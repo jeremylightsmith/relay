@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.ModalScrim do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.modal_scrim/1
+  def function, do: &HamacaWeb.CoreComponents.modal_scrim/1
   def render_source, do: :function
 
   # The scrim is `position:fixed;inset:0` (softened to `!absolute` here). A component story

@@ -6,18 +6,18 @@ defmodule Schemas.Membership do
   `user_id` is **nullable**: a membership with `user_id == nil` is an
   *invited* row (a pre-authorization created from an email address); it
   resolves — `user_id` gets set — the first time that email signs in
-  (`Relay.Members.resolve_invites_for_user/1`) or immediately when the
+  (`Hamaca.Members.resolve_invites_for_user/1`) or immediately when the
   email already belongs to a registered user. `email` is the normalized
   (downcased/trimmed) invite address. `board_id`/`user_id` are set
   programmatically, never cast from input.
 
   `starred` is the member's personal board star (RE395): it sorts the board first in
-  `Relay.Boards.list_boards_for_display/1`. Never cast — written only by
-  `Relay.Boards.set_starred/3`.
+  `Hamaca.Boards.list_boards_for_display/1`. Never cast — written only by
+  `Hamaca.Boards.set_starred/3`.
 
   `muted` is the member's per-board mute (RE406): it stops APNs pushes for this member on this
   board (browser notifications and badges are unaffected). Never cast — written only by
-  `Relay.Boards.set_muted/3`.
+  `Hamaca.Boards.set_muted/3`.
   """
 
   use Ecto.Schema
@@ -39,7 +39,7 @@ defmodule Schemas.Membership do
   Changeset for a programmatically-built membership: only `:email` is cast
   (normalized to trimmed/downcased); `board_id`/`user_id` must already be set
   on the struct. The `(board_id, email)` unique index surfaces as an `:email`
-  error so `Relay.Members.invite/2` can translate it to `:already_member`.
+  error so `Hamaca.Members.invite/2` can translate it to `:already_member`.
   """
   def changeset(membership, attrs) do
     membership

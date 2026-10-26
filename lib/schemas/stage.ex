@@ -8,7 +8,7 @@ defmodule Schemas.Stage do
 
   A **sub-lane is a child stage**: `parent_id` set, `type in sublane_types/0`. "AI-enabled" is
   not a stage field — it is derived from flows: a stage is AI-enabled iff a flow works in it
-  (`Relay.Flows.ai_stage_ids/1`, RE409). `board_id`/`parent_id` are set programmatically, never cast.
+  (`Hamaca.Flows.ai_stage_ids/1`, RE409). `board_id`/`parent_id` are set programmatically, never cast.
   `wip_limit` is the optional MMF 11 limit (`nil` = no limit). `collapsed_by_default`
   (RLY-111) makes the stage start as its 44px strip regardless of card count and applies to
   any stage type.
@@ -75,7 +75,7 @@ defmodule Schemas.Stage do
   def default_status(:done), do: :ready
 
   @doc """
-  The stage types where work happens — the types the claim rule and `Relay.ValueStream` treat
+  The stage types where work happens — the types the claim rule and `Hamaca.ValueStream` treat
   as work (a `:flow` state, RE146). Defined once.
   """
   def work_types, do: @work_types
@@ -105,7 +105,7 @@ defmodule Schemas.Stage do
 
   @doc """
   The stage `type`s that mean a card has left every flow's scope — the single source of truth
-  for "terminal stage" (RLY-233). The orphaned-run sweep (`Relay.Runs.close_orphaned_runs/0`)
+  for "terminal stage" (RLY-233). The orphaned-run sweep (`Hamaca.Runs.close_orphaned_runs/0`)
   and the card-event Listener's leak-close rule both filter through this (a run is also a leak
   when its card is archived, RE335); no second literal `:done` partition exists.
   """
@@ -120,7 +120,7 @@ defmodule Schemas.Stage do
   @doc """
   The stage types a sub-lane (child stage) may have, in display order — Review before Done
   (RE385). The single definition of the sub-lane closed set and its order; `sublane_rank/1`,
-  `Relay.Boards`' lane guards and every substage sort derive from it.
+  `Hamaca.Boards`' lane guards and every substage sort derive from it.
   """
   @spec sublane_types() :: [:review | :done]
   def sublane_types, do: @sublane_types
@@ -136,7 +136,7 @@ defmodule Schemas.Stage do
 
   @doc """
   The word a sub-lane of `type` adds to its main stage's name — `"Code · Done"`, `"Code:Done"`.
-  The one definition: `Relay.Boards`' display and composite names and `Relay.Flows.Shape`'s
+  The one definition: `Hamaca.Boards`' display and composite names and `Hamaca.Flows.Shape`'s
   column names all build on it.
   """
   @spec lane_word(:review | :done) :: String.t()
@@ -151,8 +151,8 @@ defmodule Schemas.Stage do
   otherwise the next main stage. `nil` at either end of the board; both `nil` for a stage id
   not in the list. Returns the elements passed in (structs or maps), not ids. Pure.
 
-  The ONE source of the pulls-from / lands-on rule (AGENTS.md): `Relay.Flows.neighbours/2`
-  delegates here, and `Relay.Setup` reads where the first flow pulls its cards from.
+  The ONE source of the pulls-from / lands-on rule (AGENTS.md): `Hamaca.Flows.neighbours/2`
+  delegates here, and `Hamaca.Setup` reads where the first flow pulls its cards from.
   """
   @spec neighbours(integer(), [t() | map()]) :: %{pulls_from: t() | map() | nil, lands_on: t() | map() | nil}
   def neighbours(stage_id, stages) when is_list(stages) do
@@ -170,7 +170,7 @@ defmodule Schemas.Stage do
   by `position`, so nothing is dropped. Pure — no Repo access. Works on any struct or map
   with `:id`, `:parent_id`, `:position` and `:type`.
 
-  The ONE board-order rule: `Relay.Boards.order_stages/1` delegates here, and
+  The ONE board-order rule: `Hamaca.Boards.order_stages/1` delegates here, and
   `neighbours/2` reads a list in this order.
   """
   @spec order_stages([t() | map()]) :: [t() | map()]

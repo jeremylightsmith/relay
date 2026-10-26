@@ -1,0 +1,885 @@
+defmodule HamacaWeb.BoardRunnersLiveTest do
+  use HamacaWeb.ConnCase, async: true
+
+  import Phoenix.LiveViewTest
+
+  alias Hamaca.AgentLog
+  alias Hamaca.Boards
+  alias HamacaWeb.BoardSettingsLive
+
+  setup :register_and_log_in_user
+
+  setup %{user: user} do
+    start_capacity!()
+    board = Boards.get_or_create_default_board(user)
+
+    # Reuse one of the board's OWN stages rather than inserting another. The default board
+    # already ships stages at positions 1..11, while `insert(:stage, ...)` draws `position`
+    # from a globally-shared ExMachina sequence that starts at 1 — so it collides on
+    # stages_board_id_position_index unless some earlier test file has already advanced the
+    # sequence past 11. That made this file pass in the full suite and fail 11/13 standalone
+    # (caught by the RLY-167 spec review). The tests only need somewhere to put a card.
+    %{board: board, stage: List.first(board.stages)}
+  end
+
+  defp runner(board, name, overrides \\ []) do
+    insert(:runner, [board: board, name: name] ++ overrides)
+  end
+
+  defp active_job(stage, runner_name, opts \\ []) do
+    card = insert(:card, stage: stage, title: opts[:title] || "Ship the thing")
+    run = insert(:run, card: card)
+    ne = insert(:node_execution, run: run, node_key: opts[:node_key] || "implement")
+
+    job =
+      insert(:node_job,
+        node_execution: ne,
+        runner_name: runner_name,
+        state: opts[:state] || :claimed,
+        payload: %{"isolation" => opts[:isolation] || "shared_clean"}
+      )
+
+    %{card: card, job: job}
+  end
+
+  # A queued, unclaimed job on this board, inserted `age_s` ago.
+  defp queued_job(stage, opts \\ []) do
+    at = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -(opts[:age_s] || 0), :second)
+    card = insert(:card, stage: stage, title: opts[:title] || "Ship the thing")
+    run = insert(:run, card: card, flow_key: "code")
+    ne = insert(:node_execution, run: run, node_key: opts[:node_key] || "implement", inserted_at: at)
+
+    job =
+      insert(:node_job,
+        node_execution: ne,
+        state: :queued,
+        runner_name: nil,
+        claimed_at: nil,
+        inserted_at: at,
+        payload: %{"isolation" => opts[:isolation] || "shared_clean"}
+      )
+
+    %{card: card, job: job}
+  end
+
+  defp ref(board, card), do: "#{board.key}#{card.ref_number}"
+
+  test "the top bar reads Boards / <board> / Settings / Runners (RE334)", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, ~s(#top-bar-crumb-boards[href="/boards"]))
+    assert has_element?(view, ~s(#top-bar-crumb-board[href="/board/#{board.slug}"]), board.name)
+    assert has_element?(view, ~s(#top-bar-crumb-settings[href="/board/#{board.slug}/settings"]))
+    refute has_element?(view, "#top-bar-crumb-stages")
+    assert has_element?(view, "#runners-title", BoardSettingsLive.section_label(:runners))
+    assert has_element?(view, ~s(#runners-back[href="/board/#{board.slug}"]))
+  end
+
+  test "a heartbeating runner renders by name with its capacity chips and FRESH pill",
+       %{conn: conn, board: board} do
+    runner(board, "mac-mini", host: "mac-mini.local", capacity: %{"shared_clean" => 3, "exclusive" => 1})
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-mac-mini")
+    assert has_element?(view, "#runner-mac-mini .badge-success", "FRESH")
+    assert has_element?(view, "#runner-mac-mini", "mac-mini.local")
+    assert has_element?(view, "#runner-mac-mini-pool-shared_clean", "0/3")
+    assert has_element?(view, "#runner-mac-mini-pool-exclusive", "0/1")
+    assert has_element?(view, "#summary-fresh", "1 online")
+    # artboard lines ~84-97 / capChip ~176-187: an under-capacity chip is the green treatment
+    assert render(element(view, "#runner-mac-mini-pool-shared_clean")) =~
+             "color-mix(in oklab, var(--color-success) 25%, var(--color-base-100))"
+  end
+
+  test "an idle fresh runner reads WORKING NOW · 0 with no at-risk note",
+       %{conn: conn, board: board} do
+    runner(board, "mac-mini")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-mac-mini", "WORKING NOW · 0")
+    refute has_element?(view, "#runner-mac-mini-at-risk")
+  end
+
+  test "an in-flight job is attributed to its runner with card ref and node key",
+       %{conn: conn, board: board, stage: stage} do
+    runner(board, "mac-mini", capacity: %{"shared_clean" => 3})
+    %{card: card, job: job} = active_job(stage, "mac-mini", node_key: "implement")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-mac-mini-job-#{job.id}", ref(board, card))
+    assert has_element?(view, "#runner-mac-mini-job-#{job.id}", "implement")
+    assert has_element?(view, "#runner-mac-mini-job-#{job.id}", "Ship the thing")
+
+    assert has_element?(
+             view,
+             ~s|#runner-mac-mini-job-#{job.id} a[href="/board/#{board.slug}?card=#{ref(board, card)}"]|
+           )
+
+    # the job consumes a slot in its advertised pool
+    assert has_element?(view, "#runner-mac-mini-pool-shared_clean", "1/3")
+    assert has_element?(view, "#runner-mac-mini", "WORKING NOW · 1")
+  end
+
+  test "two runners are two panels, each owning only its own jobs",
+       %{conn: conn, board: board, stage: stage} do
+    runner(board, "mac-a")
+    runner(board, "mac-b")
+    %{job: job_a} = active_job(stage, "mac-a")
+    %{job: job_b} = active_job(stage, "mac-b")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-mac-a-job-#{job_a.id}")
+    refute has_element?(view, "#runner-mac-a-job-#{job_b.id}")
+    assert has_element?(view, "#runner-mac-b-job-#{job_b.id}")
+    refute has_element?(view, "#runner-mac-b-job-#{job_a.id}")
+  end
+
+  test "a disconnected runner renders GONE, visibly distinct from a fresh idle one",
+       %{conn: conn, board: board, stage: stage} do
+    now = DateTime.utc_now()
+    runner(board, "mac-live")
+
+    runner(board, "mac-dead", last_heartbeat: DateTime.truncate(DateTime.add(now, -600, :second), :second))
+
+    active_job(stage, "mac-dead")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-mac-live .badge-success", "FRESH")
+    assert has_element?(view, "#runner-mac-dead .badge-error", "GONE")
+    assert has_element?(view, "#runner-mac-dead", "ORPHANED JOB")
+    assert has_element?(view, "#runner-mac-dead-at-risk")
+    # RE449: a gone runner's work is held, not already reclaimed — the note names both windows.
+    at_risk = render(element(view, "#runner-mac-dead-at-risk"))
+    assert at_risk =~ "requeued to another runner after #{div(Hamaca.Runs.shared_reclaim_after_s(), 60)} min"
+    assert at_risk =~ "exclusive runs park after #{div(Hamaca.Runs.exclusive_reclaim_after_s(), 60)} min"
+    assert has_element?(view, "#summary-fresh", "1 online")
+    assert has_element?(view, "#summary-gone", "1 gone")
+    # artboard: a gone runner's chips drop to the gray, dimmed treatment
+    assert render(element(view, "#runner-mac-dead-pool-shared_clean")) =~ "opacity:0.7"
+  end
+
+  test "a runner that goes silent flips to STALE on the tick, with no reload",
+       %{conn: conn, board: board, stage: stage} do
+    runner(board, "mac-mini")
+    active_job(stage, "mac-mini")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+    assert has_element?(view, "#runner-mac-mini .badge-success", "FRESH")
+
+    Hamaca.Repo.update_all(Schemas.Runner,
+      set: [last_heartbeat: DateTime.truncate(DateTime.add(DateTime.utc_now(), -50, :second), :second)]
+    )
+
+    send(view.pid, :tick)
+
+    assert has_element?(view, "#runner-mac-mini .badge-warning", "STALE")
+    assert has_element?(view, "#runner-mac-mini", "AT-RISK JOB")
+  end
+
+  test "the roster survives a cold Runs.Capacity — the page is a pure function of the DB",
+       %{conn: conn, board: board, stage: stage} do
+    runner = runner(board, "mac-mini", capacity: %{"shared_clean" => 2})
+    active_job(stage, "mac-mini")
+
+    # Simulates a fresh app boot: the ETS capacity store knows nothing about this runner
+    # while its row and claimed job are still in Postgres. This is the restart case the card
+    # is about. (Assert on this runner's key, not on an empty table — Runs.Capacity is a
+    # single global ETS table shared with every other async test.)
+    refute Map.has_key?(Hamaca.Runs.Capacity.snapshot(), runner.id)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-mac-mini")
+    assert has_element?(view, "#runner-mac-mini-pool-shared_clean", "1/2")
+    refute has_element?(view, "#runners-empty")
+  end
+
+  test "agent log lines land only under the runner holding that ref",
+       %{conn: conn, board: board, stage: stage} do
+    runner(board, "mac-a")
+    runner(board, "mac-b")
+    %{card: card} = active_job(stage, "mac-a")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    AgentLog.record(board.id, [%{"ref" => ref(board, card), "kind" => "claude", "text" => "hello a"}])
+
+    assert has_element?(view, "#runner-mac-a-log", "hello a")
+    refute has_element?(view, "#runner-mac-b-log", "hello a")
+    # the artboard's dark terminal treatment (line ~118) — always-dark regardless of theme
+    assert render(element(view, "#runner-mac-a-log")) =~ "background:var(--color-neutral)"
+  end
+
+  test "unclaimed-ref and ref-less lines render nowhere on this page",
+       %{conn: conn, board: board, stage: stage} do
+    runner(board, "mac-a")
+    active_job(stage, "mac-a")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    AgentLog.record(board.id, [
+      %{"ref" => "MY9999", "kind" => "claude", "text" => "orphan line"},
+      %{"kind" => "lifecycle", "text" => "board-level line"}
+    ])
+
+    html = render(view)
+    refute html =~ "orphan line"
+    refute html =~ "board-level line"
+  end
+
+  test "a log entry renders as one line with no leading whitespace",
+       %{conn: conn, board: board, stage: stage} do
+    runner(board, "mac-a")
+    %{card: card} = active_job(stage, "mac-a")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    AgentLog.record(board.id, [%{"ref" => ref(board, card), "kind" => "claude", "text" => "hello a"}])
+
+    # Scoped to this one runner's panel so exactly one `.log-line` matches —
+    # `render(element/2)` raises on multiple matches.
+    html = render(element(view, "#runner-mac-a-log .log-line"))
+
+    # RE328 — the defect IS markup whitespace: HEEx emits the whitespace between sibling tags
+    # verbatim, so a formatter-wrapped row rendered as a blank line plus two indented lines.
+    # Asserting on the markup is the honest level, and this is the regression guard against a
+    # future `mix format` re-breaking the row (which `phx-no-format` prevents).
+    #
+    # The separator space must live *inside* the timestamp span, not as a standalone inter-tag
+    # text node: `render/1` calls `TreeDOM.to_html/1`, which asks LazyHTML for
+    # `skip_whitespace_nodes: true` and that drops any text node that is pure whitespace — so a
+    # bare space between `</span>` and `<span>` never reaches this assertion at all, even though
+    # it would survive a real page render. Hence asserting `" </span><span"` (space before the
+    # closing tag), not `"</span> <span"` (space between the tags).
+    refute html =~ "\n"
+    assert html =~ " </span><span"
+    assert html =~ "[#{ref(board, card)}] hello a"
+  end
+
+  test "a multi-paragraph agent line collapses to one line",
+       %{conn: conn, board: board, stage: stage} do
+    runner(board, "mac-a")
+    %{card: card} = active_job(stage, "mac-a")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    AgentLog.record(board.id, [
+      %{"ref" => ref(board, card), "kind" => "claude", "text" => "first para\n\nsecond para"}
+    ])
+
+    html = render(element(view, "#runner-mac-a-log .log-line"))
+
+    assert html =~ "first para second para"
+    refute html =~ "\n"
+  end
+
+  test "the log tail panel is dense and flush-left", %{conn: conn, board: board} do
+    runner(board, "mac-a")
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    html = render(element(view, "#runner-mac-a-log"))
+
+    # RE328 — deliberate divergence from `docs/designs/Relay Runners.dc.html` lines 123/125
+    # (`line-height:1.7`, `padding:11px 13px`): the human asked for a denser panel whose lines
+    # start closer to the left edge. The header's horizontal padding moves with the body's so
+    # the status dot and the LOG TAIL caption stay left-aligned with the log lines.
+    assert html =~ "padding:8px;font-size:11px;line-height:1.35;"
+    assert html =~ "gap:7px;padding:9px 8px;"
+  end
+
+  test "a host with dots gets a CSS-safe dom id", %{conn: conn, board: board} do
+    runner(board, "mac.mini.local")
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-mac-mini-local", "mac.mini.local")
+  end
+
+  test "an outdated runner shows the OUTDATED pill instead of FRESH", %{conn: conn, board: board} do
+    runner(board, "ancient", version: nil)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-ancient .badge-error", "OUTDATED")
+    refute has_element?(view, "#runner-ancient .badge-success")
+    refute has_element?(view, "#runner-ancient-outdated")
+  end
+
+  test "the OUTDATED pill uses badge-error", %{conn: conn, board: board} do
+    runner(board, "ancient", version: nil)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert render(element(view, "#runner-ancient .badge-error")) =~ "OUTDATED"
+  end
+
+  test "a current runner shows no OUTDATED badge and a plain version line",
+       %{conn: conn, board: board} do
+    runner(board, "mac-mini", version: Hamaca.Runs.min_runner_version())
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    refute has_element?(view, "#runner-mac-mini-outdated")
+    assert has_element?(view, "#runner-mac-mini-version", "v#{Hamaca.Runs.min_runner_version()}")
+  end
+
+  test "an outdated runner's version line names both versions", %{conn: conn, board: board} do
+    runner(board, "old-box", version: 0)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    label = render(element(view, "#runner-old-box-version"))
+    assert label =~ "v0"
+    assert label =~ "requires v#{Hamaca.Runs.min_runner_version()}"
+  end
+
+  test "a runner that reports no version says so rather than showing a bare v", %{conn: conn, board: board} do
+    runner(board, "ancient", version: nil)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runner-ancient-version", "unversioned")
+  end
+
+  test "a runner silent for over a day drops off the roster", %{conn: conn, board: board} do
+    runner(board, "ancient", last_heartbeat: DateTime.truncate(DateTime.add(DateTime.utc_now(), -25, :hour), :second))
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    refute has_element?(view, "#runner-ancient")
+    assert has_element?(view, "#runners-empty")
+  end
+
+  test "with no runners the empty state names the real start command",
+       %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    assert has_element?(view, "#runners-empty", "No runners connected")
+    assert has_element?(view, "#runner-start-command", "./relay start")
+    assert has_element?(view, "#copy-start-command")
+    assert has_element?(view, "#runners-empty", "Waiting for a heartbeat…")
+    # deliberate deviation from the artboard: the real command, not npx relay-runner
+    refute render(view) =~ "npx relay-runner"
+    # RLY-139: the legacy watcher this empty state used to point at is deleted
+    refute render(view) =~ "bin/relay watch"
+  end
+
+  test "board settings gains an ENGINE rail group linking to runners",
+       %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings")
+
+    assert has_element?(view, "#settings-rail", "ENGINE")
+    assert has_element?(view, ~s|#settings-nav-runners[href="/board/#{board.slug}/runners"]|, "Runners")
+    assert has_element?(view, "#settings-tab-runners")
+  end
+
+  test "the exclusive chip reports held occupancy and names it in a tooltip", %{conn: conn, board: board} do
+    runner(board, "mac-mini",
+      capacity: %{"shared_clean" => 3, "exclusive" => 1},
+      held: [%{"ref" => "TH77", "state" => "bound"}]
+    )
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    # 1/1, not 0/1: the worktree is held with no live job, which is invisible to a job count.
+    assert has_element?(view, "#runner-mac-mini-pool-exclusive", "1/1")
+    assert render(element(view, "#runner-mac-mini-pool-exclusive")) =~ "TH77 bound"
+  end
+
+  test "a shared_clean chip carries no holdings tooltip", %{conn: conn, board: board} do
+    runner(board, "mac-mini",
+      capacity: %{"shared_clean" => 3, "exclusive" => 1},
+      held: [%{"ref" => "TH77", "state" => "bound"}]
+    )
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    # Holdings describe per-card worktrees; naming them on the shared chip would be a lie.
+    refute render(element(view, "#runner-mac-mini-pool-shared_clean")) =~ "TH77"
+  end
+
+  test "the exclusive chip's tooltip names a retained holding it does not count", %{conn: conn, board: board} do
+    runner(board, "mac-mini",
+      capacity: %{"shared_clean" => 3, "exclusive" => 2},
+      held: [%{"ref" => "TH77", "state" => "bound"}, %{"ref" => "TH8", "state" => "retained"}]
+    )
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+    # `retained` holds no partition, so the chip counts only TH77 — but the tooltip still names
+    # both, the same "everything this runner is holding" reading `busy_summary()` prints.
+    assert has_element?(view, "#runner-mac-mini-pool-exclusive", "1/2")
+    tooltip = render(element(view, "#runner-mac-mini-pool-exclusive"))
+    assert tooltip =~ "TH77 bound"
+    assert tooltip =~ "TH8 retained"
+  end
+
+  describe "an outdated-but-beating runner (RLY-191)" do
+    test "renders the OUTDATED pill, a non-pulsing rose dot, no FRESH pill, and the version line",
+         %{conn: conn, board: board} do
+      insert(:runner, board: board, name: "old", version: 0, last_heartbeat: DateTime.utc_now())
+
+      {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      # the freshness pill IS the state now — OUTDATED, not FRESH
+      assert html =~ "OUTDATED"
+      refute has_element?(view, "#runner-old .badge-success")
+      # non-pulsing dot: the header dot for this row must not carry animate-pulse
+      refute has_element?(view, "#runner-old .animate-pulse")
+      # the actionable version line survives
+      assert has_element?(view, "#runner-old-version", "requires v#{Hamaca.Runs.min_runner_version()}")
+      # header summary gains an N outdated chip
+      assert has_element?(view, "#summary-outdated")
+    end
+  end
+
+  describe "the QUEUE section (RE307)" do
+    test "a job nobody has claimed renders with a QUEUED pill and a NODE tag",
+         %{conn: conn, board: board, stage: stage} do
+      %{card: card, job: job} = queued_job(stage, node_key: "write_plan")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#queue-job-#{job.id}", ref(board, card))
+      assert has_element?(view, "#queue-job-#{job.id}", "write_plan")
+      assert has_element?(view, "#queue-job-#{job.id} .badge-ghost", "QUEUED")
+      assert has_element?(view, "#queue-job-#{job.id}", "NODE")
+      assert has_element?(view, "#queue-job-#{job.id}", "shared_clean")
+      assert has_element?(view, "#queue-label", "QUEUE · 1")
+
+      assert has_element?(
+               view,
+               ~s|#queue-job-#{job.id} a[href="/board/#{board.slug}?card=#{ref(board, card)}"]|
+             )
+    end
+
+    test "the queue renders alongside the no-runners empty state, not instead of it",
+         %{conn: conn, board: board, stage: stage} do
+      %{job: job} = queued_job(stage)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      # Both on screen at once — this is the case the page used to handle worst.
+      assert has_element?(view, "#runners-empty", "No runners connected")
+      assert has_element?(view, "#queue-job-#{job.id}")
+      # ...and the empty state no longer reserves 62vh, which would push the queue off-screen.
+      refute render(element(view, "#runners-empty")) =~ "62vh"
+    end
+
+    test "a claimed job names the runner holding it, in violet",
+         %{conn: conn, board: board, stage: stage} do
+      runner(board, "mac-mini")
+      %{job: job} = active_job(stage, "mac-mini")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      row = render(element(view, "#queue-job-#{job.id}"))
+      assert row =~ "CLAIMED"
+      assert row =~ "badge-secondary"
+      assert row =~ "mac-mini"
+    end
+
+    test "a queued talk turn is tagged TALK with no flow key and a dash isolation",
+         %{conn: conn, board: board, stage: stage} do
+      card = insert(:card, stage: stage, title: "Talk to me")
+      job = Hamaca.Runs.insert_talk_job!(card, %{"turn_id" => 1}, nil)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      row = render(element(view, "#queue-job-#{job.id}"))
+      assert row =~ "TALK"
+      # no isolation class → the dash placeholder, and no flow-key chip at all
+      assert row =~ "—"
+      refute has_element?(view, "#queue-job-#{job.id}-flow")
+    end
+
+    test "an idle board says nothing is queued", %{conn: conn, board: board} do
+      runner(board, "mac-mini")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#queue-empty", "Nothing queued or running.")
+      assert has_element?(view, "#queue-label", "QUEUE · 0")
+    end
+
+    test "the stopped-work verdict renders above the rows when work has stopped",
+         %{conn: conn, board: board, stage: stage} do
+      # Queued 10 minutes with an empty roster: `stopped_work/1` returns :no_runner.
+      queued_job(stage, age_s: 600)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#queue-diagnosis", "no runner is connected to run this board's work")
+    end
+
+    test "no diagnosis line on a board whose queue is merely young",
+         %{conn: conn, board: board, stage: stage} do
+      queued_job(stage, age_s: 5)
+      runner(board, "mac-mini", version: Hamaca.Runs.min_runner_version())
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      refute has_element?(view, "#queue-diagnosis")
+    end
+  end
+
+  describe "a rate-limited runner (RE320, per harness since RE436)" do
+    defp in_an_hour, do: DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), 3600, :second)
+
+    defp all_paused(at, opts \\ []) do
+      [
+        runner_harness("claude-code", usage: paused_usage(DateTime.add(at, 600, :second))),
+        runner_harness("codex", usage: paused_usage(at, opts))
+      ]
+    end
+
+    # Scenario 12
+    test "renders the amber RATE LIMITED pill with its usage and resume time, and a summary count",
+         %{conn: conn, board: board} do
+      resets_at = in_an_hour()
+      runner(board, "paused", harnesses: all_paused(resets_at))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-paused .badge-warning", "RATE LIMITED")
+      refute has_element?(view, "#runner-paused .badge-success")
+
+      assert has_element?(
+               view,
+               "#runner-paused-rate-limit",
+               "codex 5h 95% / 90% · resumes #{Hamaca.Runs.resume_time_label(resets_at)}"
+             )
+
+      assert has_element?(view, "#summary-rate-limited", "1 rate limited")
+    end
+
+    test "a runner with one of two harnesses paused is FRESH and uncounted", %{conn: conn, board: board} do
+      runner(board, "half",
+        harnesses: [runner_harness("claude-code"), runner_harness("codex", usage: paused_usage(in_an_hour()))]
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-half .badge-success", "FRESH")
+      refute has_element?(view, "#runner-half .badge-warning", "RATE LIMITED")
+      refute has_element?(view, "#summary-rate-limited")
+    end
+
+    test "a refusal reads <harness> refused", %{conn: conn, board: board} do
+      runner(board, "refused", harnesses: all_paused(in_an_hour(), reason: "rejected"))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-refused-rate-limit", "codex refused (5h)")
+    end
+
+    test "the paused row still shows while a free peer keeps the banner away",
+         %{conn: conn, board: board, stage: stage} do
+      runner(board, "paused", harnesses: all_paused(in_an_hour()))
+      runner(board, "free")
+      queued_job(stage, age_s: 600)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-paused .badge-warning", "RATE LIMITED")
+      assert has_element?(view, "#runner-free .badge-success", "FRESH")
+      refute has_element?(view, "#queue-diagnosis")
+    end
+  end
+
+  describe "HARNESSES (RE436)" do
+    defp harness_text(view, selector),
+      do: view |> element(selector) |> render() |> LazyHTML.from_fragment() |> LazyHTML.text() |> squish()
+
+    defp squish(text), do: text |> String.replace(~r/\s+/, " ") |> String.trim()
+
+    defp usage_reading(windows, paused) do
+      %{
+        "source" => "output",
+        "read_at" => DateTime.to_unix(DateTime.utc_now()) - 120,
+        "windows" => for({label, pct} <- windows, do: %{"label" => label, "used_pct" => pct, "resets_at" => 1}),
+        "paused" => paused
+      }
+    end
+
+    defp pause_reading(label, used_pct, resets_at) do
+      %{
+        "label" => label,
+        "used_pct" => used_pct,
+        "pause_at" => 90,
+        "resets_at" => DateTime.to_unix(resets_at),
+        "reason" => "limit"
+      }
+    end
+
+    # Scenario 1's report: Claude reading 5h 42 / 7d 18, Codex paused at 5h 93, Gemini missing.
+    defp reported_harnesses(opts \\ []) do
+      resets_at = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), 3600, :second)
+      claude_paused = if opts[:claude_paused], do: pause_reading("7d", 95.0, resets_at)
+
+      [
+        runner_harness("claude-code", usage: usage_reading([{"5h", 42.0}, {"7d", 18.0}], claude_paused)),
+        runner_harness("codex",
+          usage:
+            Keyword.get(
+              opts,
+              :codex_usage,
+              usage_reading([{"5h", 93.0}, {"wk", 31.0}], pause_reading("5h", 93.0, resets_at))
+            )
+        ),
+        "gemini-cli" |> runner_harness(installed: false) |> Map.merge(%{"version" => nil, "signed_in" => nil})
+      ]
+    end
+
+    setup %{board: board} do
+      gemini = Enum.find(Hamaca.Agents.list_harnesses(board), &(&1.key == "gemini-cli"))
+
+      {:ok, _agent} =
+        Hamaca.Agents.create_agent(board, %{
+          "name" => "Gemini Pro",
+          "harness_id" => gemini.id,
+          "model" => "gemini-2.5-pro"
+        })
+
+      :ok
+    end
+
+    # Scenario 4 (AC4, AC5)
+    test "each reported board harness gets a row: bars, signed-in state, its own pause and the missing one",
+         %{conn: conn, board: board} do
+      runner(board, "mac-mini", harnesses: reported_harnesses())
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-mac-mini-harnesses", "HARNESSES · 3")
+
+      claude = "#runner-mac-mini-harness-claude-code"
+      assert has_element?(view, claude, "✓ signed in")
+      assert has_element?(view, ~s(#{claude} progress.progress-secondary[data-usage-bar="5h"][value="42"]))
+      assert has_element?(view, ~s(#{claude} progress.progress-secondary[data-usage-bar="7d"][value="18"]))
+      assert harness_text(view, claude) =~ "from its output ·"
+
+      paused = harness_text(view, "#runner-mac-mini-harness-codex-paused")
+      assert String.starts_with?(paused, "⏸ Paused — 5h at 93%, over Codex's 90% pause-at; resets ")
+      assert paused =~ "Codex nodes wait; Claude Code nodes still claim."
+      assert has_element?(view, ~s(#runner-mac-mini-harness-codex progress.progress-warning[data-usage-bar="5h"]))
+
+      gemini = "#runner-mac-mini-harness-gemini-cli"
+      assert has_element?(view, gemini, "✗ not installed")
+      assert harness_text(view, gemini) =~ "Won't claim nodes that use “Gemini Pro”"
+
+      assert has_element?(view, "#runner-mac-mini .badge-success", "FRESH")
+      refute has_element?(view, "#runner-mac-mini .badge-warning", "RATE LIMITED")
+    end
+
+    # Scenario 5 (AC6)
+    test "with every installed harness paused the pill reads RATE LIMITED and each row keeps its paused line",
+         %{conn: conn, board: board} do
+      runner(board, "mac-mini", harnesses: reported_harnesses(claude_paused: true))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-mac-mini .badge-warning", "RATE LIMITED")
+      assert has_element?(view, "#runner-mac-mini-harness-claude-code-paused", "⏸ Paused — 7d at 95%")
+      assert has_element?(view, "#runner-mac-mini-harness-codex-paused", "⏸ Paused — 5h at 93%")
+    end
+
+    # Scenario 6
+    test "a harness with no reading yet shows — and no bars, and a harness removed from the board drops",
+         %{conn: conn, board: board} do
+      runner(board, "mac-mini", harnesses: reported_harnesses(codex_usage: nil))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert harness_text(view, "#runner-mac-mini-harness-codex-usage") == "—"
+      refute has_element?(view, "#runner-mac-mini-harness-codex [data-usage-bar]")
+
+      codex = Enum.find(Hamaca.Agents.list_harnesses(board), &(&1.key == "codex"))
+
+      for agent <- Hamaca.Agents.list_agents(board),
+          agent.harness_id == codex.id,
+          do: {:ok, _} = Hamaca.Agents.delete_agent(agent)
+
+      {:ok, _deleted} = Hamaca.Agents.delete_harness(codex)
+
+      send(view.pid, :tick)
+
+      refute has_element?(view, "#runner-mac-mini-harness-codex")
+      assert has_element?(view, "#runner-mac-mini-harnesses", "HARNESSES · 2")
+    end
+  end
+
+  describe "HELD WORKTREES (RE337)" do
+    defp parked_holding(board, stage, age_s \\ 2 * 86_400) do
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+      card = insert(:card, stage: stage, title: "Waiting on you")
+      run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+      insert(:node_execution,
+        run: run,
+        started_at: DateTime.add(now, -(age_s + 60), :second),
+        finished_at: DateTime.add(now, -age_s, :second)
+      )
+
+      %{card: card, run: run, ref: Hamaca.Cards.ref(board, card)}
+    end
+
+    test "a bound holding renders its ref, title, bound badge and parked · needs input · age",
+         %{conn: conn, board: board, stage: stage} do
+      %{ref: ref} = parked_holding(board, stage)
+      runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#runner-mac-mini-held", "HELD WORKTREES · 1")
+      assert has_element?(view, "#held-mac-mini-#{ref}", "Waiting on you")
+      assert has_element?(view, ~s|#held-mac-mini-#{ref} a[href="/board/#{board.slug}?card=#{ref}"]|, ref)
+      assert has_element?(view, "#held-mac-mini-#{ref} .badge-warning", "bound")
+      assert has_element?(view, "#held-mac-mini-#{ref}-status", "parked · needs input · 2d")
+      assert has_element?(view, "#held-mac-mini-#{ref}-release:not([disabled])", "Release worktree")
+      assert has_element?(view, "#held-mac-mini-#{ref}-cancel", "Cancel run")
+    end
+
+    test "the section sits between CAPACITY and WORKING NOW", %{conn: conn, board: board, stage: stage} do
+      %{ref: ref} = parked_holding(board, stage)
+      runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+      html = render(element(view, "#runner-mac-mini"))
+
+      {cap, _} = :binary.match(html, "CAPACITY")
+      {held, _} = :binary.match(html, "HELD WORKTREES")
+      {working, _} = :binary.match(html, "WORKING NOW")
+      assert cap < held and held < working
+    end
+
+    test "a runner holding nothing has no HELD WORKTREES section", %{conn: conn, board: board} do
+      runner(board, "mac-mini", held: [])
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      refute has_element?(view, "#runner-mac-mini-held")
+    end
+
+    test "running is disabled with its reason, talk too, retained shows no Release button",
+         %{conn: conn, board: board, stage: stage} do
+      working = insert(:card, stage: stage, title: "Working")
+      insert(:run, card: working, status: :running)
+      talk = insert(:card, stage: stage, title: "Talking")
+      retained = insert(:card, stage: stage, title: "Failed")
+      insert(:run, card: retained, status: :failed)
+      [w, t, r] = Enum.map([working, talk, retained], &Hamaca.Cards.ref(board, &1))
+
+      runner(board, "mac-mini",
+        held: [
+          %{"ref" => w, "state" => "running"},
+          %{"ref" => t, "state" => "talk"},
+          %{"ref" => r, "state" => "retained"}
+        ]
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#held-mac-mini-#{w}-release[disabled]")
+      assert has_element?(view, ~s|#held-mac-mini-#{w} [data-tip="a job is running in this worktree"]|)
+      assert has_element?(view, "#held-mac-mini-#{t}-release[disabled]")
+      assert has_element?(view, ~s|#held-mac-mini-#{t} [data-tip="a talk session is attached"]|)
+      refute has_element?(view, "#held-mac-mini-#{r}-release")
+      refute has_element?(view, "#held-mac-mini-#{r}-cancel")
+      assert has_element?(view, "#held-mac-mini-#{r}-status", "retained (failed run, no slot)")
+    end
+
+    test "Release worktree confirms, records the request and shows releasing…",
+         %{conn: conn, board: board, stage: stage} do
+      %{ref: ref, run: run} = parked_holding(board, stage)
+      runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      confirm =
+        view
+        |> element("#held-mac-mini-#{ref}-release")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.attribute("data-confirm")
+        |> List.first()
+
+      assert confirm =~ "The run stays parked"
+      assert confirm =~ "auto-salvage"
+      assert confirm =~ "will not be restored"
+
+      view |> element("#held-mac-mini-#{ref}-release") |> render_click()
+
+      assert has_element?(view, "#held-mac-mini-#{ref}-releasing", "releasing…")
+      refute has_element?(view, "#held-mac-mini-#{ref}-release")
+
+      assert %Schemas.Runner{release_requests: [^ref]} =
+               Hamaca.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "mac-mini")
+
+      assert Hamaca.Runs.get_run!(run.id).status == :parked
+    end
+
+    test "Release on a holding that stopped being idle flashes the refusal",
+         %{conn: conn, board: board, stage: stage} do
+      %{ref: ref} = parked_holding(board, stage)
+      r = runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      # The run resumed between render and click.
+      r |> Ecto.Changeset.change(held: [%{"ref" => ref, "state" => "running"}]) |> Hamaca.Repo.update!()
+
+      html = view |> element("#held-mac-mini-#{ref}-release") |> render_click()
+
+      assert html =~ "#{ref} is no longer idle on mac-mini"
+    end
+
+    test "Cancel run cancels the card's active run", %{conn: conn, board: board, stage: stage} do
+      # `cancel_run/2` looks the run's server up in the instance registry; no server is running
+      # for a fixture run, so an empty private registry is all it needs.
+      registry = :"relay_runners_live_registry_#{System.unique_integer([:positive])}"
+      start_supervised!({Registry, keys: :unique, name: registry})
+      :ok = Hamaca.Runs.Instance.register(%{registry: registry})
+
+      %{ref: ref, run: run} = parked_holding(board, stage)
+      runner(board, "mac-mini", held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert view |> element("#held-mac-mini-#{ref}-cancel") |> render() =~ "data-confirm"
+      view |> element("#held-mac-mini-#{ref}-cancel") |> render_click()
+
+      assert Hamaca.Runs.get_run!(run.id).status == :cancelled
+      refute has_element?(view, "#held-mac-mini-#{ref}-cancel")
+    end
+
+    test "the starvation banner names the idle holder and links to its row",
+         %{conn: conn, board: board, stage: stage} do
+      %{ref: ref} = parked_holding(board, stage, 3600)
+      queued_job(stage, isolation: "exclusive", age_s: 600)
+      runner(board, "mac-mini", capacity: %{"exclusive" => 1}, held: [%{"ref" => ref, "state" => "bound"}])
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      assert has_element?(view, "#queue-section #starvation-banner", "Exclusive work is starved: 1 job waiting")
+      assert has_element?(view, ~s|#starvation-banner a[href="#held-mac-mini-#{ref}"]|, ref)
+      assert render(element(view, "#starvation-banner")) =~ "var(--color-warning)"
+    end
+
+    test "no starvation banner while a held slot is running", %{conn: conn, board: board, stage: stage} do
+      working = insert(:card, stage: stage, title: "Working")
+      insert(:run, card: working, status: :running)
+      queued_job(stage, isolation: "exclusive", age_s: 600)
+
+      runner(board, "mac-mini",
+        capacity: %{"exclusive" => 1},
+        held: [%{"ref" => Hamaca.Cards.ref(board, working), "state" => "running"}]
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+
+      refute has_element?(view, "#starvation-banner")
+    end
+  end
+end

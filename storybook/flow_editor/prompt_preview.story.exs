@@ -2,7 +2,7 @@ defmodule Storybook.FlowEditor.PromptPreview do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowEditorComponents.node_inspector/1
+  def function, do: &HamacaWeb.FlowEditorComponents.node_inspector/1
   def render_source, do: :function
 
   # RE459, card mockup "A — rendered preview in inspector, Expand opens a full-height right-edge

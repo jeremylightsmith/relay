@@ -2,7 +2,7 @@ defmodule Storybook.AdminComponents.UsageStrip do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.AdminComponents.usage_strip/1
+  def function, do: &HamacaWeb.AdminComponents.usage_strip/1
   def render_source, do: :function
 
   # RE475, card mockups "Usage tab — people (blue) + their agents (violet)" (the table's `:sm`
@@ -24,7 +24,7 @@ defmodule Storybook.AdminComponents.UsageStrip do
       %Variation{
         id: :all_none,
         description: "A user with no activity",
-        attributes: %{days: List.duplicate(:none, Relay.Usage.strip_days()), size: :sm}
+        attributes: %{days: List.duplicate(:none, Hamaca.Usage.strip_days()), size: :sm}
       }
     ]
   end

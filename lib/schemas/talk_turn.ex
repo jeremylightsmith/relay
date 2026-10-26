@@ -6,7 +6,7 @@ defmodule Schemas.TalkTurn do
   stays in the transcript) or `failed`.
 
   `awaiting` is deliberately absent in step 1: it is turn state, never card state, and it lands
-  with [AC17]. A talk turn must never call `Relay.Cards.request_input/3` — that parks the card
+  with [AC17]. A talk turn must never call `Hamaca.Cards.request_input/3` — that parks the card
   and blocks its flow.
   """
   use Ecto.Schema

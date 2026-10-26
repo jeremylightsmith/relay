@@ -2,8 +2,8 @@ defmodule Storybook.Components.CoreComponents.MobileNavBar do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.mobile_nav_bar/1
-  def imports, do: [{RelayWeb.CoreComponents, icon: 1}]
+  def function, do: &HamacaWeb.CoreComponents.mobile_nav_bar/1
+  def imports, do: [{HamacaWeb.CoreComponents, icon: 1}]
   def render_source, do: :function
 
   def variations do

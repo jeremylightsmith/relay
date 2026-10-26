@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddBodyToSubTasks do
+defmodule Hamaca.Repo.Migrations.AddBodyToSubTasks do
   use Ecto.Migration
 
   # RE355 — a task's own markdown body, so a plan's per-task content can live on its row.

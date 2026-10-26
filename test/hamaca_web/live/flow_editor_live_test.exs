@@ -1,0 +1,1526 @@
+defmodule HamacaWeb.FlowEditorLiveTest do
+  use HamacaWeb.ConnCase, async: true
+
+  import Phoenix.LiveViewTest
+
+  alias Hamaca.Boards
+  alias Hamaca.Flows
+  alias HamacaWeb.BoardSettingsLive
+
+  setup :register_and_log_in_user
+
+  setup %{user: user} do
+    %{board: Boards.get_or_create_default_board(user)}
+  end
+
+  # Deploy is the default board's one flow-free work stage (RE429: one flow per stage).
+  defp deploy_id(board), do: Enum.find(board.stages, &(&1.name == "Deploy")).id
+
+  test "mounts the editor for a flow key and shows the version chip", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    assert has_element?(view, "#flow-editor-version-chip", "v1")
+    assert has_element?(view, "#flow-graph")
+  end
+
+  test "the clean (not-dirty) version chip uses the field-hover shortcut token", %{
+    conn: conn,
+    board: board
+  } do
+    # RE237 review fix: the literal swept here was oklch(0.96 0.004 255), inside the plan's
+    # exact-token shortcut range (oklch(0.955-0.975 0.004-0.008 255) -> --color-field-hover) —
+    # it should use the shortcut, not a computed color-mix.
+    {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    assert html =~
+             ~s{<span id="flow-editor-version-chip" style="font-size:11px;font-weight:600;font-family:ui-monospace,monospace;padding:4px 10px;border-radius:6px;background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);"}
+  end
+
+  test "the Code flow diagram distinguishes the two quality_review succeeded edges by their guard",
+       %{conn: conn, board: board} do
+    {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    _ = view
+    # the loop-back and the advance no longer read as identical bare "succeeded"
+    assert html =~ "succeeded · while tasks remain"
+    assert html =~ "succeeded · all tasks done"
+  end
+
+  test "renders full-bleed (wide) chrome, not the narrow centered column", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    # RLY-143: without `wide` the graph editor gets clipped to Layouts.app's default
+    # mx-auto max-w-2xl centered column.
+    refute has_element?(view, "main div.max-w-2xl")
+    assert has_element?(view, "#top-bar-crumb-boards")
+  end
+
+  test "34. the trigger bar is one Stage select with read-only derived pickup and drop-off (RE429)",
+       %{conn: conn, board: board} do
+    deploy = Enum.find(Boards.list_stages(board), &(&1.name == "Deploy"))
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    options =
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#trigger-stage option")
+      |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+
+    assert options == ["Code", "Deploy"]
+    assert has_element?(view, "#trigger-stage option[selected]", "Code")
+    refute has_element?(view, "#trigger-pulls-from")
+    refute has_element?(view, "#trigger-works-in")
+    refute has_element?(view, "#trigger-lands-on")
+    assert has_element?(view, "#trigger-derived-pulls-from", "Plan:Done")
+    assert has_element?(view, "#trigger-derived-lands-on", "Review")
+
+    view |> element("#trigger-stage") |> render_change(%{"field" => "stage", "stage_id" => to_string(deploy.id)})
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+
+    view |> element("#flow-editor-save") |> render_click()
+
+    code = Flows.get_flow!(board, "code")
+    assert code.stage_id == deploy.id
+    assert code.version == 1
+    assert has_element?(view, "#flow-editor-version-chip", "v1")
+    assert has_element?(view, "#trigger-derived-pulls-from", "Review")
+    assert has_element?(view, "#trigger-derived-lands-on", "Done")
+  end
+
+  test "an unknown flow key redirects to the Stages settings", %{conn: conn, board: board} do
+    assert {:error, {:live_redirect, %{to: to}}} = live(conn, ~p"/board/#{board.slug}/flows/nope")
+    assert to == "/board/#{board.slug}/settings?section=stages"
+  end
+
+  test "opening a foreach flow does not corrupt the working copy with a spurious routing error", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, _flow} =
+      Flows.create_flow(board, %{
+        key: "loopy",
+        isolation: :shared_clean,
+        stage_id: deploy_id(board),
+        nodes: [
+          %{key: "work", type: :agent, run: "a", foreach: "card.tasks"},
+          %{key: "after", type: :gate, run: "true"}
+        ],
+        edges: [
+          %{from: "start", to: "work"},
+          %{from: "work", to: "work", on: :succeeded, when: :foreach_remaining},
+          %{from: "work", to: "after", on: :succeeded, when: :foreach_exhausted},
+          %{from: "after", to: "done", on: :succeeded}
+        ]
+      })
+
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/loopy")
+
+    refute has_element?(view, "#flow-editor-errors")
+  end
+
+  test "mounts and renders the editor for a just-created scratch flow (nodes: [], start → done)",
+       %{conn: conn, board: board} do
+    {:ok, flow} =
+      Flows.create_flow(board, %{
+        key: "deploy-gate",
+        isolation: :shared_clean,
+        stage_id: deploy_id(board),
+        nodes: [],
+        edges: [%{from: "start", to: "done"}]
+      })
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/#{flow.key}")
+
+    assert has_element?(view, "#flow-graph")
+    assert has_element?(view, "#flow-editor-version-chip", "v1")
+  end
+
+  # RE394 — the editor's persisting actions show the shared client-side pressed face.
+  defp pending_text(view, selector), do: view |> element(selector) |> render() |> face_text()
+
+  defp face_text(html) do
+    html |> LazyHTML.from_fragment() |> LazyHTML.query(".pending-face") |> LazyHTML.text() |> String.trim()
+  end
+
+  test "the unsaved bar's Save presses to Saving… inside its action group (RE394)", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    render_hook(view, "edit_node_field", %{"key" => "implement", "field" => "run", "value" => "CHANGED"})
+
+    assert has_element?(view, "#flow-editor-unsaved-bar .action-group #flow-editor-save.pending-action")
+    assert has_element?(view, "#flow-editor-unsaved-bar .action-group #flow-editor-discard")
+    refute has_element?(view, "#flow-editor-discard.pending-action")
+    refute has_element?(view, "#flow-editor-save.btn")
+    assert view |> element("#flow-editor-save .pending-idle") |> render() =~ "Save as v2"
+    assert pending_text(view, "#flow-editor-save") == "Saving…"
+
+    view |> element("#flow-editor-save") |> render_click()
+
+    assert has_element?(view, "#flow-save-modal .action-group #flow-save-confirm.pending-action")
+    assert pending_text(view, "#flow-save-confirm") == "Saving…"
+    refute has_element?(view, "#flow-save-modal button[phx-click=close_modal].pending-action")
+  end
+
+  test "the reset modal's confirm presses to Resetting… (RE394)", %{conn: conn, board: board} do
+    {:ok, _} =
+      Flows.save_definition(Flows.get_flow!(board, "code"), %{
+        nodes: bump_implement_run(Flows.get_flow!(board, "code"))
+      })
+
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element("#flow-diff-reset") |> render_click()
+
+    assert has_element?(view, "#flow-reset-modal .action-group #flow-reset-confirm.pending-action")
+    assert pending_text(view, "#flow-reset-confirm") == "Resetting…"
+    refute has_element?(view, "#flow-reset-modal button[phx-click=close_modal].pending-action")
+  end
+
+  test "editing then Save opens the confirm modal; confirm bumps to v2", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    # simulate a definition edit through the working copy (implement prompt) via the
+    # low-level edit event the inspector (Task 4) will emit.
+    render_hook(view, "edit_node_field", %{"key" => "implement", "field" => "run", "value" => "CHANGED"})
+
+    view |> element("#flow-editor-save") |> render_click()
+    assert has_element?(view, "#flow-save-modal", "Save as v2")
+
+    view |> element("#flow-save-confirm") |> render_click()
+    assert has_element?(view, "#flow-editor-version-chip", "v2")
+    assert %Schemas.FlowVersion{} = Flows.get_version(Flows.get_flow!(board, "code"), 1)
+    assert %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+    assert Enum.any?(nodes, &(&1.key == "implement" and &1.run == "CHANGED"))
+  end
+
+  test "the save modal omits the mid-run note while mid_run_count is 0", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    render_hook(view, "edit_node_field", %{"key" => "implement", "field" => "run", "value" => "X"})
+    view |> element("#flow-editor-save") |> render_click()
+    refute has_element?(view, "#flow-save-modal-midrun")
+  end
+
+  test "selecting a node shows the inspector; Delete node is guarded while referenced", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    view |> element(~s([data-node="implement"])) |> render_click()
+    assert has_element?(view, "#inspector-node-name")
+    # implement is referenced by several edges → delete disabled + warning strip
+    assert has_element?(view, "#inspector-delete-node[disabled]")
+    assert has_element?(view, "#inspector-delete-guard", "Referenced by")
+  end
+
+  # RE459 scenario 23: the inspector's textarea moved into the Edit sheet.
+  test "editing the run prompt in the inspector marks the flow dirty", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="implement"])) |> render_click()
+    view |> element("#inspector-prompt-edit") |> render_click()
+
+    view
+    |> element("#prompt-sheet-form")
+    |> render_change(%{"key" => "implement", "field" => "run", "value" => "new prompt"})
+
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+  end
+
+  test "clicking an effort chip in the inspector selects it (RLY-143 phx-value-v regression)", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="implement"])) |> render_click()
+
+    # "implement" ships with effort: "high"
+    view |> element("#inspector-effort-medium") |> render_click()
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+
+    view |> element("#flow-editor-save") |> render_click()
+    view |> element("#flow-save-confirm") |> render_click()
+
+    assert %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+    assert Enum.any?(nodes, &(&1.key == "implement" and &1.effort == "medium"))
+  end
+
+  test "editing the AGENT field in the inspector persists the bound subagent", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="implement"])) |> render_click()
+
+    # the inspector surfaces the current binding in an editable field...
+    assert has_element?(view, "#inspector-node-agent")
+
+    # ...and typing a new value routes through edit_node_field(field: "agent")
+    view
+    |> element("#inspector-node-agent-form")
+    |> render_change(%{"field" => "agent", "value" => "spec-reviewer"})
+
+    view |> element("#flow-editor-save") |> render_click()
+    view |> element("#flow-save-confirm") |> render_click()
+
+    assert %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+    assert Enum.any?(nodes, &(&1.key == "implement" and &1.agent == "spec-reviewer"))
+  end
+
+  test "deleting the start edge blocks save with an inline error naming the problem", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    # select the start edge's outcome chip then delete it via the toolbar
+    render_hook(view, "delete_start_edge", %{})
+    assert has_element?(view, "#flow-editor-errors", "exactly one edge must leave start")
+    assert has_element?(view, "#flow-editor-save[disabled]")
+  end
+
+  test "add-node palette inserts a typed node with a unique key and selects it", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s(#palette-shell)) |> render_click()
+    assert has_element?(view, "#inspector-node-name")
+    # a new shell-N node exists in the graph
+    assert render(view) =~ "shell-"
+  end
+
+  test "selecting an edge shows the edge inspector; the max-loops stepper marks the flow dirty", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    # spec_review → fix_findings (failed, max_loops: 3) is edge index 3
+    view |> element(~s([data-edge="3"])) |> render_click()
+    assert has_element?(view, "#inspector-edge-from", "spec_review")
+    assert has_element?(view, "#inspector-edge-to", "fix_findings")
+
+    view |> element("#inspector-max-loops-inc") |> render_click()
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+  end
+
+  test "stepping MAX RETRIES below the minimum clears it to no-limit instead of an invalid 0", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    # "spec_review" has no max_retries set (nil == no limit, displayed as 0)
+    view |> element(~s([data-node="spec_review"])) |> render_click()
+
+    # stepping down from unset must stay unset, not introduce an invalid 0
+    view |> element("#inspector-max-retries-dec") |> render_click()
+    refute has_element?(view, "#flow-editor-unsaved-bar")
+
+    view |> element("#inspector-max-retries-inc") |> render_click()
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+    refute has_element?(view, "#flow-editor-errors")
+
+    # stepping back down from 1 clears to no-limit rather than landing on 0
+    view |> element("#inspector-max-retries-dec") |> render_click()
+    refute has_element?(view, "#flow-editor-unsaved-bar")
+  end
+
+  test "stepping MAX LOOPS below the minimum clears it to no-limit instead of an invalid 0", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    # spec_review → implement (failed, max_loops: 3) is edge index 3
+    view |> element(~s([data-edge="3"])) |> render_click()
+
+    for _ <- 1..3, do: view |> element("#inspector-max-loops-dec") |> render_click()
+    # 3 -> 2 -> 1 -> nil: dirty (differs from the shipped default of 3) but not invalid
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+    refute has_element?(view, "#flow-editor-errors")
+    refute has_element?(view, "#flow-editor-save[disabled]")
+
+    # a further decrement from unset stays unset, never reaching 0
+    view |> element("#inspector-max-loops-dec") |> render_click()
+    refute has_element?(view, "#flow-editor-errors")
+  end
+
+  test "the edge inspector's WHEN control shows the guard and edits it (set, then clear)", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    # quality_review → sync (succeeded, when: foreach_exhausted) is edge index 7
+    view |> element(~s([data-edge="7"])) |> render_click()
+    assert has_element?(view, "#inspector-edge-when")
+    assert has_element?(view, "#inspector-edge-when option[value='foreach_exhausted'][selected]")
+
+    # change the guard to the other value → dirty + reflects the choice
+    view
+    |> element("#inspector-edge-when-form")
+    |> render_change(%{"value" => "foreach_remaining"})
+
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+    assert has_element?(view, "#inspector-edge-when option[value='foreach_remaining'][selected]")
+
+    # clear the guard to (none) → the empty option is selected
+    view
+    |> element("#inspector-edge-when-form")
+    |> render_change(%{"value" => ""})
+
+    assert has_element?(view, "#inspector-edge-when option[value=''][selected]")
+  end
+
+  test "editing another field on a guarded edge preserves its WHEN guard (2b regression)", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    # quality_review → implement (succeeded, when: foreach_remaining) is edge index 6
+    view |> element(~s([data-edge="6"])) |> render_click()
+    assert has_element?(view, "#inspector-edge-when option[value='foreach_remaining'][selected]")
+
+    # step an UNRELATED field (MAX LOOPS) and save through the confirm modal
+    view |> element("#inspector-max-loops-inc") |> render_click()
+    view |> element("#flow-editor-save") |> render_click()
+    view |> element("#flow-save-confirm") |> render_click()
+
+    # the saved v2 edge still carries its foreach_remaining guard — not dropped
+    assert %Schemas.FlowVersion{edges: edges} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+
+    assert Enum.any?(edges, fn e ->
+             e.from == "quality_review" and e.to == "implement" and
+               e.on == :succeeded and e.when == :foreach_remaining and e.max_loops == 1
+           end)
+  end
+
+  test "Delete edge in the inspector removes the selected edge", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    count_before = count_edges(render(view))
+
+    view |> element(~s([data-edge="3"])) |> render_click()
+    view |> element("#inspector-delete-edge") |> render_click()
+
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+    assert count_edges(render(view)) == count_before - 1
+  end
+
+  test "a needs_input edge is selectable from the node inspector's OUTGOING EDGES row and deletable (RE330)",
+       %{conn: conn, board: board} do
+    # needs_input edges are not drawn on the canvas (they render as a non-interactive park
+    # badge), so the inspector row is the only way to reach one in the edge inspector.
+    code = Enum.find(Hamaca.Flows.DefaultLibrary.all(), &(&1.key == "code"))
+
+    idx =
+      Enum.find_index(code.edges, &(&1.from == "implement" and &1.to == "needs_input"))
+
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="implement"])) |> render_click()
+    view |> element("#inspector-out-edge-#{idx}") |> render_click()
+
+    assert has_element?(view, "#inspector-edge-from", "implement")
+    assert has_element?(view, "#inspector-edge-to", "needs_input")
+
+    view |> element("#inspector-delete-edge") |> render_click()
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+
+    view |> element(~s([data-node="implement"])) |> render_click()
+    refute has_element?(view, ~s(#flow-inspector [data-out-edge-to="needs_input"]))
+  end
+
+  test "Connect edge: selecting two nodes creates a new succeeded edge", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    count_before = count_edges(render(view))
+
+    view |> element("#toolbar-connect-edge") |> render_click()
+    view |> element(~s([data-node="branch"])) |> render_click()
+    view |> element(~s([data-node="merge"])) |> render_click()
+
+    assert has_element?(view, "#flow-editor-unsaved-bar")
+    assert count_edges(render(view)) == count_before + 1
+  end
+
+  test "Connect edge: a second toolbar click cancels connect mode", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    view |> element("#toolbar-connect-edge") |> render_click()
+    assert has_element?(view, "#toolbar-connect-edge", "Cancel")
+
+    view |> element("#toolbar-connect-edge") |> render_click()
+    refute has_element?(view, "#toolbar-connect-edge", "Cancel")
+  end
+
+  test "Connect edge: pressing Esc cancels connect mode", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    view |> element("#toolbar-connect-edge") |> render_click()
+    assert has_element?(view, "#toolbar-connect-edge", "Cancel")
+
+    view |> element("#flow-editor-canvas") |> render_keydown(%{"key" => "Escape"})
+    refute has_element?(view, "#toolbar-connect-edge", "Cancel")
+  end
+
+  test "renaming a node rewrites its key and every edge endpoint referencing it", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="branch"])) |> render_click()
+
+    view
+    |> element("#inspector-node-rename-form")
+    |> render_change(%{"value" => "branch2"})
+
+    assert has_element?(view, ~s([data-node="branch2"]))
+    refute has_element?(view, ~s([data-node="branch"]))
+  end
+
+  test "a stale rename event (old key no longer present) is a no-op and doesn't corrupt selection", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="branch"])) |> render_click()
+
+    # simulate an in-flight keystroke event whose hidden "key" field is stale (the client
+    # fired before the previous rename's patch landed) — no node is keyed "does-not-exist"
+    render_hook(view, "rename_node", %{"key" => "does-not-exist", "value" => "zzz"})
+
+    # no rename happened, and selection/inspector must still render safely
+    refute has_element?(view, ~s([data-node="zzz"]))
+    assert has_element?(view, ~s([data-node="branch"]))
+    assert has_element?(view, "#inspector-node-name")
+  end
+
+  test "renaming a node to a key another node already has does not crash the editor", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="branch"])) |> render_click()
+
+    assert has_element?(view, ~s([data-node="implement"]))
+
+    render_hook(view, "rename_node", %{"key" => "branch", "value" => "implement"})
+
+    assert Process.alive?(view.pid)
+    assert has_element?(view, ~s([data-node="implement"]))
+  end
+
+  test "renaming a node to an empty key is blocked inline and disables Save", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="branch"])) |> render_click()
+
+    view
+    |> element("#inspector-node-rename-form")
+    |> render_change(%{"value" => ""})
+
+    assert has_element?(view, "#flow-editor-errors")
+    assert has_element?(view, "#flow-editor-save[disabled]")
+  end
+
+  test "renaming a node to a reserved sentinel name is blocked inline and disables Save", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element(~s([data-node="branch"])) |> render_click()
+
+    view
+    |> element("#inspector-node-rename-form")
+    |> render_change(%{"value" => "done"})
+
+    assert has_element?(view, "#flow-editor-errors")
+    assert has_element?(view, "#flow-editor-save[disabled]")
+  end
+
+  test "Connect edge: connecting a node to done creates an edge landing on done", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    count_before = count_edges(render(view))
+
+    view |> element("#toolbar-connect-edge") |> render_click()
+    view |> element(~s([data-node="branch"])) |> render_click()
+    assert has_element?(view, "#flow-node-done")
+
+    view |> element("#flow-node-done") |> render_click()
+
+    assert count_edges(render(view)) == count_before + 1
+    assert has_element?(view, "#inspector-edge-to", "done")
+  end
+
+  test "Delete node in the inspector removes an unreferenced node", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element("#palette-shell") |> render_click()
+    view |> element("#inspector-delete-node") |> render_click()
+    refute render(view) =~ ~s(data-node="shell-1")
+  end
+
+  test "a customized default flow shows the diff affordance; View diff lists the changed node", %{
+    conn: conn,
+    board: board
+  } do
+    {:ok, _flow} =
+      Flows.save_definition(Flows.get_flow!(board, "code"), %{
+        nodes: bump_implement_run(Flows.get_flow!(board, "code"))
+      })
+
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    assert has_element?(view, "#flow-diff-affordance", "differ from the shipped default")
+
+    view |> element("#flow-diff-view") |> render_click()
+    assert has_element?(view, "#flow-diff-modal", "implement")
+  end
+
+  test "Reset to default restores the definition and bumps the version", %{conn: conn, board: board} do
+    {:ok, _} =
+      Flows.save_definition(Flows.get_flow!(board, "code"), %{
+        nodes: bump_implement_run(Flows.get_flow!(board, "code"))
+      })
+
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+    view |> element("#flow-diff-reset") |> render_click()
+    view |> element("#flow-reset-confirm") |> render_click()
+
+    refute has_element?(view, "#flow-diff-affordance")
+    refute Flows.customized?(Flows.get_flow!(board, "code"))
+  end
+
+  test "the node inspector shows the card contract, read-only (RE244)", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/plan")
+
+    view |> element(~s([data-node="write_plan"])) |> render_click()
+
+    assert has_element?(view, "#inspector-card-contract", "CARD CONTRACT")
+    assert has_element?(view, "#inspector-card-contract-value", "spec, acceptance_criteria")
+    assert has_element?(view, "#inspector-card-contract-value", "plan")
+    assert render(view) =~ ~r/reads.*spec, acceptance_criteria.*·.*writes.*plan/s
+
+    # Display only — authoring is flow-push + /relay-doctor, never an inline control.
+    refute has_element?(view, "#inspector-card-contract [phx-click]")
+    refute has_element?(view, "#inspector-card-contract input")
+    refute has_element?(view, "#inspector-card-contract select")
+  end
+
+  test "a node declaring no contract shows no contract block (RE244)", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    view |> element(~s([data-node="precommit"])) |> render_click()
+
+    assert has_element?(view, "#inspector-node-name")
+    refute has_element?(view, "#inspector-card-contract")
+  end
+
+  # Without reads/writes in the "add_node" map the inspector raises KeyError the moment it
+  # dereferences @node.reads on a freshly added node.
+  test "a freshly added node selects cleanly with no contract block (RE244)", %{conn: conn, board: board} do
+    {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/plan")
+
+    view |> element("#palette-shell") |> render_click()
+
+    assert has_element?(view, "#inspector-node-name")
+    refute has_element?(view, "#inspector-card-contract")
+  end
+
+  defp count_edges(html), do: ~r/data-edge="\d+"/ |> Regex.scan(html) |> length()
+
+  # helper: return the code flow's nodes with implement.run changed (as attr maps)
+  defp bump_implement_run(flow) do
+    Enum.map(flow.nodes, fn n ->
+      base = Map.take(n, [:key, :type, :run, :model, :effort, :max_retries, :timeout_minutes, :foreach])
+      if n.key == "implement", do: %{base | run: "CUSTOM"}, else: base
+    end)
+  end
+
+  test "the top bar carries the full trail and the page has no second breadcrumb (RE334)",
+       %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    assert has_element?(view, ~s(#top-bar-crumb-boards[href="/boards"]))
+    assert has_element?(view, ~s(#top-bar-crumb-board[href="/board/#{board.slug}"]), board.name)
+    assert has_element?(view, ~s(#top-bar-crumb-settings[href="/board/#{board.slug}/settings"]))
+
+    code = Enum.find(Boards.list_stages(board), &(&1.name == "Code"))
+
+    assert has_element?(
+             view,
+             ~s(#top-bar-crumb-stages[href="/board/#{board.slug}/settings?section=stages#stage-#{code.id}-row"]),
+             BoardSettingsLive.section_label(:stages)
+           )
+
+    refute has_element?(view, ~s([href*="section=flows"]))
+
+    assert has_element?(view, "#flow-title", "code")
+
+    # The old in-page trail linked the board and the settings section from inside <main>.
+    refute has_element?(view, ~s(main a[href="/board/#{board.slug}"]))
+    refute has_element?(view, ~s(main a[href^="/board/#{board.slug}/settings"]))
+
+    # The in-page bar keeps the Editor/Metrics tabs and the version chip.
+    assert has_element?(view, "#flow-editor-version-chip")
+  end
+
+  test "the derived read-outs follow a renamed neighbour (RE385, RE429)", %{conn: conn, board: board} do
+    spec = Enum.find(Boards.list_stages(board), &(&1.name == "Spec"))
+    {:ok, _} = Boards.update_stage(spec, %{name: "Specify"})
+
+    {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/flows/spec")
+
+    assert has_element?(view, "#trigger-stage option[selected]", "Specify")
+    assert has_element?(view, "#trigger-derived-lands-on", "Specify:Review")
+    refute html =~ "Spec:Review"
+  end
+
+  describe "LLM picker and canvas subtitles (RE433)" do
+    alias Hamaca.Agents
+
+    defp agent_named(board, name), do: Enum.find(Agents.list_agents(board), &(&1.name == name))
+    defp harness_keyed(board, key), do: Enum.find(Agents.list_harnesses(board), &(&1.key == key))
+
+    defp add_agent!(board, harness_key, name, model) do
+      harness = harness_keyed(board, harness_key)
+      {:ok, agent} = Agents.create_agent(board, %{"name" => name, "harness_id" => harness.id, "model" => model})
+      agent
+    end
+
+    defp canvas_llm(view, key, state) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s([data-node="#{key}"] [data-llm="#{state}"]))
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    defp save!(view) do
+      view |> element("#flow-editor-save") |> render_click()
+      view |> element("#flow-save-confirm") |> render_click()
+    end
+
+    defp saved_node(board, key) do
+      %Schemas.FlowVersion{nodes: nodes} = Flows.get_version(Flows.get_flow!(board, "code"), 2)
+      Enum.find(nodes, &(&1.key == key))
+    end
+
+    test "1. the inspector lists the board's agents under their harness, with the board default first",
+         %{conn: conn, board: board} do
+      sonnet = agent_named(board, "Claude Sonnet")
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="spec_review"])) |> render_click()
+
+      assert has_element?(view, "#inspector-llm-default", "Board default")
+      assert has_element?(view, "#inspector-llm-default", "Claude Opus")
+      assert has_element?(view, "#inspector-llm-group-claude-code", "CLAUDE CODE")
+      assert has_element?(view, ~s(#inspector-llm-#{sonnet.id}[data-selected="true"]))
+      refute has_element?(view, "#inspector-model-sonnet")
+      refute has_element?(view, "#inspector-llm input")
+
+      assert has_element?(
+               view,
+               ~s(#inspector-llm-manage[href="/board/#{board.slug}/settings?section=agents"])
+             )
+    end
+
+    test "2. picking a board agent saves it as the node's llm and shows the override on the canvas",
+         %{conn: conn, board: board} do
+      codex_fast = add_agent!(board, "codex", "Codex Fast", "gpt-6-sol")
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="spec_review"])) |> render_click()
+
+      assert has_element?(view, "#inspector-llm-group-codex")
+      view |> element("#inspector-llm-#{codex_fast.id}") |> render_click()
+      assert has_element?(view, "#flow-editor-unsaved-bar")
+      save!(view)
+
+      assert saved_node(board, "spec_review").llm == "Codex Fast"
+      assert canvas_llm(view, "spec_review", "override") == "◆ Codex Fast"
+    end
+
+    test "3. picking Board default clears the node's llm and the canvas reads the default",
+         %{conn: conn, board: board} do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      # the shipped code.json names "Claude Opus" on implement, so inheriting is a real edit
+      view |> element(~s([data-node="implement"])) |> render_click()
+      view |> element("#inspector-llm-default") |> render_click()
+      assert has_element?(view, ~s(#inspector-llm-default[data-selected="true"]))
+      save!(view)
+
+      assert saved_node(board, "implement").llm == nil
+      assert canvas_llm(view, "implement", "default") == "default · Claude Opus"
+    end
+
+    test "4. a pushed node carrying a legacy model selects the matching agent",
+         %{conn: conn, board: board} do
+      sonnet = agent_named(board, "Claude Sonnet")
+
+      doc = %{
+        "key" => "legacy",
+        "isolation" => "shared_clean",
+        "trigger" => %{"stage" => "Deploy"},
+        "nodes" => [%{"key" => "a", "type" => "agent", "run" => "/x {ref}", "model" => "sonnet"}],
+        "edges" => [%{"from" => "start", "to" => "a"}, %{"from" => "a", "to" => "done", "on" => "succeeded"}]
+      }
+
+      assert {:ok, :created, _} = Flows.upsert_from_document(board, "legacy", doc)
+
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/legacy")
+      view |> element(~s([data-node="a"])) |> render_click()
+      assert has_element?(view, ~s(#inspector-llm-#{sonnet.id}[data-selected="true"]))
+    end
+
+    test "5. a red agent reads `model removed` on the canvas and MODEL REMOVED in the picker",
+         %{conn: conn, board: board} do
+      gemini_pro = add_agent!(board, "gemini-cli", "Gemini Pro", "gemini-2.5-pro")
+      flow = Flows.get_flow!(board, "code")
+
+      nodes =
+        Enum.map(flow.nodes, fn n ->
+          n = Map.take(n, Schemas.Flow.Node.fields())
+          if n.key == "spec_review", do: %{n | llm: "Gemini Pro"}, else: n
+        end)
+
+      edges = Enum.map(flow.edges, &Map.take(&1, Schemas.Flow.Edge.fields()))
+      {:ok, _} = Flows.save_definition(flow, %{nodes: nodes, edges: edges})
+
+      {:ok, _} = Agents.update_harness(harness_keyed(board, "gemini-cli"), %{"models" => "gemini-2.5-flash"})
+
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      assert canvas_llm(view, "spec_review", "red") == "◆ Gemini Pro · model removed"
+
+      view |> element(~s([data-node="spec_review"])) |> render_click()
+      assert has_element?(view, "#inspector-llm-#{gemini_pro.id}-removed", "MODEL REMOVED")
+
+      assert has_element?(
+               view,
+               "#inspector-llm-group-gemini-cli + #inspector-llm-#{gemini_pro.id}"
+             )
+    end
+
+    test "6. shell nodes get no LLM picker; agent nodes say SUBAGENT and carry the EFFORT hint",
+         %{conn: conn, board: board} do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="precommit"])) |> render_click()
+      refute has_element?(view, "#inspector-llm")
+
+      view |> element(~s([data-node="implement"])) |> render_click()
+      assert has_element?(view, "#flow-inspector", "SUBAGENT")
+      refute has_element?(view, "#flow-inspector span.font-mono", ~r/^\s*AGENT\s*$/)
+      assert has_element?(view, "#inspector-effort-hint", "Passed to harnesses that take one; ignored by the rest.")
+    end
+  end
+
+  describe "fan_out / fan_in regions (RE437)" do
+    defp error_texts(view) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#flow-editor-errors span")
+      |> Enum.map(&LazyHTML.text/1)
+    end
+
+    defp working_nodes(view), do: :sys.get_state(view.pid).socket.assigns.working.nodes
+
+    # Scenario 25: the editor shows flow-push's message (scenario 3), byte for byte.
+    test "giving a fan-out edge an outcome blocks Save with the shared validation message",
+         %{conn: conn, board: board} do
+      {:ok, _flow} = Flows.create_flow(board, Hamaca.FanOutFixtures.panel_attrs(%{stage_id: deploy_id(board)}))
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/panel")
+      refute has_element?(view, "#flow-editor-errors")
+
+      index = Enum.find_index(Hamaca.FanOutFixtures.panel_edges(), &(&1 == %{from: "fo", to: "a"}))
+      render_hook(view, "edit_edge", %{"index" => "#{index}", "field" => "on", "value" => "succeeded"})
+
+      assert ~s(edge "fo" → "a" leaves a fan_out, which fires every edge on entry — remove "on") in error_texts(view)
+      assert has_element?(view, "#flow-editor-save[disabled]")
+    end
+
+    # Scenario 26
+    test "the palette places fan_out and fan_in nodes, and offers no parallel node",
+         %{conn: conn, board: board} do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+      assert has_element?(view, "#palette-fan_out", "Fan out")
+      assert has_element?(view, "#palette-fan_in", "Fan in")
+      refute has_element?(view, "#palette-parallel")
+
+      view |> element("#palette-fan_out") |> render_click()
+      view |> element("#palette-fan_in") |> render_click()
+
+      added = Enum.filter(working_nodes(view), &(&1.key in ["fan_out-1", "fan_in-1"]))
+      assert [%{key: "fan_out-1", type: :fan_out}, %{key: "fan_in-1", type: :fan_in}] = added
+      assert Enum.all?(added, &(Map.fetch(&1, :max_parallel) == {:ok, nil}))
+    end
+  end
+
+  describe "fan-out authoring (RE439)" do
+    alias Hamaca.FanOutFixtures
+    alias HamacaWeb.ChangesetErrors
+
+    defp panel_editor(conn, board) do
+      {:ok, _flow} = Flows.create_flow(board, FanOutFixtures.panel_attrs(%{stage_id: deploy_id(board)}))
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/panel")
+      view
+    end
+
+    defp working_edges(view), do: :sys.get_state(view.pid).socket.assigns.working.edges
+
+    defp el_text(view, selector) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    defp texts(view, selector) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+    end
+
+    defp ids(view, selector) do
+      view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> LazyHTML.attribute("id")
+    end
+
+    defp connect!(view, from, to) do
+      view |> element("#toolbar-connect-edge") |> render_click()
+      view |> element(~s([data-node="#{from}"])) |> render_click()
+      view |> element(~s([data-node="#{to}"])) |> render_click()
+    end
+
+    defp select_fo(view), do: view |> element(~s([data-node="fo"])) |> render_click()
+
+    defp saved_fo(board) do
+      flow = Flows.get_flow!(board, "panel")
+      {flow.version, Enum.find(flow.nodes, &(&1.key == "fo"))}
+    end
+
+    # Scenario 1
+    test "an edge connected out of a fan-out is plain and opens the branch-start inspector",
+         %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      connect!(view, "fo", "after")
+
+      assert List.last(working_edges(view)) == %{from: "fo", to: "after", on: nil, max_loops: nil, when: nil}
+      assert el_text(view, "#inspector-edge-kind") == "EDGE · BRANCH START"
+    end
+
+    # Scenario 2
+    test "an edge connected out of an ordinary node still routes on succeeded", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      connect!(view, "prep", "after")
+
+      assert %{from: "prep", to: "after", on: :succeeded} = List.last(working_edges(view))
+      assert el_text(view, "#inspector-edge-kind") == "EDGE"
+    end
+
+    # Scenario 3
+    test "selecting a fan-out opens the fan-out inspector, not the work-node one", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+
+      assert has_element?(view, ~s(#inspector-node-name[value="fo"]))
+      assert el_text(view, "#inspector-max-parallel-value") == "all"
+      assert has_element?(view, "#inspector-max-parallel-hint", "Unset runs every branch at once (3 today)")
+      assert has_element?(view, "#inspector-max-parallel-inc[disabled]")
+      refute has_element?(view, "#inspector-max-parallel-reset")
+
+      for id <- ~w(#inspector-node-form #inspector-node-agent-form #inspector-llm #inspector-effort-hint
+                   #inspector-max-retries-dec #inspector-node-timeout-form) do
+        refute has_element?(view, id), "expected no #{id} in the fan-out inspector"
+      end
+    end
+
+    # Scenario 4
+    test "stepping MAX PARALLEL down from unset saves max_parallel", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+
+      view |> element("#inspector-max-parallel-dec") |> render_click()
+      assert el_text(view, "#inspector-max-parallel-value") == "2"
+      save!(view)
+
+      assert {2, %{max_parallel: 2}} = saved_fo(board)
+    end
+
+    # Scenario 5
+    test "Reset to all branches clears a saved max_parallel", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+      view |> element("#inspector-max-parallel-dec") |> render_click()
+      save!(view)
+      assert {2, %{max_parallel: 2}} = saved_fo(board)
+
+      select_fo(view)
+      view |> element("#inspector-max-parallel-reset") |> render_click()
+      assert el_text(view, "#inspector-max-parallel-value") == "all"
+      save!(view)
+
+      assert {3, %{max_parallel: nil}} = saved_fo(board)
+    end
+
+    # Scenario 6
+    test "MAX PARALLEL floors at 1 and steps back up", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+
+      render_hook(view, "edit_node_field", %{"key" => "fo", "field" => "max_parallel", "v" => "1"})
+      assert el_text(view, "#inspector-max-parallel-value") == "1"
+      assert has_element?(view, "#inspector-max-parallel-dec[disabled]")
+
+      view |> element("#inspector-max-parallel-inc") |> render_click()
+      assert el_text(view, "#inspector-max-parallel-value") == "2"
+    end
+
+    # Scenario 7
+    test "BRANCHES lists each branch with its steps and loop, then the join and shared-checkout note",
+         %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+
+      assert el_text(view, "#inspector-branches-label") == "BRANCHES · 3"
+
+      assert ids(view, "button[id^=inspector-branch-]") ==
+               ~w(inspector-branch-a inspector-branch-b1 inspector-branch-c)
+
+      assert texts(view, "button[id^=inspector-branch-] [data-branch-meta]") == ["1 step", "2 steps · loop", "1 step"]
+      assert has_element?(view, "#inspector-fan-out-join", "All branches join at")
+      assert has_element?(view, "#inspector-fan-out-join .font-mono", "fi")
+      assert has_element?(view, "#inspector-shared-checkout", "Shared checkout.")
+    end
+
+    # Scenario 8
+    test "BRANCHES follows the unsaved graph", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      connect!(view, "fo", "after")
+      select_fo(view)
+
+      assert el_text(view, "#inspector-branches-label") == "BRANCHES · 4"
+      assert has_element?(view, "#inspector-branch-after")
+      assert has_element?(view, "#inspector-fan-out-join", "The branches don't join at one fan in yet.")
+    end
+
+    # Scenario 9
+    test "clicking a branch row opens the branch-start edge inspector", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+      view |> element("#inspector-branch-b1") |> render_click()
+
+      assert el_text(view, "#inspector-edge-from") == "fo"
+      assert el_text(view, "#inspector-edge-to") == "b1"
+      assert el_text(view, "#inspector-edge-kind") == "EDGE · BRANCH START"
+      assert texts(view, "#inspector-edge-outcome[disabled] option") == ["(none · fires on entry)"]
+      assert texts(view, "#inspector-edge-when[disabled] option") == ["(none)"]
+      assert has_element?(view, "#inspector-branch-start-note", "fo")
+      refute has_element?(view, "#inspector-delete-edge")
+      refute has_element?(view, "#inspector-max-loops-inc")
+    end
+
+    # Scenario 10
+    test "the toolbar Delete removes a selected branch-start edge", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_fo(view)
+      view |> element("#inspector-branch-b1") |> render_click()
+      view |> element("#toolbar-delete") |> render_click()
+
+      refute Enum.any?(working_edges(view), &(&1.from == "fo" and &1.to == "b1"))
+      assert has_element?(view, "#flow-editor-unsaved-bar")
+    end
+
+    # Scenario 11
+    test "an ordinary edge keeps the editable edge inspector", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      view |> element(~s([data-edge="5"])) |> render_click()
+
+      assert el_text(view, "#inspector-edge-kind") == "EDGE"
+      refute has_element?(view, "#inspector-edge-outcome[disabled]")
+      assert has_element?(view, "#inspector-edge-outcome option[selected]", "succeeded")
+      assert has_element?(view, "#inspector-delete-edge")
+    end
+
+    defp select_node(view, key), do: view |> element(~s([data-node="#{key}"])) |> render_click()
+
+    defp style_of(view, selector) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> LazyHTML.attribute("style")
+      |> List.first()
+    end
+
+    # Task 3 scenario 1
+    test "selecting a fan-in opens the read-only fan-in inspector with WAITS FOR and RESOLVES",
+         %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      select_node(view, "fi")
+
+      assert has_element?(view, ~s(#inspector-node-name[value="fi"]))
+      assert el_text(view, "#inspector-waits-for-label") == "WAITS FOR · 3 BRANCHES OF fo"
+
+      assert ids(view, "[id^=inspector-wait-]:not([id^=inspector-waits-])") ==
+               ~w(inspector-wait-a inspector-wait-b1 inspector-wait-c)
+
+      assert texts(view, "[id^=inspector-wait-] [data-wait-outcomes]") == ["succeeded / failed", "succeeded", "succeeded"]
+      assert has_element?(view, "#inspector-resolves", "when every branch succeeded")
+      assert has_element?(view, "#inspector-resolves", "when any branch failed")
+      assert has_element?(view, "#inspector-fan-in-note", "Always waits for every branch.")
+
+      for sel <- [
+            "#flow-inspector textarea",
+            "#flow-inspector select",
+            "#inspector-max-parallel-dec",
+            "#inspector-max-retries-dec",
+            "#inspector-node-timeout-form"
+          ] do
+        refute has_element?(view, sel), "expected no #{sel} in the fan-in inspector"
+      end
+    end
+
+    # Task 3 scenario 2
+    test "a fan-in no region closes shows 0 branches and defers to the bar", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      view |> element(~s([data-edge="10"])) |> render_click()
+      view |> element("#inspector-delete-edge") |> render_click()
+      select_node(view, "fi")
+
+      assert el_text(view, "#inspector-waits-for-label") == "WAITS FOR · 0 BRANCHES"
+      assert has_element?(view, "#inspector-waits-for-empty", "No fan-out closes here yet. The unsaved bar says why.")
+      assert ~s(branch "c" of fan_out "fo" never reaches a fan_in) in error_texts(view)
+      assert has_element?(view, "#flow-editor-save[disabled]")
+    end
+
+    defp leave_region!(view, board) do
+      connect!(view, "c", "after")
+
+      ChangesetErrors.leaf_messages(
+        Schemas.Flow.changeset(%Schemas.Flow{}, %{
+          key: "panel",
+          isolation: :shared_clean,
+          stage_id: deploy_id(board),
+          nodes: FanOutFixtures.panel_nodes(),
+          edges: FanOutFixtures.panel_edges() ++ [%{from: "c", to: "after", on: :succeeded}]
+        })
+      )
+    end
+
+    # Task 3 scenario 3 (acceptance criterion 6)
+    test "an edge leaving the region lists flow-push's messages, disables Save and leaves the canvas unmarked",
+         %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      expected = leave_region!(view, board)
+
+      assert ~s(edge "c" → "after" leaves the region of fan_out "fo") in error_texts(view)
+      assert has_element?(view, "#flow-editor-save[disabled]")
+      assert error_texts(view) == expected
+
+      for key <- ~w(c after fo fi) do
+        refute style_of(view, ~s([data-node="#{key}"])) =~ "--color-error", "expected #{key} unmarked"
+      end
+    end
+
+    # Task 3 scenario 4
+    test "the unsaved bar lays the error list out as a column, one span per message", %{conn: conn, board: board} do
+      view = panel_editor(conn, board)
+      leave_region!(view, board)
+
+      assert style_of(view, "#flow-editor-errors") =~ "flex-direction:column"
+      assert length(error_texts(view)) == length(Enum.uniq(error_texts(view)))
+      assert style_of(view, "#flow-editor-unsaved-bar") =~ "align-items:flex-start;"
+      assert style_of(view, "#flow-editor-unsaved-bar") =~ "flex-wrap:wrap;"
+    end
+
+    defp connect_done!(view, from) do
+      view |> element("#toolbar-connect-edge") |> render_click()
+      view |> element(~s([data-node="#{from}"])) |> render_click()
+      view |> element("#flow-node-done") |> render_click()
+    end
+
+    # Task 3 scenario 5 (acceptance criterion 2, end to end)
+    test "a whole fan-out region is built, capped and saved in the editor", %{conn: conn, board: board} do
+      {:ok, _flow} =
+        Flows.create_flow(board, %{
+          key: "build",
+          isolation: :shared_clean,
+          stage_id: deploy_id(board),
+          nodes: [%{key: "prep", type: :shell, run: "true"}],
+          edges: [%{from: "start", to: "prep"}, %{from: "prep", to: "done", on: :succeeded}]
+        })
+
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/build")
+
+      view |> element(~s([data-edge="1"])) |> render_click()
+      view |> element("#inspector-delete-edge") |> render_click()
+
+      view |> element("#palette-fan_out") |> render_click()
+      for _ <- 1..3, do: view |> element("#palette-agent") |> render_click()
+      view |> element("#palette-fan_in") |> render_click()
+
+      connect!(view, "prep", "fan_out-1")
+      for n <- 1..3, do: connect!(view, "fan_out-1", "agent-#{n}")
+      for n <- 1..3, do: connect!(view, "agent-#{n}", "fan_in-1")
+      connect_done!(view, "fan_in-1")
+
+      connect!(view, "fan_in-1", "prep")
+      index = length(working_edges(view)) - 1
+
+      view
+      |> element("#inspector-edge-outcome-form")
+      |> render_change(%{"index" => "#{index}", "field" => "on", "value" => "failed"})
+
+      select_node(view, "fan_out-1")
+      view |> element("#inspector-max-parallel-dec") |> render_click()
+
+      assert error_texts(view) == []
+      save!(view)
+
+      stored = Flows.get_flow!(board, "build")
+      assert stored.version == 2
+
+      fan_out = Enum.find(stored.nodes, &(&1.key == "fan_out-1"))
+
+      assert %{type: :fan_out, max_parallel: 2, run: nil, agent: nil, llm: nil, effort: nil} = fan_out
+      assert %{max_retries: nil, timeout_minutes: nil} = fan_out
+
+      fo_edges = Enum.filter(stored.edges, &(&1.from == "fan_out-1"))
+      assert Enum.map(fo_edges, & &1.to) == ~w(agent-1 agent-2 agent-3)
+      assert Enum.all?(fo_edges, &(is_nil(&1.on) and is_nil(&1.when)))
+
+      assert %{type: :fan_in} = Enum.find(stored.nodes, &(&1.key == "fan_in-1"))
+      assert Enum.any?(stored.edges, &(&1.from == "fan_in-1" and &1.to == "done" and &1.on == :succeeded))
+      assert Enum.any?(stored.edges, &(&1.from == "fan_in-1" and &1.to == "prep" and &1.on == :failed))
+
+      assert %{fan_in: "fan_in-1", max_parallel: 2, branches: [_, _, _]} =
+               Schemas.Flow.region(stored, "fan_out-1")
+    end
+  end
+
+  # RE442: a template flow's prompt lives in the node itself — an agent node with no `agent`
+  # is tagged so it doesn't read as "forgot to bind a subagent".
+  describe "inline · no skill tag (RE442)" do
+    setup %{user: user} do
+      {:ok, bare} = Boards.create_board(user, %{name: "Bare", slug: unique_slug("bare"), template: "bare-minimum"})
+      %{bare: bare}
+    end
+
+    # Some node of `type` on the template board, as `{flow key, node key}`: the template's flows
+    # are edited freely, so the test never names one.
+    defp template_node(board, type) do
+      Enum.find_value(Flows.list_flows(board), fn flow ->
+        node = Enum.find(flow.nodes, &(&1.type == type))
+        node && {flow.key, node.key}
+      end)
+    end
+
+    test "14. an agent node with no agent is tagged inline · no skill", %{conn: conn, bare: bare} do
+      {flow, node} = template_node(bare, :agent)
+      {:ok, view, _} = live(conn, ~p"/board/#{bare.slug}/flows/#{flow}")
+      view |> element(~s([data-node="#{node}"])) |> render_click()
+
+      assert view |> element("#inspector-inline-tag") |> render() =~ "inline · no skill"
+      assert has_element?(view, "#inspector-node-agent")
+      refute has_element?(view, "#inspector-node-agent[value]")
+    end
+
+    test "15. an agent node bound to a subagent carries no tag", %{conn: conn, board: board} do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="implement"])) |> render_click()
+
+      assert has_element?(view, ~s(#inspector-node-agent[value="plan-implementer"]))
+      refute has_element?(view, "#inspector-inline-tag")
+    end
+
+    test "16. a shell node carries no tag", %{conn: conn, bare: bare} do
+      {flow, node} = template_node(bare, :shell)
+      {:ok, view, _} = live(conn, ~p"/board/#{bare.slug}/flows/#{flow}")
+      view |> element(~s([data-node="#{node}"])) |> render_click()
+
+      refute has_element?(view, "#inspector-inline-tag")
+    end
+  end
+
+  describe "long prompts (RE459)" do
+    defp code_editor(conn, board) do
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view
+    end
+
+    defp select!(view, key), do: view |> element(~s([data-node="#{key}"])) |> render_click()
+
+    defp open_sheet(view, key, mode) do
+      select!(view, key)
+      view |> element("#inspector-prompt-#{if mode == :edit, do: "edit", else: "expand"}") |> render_click()
+      view
+    end
+
+    defp trimmed(view, sel) do
+      view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query(sel) |> LazyHTML.text() |> String.trim()
+    end
+
+    defp lv_assigns(view), do: :sys.get_state(view.pid).socket.assigns
+
+    defp first_shell_key(view), do: Enum.find(lv_assigns(view).working.nodes, &(&1.type == :shell)).key
+
+    # Scenario 13
+    test "the post node's inspector shows a rendered preview and its count, not a textarea",
+         %{conn: conn, board: board} do
+      view = code_editor(conn, board)
+      select!(view, "post")
+
+      refute has_element?(view, "#flow-inspector textarea")
+      assert trimmed(view, "#inspector-prompt-count") == "1,880 chars · 9 lines"
+      assert has_element?(view, "#inspector-prompt-preview-body .prompt-placeholder")
+    end
+
+    # Scenario 14
+    test "Expand opens the sheet in Read", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      assert has_element?(view, "#prompt-sheet")
+      assert has_element?(view, "#prompt-sheet-read")
+      refute has_element?(view, "#prompt-sheet-textarea")
+    end
+
+    # Scenario 14 (the preview box itself)
+    test "clicking the preview box opens the sheet in Read", %{conn: conn, board: board} do
+      view = code_editor(conn, board)
+      select!(view, "post")
+      view |> element("#inspector-prompt-preview") |> render_click()
+
+      assert has_element?(view, "#prompt-sheet")
+      assert has_element?(view, "#prompt-sheet-read")
+      refute has_element?(view, "#prompt-sheet-textarea")
+    end
+
+    # Scenario 15
+    test "Edit opens the sheet in Edit", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :edit)
+      assert has_element?(view, "#prompt-sheet-textarea")
+    end
+
+    # Scenario 16
+    test "an edit in the sheet dirties the working copy, shows in Read, and Done closes",
+         %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :edit)
+
+      view
+      |> element("#prompt-sheet-form")
+      |> render_change(%{"key" => "post", "field" => "run", "value" => "new prompt {ref}"})
+
+      assert has_element?(view, "#flow-editor-version-chip", "Editing · unsaved")
+      assert has_element?(view, "#flow-editor-unsaved-bar")
+      assert Enum.find(lv_assigns(view).working.nodes, &(&1.key == "post")).run == "new prompt {ref}"
+
+      view |> element("#prompt-sheet-mode-read") |> render_click()
+      assert has_element?(view, "#prompt-sheet-read", "new prompt")
+      assert has_element?(view, "#prompt-sheet-read .prompt-placeholder", "{ref}")
+
+      # Done lives in the Edit footer only, so step back to Edit to reach it.
+      view |> element("#prompt-sheet-mode-edit") |> render_click()
+      view |> element("#prompt-sheet-done") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+      assert trimmed(view, "#inspector-prompt-count") == "16 chars · 1 line"
+    end
+
+    # Scenario 17
+    test "Esc closes the sheet without touching connect mode or the modal", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      render_keydown(view, "close_prompt_sheet", %{"key" => "Escape"})
+
+      refute has_element?(view, "#prompt-sheet")
+      assert lv_assigns(view).connecting == nil
+      assert lv_assigns(view).modal == nil
+    end
+
+    # Scenario 17 (Esc exclusivity: the canvas's cancel_connect binding is off while the sheet is open)
+    test "opening the sheet clears connect mode and the canvas drops its Esc binding",
+         %{conn: conn, board: board} do
+      view = code_editor(conn, board)
+      select!(view, "post")
+      view |> element("#toolbar-connect-edge") |> render_click()
+      assert has_element?(view, ~s(#flow-editor-canvas[phx-window-keydown="cancel_connect"]))
+
+      render_click(view, "open_prompt_sheet", %{"mode" => "read"})
+
+      assert has_element?(view, "#prompt-sheet")
+      assert lv_assigns(view).connecting == nil
+      refute has_element?(view, "#flow-editor-canvas[phx-window-keydown]")
+    end
+
+    # Scenario 18
+    test "the overlay and ✕ each close the sheet", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      view |> element("#prompt-sheet-overlay") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+
+      view |> element("#inspector-prompt-expand") |> render_click()
+      assert has_element?(view, "#prompt-sheet")
+      view |> element("#prompt-sheet-close") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 19
+    test "selecting another node closes the sheet", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      select!(view, "implement")
+
+      refute has_element?(view, "#prompt-sheet")
+      assert has_element?(view, ~s(#inspector-node-name[value="implement"]))
+    end
+
+    # Scenario 20
+    test "Discard closes the sheet", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :edit)
+
+      view
+      |> element("#prompt-sheet-form")
+      |> render_change(%{"key" => "post", "field" => "run", "value" => "changed"})
+
+      view |> element("#flow-editor-discard") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 20
+    test "selecting an edge closes the sheet", %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :read)
+
+      render_click(view, "select_edge", %{"index" => "0"})
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 21
+    test "a shell node's sheet renders its command as a code block under COMMAND", %{conn: conn, board: board} do
+      view = code_editor(conn, board)
+      open_sheet(view, first_shell_key(view), :read)
+      assert has_element?(view, "#prompt-sheet-read pre.prompt-code")
+      assert has_element?(view, "#prompt-sheet-panel header", "COMMAND")
+    end
+
+    # Scenario 22
+    test "Save closes the sheet before the save modal, and the saved version holds the edit",
+         %{conn: conn, board: board} do
+      view = conn |> code_editor(board) |> open_sheet("post", :edit)
+
+      view
+      |> element("#prompt-sheet-form")
+      |> render_change(%{"key" => "post", "field" => "run", "value" => "new prompt {ref}"})
+
+      view |> element("#flow-editor-save") |> render_click()
+      refute has_element?(view, "#prompt-sheet")
+      assert has_element?(view, "#flow-save-modal")
+
+      view |> element("#flow-save-confirm") |> render_click()
+      saved = Flows.get_flow(board, "code")
+      assert saved.version == 2
+      assert Enum.find(saved.nodes, &(&1.key == "post")).run == "new prompt {ref}"
+    end
+  end
+
+  describe "archived board: read-only prompts (RE459)" do
+    @read_only_flash "This board is archived (read-only)."
+
+    setup %{conn: conn, board: board} do
+      {:ok, board} = Boards.archive_board(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      %{board: board, view: view}
+    end
+
+    defp working(view), do: :sys.get_state(view.pid).socket.assigns.working
+
+    defp counts(view) do
+      w = working(view)
+      {length(w.nodes), length(w.edges)}
+    end
+
+    defp post_run(view), do: Enum.find(working(view).nodes, &(&1.key == "post")).run
+
+    defp open_read_only_sheet(view) do
+      view |> element(~s([data-node="post"])) |> render_click()
+      view |> element("#inspector-prompt-expand") |> render_click()
+      view
+    end
+
+    # Scenario 1
+    test "a node is selectable and its inspector is read-only, with no Edit path", %{view: view} do
+      html = view |> element(~s([data-node="post"])) |> render_click()
+
+      assert has_element?(view, "#inspector-node-name[disabled]")
+      assert has_element?(view, "#inspector-delete-node[disabled]")
+      assert has_element?(view, "#inspector-prompt-expand")
+      refute has_element?(view, "#inspector-prompt-edit")
+      refute html =~ "archived (read-only)"
+    end
+
+    # Scenario 2
+    test "Expand opens a READ-ONLY sheet with no mode toggle, Done or textarea", %{view: view} do
+      open_read_only_sheet(view)
+
+      assert has_element?(view, "#prompt-sheet")
+      assert has_element?(view, "#prompt-sheet-readonly-badge", "READ-ONLY")
+      refute has_element?(view, "#prompt-sheet-mode-read")
+      refute has_element?(view, "#prompt-sheet-mode-edit")
+      refute has_element?(view, "#prompt-sheet-done")
+      refute has_element?(view, "#prompt-sheet-textarea")
+    end
+
+    # Scenario 3
+    test "opening the sheet in edit mode is refused with the read-only flash", %{view: view} do
+      view |> element(~s([data-node="post"])) |> render_click()
+
+      html = render_click(view, "open_prompt_sheet", %{"mode" => "edit"})
+
+      assert html =~ @read_only_flash
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 4
+    test "switching the open read-only sheet to edit is refused and it stays in read", %{view: view} do
+      open_read_only_sheet(view)
+
+      html = render_click(view, "prompt_sheet_mode", %{"mode" => "edit"})
+
+      assert html =~ @read_only_flash
+      assert :sys.get_state(view.pid).socket.assigns.prompt_sheet == :read
+    end
+
+    # Scenario 5
+    test "Esc closes the read-only sheet", %{view: view} do
+      open_read_only_sheet(view)
+
+      render_keydown(view, "close_prompt_sheet", %{"key" => "Escape"})
+
+      refute has_element?(view, "#prompt-sheet")
+    end
+
+    # Scenario 6
+    test "connect, add and delete are still refused and change nothing", %{view: view} do
+      before = counts(view)
+
+      assert render_click(view, "connect_edge", %{}) =~ @read_only_flash
+      assert :sys.get_state(view.pid).socket.assigns.connecting == nil
+      assert render_click(view, "add_node", %{"type" => "agent"}) =~ @read_only_flash
+
+      view |> element(~s([data-node="post"])) |> render_click()
+      assert render_click(view, "delete_selected", %{}) =~ @read_only_flash
+
+      assert counts(view) == before
+    end
+
+    # Scenario 7
+    test "a node field edit is refused and leaves the working copy alone", %{view: view} do
+      before = post_run(view)
+
+      html = render_click(view, "edit_node_field", %{"key" => "post", "field" => "run", "value" => "x"})
+
+      assert html =~ @read_only_flash
+      assert post_run(view) == before
+    end
+
+    # Scenario 8
+    test "an edge is selectable and its inspector controls are disabled", %{view: view} do
+      html = render_click(view, "select_edge", %{"index" => "0"})
+
+      refute html =~ @read_only_flash
+      assert has_element?(view, "#inspector-edge-kind")
+      assert has_element?(view, "#inspector-edge-outcome[disabled]")
+      assert has_element?(view, "#inspector-edge-when[disabled]")
+      refute has_element?(view, "#inspector-delete-edge:not([disabled])")
+    end
+  end
+
+  describe "editable board: the edit-mode refusal only fires when read-only (RE459)" do
+    # Scenario 9
+    test "open_prompt_sheet in edit mode opens the textarea", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+      view |> element(~s([data-node="post"])) |> render_click()
+
+      render_click(view, "open_prompt_sheet", %{"mode" => "edit"})
+
+      assert has_element?(view, "#prompt-sheet-textarea")
+    end
+  end
+end

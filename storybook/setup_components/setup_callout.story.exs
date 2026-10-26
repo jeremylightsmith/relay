@@ -2,7 +2,7 @@ defmodule Storybook.SetupComponents.SetupCallout do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.SetupComponents.setup_callout/1
+  def function, do: &HamacaWeb.SetupComponents.setup_callout/1
   def render_source, do: :function
 
   # The callout is absolutely positioned by its `.SetupCallout` hook; with no `#board` on the page

@@ -1,9 +1,9 @@
 defmodule Schemas.CardOwner do
   @moduledoc """
   One owner of a card — the "actor" concept: either a user
-  (`actor_type: :user` + `user_id`) or the single Relay AI agent
+  (`actor_type: :user` + `user_id`) or the single Hamaca AI agent
   (`actor_type: :agent`, no `user_id`). A card has many owners; the active
-  owner is derived by `Relay.Cards.active_owner_type/1`, never stored.
+  owner is derived by `Hamaca.Cards.active_owner_type/1`, never stored.
   All fields are set programmatically, never cast from input.
   """
 

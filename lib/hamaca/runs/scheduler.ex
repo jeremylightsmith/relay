@@ -1,0 +1,658 @@
+defmodule Hamaca.Runs.Scheduler do
+  @moduledoc """
+  The pure dispatch core (ADR 0006 / RLY-133) — the server-side heir to
+  `./relay`'s `find_all_ready`. `plan/1` takes a `Snapshot` and returns a
+  `Plan`: an ordered list of `{:resume, ...}` / `{:start, ...}` decisions plus
+  the `ready ↔ queued` reconciliation. No processes, no DB — every ported rule
+  unit-tests directly.
+
+  Ported semantics: process enabled flows **rightmost stage first**
+  (by stage `position`, descending — not config order); within a flow, resume
+  parked runs before pulling fresh; WIP limits count a column **plus its
+  sub-lanes**; `:needs_input` and `:failed` cards are skipped (a dead run is
+  never silently restarted — recovery is a human's call, RLY-179); human-owned
+  cards are off-limits (ADR 0004); a parked run resumes through the scheduler
+  only when its `parked_reason` is `:runner_gone` — `:needs_input` and
+  `:claimed` parks are the run `Listener`'s territory and are left untouched
+  here (RLY-200, one authority per parked_reason); capacity and WIP are
+  consumed as decisions are made, so a single pass never over-dispatches. Extensions: every decision
+  names a runner (capacity consumed on that runner's isolation class);
+  `exclusive` runs are pinned to their affine runner (absolute — never
+  reassigned mid-run); a resume the capacity map cannot satisfy is REPORTED as a `refusals`
+  entry rather than silently skipped (RE297), so a permanently-unplaceable run can be aged out
+  instead of waiting forever.
+
+  **Paused flows (RE430).** A flow whose key has a problem in `snapshot.problems` (a broken
+  board shape — `Hamaca.Flows.Shape`) is paused: `plan/1` starts no fresh run for it, but still
+  resumes its in-flight runs, which finish and land as the board says. Nothing here re-derives
+  the shape rule — the snapshot carries the problems; `explain/2` names the pause
+  (`:flow_paused`).
+  """
+
+  alias Hamaca.Flows.Shape
+  alias Hamaca.Runs.Policy
+  alias Hamaca.Runs.Scheduler.Plan
+  alias Hamaca.Runs.Scheduler.Snapshot
+
+  @spec plan(Snapshot.t()) :: Plan.t()
+  def plan(%Snapshot{} = snapshot) do
+    stage_by_id = Map.new(snapshot.stages, &{&1.id, &1})
+    children = children_index(snapshot.stages)
+    cards_by_stage = Enum.group_by(snapshot.cards, & &1.stage_id)
+    card_by_id = Map.new(snapshot.cards, &{&1.id, &1})
+    run_by_card = Map.new(snapshot.runs, &{&1.card_id, &1})
+    paused = paused_flow_keys(snapshot)
+
+    acc0 = %{
+      capacity: snapshot.capacity,
+      decided: MapSet.new(),
+      wip_extra: %{},
+      dispatches: [],
+      to_queue: [],
+      refusals: []
+    }
+
+    acc =
+      snapshot.flows
+      |> Enum.sort_by(&stage_position(&1, stage_by_id), :desc)
+      |> Enum.reduce(acc0, fn flow, acc ->
+        acc = resume_runs(acc, flow, snapshot.runs, children, card_by_id)
+
+        if MapSet.member?(paused, flow.key),
+          do: acc,
+          else: fresh_pulls(acc, flow, stage_by_id, children, cards_by_stage, run_by_card)
+      end)
+
+    %Plan{
+      dispatches: acc.dispatches,
+      to_queue: acc.to_queue,
+      to_unqueue: unqueue(snapshot.cards, acc.to_queue, acc.dispatches, run_by_card),
+      refusals: acc.refusals
+    }
+  end
+
+  # The keys of the flows a broken board shape pauses (RE430).
+  defp paused_flow_keys(snapshot), do: MapSet.new(snapshot.problems, & &1.flow_key)
+
+  # --- flow ordering ---
+
+  defp stage_position(flow, stage_by_id) do
+    case stage_by_id[flow.stage_id] do
+      nil -> -1
+      stage -> stage.position
+    end
+  end
+
+  # --- resume parked runs whose card sits in this flow's stage (or a sub-lane) ---
+
+  defp resume_runs(acc, flow, runs, children, card_by_id) do
+    lane_ids = lane_ids(flow.stage_id, children)
+
+    runs
+    |> Enum.filter(fn run ->
+      card = card_by_id[run.card_id]
+      run.status == :parked and card != nil and card.stage_id in lane_ids
+    end)
+    |> Enum.sort_by(&card_sort_key(card_by_id[&1.card_id]))
+    |> Enum.reduce(acc, fn run, acc ->
+      card = card_by_id[run.card_id]
+
+      cond do
+        MapSet.member?(acc.decided, run.card_id) -> acc
+        not Policy.resumable?(run, card) -> acc
+        true -> maybe_resume(acc, run)
+      end
+    end)
+  end
+
+  defp maybe_resume(acc, run) do
+    case take_slot(acc.capacity, run.isolation, runner_target(run)) do
+      # RE297: a refused resume used to be dropped on the floor, so the engine could not tell
+      # "waiting, legitimately" from "waiting forever". Report it instead; `Hamaca.Runs` turns
+      # the report into a clock and the reaper eventually gives up on it.
+      :none ->
+        %{acc | refusals: acc.refusals ++ [refusal(run, acc.capacity)]}
+
+      {runner_id, capacity} ->
+        %{
+          acc
+          | capacity: capacity,
+            decided: MapSet.put(acc.decided, run.card_id),
+            dispatches: acc.dispatches ++ [{:resume, run.id, runner_id}]
+        }
+    end
+  end
+
+  # exclusive resumes are pinned; every other placement is greedy.
+  defp runner_target(%{isolation: :exclusive, pinned_runner_id: eid}), do: {:pinned, eid}
+  defp runner_target(_run), do: :any
+
+  defp refusal(run, capacity), do: %{run_id: run.id, card_id: run.card_id, reason: refusal_reason(run, capacity)}
+
+  # Classified from the snapshot alone, most-specific first — every value is a member of
+  # `Schemas.Run.resume_refusal_reasons/0`, which is the one definition of the set.
+  defp refusal_reason(%{isolation: nil}, _capacity), do: :no_isolation
+
+  defp refusal_reason(%{isolation: :exclusive, pinned_runner_id: nil}, _capacity), do: :pin_unresolved
+
+  defp refusal_reason(%{isolation: :exclusive, pinned_runner_id: eid}, capacity) do
+    if Map.has_key?(capacity, eid), do: :no_free_slot, else: :pinned_runner_absent
+  end
+
+  defp refusal_reason(_run, _capacity), do: :no_free_slot
+
+  # --- then pull fresh from this flow's pulls-from stage ---
+
+  defp fresh_pulls(acc, flow, stage_by_id, children, cards_by_stage, run_by_card) do
+    flow_stage = flow.stage_id
+    wip_limit = wip_limit(stage_by_id, flow_stage)
+    base_used = used(children, cards_by_stage, flow_stage)
+
+    cards_by_stage
+    |> Map.get(flow.pulls_from_stage_id, [])
+    |> Enum.sort_by(&card_sort_key/1)
+    |> Enum.reduce_while(acc, fn card, acc ->
+      cond do
+        not fresh_eligible?(card, acc.decided, run_by_card) ->
+          {:cont, acc}
+
+        wip_full?(wip_limit, base_used, Map.get(acc.wip_extra, flow_stage, 0)) ->
+          # WIP full: stop pulling fresh for this flow; remaining stay :ready (not queued).
+          {:halt, acc}
+
+        true ->
+          {:cont, place_fresh(acc, card, flow, flow_stage)}
+      end
+    end)
+  end
+
+  defp place_fresh(acc, card, flow, flow_stage) do
+    case take_slot(acc.capacity, flow.isolation, :any) do
+      :none ->
+        # WIP had room but no capacity → queue, keep scanning (do NOT consume WIP).
+        %{acc | to_queue: acc.to_queue ++ [card.id]}
+
+      {runner_id, capacity} ->
+        %{
+          acc
+          | capacity: capacity,
+            decided: MapSet.put(acc.decided, card.id),
+            wip_extra: Map.update(acc.wip_extra, flow_stage, 1, &(&1 + 1)),
+            dispatches: acc.dispatches ++ [{:start, card.id, flow.key, runner_id}]
+        }
+    end
+  end
+
+  defp fresh_eligible?(card, decided, run_by_card) do
+    Policy.pullable?(card) and
+      not Map.has_key?(run_by_card, card.id) and
+      not MapSet.member?(decided, card.id)
+  end
+
+  # --- WIP accounting (column + sub-lanes, mirrors `used/1` in ./relay) ---
+
+  defp lane_ids(stage_id, children), do: [stage_id | Map.get(children, stage_id, [])]
+
+  defp used(children, cards_by_stage, stage_id) do
+    stage_id
+    |> lane_ids(children)
+    |> Enum.map(&length(Map.get(cards_by_stage, &1, [])))
+    |> Enum.sum()
+  end
+
+  defp wip_limit(stage_by_id, stage_id) do
+    case stage_by_id[stage_id] do
+      nil -> nil
+      stage -> stage.wip_limit
+    end
+  end
+
+  defp wip_full?(nil, _base, _extra), do: false
+  defp wip_full?(limit, base, extra), do: base + extra >= limit
+
+  # --- capacity consumption ---
+
+  @doc """
+  Greedy slot placement: finds a runner with a free slot of `class` (the
+  lowest-id runner first for `:any`; the affine runner only for
+  `{:pinned, runner_id}`) and decrements it. Returns `{runner_id, updated_capacity}`
+  or `:none` when nothing is free. Public because `Hamaca.Runs.Scheduler.Server`
+  reuses this exact arithmetic to debit capacity for in-flight `:running` runs
+  (the B3 accounting fix) — the two calculations must never diverge, since the
+  server's subtraction is a re-derivation of a placement this function made on
+  an earlier beat.
+  """
+  @spec take_slot(map(), atom(), :any | {:pinned, term()}) :: {term(), map()} | :none
+  def take_slot(capacity, class, :any) do
+    capacity
+    |> Map.keys()
+    |> Enum.sort()
+    |> Enum.find(&free?(capacity, &1, class))
+    |> consume(capacity, class)
+  end
+
+  def take_slot(capacity, class, {:pinned, runner_id}) do
+    if free?(capacity, runner_id, class),
+      do: consume(runner_id, capacity, class),
+      else: :none
+  end
+
+  defp consume(nil, _capacity, _class), do: :none
+
+  defp consume(runner_id, capacity, class) do
+    updated =
+      Map.update!(capacity, runner_id, fn slots ->
+        Map.update(slots, class, 0, &(&1 - 1))
+      end)
+
+    {runner_id, updated}
+  end
+
+  defp free?(capacity, runner_id, class) do
+    case Map.get(capacity, runner_id) do
+      nil -> false
+      slots -> Map.get(slots, class, 0) > 0
+    end
+  end
+
+  # --- to_unqueue: currently :queued cards no longer capacity-blocked and not dispatched ---
+
+  defp unqueue(cards, to_queue, dispatches, run_by_card) do
+    queued_now = MapSet.new(to_queue)
+    dispatched = dispatched_card_ids(dispatches, run_by_card)
+
+    for card <- cards,
+        card.status == :queued,
+        not MapSet.member?(queued_now, card.id),
+        not MapSet.member?(dispatched, card.id),
+        do: card.id
+  end
+
+  defp dispatched_card_ids(dispatches, run_by_card) do
+    card_by_run = Map.new(run_by_card, fn {card_id, run} -> {run.id, card_id} end)
+
+    Enum.reduce(dispatches, MapSet.new(), fn
+      {:start, card_id, _flow_key, _runner_id}, acc ->
+        MapSet.put(acc, card_id)
+
+      {:resume, run_id, _runner_id}, acc ->
+        case Map.get(card_by_run, run_id) do
+          nil -> acc
+          card_id -> MapSet.put(acc, card_id)
+        end
+    end)
+  end
+
+  # --- explain: why a given card is (not) dispatchable (RLY-177) ---
+
+  @doc """
+  The diagnosis sibling of `plan/1`: why `card_id` is or is not dispatchable on this
+  snapshot. Deliberately lives in this module and reuses `plan/1`'s own decision plus the
+  shared predicates (`fresh_eligible?/3`, `wip_full?/3`, `used/3`) — a separate
+  reimplementation would silently drift from the scheduler it claims to explain, which is
+  worse than no diagnosis at all (RLY-177).
+
+  `:dispatchable` is decided by running `plan/1` itself, never re-derived; only the
+  *reason* for a non-dispatch is walked, in the same order `plan/1` excludes cards.
+  Returns `%{verdict, detail, evidence}`; `detail` is the human sentence `relay why`
+  prints. Verdicts needing DB state beyond the snapshot (`:run_failed`, `:job_stranded`,
+  `:job_awaiting_slot`) are layered on by `Hamaca.Runs.diagnose/3`.
+  """
+  @spec explain(Snapshot.t(), term()) :: %{verdict: atom(), detail: String.t(), evidence: map()}
+  def explain(%Snapshot{} = snapshot, card_id) do
+    case Enum.find(snapshot.cards, &(&1.id == card_id)) do
+      nil -> verdict(:unknown_card, "No card with id #{inspect(card_id)} is on this board.", %{})
+      card -> do_explain(snapshot, card)
+    end
+  end
+
+  defp do_explain(snapshot, card) do
+    run = Enum.find(snapshot.runs, &(&1.card_id == card.id))
+    flow = Enum.find(snapshot.flows, &(&1.pulls_from_stage_id == card.stage_id))
+    plan = plan(snapshot)
+    evidence = evidence(snapshot, card, run, flow)
+
+    cond do
+      dispatched?(plan, snapshot, card) ->
+        verdict(:dispatchable, "This card would dispatch on the scheduler's next tick.", evidence)
+
+      not Policy.agent_may_hold?(card) ->
+        verdict(:owned_by_human, "A human holds the baton on this card, so no flow will pick it up.", evidence)
+
+      card.status == :needs_input ->
+        verdict(:blocked_on_input, "This card is waiting on a human answer (status needs_input).", evidence)
+
+      run != nil ->
+        run_verdict(run, Enum.find(plan.refusals, &(&1.run_id == run.id)), evidence)
+
+      true ->
+        fresh_card_verdict(snapshot, card, flow, evidence)
+    end
+  end
+
+  # RE93 — split out of do_explain/2's cond (credo cyclomatic-complexity cap) to hold the reasons
+  # a FRESH (no run, agent-eligible, not needs_input) card is not dispatching.
+  defp fresh_card_verdict(snapshot, card, flow, evidence) do
+    cond do
+      flow == nil ->
+        verdict(
+          :no_enabled_flow,
+          "There is no enabled flow that pulls from this card's stage, so nothing will ever pick it up.",
+          evidence
+        )
+
+      problem = flow_problem(snapshot, flow) ->
+        verdict(:flow_paused, Shape.paused_detail(problem), %{evidence | problem: Shape.wire(problem)})
+
+      card.blocked_by != [] ->
+        blocked_by_verdict(evidence)
+
+      not fresh_eligible?(card, MapSet.new(), %{}) ->
+        verdict(
+          :not_eligible,
+          "The #{flow.key} flow pulls from this card's stage, but the card's status is " <>
+            "#{card.status} — only ready or queued cards are pulled.",
+          evidence
+        )
+
+      wip_full?(evidence.wip_limit, evidence.wip_used, 0) ->
+        verdict(
+          :wip_full,
+          "The #{flow.key} flow's column is at its WIP limit " <>
+            "(#{evidence.wip_used}/#{evidence.wip_limit}), so it is not pulling anything new.",
+          evidence
+        )
+
+      true ->
+        capacity_verdict(snapshot, flow, evidence)
+    end
+  end
+
+  # RE93 — split out of do_explain/2's cond to keep its cyclomatic complexity down.
+  defp blocked_by_verdict(evidence) do
+    refs = evidence.blocked_by
+    noun = if length(refs) == 1, do: "card", else: "cards"
+    verb = if length(refs) == 1, do: "has", else: "have"
+
+    verdict(
+      :blocked_by_dependencies,
+      "This card is waiting on #{length(refs)} #{noun} that #{verb} not reached a Done column: " <>
+        "#{Enum.join(refs, ", ")}.",
+      evidence
+    )
+  end
+
+  # The capacity_diagnosis/1 reasons that mean NO live runner exists at all — the roster is empty
+  # or every runner has gone silent. Defined once (RE416): `capacity_verdict/3`, the stopped-work
+  # banner and the live-run diagnosis all match on it via `is_no_live_runner/1`.
+  @no_live_runner_reasons [:no_runner, :runner_gone]
+
+  @doc "The `capacity_diagnosis/1` reasons that mean no live runner is on the roster at all."
+  @spec no_live_runner_reasons() :: [atom()]
+  def no_live_runner_reasons, do: @no_live_runner_reasons
+
+  @doc "True when `reason` is one of `no_live_runner_reasons/0`; usable in guards."
+  defguard is_no_live_runner(reason) when reason in @no_live_runner_reasons
+
+  # The capacity_diagnosis/1 reasons that blame the ROSTER — nothing connected will claim queued
+  # work — as opposed to `:awaiting_capacity`, a legitimately busy board. Defined once (RE320):
+  # `Hamaca.Runs.stopped_work/2` and the live-run diagnosis both gate on it.
+  @roster_blocking_reasons [:runner_outdated] ++ @no_live_runner_reasons ++ [:runner_rate_limited]
+
+  @doc "The `capacity_diagnosis/1` reasons that mean no connected runner will claim queued work."
+  def roster_blocking_reasons, do: @roster_blocking_reasons
+
+  defp capacity_verdict(snapshot, flow, evidence) do
+    {reason, bits} = capacity_diagnosis(snapshot)
+    evidence = Map.merge(evidence, bits)
+
+    case reason do
+      :runner_outdated ->
+        verdict(
+          :runner_outdated,
+          "every connected runner is running old code and is being refused — " <>
+            "#{running_versions_phrase(bits)}, requires v#{bits.required_version}. " <>
+            "Restart it to pick up current code.",
+          evidence
+        )
+
+      :runner_rate_limited ->
+        verdict(
+          :runner_rate_limited,
+          "every connected runner is paused at its usage limits " <>
+            "(#{Hamaca.Runs.roster_rate_limit_phrase(bits)}) — resumes " <>
+            "#{Hamaca.Runs.resume_time_label(bits.resumes_at)}.",
+          evidence
+        )
+
+      reason when is_no_live_runner(reason) ->
+        verdict(
+          :no_runner,
+          "#{no_live_runner_phrase()} — nothing is running node-jobs for this board.",
+          evidence
+        )
+
+      :awaiting_capacity ->
+        verdict(
+          :awaiting_capacity,
+          "The #{flow.key} flow would dispatch this card, but no runner is advertising a free " <>
+            "#{flow.isolation} slot — every connected runner is busy.",
+          evidence
+        )
+    end
+  end
+
+  # RE297: the scheduler WANTED to resume this run and could not place it. Naming the refusal —
+  # and its cause — is the difference between "waiting, legitimately" and a dead end, which the
+  # undifferentiated :awaiting_capacity could not express.
+  defp run_verdict(run, %{reason: reason}, evidence) do
+    verdict(
+      :resume_refused,
+      "Run #{run.id} is parked and the scheduler is refusing to resume it on every tick: " <>
+        resume_refusal_sentence(reason) <> "." <> pin_phrase(run),
+      evidence |> Map.put(:resume_refused_reason, reason) |> put_pin_name(run)
+    )
+  end
+
+  defp run_verdict(run, nil, evidence), do: run_verdict(run, evidence)
+
+  defp pin_phrase(%{pinned_runner_name: name}) when is_binary(name),
+    do: ~s[ Its worktree lives on runner "#{name}" (exclusive affinity).]
+
+  defp pin_phrase(_run), do: ""
+
+  defp put_pin_name(evidence, %{pinned_runner_name: name}) when is_binary(name),
+    do: Map.put(evidence, :pinned_runner_name, name)
+
+  defp put_pin_name(evidence, _run), do: evidence
+
+  defp run_verdict(%{status: :parked, parked_reason: :runner_gone, pinned_runner_name: name} = run, evidence)
+       when is_binary(name) do
+    verdict(
+      :awaiting_capacity,
+      ~s(Run #{run.id} is parked waiting for runner "#{name}" to return ) <>
+        "(exclusive affinity — its worktree lives there).",
+      Map.put(evidence, :pinned_runner_name, name)
+    )
+  end
+
+  defp run_verdict(%{status: :parked, parked_reason: reason} = run, evidence) when reason in [:runner_gone, nil] do
+    verdict(
+      :awaiting_capacity,
+      "Run #{run.id} is parked and waiting for a runner with a free #{run.isolation} slot.",
+      evidence
+    )
+  end
+
+  defp run_verdict(%{status: :parked, parked_reason: reason} = run, evidence) when reason in [:needs_input, :claimed] do
+    verdict(
+      :awaiting_listener_resume,
+      "Run #{run.id} is parked (#{reason}) and will be resumed by the run Listener on the next card event.",
+      evidence
+    )
+  end
+
+  defp run_verdict(run, evidence), do: verdict(:run_active, "Run #{run.id} is live and working.", evidence)
+
+  # `:dispatchable` is plan/1's own answer, not a re-derivation — this is the whole anti-drift
+  # property the agreement test pins. The plan is computed once in do_explain/2 and passed in,
+  # so the refusal branch reads the SAME pass.
+  defp dispatched?(plan, snapshot, card) do
+    run_ids = for r <- snapshot.runs, r.card_id == card.id, do: r.id
+
+    Enum.any?(plan.dispatches, fn
+      {:start, card_id, _flow_key, _runner_id} -> card_id == card.id
+      {:resume, run_id, _runner_id} -> run_id in run_ids
+    end)
+  end
+
+  defp evidence(snapshot, card, run, flow) do
+    stage_by_id = Map.new(snapshot.stages, &{&1.id, &1})
+    children = children_index(snapshot.stages)
+    cards_by_stage = Enum.group_by(snapshot.cards, & &1.stage_id)
+    flow_stage = flow && flow.stage_id
+
+    %{
+      card_id: card.id,
+      card_ref: card.ref,
+      card_status: card.status,
+      stage_id: card.stage_id,
+      active_owner: card.active_owner,
+      # RE93 — the refs, resolved from the snapshot's OWN card list: explain/2 must never need a
+      # DB read. Sorted by id so the sentence is deterministic.
+      blocked_by: blocked_refs(snapshot, card),
+      flow_key: flow && flow.key,
+      isolation: run_isolation(run, flow),
+      capacity: snapshot.capacity,
+      run_id: run && run.id,
+      run_status: run && run.status,
+      # RE297: exactly the fields that could not be checked from outside when this card was
+      # written — the runs JSON projection exposes none of them.
+      pinned_runner_id: run && run.pinned_runner_id,
+      resume_refused_reason: nil,
+      # Filled in by Hamaca.Runs.diagnose/3 — the Snapshot's run maps carry no
+      # current_node (snapshot.ex:44-51); only the DB row has it. `resume_refused_since` is
+      # layered there for the same reason.
+      current_node: nil,
+      wip_limit: flow_stage && wip_limit(stage_by_id, flow_stage),
+      wip_used: flow_stage && used(children, cards_by_stage, flow_stage),
+      # RE430 — the pulling flow's broken-shape problem, on the wire (`Shape.wire/1`). Only the
+      # `:flow_paused` verdict fills it (fresh_card_verdict/4); every other verdict carries nil,
+      # so a non-nil problem always means "this card is paused".
+      problem: nil
+    }
+  end
+
+  defp flow_problem(snapshot, flow), do: Enum.find(snapshot.problems, &(&1.flow_key == flow.key))
+
+  # The run's own isolation (from the LIVE flow row) when it has one, else the pulling flow's —
+  # a run whose flow row was deleted reads nil here, which is itself the diagnosis (RE297).
+  defp run_isolation(run, flow), do: (run && run.isolation) || (flow && flow.isolation)
+
+  defp blocked_refs(snapshot, card) do
+    by_id = Map.new(snapshot.cards, &{&1.id, &1.ref})
+
+    card.blocked_by
+    |> Enum.sort()
+    |> Enum.map(&Map.get(by_id, &1))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp verdict(verdict, detail, evidence), do: %{verdict: verdict, detail: detail, evidence: evidence}
+
+  @doc """
+  The roster-level reason no node-job is being claimed on this snapshot, shared by
+  `explain/2`'s terminal branch and `Hamaca.Runs.stopped_work/2` so the board banner, `relay
+  why`, and `GET /api/cards/:ref/diagnosis` all speak one diagnosis. `plan/1` never calls this;
+  it reads only `capacity`, so the plan/explain agreement property is untouched.
+
+    * `:no_runner` — the roster is empty.
+    * `:runner_gone` — the roster is non-empty but every runner has gone silent.
+    * `:runner_outdated` — every live (non-`:gone`) runner is running refused old code.
+    * `:runner_rate_limited` — at least one live runner is current, and every live, current
+      runner has paused itself at its usage limits (RE320) — since RE436, every one of its
+      installed harnesses is paused. The evidence adds `resumes_at` (the EARLIEST `resets_at`
+      among them — when the first one claims again) and `rate_limited_runners`, one
+      `%{name, harness, window, used_pct, pause_at, resets_at, reason}` each: the runner's
+      earliest-lifting harness pause (`Hamaca.Runs.active_rate_limit/2`).
+    * `:awaiting_capacity` — at least one live, current, unpaused runner exists; it is simply out
+      of free slots.
+
+  The evidence carries the required version and one `%{name, version}` per live runner, so
+  every consumer names the mismatch without a second query.
+  """
+  @spec capacity_diagnosis(Snapshot.t()) ::
+          {:runner_outdated | :no_runner | :runner_gone | :runner_rate_limited | :awaiting_capacity, map()}
+  def capacity_diagnosis(%Snapshot{runners: runners}) do
+    live = for {_id, e} <- runners, Hamaca.Runs.counting_runner?(e), do: e
+    current = Enum.reject(live, & &1.outdated)
+
+    cond do
+      map_size(runners) == 0 -> {:no_runner, version_evidence([])}
+      live == [] -> {:runner_gone, version_evidence([])}
+      current == [] -> {:runner_outdated, version_evidence(live)}
+      Enum.all?(current, &(&1.rate_limit != nil)) -> {:runner_rate_limited, rate_limit_evidence(current)}
+      true -> {:awaiting_capacity, version_evidence([])}
+    end
+  end
+
+  defp version_evidence(live) do
+    %{
+      required_version: Hamaca.Runs.min_runner_version(),
+      running_versions: Enum.map(live, &%{name: &1.name, version: &1.version})
+    }
+  end
+
+  defp rate_limit_evidence(paused) do
+    Map.merge(version_evidence([]), %{
+      resumes_at: paused |> Enum.map(& &1.rate_limit.resets_at) |> Enum.min(DateTime),
+      rate_limited_runners: Enum.map(paused, &Map.put(&1.rate_limit, :name, &1.name))
+    })
+  end
+
+  @doc false
+  @spec no_live_runner_phrase() :: String.t()
+  def no_live_runner_phrase, do: "no runner is connected"
+
+  @doc false
+  def running_versions_phrase(%{running_versions: rvs}) do
+    labels =
+      rvs
+      |> Enum.map(fn
+        %{version: nil} -> "unversioned"
+        %{version: v} -> "v#{v}"
+      end)
+      |> Enum.uniq()
+
+    "running " <> Enum.join(labels, "/")
+  end
+
+  @doc """
+  The one-sentence human explanation of a `Schemas.Run.resume_refusal_reasons/0` value —
+  shared by `explain/2`'s `:resume_refused` detail and the `failure_detail`
+  `Hamaca.Runs.abandon_unresumable_runs/1` writes, so an operator reads the same words in
+  `relay why` and on the failed card.
+  """
+  @spec resume_refusal_sentence(atom()) :: String.t()
+  def resume_refusal_sentence(:no_isolation), do: "its flow row no longer exists, so it has no isolation class to place"
+
+  def resume_refusal_sentence(:pin_unresolved),
+    do: "it is an exclusive run whose runner pin cannot be resolved, so no machine can be chosen for it"
+
+  def resume_refusal_sentence(:pinned_runner_absent), do: "the runner it is pinned to is not advertising any capacity"
+
+  def resume_refusal_sentence(:no_free_slot), do: "no runner has a free slot of its isolation class"
+
+  # --- misc ---
+
+  defp children_index(stages) do
+    Enum.reduce(stages, %{}, fn stage, acc ->
+      if stage.parent_id,
+        do: Map.update(acc, stage.parent_id, [stage.id], &[stage.id | &1]),
+        else: acc
+    end)
+  end
+
+  defp card_sort_key(nil), do: {0, 0}
+  defp card_sort_key(card), do: {card.position, card.id}
+end

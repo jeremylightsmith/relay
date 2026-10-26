@@ -1,7 +1,7 @@
 defmodule Schemas.CardTest do
-  use Relay.DataCase, async: true
+  use Hamaca.DataCase, async: true
 
-  alias Relay.Cards
+  alias Hamaca.Cards
   alias Schemas.Board
   alias Schemas.Card
   alias Schemas.Stage

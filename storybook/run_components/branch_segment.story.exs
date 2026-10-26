@@ -2,7 +2,7 @@ defmodule Storybook.RunComponents.BranchSegment do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.branch_segment/1
+  def function, do: &HamacaWeb.RunComponents.branch_segment/1
   def render_source, do: :function
 
   # branch_segment sizes itself with `flex:1.6`, so it has no width outside a flex row —

@@ -2,7 +2,7 @@ defmodule Schemas.User do
   @moduledoc """
   A person who signed in. Identity is keyed on `provider_uid` first (the
   provider's stable `sub` claim — Google or Apple), then on the normalized
-  verified `email` (see `Relay.Accounts.upsert_user_from_provider/2`).
+  verified `email` (see `Hamaca.Accounts.upsert_user_from_provider/2`).
   `provider` and `provider_uid` record the first provider the user signed in
   with; they are set programmatically, never cast from input.
   """
@@ -39,7 +39,7 @@ defmodule Schemas.User do
   @doc """
   Changeset for profile fields coming from the OAuth provider. `:email` is
   normalized (trimmed/downcased) so every email in the system is canonical —
-  `Relay.Members` matches invite rows against `user.email` verbatim and
+  `Hamaca.Members` matches invite rows against `user.email` verbatim and
   relies on this.
   """
   def changeset(user, attrs) do

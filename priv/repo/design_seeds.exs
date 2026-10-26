@@ -15,13 +15,13 @@
 import Ecto.Query
 
 alias Ecto.Changeset
-alias Relay.Accounts
-alias Relay.Activity
-alias Relay.Boards
-alias Relay.Cards
-alias Relay.Flows
-alias Relay.Members
-alias Relay.Repo
+alias Hamaca.Accounts
+alias Hamaca.Activity
+alias Hamaca.Boards
+alias Hamaca.Cards
+alias Hamaca.Flows
+alias Hamaca.Members
+alias Hamaca.Repo
 alias Schemas.Board
 alias Schemas.CardRejection
 alias Schemas.Comment
@@ -154,7 +154,7 @@ cost = fn s -> Decimal.new(s) end
 # ---------------------------------------------------------------------------
 
 description = """
-Board owners keep asking for their data outside Relay — for a standup deck, a
+Board owners keep asking for their data outside Hamaca — for a standup deck, a
 quarterly review, a spreadsheet of cycle times. Today the only way out is the
 API, which is a non-starter for anyone who isn't a developer.
 
@@ -172,7 +172,7 @@ acceptance = """
 """
 
 spec = """
-`Relay.Exports.stream_board_csv/2` returns a `Stream` of iodata rows, built on
+`Hamaca.Exports.stream_board_csv/2` returns a `Stream` of iodata rows, built on
 `Repo.stream/2` inside a transaction so the row cursor stays open.
 
 The controller wraps it in `Plug.Conn.send_chunked/2` and writes each row as it
@@ -184,12 +184,12 @@ top-to-bottom the same way the board does.
 """
 
 plan = """
-## Task 1 — `Relay.Exports.stream_board_csv/2`
+## Task 1 — `Hamaca.Exports.stream_board_csv/2`
 Pure function over a preloaded board. Tests cover column order, archived
 filtering, and that the stream is lazy (assert `Repo.stream` is used inside a
 transaction).
 
-## Task 2 — `RelayWeb.ExportController`
+## Task 2 — `HamacaWeb.ExportController`
 `GET /boards/:slug/export.csv`. Scope-checked, chunked response, filename
 header. Tests cover the 403 for a non-member and the chunk boundaries.
 
@@ -199,7 +199,7 @@ renders for a member and not for a stranger.
 """
 
 qr_detail = """
-test/relay/export_test.exs:24
+test/hamaca/export_test.exs:24
   Asserts on %Board{} private struct internals
   (row.__meta__, column ordering). Brittle — assert
   on the CSV bytes the user downloads instead.
@@ -210,8 +210,8 @@ test/relay/export_test.exs:24
 escalation_detail = """
 ✗ commit guard: the working tree is dirty after `mix precommit`
 
-  M lib/relay/exports.ex
-  M test/relay/exports_test.exs
+  M lib/hamaca/exports.ex
+  M test/hamaca/exports_test.exs
 
   mix format rewrote two files the implementer already committed, so the
   node ends with uncommitted changes and cannot hand the branch on.
@@ -265,7 +265,7 @@ working = status.(working, :working)
 
 working =
   sub_tasks.(working, [
-    {"Relay.Exports.stream_board_csv/2 + tests", true},
+    {"Hamaca.Exports.stream_board_csv/2 + tests", true},
     {"Chunked ExportController + scope check", true},
     {"Board menu entry behind the read check", false},
     {"Docs: architecture page for the export endpoint", false}
@@ -392,9 +392,9 @@ review =
         "stage neighbour, e focuses the title, esc closes.",
     "changes" => [
       "assets/js/hooks/arrow_key_guard.js — new hook, 61 lines",
-      "lib/relay_web/components/core_components.ex — wire the hook, prev/next refs",
-      "lib/relay_web/live/board_live.ex — stage_neighbors/2 assigns",
-      "test/relay_web/live/board_live_test.exs — 6 new tests"
+      "lib/hamaca_web/components/core_components.ex — wire the hook, prev/next refs",
+      "lib/hamaca_web/live/board_live.ex — stage_neighbors/2 assigns",
+      "test/hamaca_web/live/board_live_test.exs — 6 new tests"
     ],
     "screens" => [
       %{"caption" => "Drawer with the shortcut hint row"},
@@ -490,7 +490,7 @@ add_ne.(run, %{
   outcome: :failed,
   duration_s: 44,
   cost: cost.("0.31"),
-  detail: "test/relay/export_test.exs:24 — 3rd identical failure\n  Same brittle assertion regenerated again."
+  detail: "test/hamaca/export_test.exs:24 — 3rd identical failure\n  Same brittle assertion regenerated again."
 })
 
 # ---------------------------------------------------------------------------
@@ -531,9 +531,9 @@ done =
         "transaction and broadcast on the board topic, so every open board follows " <>
         "without a refresh.",
     "changes" => [
-      "lib/relay/boards.ex — reorder_stages/2",
-      "lib/relay_web/live/board_settings_live.ex — Sortable hook + drop handler",
-      "test/relay/boards_test.exs — position rewrite + concurrency tests"
+      "lib/hamaca/boards.ex — reorder_stages/2",
+      "lib/hamaca_web/live/board_settings_live.ex — Sortable hook + drop handler",
+      "test/hamaca/boards_test.exs — position rewrite + concurrency tests"
     ],
     "screens" => [
       %{"caption" => "Settings list mid-drag"},
@@ -636,12 +636,12 @@ chatty = ai.(chatty)
 chatty = status.(chatty, :working)
 chatty = sub_tasks.(chatty, [{"Webhook schema + signing", true}, {"Delivery worker with retries", false}])
 
-# `meta` keys are not free-form: `RelayWeb.CoreComponents.activity_phrase/1`
+# `meta` keys are not free-form: `HamacaWeb.CoreComponents.activity_phrase/1`
 # pattern-matches them, and a shape it has no clause for crashes the drawer.
-# Match what `Relay.Activity` actually writes.
+# Match what `Hamaca.Activity` actually writes.
 for {type, meta, actor} <- [
       {:moved, %{"from_stage" => "Spec", "to_stage" => "Plan"}, {:user, user.id}},
-      {:owners_changed, %{"action" => "set", "owners" => ["Relay AI"]}, {:user, user.id}},
+      {:owners_changed, %{"action" => "set", "owners" => ["Hamaca AI"]}, {:user, user.id}},
       {:moved, %{"from_stage" => "Plan", "to_stage" => "Code"}, :agent},
       {:status_changed, %{"to_status" => "working"}, :agent},
       {:needs_input, %{"question" => "Should deliveries retry forever, or give up after 24h?"}, :agent},

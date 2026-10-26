@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddNodeJobIdToActivities do
+defmodule Hamaca.Repo.Migrations.AddNodeJobIdToActivities do
   use Ecto.Migration
 
   def change do

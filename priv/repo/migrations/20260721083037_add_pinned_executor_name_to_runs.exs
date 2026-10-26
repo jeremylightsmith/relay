@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddPinnedExecutorNameToRuns do
+defmodule Hamaca.Repo.Migrations.AddPinnedExecutorNameToRuns do
   use Ecto.Migration
 
   def change do

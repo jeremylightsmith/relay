@@ -2,10 +2,10 @@ defmodule Storybook.Components.CoreComponents.CardMockupsSection do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.card_mockups_section/1
+  def function, do: &HamacaWeb.CoreComponents.card_mockups_section/1
   def render_source, do: :function
 
-  # `RelayWeb.CardMedia` items. A real HTML mockup is an /attachments/<id> page; any same-origin
+  # `HamacaWeb.CardMedia` items. A real HTML mockup is an /attachments/<id> page; any same-origin
   # path shows the miniature here.
   defp mockups do
     for {key, caption} <- [

@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.RemoveRateLimitFromRunners do
+defmodule Hamaca.Repo.Migrations.RemoveRateLimitFromRunners do
   use Ecto.Migration
 
   # RE436: a runner no longer pauses as a whole. Each harness's usage reading — and its pause —

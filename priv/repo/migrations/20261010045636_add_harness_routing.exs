@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddHarnessRouting do
+defmodule Hamaca.Repo.Migrations.AddHarnessRouting do
   use Ecto.Migration
 
   # RE433 — a node job names the harness it runs on (`node_jobs.harness_key`, nil for shell/gate
@@ -8,7 +8,7 @@ defmodule Relay.Repo.Migrations.AddHarnessRouting do
   # Agent jobs already queued or claimed when this ships carry no harness: they are pointed at
   # Claude Code — the only CLI a pre-RE433 runner ever ran. A claimed one must be rewritten too,
   # since `requeue_orphaned_jobs/3` may later hand it to a new runner. The harness below is a
-  # FROZEN copy of `Relay.Agents.seed_harnesses/0`'s Claude Code entry and its legacy model — the
+  # FROZEN copy of `Hamaca.Agents.seed_harnesses/0`'s Claude Code entry and its legacy model — the
   # one sanctioned exception to the magic-value rule: a migration must replay identically forever.
   @harness_key "claude-code"
   @model "opus"

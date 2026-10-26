@@ -1,13 +1,13 @@
 defmodule Schemas.ApiKey do
   @moduledoc """
   A board API key (MMF 08; multi-key since RE361). A board holds any number
-  of named keys — typically one per machine — each authenticating as Relay AI
+  of named keys — typically one per machine — each authenticating as Hamaca AI
   on its board. The raw token is `relay_<token_prefix>_<secret>`:
   `token_prefix` is a public random id stored in the clear (lookup + masked
   display), the secret is stored only as a SHA-256 hash in `token_hash`
   (`last_four` supports the masked display). Only `name` is ever cast from
   input (`name_changeset/2`); every token field is set programmatically by
-  `Relay.ApiKeys`.
+  `Hamaca.ApiKeys`.
   """
 
   use Ecto.Schema

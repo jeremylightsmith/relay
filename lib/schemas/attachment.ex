@@ -8,16 +8,16 @@ defmodule Schemas.Attachment do
   the caller.
 
   RE427 — an image may belong to a Note: `comment_id` + `position` link it to the comment that
-  carries it (set only by `Relay.Activity.add_comment/2`; nil while unlinked).
+  carries it (set only by `Hamaca.Activity.add_comment/2`; nil while unlinked).
 
   This module is the ONE definition of the facts every layer needs: the HTML content type
   (`html_type/0`, `html?/1` — the controller's sandboxed serving branch asks here), the image
   types (`image_types/0`) and their display names (`image_type_names/0`, RE427), the size cap
-  (`max_bytes/0`, RE427), the mockup types (`mockup_types/0`, RE390 — what `Relay.Cards`'
+  (`max_bytes/0`, RE427), the mockup types (`mockup_types/0`, RE390 — what `Hamaca.Cards`'
   mockup validation accepts: HTML or an image; `./relay` mirrors it under
   `runner_contract.json`'s `mockups.content_types`), and where an attachment is served (`path/1`,
-  `id_from_path/1`, `path?/1` — domain-side so `Relay.Cards` can parse a mockup url without
-  calling the web layer; `RelayWeb.attachment_path/1` delegates here) — plus where a board API
+  `id_from_path/1`, `path?/1` — domain-side so `Hamaca.Cards` can parse a mockup url without
+  calling the web layer; `HamacaWeb.attachment_path/1` delegates here) — plus where a board API
   key downloads it (`api_path/1`, RE373).
   """
 
@@ -97,15 +97,15 @@ defmodule Schemas.Attachment do
   @doc """
   RE322 — the path an attachment is served from (`AttachmentController.show`). The router's
   `get "/attachments/:id"` is the only other spelling (a route can't call a function);
-  `RelayWeb.AttachmentPathTest` pins the two together.
+  `HamacaWeb.AttachmentPathTest` pins the two together.
   """
   def path(id), do: @path_prefix <> to_string(id)
 
   @doc """
   RE373 — the path a board API key downloads an attachment's raw bytes from
-  (`RelayWeb.Api.AttachmentController.show`). The router's bearer-authed
+  (`HamacaWeb.Api.AttachmentController.show`). The router's bearer-authed
   `get "/attachments/:id"` inside `scope "/api"` is the only other spelling;
-  `RelayWeb.AttachmentPathTest` pins the two together, and `./relay` mirrors the prefix under
+  `HamacaWeb.AttachmentPathTest` pins the two together, and `./relay` mirrors the prefix under
   `runner_contract.json`'s `mockups.download_path`.
   """
   def api_path(id), do: @api_path_prefix <> to_string(id)

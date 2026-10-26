@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateBilling do
+defmodule Hamaca.Repo.Migrations.CreateBilling do
   use Ecto.Migration
 
   # RE460 — billing (ADR 0012). One `billing_accounts` row per user (the board owner pays);

@@ -2,7 +2,7 @@ defmodule Storybook.AdminComponents.UserTabs do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.AdminComponents.user_tabs/1
+  def function, do: &HamacaWeb.AdminComponents.user_tabs/1
   def render_source, do: :function
 
   # RE462 / RE463, card mockup "Billing screens — pricing section, Billing page, past-due and read-only

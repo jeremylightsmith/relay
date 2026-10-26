@@ -2,7 +2,7 @@ defmodule Storybook.FreeBoardComponents.FreeBoardDialog do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FreeBoardComponents.free_board_dialog/1
+  def function, do: &HamacaWeb.FreeBoardComponents.free_board_dialog/1
   def render_source, do: :function
 
   # The dialog is a daisyUI `modal-open` (a fixed overlay), so each variation gets its own iframe.
@@ -38,7 +38,7 @@ defmodule Storybook.FreeBoardComponents.FreeBoardDialog do
       %{
         id: 1,
         slug: "relay-engineering",
-        name: "Relay Engineering",
+        name: "Hamaca Engineering",
         editable?: true,
         active_at: DateTime.add(now, -2, :hour)
       },

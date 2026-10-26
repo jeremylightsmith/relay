@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddStatusAndProgressToCards do
+defmodule Hamaca.Repo.Migrations.AddStatusAndProgressToCards do
   use Ecto.Migration
 
   def change do

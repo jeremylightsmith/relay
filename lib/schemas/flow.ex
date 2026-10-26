@@ -4,15 +4,15 @@ defmodule Schemas.Flow do
   data. A flow belongs to exactly one main work/planning **stage** (RE429): `stage_id` is
   `NOT NULL` and unique (`flows_stage_id_index`), and deleting the stage deletes the flow.
   Where it picks cards up and drops them off is never stored — `pulls_from_stage` /
-  `lands_on_stage` are virtual, filled from the board's current order by `Relay.Flows`'
-  readers (`Relay.Flows.neighbours/2`); they are nil on a flow read any other way. So is the
-  virtual `problem` (RE430): the flow's `Relay.Flows.Shape.problem/0` on a broken board shape,
-  filled by `Relay.Flows.list_flows/1` / `get_flow_with_stages/2`, nil when healthy or read
+  `lands_on_stage` are virtual, filled from the board's current order by `Hamaca.Flows`'
+  readers (`Hamaca.Flows.neighbours/2`); they are nil on a flow read any other way. So is the
+  virtual `problem` (RE430): the flow's `Hamaca.Flows.Shape.problem/0` on a broken board shape,
+  filled by `Hamaca.Flows.list_flows/1` / `get_flow_with_stages/2`, nil when healthy or read
   any other way. Nodes and edges
   are embedded jsonb; `"start"`/`"done"`/`"needs_input"` are edge-endpoint
   sentinels, not nodes — `"needs_input"` (RLY-194) is `to`-only and parks
   the run. `board_id` and `enabled` are set programmatically by
-  `Relay.Flows`, never cast. `version` holds the current definition version;
+  `Hamaca.Flows`, never cast. `version` holds the current definition version;
   `flow_versions` snapshots each one.
 
   ## Fan-out regions (RE437)
@@ -43,7 +43,7 @@ defmodule Schemas.Flow do
     # Worked out from board order on read (RE429), never persisted.
     field :pulls_from_stage, :any, virtual: true
     field :lands_on_stage, :any, virtual: true
-    # The flow's broken-board-shape problem (`Relay.Flows.Shape`, RE430), nil when healthy.
+    # The flow's broken-board-shape problem (`Hamaca.Flows.Shape`, RE430), nil when healthy.
     field :problem, :any, virtual: true
 
     embeds_many :nodes, Schemas.Flow.Node, on_replace: :delete
@@ -63,8 +63,8 @@ defmodule Schemas.Flow do
 
   The `"start"` sentinel is spelled in this module (see `validate_start_edges/1`, which makes
   "exactly one edge leaves start" an invariant), so every consumer asks this function rather
-  than re-finding that edge — `Relay.Runs.start_run/3` for a fresh run, and retry's re-adoption
-  of a replaced flow (`Relay.Runs.retry_run/2`, RE297).
+  than re-finding that edge — `Hamaca.Runs.start_run/3` for a fresh run, and retry's re-adoption
+  of a replaced flow (`Hamaca.Runs.retry_run/2`, RE297).
 
   Returns `"done"` for a flow whose start edge goes straight to the done sentinel (an empty
   flow), and `nil` for a struct with no start edge at all — a shape the changeset rejects, so
@@ -164,7 +164,7 @@ defmodule Schemas.Flow do
 
   @doc """
   Validates a flow definition. `board_id` must already be set on the struct.
-  Whether the stage is on the board, a main work stage and free is validated in `Relay.Flows` —
+  Whether the stage is on the board, a main work stage and free is validated in `Hamaca.Flows` —
   it needs the database, which the Schemas boundary (`deps: []`) can't reach; the unique index
   is the race backstop.
   """

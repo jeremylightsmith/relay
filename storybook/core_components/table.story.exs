@@ -2,8 +2,8 @@ defmodule Storybook.Components.CoreComponents.Table do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.table/1
-  def imports, do: [{RelayWeb.CoreComponents, button: 1}]
+  def function, do: &HamacaWeb.CoreComponents.table/1
+  def imports, do: [{HamacaWeb.CoreComponents, button: 1}]
   def render_source, do: :function
   def layout, do: :one_column
 

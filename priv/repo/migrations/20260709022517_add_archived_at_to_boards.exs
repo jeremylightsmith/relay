@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddArchivedAtToBoards do
+defmodule Hamaca.Repo.Migrations.AddArchivedAtToBoards do
   use Ecto.Migration
 
   def change do

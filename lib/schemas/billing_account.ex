@@ -2,7 +2,7 @@ defmodule Schemas.BillingAccount do
   @moduledoc """
   A user's billing facts (RE460, ADR 0012) — one row per user, the board owner being the payer.
 
-  Standing (`Relay.Billing.Standing`) is derived from these facts and never stored.
+  Standing (`Hamaca.Billing.Standing`) is derived from these facts and never stored.
   `paid_through` is the only thing that grants paid access; `trial_ends_on` is the retired
   trial's last day (RE469: nothing reads or writes it); `billing_day` (1–31) is the day of the month the account renews on. `comped` and
   `held_on` / `hold_reason` are admin facts; `cancelled_on` / `access_until` record a cancelled
@@ -14,7 +14,7 @@ defmodule Schemas.BillingAccount do
   when the one-time "Which board stays editable?" prompt was shown (cleared on leaving Free).
 
   `user_id`, `promo_code_id`, `promo_months_left`, `free_board_id` and `free_board_prompted_at`
-  are set programmatically on the struct, never cast from input. Every write goes through `Relay.Billing`.
+  are set programmatically on the struct, never cast from input. Every write goes through `Hamaca.Billing`.
   """
 
   use Ecto.Schema

@@ -316,7 +316,7 @@ worked.**
 | | Today | Tomorrow |
 | --- | --- | --- |
 | Repo-side flow machinery | 2,174 lines across 12 files | ~610 lines across 2 files (runner + its config) |
-| Orchestration logic | `execute-plan.js` (485 lines of JS) + `bin/relay watch` dispatch (~400 of the 995) | engine code in `Relay.Flows`/`Relay.Runs` (new, W2–W4 — the cost moved here, written once for every project) |
+| Orchestration logic | `execute-plan.js` (485 lines of JS) + `bin/relay watch` dispatch (~400 of the 995) | engine code in `Hamaca.Flows`/`Hamaca.Runs` (new, W2–W4 — the cost moved here, written once for every project) |
 | Flow *definitions* | implicit in JS + config + 8 agent files | 130 lines of data, 3 files, renderable as graphs |
 | Per-project setup | copy 12 files, keep them in sync by hand | `relay init` + one runner config |
 | State when idle | none (stateless watcher) | 3 Flow rows + 1 Runner row |

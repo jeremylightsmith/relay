@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.BoxedField do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.boxed_field/1
+  def function, do: &HamacaWeb.CoreComponents.boxed_field/1
   def render_source, do: :function
   def layout, do: :one_column
 

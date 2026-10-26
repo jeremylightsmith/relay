@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.SteerReceipt do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.steer_receipt/1
+  def function, do: &HamacaWeb.CoreComponents.steer_receipt/1
   def render_source, do: :function
 
   # RE358 — a steer note's receipt, under its body once a claimed agent job delivered it, and the

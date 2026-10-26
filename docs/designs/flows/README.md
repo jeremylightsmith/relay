@@ -1,27 +1,27 @@
 # The default flow library
 
-The three flows Relay ships under [ADR 0006](../../adr/0006-workflow-orchestration.md) —
+The three flows Hamaca ships under [ADR 0006](../../adr/0006-workflow-orchestration.md) —
 [`spec.json`](spec.json) · [`plan.json`](plan.json) · [`code.json`](code.json) —
 expressed as real files. This is the seed data for **RLY-131** and the faithful
 translation of today's pipeline (`relay_config.json` + `execute-plan.js`). Fabro's own
 dogfood workflows (`../fabro/.fabro/workflows/implement-issue` + `implement-plan`) are the
 third column: same job, their vocabulary.
 
-> **These files are the source.** `Relay.Flows.DefaultLibrary` *loads*
+> **These files are the source.** `Hamaca.Flows.DefaultLibrary` *loads*
 > [`spec.json`](spec.json) · [`plan.json`](plan.json) · [`code.json`](code.json) at compile
 > time (RLY-241, `@external_resource`) — there is no hand-kept Elixir mirror any more. Edit
-> the JSON and recompile; `mix relay.flows.sync_defaults` pushes the change to existing
+> the JSON and recompile; `mix hamaca.flows.sync_defaults` pushes the change to existing
 > boards. The same document shape is what `GET`/`PUT /api/flows/:key` speaks.
 
 > **Historical design record.** This doc was written for RLY-131/132, before the ADR 0006
 > columns below were real. All three stages are now cut over (RLY-139 retired `relay_config.json`,
 > `execute-plan.js` and `/exec-plan`) — the **ADR 0006** column is what actually runs today; the
-> **Pre-cutover (Relay)** column is deleted history, kept here for the design rationale. See
+> **Pre-cutover (Hamaca)** column is deleted history, kept here for the design rationale. See
 > [`docs/architecture/runner.md`](../../architecture/runner.md) for the current state.
 
 ## File inventory — where each piece lives
 
-| What | Pre-cutover (Relay) | Fabro's version | ADR 0006 |
+| What | Pre-cutover (Hamaca) | Fabro's version | ADR 0006 |
 | --- | --- | --- | --- |
 | Macro pipeline (stage → stage) | `relay_config.json` `pipeline` | board is derived; graph chains via `house` sub-workflow nodes | the board itself + each flow's `trigger` (one stage; pickup / drop-off worked out from board order — RE429) |
 | Spec behavior | `.claude/skills/brainstorm` | first half of `implement-issue`'s `plan` node | [`spec.json`](spec.json) → same repo skill |
@@ -128,7 +128,7 @@ became comment-free JSON (RLY-241). Keyed by node.
   artboard — and `changes` is short user-facing verb phrases, scannable at a glance, because the
   drawer renders them as a checked list. Without that, the node writes a restatement of its own
   comment ("all criteria pass") and the summary section earns nothing. Pinned by
-  `test/relay/flows/default_library_test.exs`.
+  `test/hamaca/flows/default_library_test.exs`.
 - **`implement`** — execute-plan's per-task loop as a real engine `foreach`: each entry begins
   one iteration bound to one of the card's tasks. The `next_task` grep-gate is **gone** —
   "which task is next" is derived server-side; `{task}` names the task in the prompt and
@@ -208,7 +208,7 @@ became comment-free JSON (RLY-241). Keyed by node.
   neither — its output is commits. The four per-task Code nodes read `tasks`; nothing in the
   Code flow writes it (the legacy plan-parse fallback still seeds tasks from `card.plan` at run
   start for a planner that has not migrated, RLY-165). Existing boards pick the contract up automatically:
-  `Relay.Flows.sync_defaults!/0` runs at deploy (`Relay.Release.migrate/0`) and re-syncs every
+  `Hamaca.Flows.sync_defaults!/0` runs at deploy (`Hamaca.Release.migrate/0`) and re-syncs every
   **library-managed** (`version == 1`) flow to the new default, so the contract and the run
   strings that satisfy it land together in one transaction. A **hand-customized** flow
   (`version > 1`) is skipped and keeps its undeclared nodes — `/relay-doctor`'s establish
@@ -221,7 +221,7 @@ became comment-free JSON (RLY-241). Keyed by node.
   five agent checks (`spec_review`, `quality_review`, `final_review`, `smoke`, `acceptance`) and
   `deploy`, a `shell` node that only waits on CI + the Fly deploy and whose failure routes to
   `github_fix`. Display-only — the engine and the runner never read it. Existing
-  library-managed boards pick the annotations up via `Relay.Flows.sync_defaults!/0` at deploy,
+  library-managed boards pick the annotations up via `Hamaca.Flows.sync_defaults!/0` at deploy,
   like any other default change.
 
 ## Open modeling questions (settle in RLY-131/132)

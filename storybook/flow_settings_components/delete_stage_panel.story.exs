@@ -2,7 +2,7 @@ defmodule Storybook.FlowSettingsComponents.DeleteStagePanel do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowSettingsComponents.delete_stage_panel/1
+  def function, do: &HamacaWeb.FlowSettingsComponents.delete_stage_panel/1
   def render_source, do: :function
 
   # The inline confirm a stage row's × opens on Board Settings → Stages (RE431, card mockup

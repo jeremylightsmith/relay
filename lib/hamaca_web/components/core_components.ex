@@ -1,0 +1,8919 @@
+defmodule HamacaWeb.CoreComponents do
+  @moduledoc """
+  Provides core UI components.
+
+  At first glance, this module may seem daunting, but its goal is to provide
+  core building blocks for your application, such as tables, forms, and
+  inputs. The components consist mostly of markup and are well-documented
+  with doc strings and declarative assigns. You may customize and style
+  them in any way you want, based on your application growth and needs.
+
+  The foundation for styling is Tailwind CSS, a utility-first CSS framework,
+  augmented with daisyUI, a Tailwind CSS plugin that provides UI components
+  and themes. Here are useful references:
+
+    * [daisyUI](https://daisyui.com/docs/intro/) - a good place to get
+      started and see the available components.
+
+    * [Tailwind CSS](https://tailwindcss.com) - the foundational framework
+      we build on. You will use it for layout, sizing, flexbox, grid, and
+      spacing.
+
+    * [Heroicons](https://heroicons.com) - see `icon/1` for usage.
+
+    * [Phoenix.Component](https://hexdocs.pm/phoenix_live_view/Phoenix.Component.html) -
+      the component system used by Phoenix. Some components, such as `<.link>`
+      and `<.form>`, are defined there.
+
+  """
+  use Phoenix.Component
+  use Gettext, backend: HamacaWeb.Gettext
+  use HamacaWeb, :verified_routes
+
+  alias Hamaca.Cards
+  alias HamacaWeb.CardMedia
+  alias HamacaWeb.NativeCardNav
+  alias HamacaWeb.RunComponents
+  alias HamacaWeb.TalkComponents
+  alias HamacaWeb.TimeAgo
+  alias Phoenix.HTML.FormField
+  alias Phoenix.LiveView.JS
+  alias Schemas.Activity
+  alias Schemas.Card
+
+  # RE356 — an open task body longer than this many lines is clamped (280px + fade) behind
+  # "Show all N lines" (Relay Card Detail v5 · Running fine · DE4). Defined once, here.
+  @task_clamp_lines 16
+
+  @doc """
+  Renders flash notices.
+
+  ## Examples
+
+      <.flash kind={:info} flash={@flash} />
+      <.flash
+        id="welcome-back"
+        kind={:info}
+        phx-mounted={show("#welcome-back") |> JS.remove_attribute("hidden")}
+        hidden
+      >
+        Welcome Back!
+      </.flash>
+  """
+  attr :id, :string, doc: "the optional id of flash container"
+  attr :flash, :map, default: %{}, doc: "the map of flash messages to display"
+  attr :title, :string, default: nil
+  attr :kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup"
+  attr :rest, :global, doc: "the arbitrary HTML attributes to add to the flash container"
+
+  slot :inner_block, doc: "the optional inner block that renders the flash message"
+
+  def flash(assigns) do
+    assigns = assign_new(assigns, :id, fn -> "flash-#{assigns.kind}" end)
+
+    ~H"""
+    <%!-- z-[52] sits above the template picker's z-[51] overlay (RE472): a declined
+    Checkout reopens the picker and flashes the reason, which must stay readable. --%>
+    <div
+      :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
+      id={@id}
+      phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
+      role="alert"
+      class="toast toast-top toast-end z-[52]"
+      {@rest}
+    >
+      <div class={[
+        "alert w-80 sm:w-96 max-w-80 sm:max-w-96 text-wrap",
+        @kind == :info && "alert-info",
+        @kind == :error && "alert-error"
+      ]}>
+        <.icon :if={@kind == :info} name="hero-information-circle" class="size-5 shrink-0" />
+        <.icon :if={@kind == :error} name="hero-exclamation-circle" class="size-5 shrink-0" />
+        <div>
+          <p :if={@title} class="font-semibold">{@title}</p>
+          <p>{msg}</p>
+        </div>
+        <div class="flex-1" />
+        <button type="button" class="group self-start cursor-pointer" aria-label={gettext("close")}>
+          <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders a button with navigation support.
+
+  ## Examples
+
+      <.button>Send!</.button>
+      <.button phx-click="go" variant="primary">Send!</.button>
+      <.button navigate={~p"/"}>Home</.button>
+      <.button phx-click="review_approve" pending="Approving…">Approve</.button>
+
+  ## Pending (RE394)
+
+  `pending` gives a `<button>` a client-side pressed face: the button gains `pending-action` and
+  stacks its idle content and a spinner + `pending` label in one grid cell (`pending-stack` →
+  `pending-idle` / `pending-face`). The unlayered "RE394 pending actions" rules in `app.css` swap
+  the faces while LiveView's own `phx-click-loading` / `phx-submit-loading` class is on the
+  button, so it reacts in the click's frame and the width never changes. Ignored on links.
+  Don't combine it with `phx-disable-with`, which replaces the button's text and wipes the faces.
+  """
+  attr :rest, :global, include: ~w(href navigate patch method download name value disabled)
+  attr :class, :any
+  attr :variant, :string, values: ~w(primary)
+
+  attr :pending, :string,
+    default: nil,
+    doc: "verb-ing label shown with a spinner while the server handles this button's click/submit"
+
+  slot :inner_block, required: true
+
+  def button(%{rest: rest} = assigns) do
+    variants = %{"primary" => "btn-primary", nil => "btn-primary btn-soft"}
+
+    assigns =
+      assign_new(assigns, :class, fn ->
+        ["btn", Map.fetch!(variants, assigns[:variant])]
+      end)
+
+    cond do
+      rest[:href] || rest[:navigate] || rest[:patch] ->
+        ~H"""
+        <.link class={@class} {@rest}>
+          {render_slot(@inner_block)}
+        </.link>
+        """
+
+      assigns.pending ->
+        ~H"""
+        <button class={[@class, "pending-action"]} {@rest}>
+          <span class="pending-stack">
+            <span class="pending-idle">{render_slot(@inner_block)}</span>
+            <span class="pending-face" aria-hidden="true">
+              <span class="loading loading-spinner loading-xs"></span>
+              {@pending}
+            </span>
+          </span>
+        </button>
+        """
+
+      true ->
+        ~H"""
+        <button class={@class} {@rest}>
+          {render_slot(@inner_block)}
+        </button>
+        """
+    end
+  end
+
+  @doc """
+  Marks one cluster of action controls (RE394). While any `pending-action` inside it is pressed
+  (see `button/1`'s `pending`), the group's other buttons, links, inputs and menu rows go inert —
+  dimmed, no pointer events — so e.g. Approve and Reject can't race. A caller may instead put the
+  literal class `action-group` on an existing wrapper; the effect is the same.
+
+  ## Examples
+
+      <.action_group class="flex gap-2">
+        <.button phx-click="review_approve" pending="Approving…">Approve</.button>
+        <.button phx-click="open_reject">Request changes</.button>
+      </.action_group>
+  """
+  attr :id, :string, default: nil
+  attr :class, :any, default: nil
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  def action_group(assigns) do
+    ~H"""
+    <div id={@id} class={["action-group", @class]} {@rest}>
+      {render_slot(@inner_block)}
+    </div>
+    """
+  end
+
+  @doc """
+  Renders an input with label and error messages.
+
+  A `Phoenix.HTML.FormField` may be passed as argument,
+  which is used to retrieve the input name, id, and values.
+  Otherwise all attributes may be passed explicitly.
+
+  ## Types
+
+  This function accepts all HTML input types, considering that:
+
+    * You may also set `type="select"` to render a `<select>` tag
+
+    * `type="checkbox"` is used exclusively to render boolean values
+
+    * For live file uploads, see `Phoenix.Component.live_file_input/1`
+
+  See https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input
+  for more information. Unsupported types, such as radio, are best
+  written directly in your templates.
+
+  ## Examples
+
+  ```heex
+  <.input field={@form[:email]} type="email" />
+  <.input name="my-input" errors={["oh no!"]} />
+  ```
+
+  ## Select type
+
+  When using `type="select"`, you must pass the `options` and optionally
+  a `value` to mark which option should be preselected.
+
+  ```heex
+  <.input field={@form[:user_type]} type="select" options={["Admin": "admin", "User": "user"]} />
+  ```
+
+  For more information on what kind of data can be passed to `options` see
+  [`options_for_select`](https://hexdocs.pm/phoenix_html/Phoenix.HTML.Form.html#options_for_select/2).
+  """
+  attr :id, :any, default: nil
+  attr :name, :any
+  attr :label, :string, default: nil
+  attr :value, :any
+
+  attr :type, :string,
+    default: "text",
+    values: ~w(checkbox color date datetime-local email file month number password
+               search select tel text textarea time url week hidden)
+
+  attr :field, FormField, doc: "a form field struct retrieved from the form, for example: @form[:email]"
+
+  attr :errors, :list, default: []
+  attr :checked, :boolean, doc: "the checked flag for checkbox inputs"
+  attr :prompt, :string, default: nil, doc: "the prompt for select inputs"
+  attr :options, :list, doc: "the options to pass to Phoenix.HTML.Form.options_for_select/2"
+  attr :multiple, :boolean, default: false, doc: "the multiple flag for select inputs"
+  attr :class, :any, default: nil, doc: "the input class to use over defaults"
+  attr :error_class, :any, default: nil, doc: "the input error class to use over defaults"
+
+  attr :rest, :global, include: ~w(accept autocomplete capture cols disabled form list max maxlength min minlength
+                multiple pattern placeholder readonly required rows size step)
+
+  def input(%{field: %FormField{} = field} = assigns) do
+    errors = if Phoenix.Component.used_input?(field), do: field.errors, else: []
+
+    assigns
+    |> assign(field: nil, id: assigns.id || field.id)
+    |> assign(:errors, Enum.map(errors, &translate_error(&1)))
+    |> assign_new(:name, fn -> if assigns.multiple, do: field.name <> "[]", else: field.name end)
+    |> assign_new(:value, fn -> field.value end)
+    |> input()
+  end
+
+  def input(%{type: "hidden"} = assigns) do
+    ~H"""
+    <input type="hidden" id={@id} name={@name} value={@value} {@rest} />
+    """
+  end
+
+  def input(%{type: "checkbox"} = assigns) do
+    assigns =
+      assign_new(assigns, :checked, fn ->
+        Phoenix.HTML.Form.normalize_value("checkbox", assigns[:value])
+      end)
+
+    ~H"""
+    <div class="fieldset mb-2">
+      <label for={@id}>
+        <input
+          type="hidden"
+          name={@name}
+          value="false"
+          disabled={@rest[:disabled]}
+          form={@rest[:form]}
+        />
+        <span class="label">
+          <input
+            type="checkbox"
+            id={@id}
+            name={@name}
+            value="true"
+            checked={@checked}
+            class={@class || "checkbox checkbox-sm"}
+            {@rest}
+          />{@label}
+        </span>
+      </label>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  def input(%{type: "select"} = assigns) do
+    ~H"""
+    <div class="fieldset mb-2">
+      <label for={@id}>
+        <span :if={@label} class="label mb-1">{@label}</span>
+        <select
+          id={@id}
+          name={@name}
+          class={[@class || "w-full select", @errors != [] && (@error_class || "select-error")]}
+          multiple={@multiple}
+          {@rest}
+        >
+          <option :if={@prompt} value="">{@prompt}</option>
+          {Phoenix.HTML.Form.options_for_select(@options, @value)}
+        </select>
+      </label>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  def input(%{type: "textarea"} = assigns) do
+    ~H"""
+    <div class="fieldset mb-2">
+      <label for={@id}>
+        <span :if={@label} class="label mb-1">{@label}</span>
+        <textarea
+          id={@id}
+          name={@name}
+          class={[
+            @class || "w-full textarea",
+            @errors != [] && (@error_class || "textarea-error")
+          ]}
+          {@rest}
+        >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
+      </label>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  # All other inputs text, datetime-local, url, password, etc. are handled here...
+  def input(assigns) do
+    ~H"""
+    <div class="fieldset mb-2">
+      <label for={@id}>
+        <span :if={@label} class="label mb-1">{@label}</span>
+        <input
+          type={@type}
+          name={@name}
+          id={@id}
+          value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+          class={[
+            @class || "w-full input",
+            @errors != [] && (@error_class || "input-error")
+          ]}
+          {@rest}
+        />
+      </label>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  # Helper used by inputs to generate form errors
+  defp error(assigns) do
+    ~H"""
+    <p class="mt-1.5 flex gap-2 items-center text-sm text-error">
+      <.icon name="hero-exclamation-circle" class="size-5" />
+      {render_slot(@inner_block)}
+    </p>
+    """
+  end
+
+  @doc """
+  Renders a header with title.
+  """
+  slot :inner_block, required: true
+  slot :subtitle
+  slot :actions
+
+  def header(assigns) do
+    ~H"""
+    <header class={[@actions != [] && "flex items-center justify-between gap-6", "pb-4"]}>
+      <div>
+        <h1 class="text-lg font-semibold leading-8">
+          {render_slot(@inner_block)}
+        </h1>
+        <p :if={@subtitle != []} class="text-sm text-base-content/70">
+          {render_slot(@subtitle)}
+        </p>
+      </div>
+      <div class="flex-none">{render_slot(@actions)}</div>
+    </header>
+    """
+  end
+
+  @doc """
+  Renders a table with generic styling.
+
+  ## Examples
+
+      <.table id="users" rows={@users}>
+        <:col :let={user} label="id">{user.id}</:col>
+        <:col :let={user} label="username">{user.username}</:col>
+      </.table>
+  """
+  attr :id, :string, required: true
+  attr :rows, :list, required: true
+  attr :row_id, :any, default: nil, doc: "the function for generating the row id"
+  attr :row_click, :any, default: nil, doc: "the function for handling phx-click on each row"
+
+  attr :row_item, :any,
+    default: &Function.identity/1,
+    doc: "the function for mapping each row before calling the :col and :action slots"
+
+  slot :col, required: true do
+    attr :label, :string
+  end
+
+  slot :action, doc: "the slot for showing user actions in the last table column"
+
+  def table(assigns) do
+    assigns =
+      with %{rows: %Phoenix.LiveView.LiveStream{}} <- assigns do
+        assign(assigns, row_id: assigns.row_id || fn {id, _item} -> id end)
+      end
+
+    ~H"""
+    <table class="table table-zebra">
+      <thead>
+        <tr>
+          <th :for={col <- @col}>{col[:label]}</th>
+          <th :if={@action != []}>
+            <span class="sr-only">{gettext("Actions")}</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody id={@id} phx-update={is_struct(@rows, Phoenix.LiveView.LiveStream) && "stream"}>
+        <tr :for={row <- @rows} id={@row_id && @row_id.(row)}>
+          <td
+            :for={col <- @col}
+            phx-click={@row_click && @row_click.(row)}
+            class={@row_click && "hover:cursor-pointer"}
+          >
+            {render_slot(col, @row_item.(row))}
+          </td>
+          <td :if={@action != []} class="w-0 font-semibold">
+            <div class="flex gap-4">
+              <%= for action <- @action do %>
+                {render_slot(action, @row_item.(row))}
+              <% end %>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    """
+  end
+
+  @doc """
+  Renders a data list.
+
+  ## Examples
+
+      <.list>
+        <:item title="Title">{@post.title}</:item>
+        <:item title="Views">{@post.views}</:item>
+      </.list>
+  """
+  slot :item, required: true do
+    attr :title, :string, required: true
+  end
+
+  def list(assigns) do
+    ~H"""
+    <ul class="list">
+      <li :for={item <- @item} class="list-row">
+        <div class="list-col-grow">
+          <div class="font-bold">{item.title}</div>
+          <div>{render_slot(item)}</div>
+        </div>
+      </li>
+    </ul>
+    """
+  end
+
+  @doc """
+  Renders the Human/AI owner pill — who holds the baton for a stage.
+
+  Human maps to the primary (blue) theme token, AI to the secondary
+  (violet) one, per the daisyUI theme in `assets/css/app.css`.
+
+  ## Examples
+
+      <.owner_pill owner={:human} />
+      <.owner_pill owner={:ai} />
+  """
+  attr :owner, :atom, values: [:human, :ai], required: true
+  attr :class, :any, default: nil
+
+  def owner_pill(assigns) do
+    ~H"""
+    <span
+      class={[
+        "owner-pill badge badge-sm font-medium",
+        if(@owner == :human, do: "badge-primary", else: "badge-secondary"),
+        @class
+      ]}
+      data-owner={@owner}
+    >
+      {if @owner == :human, do: "Human", else: "AI"}
+    </span>
+    """
+  end
+
+  @doc """
+  The stage-type glyph that replaces the owner dot: a 9px mark whose shape+color encodes the
+  five stage types (queue/work/planning/review/done). See ADR 0003 / the Stage & Card Model
+  mockup §02.
+  """
+  attr :type, :atom, values: [:queue, :work, :planning, :review, :done], required: true
+  attr :size, :integer, default: 9
+
+  def stage_type_icon(assigns) do
+    ~H"""
+    <span
+      class="stage-type-icon"
+      data-type={@type}
+      aria-label={"#{@type} stage"}
+      style={stage_type_icon_style(@type, @size)}
+    >
+    </span>
+    """
+  end
+
+  defp stage_type_icon_style(:queue, s),
+    do:
+      "width:#{s}px;height:#{s}px;border-radius:3px;border:1.5px solid color-mix(in oklab, var(--color-base-content) 45%, var(--color-base-100));box-sizing:border-box;flex:0 0 auto;display:block;background:transparent;"
+
+  defp stage_type_icon_style(:work, s),
+    do: "width:#{s}px;height:#{s}px;border-radius:2px;background:var(--color-primary);flex:0 0 auto;display:block;"
+
+  defp stage_type_icon_style(:planning, s),
+    do:
+      "width:#{s}px;height:#{s}px;background:var(--color-secondary);transform:rotate(45deg);flex:0 0 auto;display:block;"
+
+  defp stage_type_icon_style(:review, s),
+    do:
+      "width:#{s}px;height:#{s}px;border-radius:50%;border:1.5px solid var(--color-warning);box-sizing:border-box;flex:0 0 auto;display:block;background:transparent;"
+
+  defp stage_type_icon_style(:done, s),
+    do: "width:#{s}px;height:#{s}px;border-radius:50%;background:var(--color-success);flex:0 0 auto;display:block;"
+
+  @doc """
+  Renders a card's status badge — the baton state at a glance.
+
+  `working` appends the stored progress percentage when present
+  (`working·61%`); `needs_input` renders the amber NEEDS INPUT treatment;
+  `in_review` blue; `ready` neutral (Done is a derivation, not a status —
+  see `Hamaca.Cards.done?/2` — and is rendered by callers, not this badge).
+  `failed` renders the red FAILED treatment (a dead run — RLY-179 — not an
+  answerable question).
+
+  ## Examples
+
+      <.status_badge status={:working} progress={61} />
+      <.status_badge status={:needs_input} />
+  """
+  attr :status, :atom,
+    values: [:ready, :working, :needs_input, :in_review, :failed],
+    required: true
+
+  attr :progress, :integer, default: nil
+  attr :class, :any, default: nil
+
+  def status_badge(assigns) do
+    ~H"""
+    <span
+      class={["status-badge badge badge-sm font-medium", status_badge_class(@status), @class]}
+      data-status={@status}
+    >
+      {status_badge_label(@status, @progress)}
+    </span>
+    """
+  end
+
+  # Every value in `Schemas.Card.statuses/0` needs a clause here — the scheduler
+  # writes `:queued` (Runs.Scheduler.Server), and a missing clause is not a
+  # fallback, it is a FunctionClauseError that takes the whole drawer down.
+  defp status_badge_class(:ready), do: "badge-ghost"
+  defp status_badge_class(:queued), do: "badge-ghost"
+  defp status_badge_class(:working), do: "badge-secondary"
+  defp status_badge_class(:needs_input), do: "badge-warning"
+  defp status_badge_class(:in_review), do: "badge-primary"
+  defp status_badge_class(:failed), do: "badge-error"
+
+  defp status_badge_label(:working, progress) when is_integer(progress), do: "working·#{progress}%"
+  defp status_badge_label(:ready, _progress), do: "ready"
+  defp status_badge_label(:queued, _progress), do: "queued"
+  defp status_badge_label(:working, _progress), do: "working"
+  defp status_badge_label(:needs_input, _progress), do: "NEEDS INPUT"
+  defp status_badge_label(:in_review, _progress), do: "in review"
+  defp status_badge_label(:failed, _progress), do: "FAILED"
+
+  @doc """
+  The in-page browser-notification toast (RE399): one push-worthy event, accented by the card
+  status it announces (amber rule for `needs_input`, blue for `in_review`, the same tokens as
+  `status_badge/1`). It never names a board: the server only delivers notifications for the
+  board the tab is showing (RE404).
+
+  `Layouts.app` renders one per kind inside a `<template>` with blank text slots; the JS hook
+  clones it and fills the `[data-field]` slots, so every class stays here, in tokens.
+  `[data-action="open"]` / `[data-action="close"]` are the hook's click targets.
+  """
+  attr :kind, :any, required: true, doc: ":needs_input | :in_review (or the same as strings)"
+  attr :card_ref, :string, required: true
+  attr :title, :string, required: true
+  attr :card_title, :string, required: true
+  attr :id, :string, default: nil
+
+  def notification_toast(assigns) do
+    assigns = assign(assigns, :kind, notification_kind(assigns.kind))
+
+    ~H"""
+    <div
+      id={@id}
+      role="alert"
+      data-kind={@kind}
+      class={[
+        "browser-notify-toast w-full sm:w-96 sm:max-w-96 rounded-box border border-base-300 border-l-4 bg-base-100 p-3 shadow-lg",
+        notification_accent(@kind)
+      ]}
+    >
+      <div class="flex items-start gap-3">
+        <.icon
+          :if={@kind == :needs_input}
+          name="hero-chat-bubble-left-ellipsis"
+          class="size-5 shrink-0 text-warning"
+        />
+        <.icon :if={@kind == :in_review} name="hero-eye" class="size-5 shrink-0 text-primary" />
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <.status_badge status={@kind} class="badge-xs font-mono" />
+            <%!-- `phx-no-format` keeps the slot text flush: the formatter's line break would put
+            whitespace into the text the JS hook reads and replaces. --%>
+            <span
+              phx-no-format
+              data-field="card_ref"
+              class="font-mono text-[11px] text-base-content/65"
+            >{@card_ref}</span>
+          </div>
+          <p data-field="title" class="mt-1 text-sm font-semibold">{@title}</p>
+          <p data-field="card_title" class="truncate text-sm text-base-content/80">{@card_title}</p>
+          <div class="mt-2">
+            <button type="button" data-action="open" class="btn btn-sm btn-primary">Open card</button>
+          </div>
+        </div>
+        <button
+          type="button"
+          data-action="close"
+          class="group self-start cursor-pointer"
+          aria-label={gettext("close")}
+        >
+          <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  # Accepts the atom or its string form (the JS hook's payload); only push-worthy statuses map.
+  defp notification_kind(kind) do
+    Enum.find(Hamaca.Push.notification_statuses(), &(to_string(&1) == to_string(kind))) ||
+      raise ArgumentError, "not a notification kind: #{inspect(kind)}"
+  end
+
+  defp notification_accent(:needs_input), do: "border-l-warning"
+  defp notification_accent(:in_review), do: "border-l-primary"
+
+  @doc """
+  The "Notifications" section of the avatar menu (RE399): a fragment of `<li>`s for the
+  `#account-menu` `<ul>`, one row per browser permission state plus the Sound switch.
+
+  The permission lives in the browser, so the server cannot know it. With `state: :auto` (the
+  layout's default) all three state rows render hidden and are revealed by an arbitrary variant
+  keyed off `<html data-notify-permission="default|granted|denied|unsupported">`, which the
+  `BrowserNotify` JS hook sets — the same technique as `Layouts.theme_toggle/1`, keyed off an
+  attribute LiveView never re-renders. `blocked` covers both `denied` and `unsupported`.
+
+  A forced state (Storybook, tests) renders only that state's row, visible.
+
+  The Sound row is `phx-update="ignore"`: the JS hook owns the checkbox's `checked` (stored per
+  browser), and a LiveView patch must never reset it.
+  """
+  attr :state, :atom, values: [:auto, :default, :granted, :denied, :unsupported], default: :auto
+
+  def notification_settings(assigns) do
+    assigns = assign(assigns, :rows, notification_rows(assigns.state))
+
+    ~H"""
+    <li class="menu-title px-2 text-[10px] uppercase tracking-wider">Notifications</li>
+    <li
+      :if={:default in @rows}
+      data-notify-state="default"
+      class={notification_row_class(@state, :default)}
+    >
+      <div class="flex items-center gap-2 hover:bg-transparent">
+        <.icon name="hero-bell" class="size-4" />
+        <span class="flex-1">Desktop alerts</span>
+        <button type="button" id="notify-enable" class="btn btn-primary btn-xs">Enable</button>
+      </div>
+    </li>
+    <li
+      :if={:granted in @rows}
+      data-notify-state="granted"
+      class={notification_row_class(@state, :granted)}
+    >
+      <div class="flex items-center gap-2 hover:bg-transparent">
+        <.icon name="hero-bell-alert" class="size-4 text-success" />
+        <span class="flex-1">Desktop alerts</span>
+        <span class="inline-flex items-center gap-1 text-xs font-medium text-success">
+          <.icon name="hero-check-micro" class="size-3.5" />On
+        </span>
+      </div>
+    </li>
+    <li
+      :if={:blocked in @rows}
+      data-notify-state="blocked"
+      class={["menu-disabled", notification_row_class(@state, :blocked)]}
+    >
+      <div class="flex flex-col items-start gap-1 hover:bg-transparent">
+        <span class="flex w-full items-center gap-2">
+          <.icon name="hero-bell-slash" class="size-4" />
+          <span class="flex-1">Blocked in browser settings</span>
+        </span>
+        <span class="pl-6 text-[11px] leading-snug text-base-content/65">
+          To allow: click <.icon name="hero-lock-closed-micro" class="size-3 align-[-1px]" />
+          in the address bar → Notifications → Allow, then reload.
+        </span>
+      </div>
+    </li>
+    <li id="notify-sound-row" phx-update="ignore">
+      <label class="flex items-center gap-2">
+        <.icon name="hero-speaker-wave" class="size-4" />
+        <span class="flex-1">Sound</span>
+        <input
+          type="checkbox"
+          id="notify-sound-toggle"
+          class="toggle toggle-xs toggle-primary"
+          checked
+        />
+      </label>
+    </li>
+    """
+  end
+
+  defp notification_rows(:auto), do: [:default, :granted, :blocked]
+  defp notification_rows(:default), do: [:default]
+  defp notification_rows(:granted), do: [:granted]
+  defp notification_rows(state) when state in [:denied, :unsupported], do: [:blocked]
+
+  # Tailwind only sees literal class strings, so each reveal variant is spelled out in full.
+  defp notification_row_class(:auto, :default), do: "hidden [[data-notify-permission=default]_&]:flex"
+  defp notification_row_class(:auto, :granted), do: "hidden [[data-notify-permission=granted]_&]:flex"
+
+  defp notification_row_class(:auto, :blocked),
+    do: "hidden [[data-notify-permission=denied]_&]:flex [[data-notify-permission=unsupported]_&]:flex"
+
+  defp notification_row_class(_forced, _row), do: nil
+
+  @doc """
+  The RLY-69 public-support badge. `variant: :pill` is the public board's interactive
+  vote pill (violet-filled when `voted`, outlined otherwise); `variant: :count` is the
+  internal card face's muted `↑ N` label. Presentational only — the caller wires
+  `phx-click` via the global `rest`.
+  """
+  attr :count, :integer, required: true
+  attr :voted, :boolean, default: false
+  attr :variant, :atom, values: [:pill, :count], default: :pill
+  attr :size, :atom, values: [:sm, :lg], default: :sm
+  attr :class, :string, default: nil
+  attr :rest, :global
+
+  def support_badge(%{variant: :count} = assigns) do
+    ~H"""
+    <span
+      class={@class}
+      style="display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+      title="Public supporters"
+      data-support-count={@count}
+      {@rest}
+    >
+      <span style="font-size:11px;line-height:1;">↑</span>{@count}
+    </span>
+    """
+  end
+
+  def support_badge(assigns) do
+    ~H"""
+    <button
+      type="button"
+      class={@class}
+      style={support_pill_style(@voted, @size)}
+      data-voted={to_string(@voted)}
+      {@rest}
+    >
+      <span style={"font-size:#{if(@size == :lg, do: "13px", else: "12px")};line-height:1;"}>↑</span>{@count}
+    </button>
+    """
+  end
+
+  defp support_pill_style(voted, size) do
+    base =
+      if voted do
+        "color:var(--color-primary-content);background:var(--color-primary);border:1px solid var(--color-primary);"
+      else
+        "color:color-mix(in oklab, var(--color-primary) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100));"
+      end
+
+    dims =
+      if size == :lg do
+        "border-radius:10px;padding:9px 16px;gap:4px;font-size:13px;"
+      else
+        "border-radius:9px;padding:6px 11px;gap:3px;font-size:12px;min-width:52px;justify-content:center;"
+      end
+
+    "display:inline-flex;align-items:center;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;flex:0 0 auto;" <>
+      base <> dims
+  end
+
+  @doc """
+  The RLY-69 supporters row: a horizontal stack of supporter avatars (faces already
+  limited by the caller) plus the total count. Renders a muted "+ M more" line when
+  `total` exceeds the number of faces shown. Used by the internal drawer's PUBLIC
+  SUPPORT block.
+  """
+  attr :supporters, :list, required: true
+  attr :total, :integer, required: true
+  attr :class, :string, default: nil
+
+  def supporters_row(assigns) do
+    assigns = assign(assigns, :more, assigns.total - length(assigns.supporters))
+
+    ~H"""
+    <div class={@class} style="display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="display:flex;align-items:center;">
+          <span
+            :for={{sp, i} <- Enum.with_index(@supporters)}
+            style={"margin-left:#{if(i == 0, do: 0, else: -6)}px;"}
+          >
+            <.avatar name={sp[:name]} email={sp[:email]} src={sp[:src]} size={24} tint={:identity} />
+          </span>
+        </div>
+        <span style="font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
+          {@total} {if(@total == 1, do: "supporter", else: "supporters")}
+        </span>
+      </div>
+      <span
+        :if={@more > 0}
+        style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+      >
+        + {@more} more
+      </span>
+    </div>
+    """
+  end
+
+  @doc """
+  The one avatar (RLY-90). A person renders their photo when we have one
+  (`src`), white initials on a colored circle otherwise; the AI renders the
+  violet dot mark and never a photo. Every people surface (top bar, card
+  owner cluster, member stack, comment timeline, reassign picker, board
+  settings) draws through this, so the same person looks the same everywhere.
+
+  Takes primitives, not structs — storybook stories pass plain values, and
+  invited members have no user row at all.
+
+  `tint={:role}` fills with `--color-primary` (human=blue is load-bearing);
+  `tint={:identity}` seeds a stable hue from the email, so one person keeps
+  one color across surfaces.
+
+  `title` overrides the tooltip without touching the initials — RE257's presence stack marks
+  your own face `"<name> (you)"`, and folding that into `name` would corrupt the initials.
+  """
+  attr :src, :string, default: nil, doc: "the avatar_url; ignored when actor={:ai}"
+  attr :name, :string, default: nil, doc: "display name — title text + initials"
+  attr :email, :string, default: nil, doc: "initials fallback + identity hue seed"
+  attr :actor, :atom, values: [:human, :ai], default: :human
+  attr :size, :integer, default: 24, doc: "circle diameter in px"
+  attr :tint, :atom, values: [:role, :identity], default: :identity
+  attr :ring, :string, default: nil, doc: "CSS ring color, or nil — the active-owner double shadow"
+  attr :grayed, :boolean, default: false
+  attr :class, :string, default: nil
+
+  attr :title, :string, default: nil, doc: "tooltip override; defaults to name || email"
+
+  def avatar(%{actor: :ai} = assigns) do
+    assigns = assign(assigns, :mark_size, round(assigns.size * 0.36))
+
+    ~H"""
+    <span
+      class={@class}
+      style={avatar_circle_style(@size, "var(--color-secondary)", @ring, @grayed)}
+      title={@title || Hamaca.Brand.agent_name()}
+      data-avatar="ai"
+    >
+      <span style={"width:#{@mark_size}px;height:#{@mark_size}px;border-radius:50%;border:1.5px solid var(--color-secondary-content);display:block"}>
+      </span>
+    </span>
+    """
+  end
+
+  def avatar(%{src: src} = assigns) when is_binary(src) and src != "" do
+    ~H"""
+    <span
+      class={@class}
+      style={avatar_circle_style(@size, nil, @ring, @grayed) <> ";overflow:hidden"}
+      title={@title || @name || @email}
+      data-avatar="photo"
+    >
+      <img
+        src={@src}
+        alt={@name || @email}
+        referrerpolicy="no-referrer"
+        style="width:100%;height:100%;object-fit:cover"
+      />
+    </span>
+    """
+  end
+
+  def avatar(assigns) do
+    fill = if assigns.tint == :role, do: "var(--color-primary)", else: identity_color(assigns.email)
+
+    # Spread as dynamic attrs, and keep the child on the tag's own line: with
+    # a bare-text child, mix format's HEEx formatter (unlike for element
+    # children) hoists surrounding whitespace into literal text nodes the
+    # moment the opening tag wraps onto multiple lines — which the `>DK<`
+    # style tests below would otherwise fail on.
+    assigns =
+      assign(assigns,
+        attrs: %{
+          class: assigns.class,
+          style: avatar_circle_style(assigns.size, fill, assigns.ring, assigns.grayed),
+          title: assigns.title || assigns.name || assigns.email,
+          "data-avatar": "initials"
+        },
+        initials: avatar_initials(assigns.name, assigns.email)
+      )
+
+    ~H"""
+    <span {@attrs}>{@initials}</span>
+    """
+  end
+
+  defp avatar_circle_style(size, fill, ring, grayed) do
+    [
+      "width:#{size}px",
+      "height:#{size}px",
+      "border-radius:50%",
+      fill && "background:#{fill}",
+      "color:var(--color-neutral-content)",
+      "display:flex",
+      "align-items:center",
+      "justify-content:center",
+      "font-size:#{round(size * 0.42)}px",
+      "font-weight:600",
+      "flex:0 0 auto",
+      "box-sizing:border-box",
+      ring && "box-shadow:0 0 0 3.5px #{ring}, 0 0 0 2px var(--color-base-100)",
+      grayed && "filter:grayscale(1)",
+      grayed && "opacity:0.5"
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join(";")
+  end
+
+  # The one initials rule (RLY-90 [E4]), mirrored by the mobile app's
+  # initialsFor/2: a name yields the first letters of its first two words;
+  # with no name, the email's LOCAL PART split on [._\s-] (dana@acme.co → D,
+  # dana.kim@acme.co → DK); both blank yields "?". Never crashes on nil.
+  defp avatar_initials(name, email) do
+    cond do
+      filled?(name) -> take_initials(String.split(name, ~r/\s+/, trim: true))
+      filled?(email) -> email |> String.split("@") |> List.first("") |> local_part_initials()
+      true -> "?"
+    end
+  end
+
+  defp filled?(value), do: is_binary(value) and String.trim(value) != ""
+
+  defp local_part_initials(local), do: take_initials(String.split(local, ~r/[._\s-]+/, trim: true))
+
+  defp take_initials(words) do
+    case words |> Enum.take(2) |> Enum.map_join("", &String.first/1) |> String.upcase() do
+      "" -> "?"
+      initials -> initials
+    end
+  end
+
+  @doc """
+  The identity **hue** for `email` (RLY-90 [E2]) — one integer per person, the seed behind every
+  identity-tinted surface. Public since RE257: the story-map cursor arrow and its name chip must
+  be the same colour as that person's avatar, and a second copy of
+  `rem(:erlang.phash2(email), 360)` would be a second definition of who is what colour.
+  """
+  def identity_hue(email), do: rem(:erlang.phash2(email || ""), 360)
+
+  @doc """
+  An arbitrary `hue` as an identity fill — the ONE definition of the lightness/chroma pair that
+  turns a per-entity hue into a colour. `identity_color/1` (people), the story map's owner chips
+  and the `/boards` per-board accent all draw this same fill, so the formula lives here once.
+
+  RE237: this stays an OKLCH color, not a token — see the `theme-tokens:allow` marker below and
+  `test/hamaca_web/theme_tokens_test.exs`, which pins the full inventory of such markers. The hue
+  is per-entity and arbitrary (seeded from a hash), so it cannot be one of the six named brand
+  roles the token vocabulary covers — there is nothing to map it onto. Its lightness and
+  saturation stay fixed across themes on purpose: unlike a token, this fill never inverts, so ink
+  drawn on it (`avatar_circle_style/4`) can stay a single constant color too. The lightness
+  specifically must stay in OKLCH's *perceptual* L channel, not HSL's: HSL's L is not
+  perceptually uniform, so a flat HSL color at L=58% swings from oklab L 0.53 to 0.83 across the
+  hue circle and starts failing contrast against the fixed `--color-neutral-content` ink at some
+  hues. OKLCH holds L at a constant 0.62 for every hue, which is what makes a single fixed ink
+  color legible everywhere — and that argument only holds while 0.62 has exactly one home.
+  """
+  # theme-tokens:allow: no role for a hue
+  def identity_color_for_hue(hue), do: "oklch(0.62 0.13 #{hue})"
+
+  @doc """
+  `identity_hue/1` as a fill — a person's colour, the same one the member stack, board settings
+  and the card owner cluster already draw.
+  """
+  def identity_color(email), do: email |> identity_hue() |> identity_color_for_hue()
+
+  @doc """
+  Renders the owner avatar cluster for a card — the mockup's "who holds the
+  baton" glance (`docs/designs/Relay Board.dc.html`, `buildCluster`). Human
+  owners are ~22px initialed circles (blue); the AI owner is a violet circle
+  with a small mark. The active owner is ringed; when the AI is active the
+  human owners render smaller/grayed and overlap behind it. Nothing renders
+  for an unowned card.
+  """
+  attr :owners, :list, default: [], doc: "the card's loaded owner rows (actor_type + optional :user)"
+
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton, derived by Hamaca.Cards.active_owner_type/1"
+
+  attr :size, :integer, default: 22
+
+  attr :style, :string,
+    default: "",
+    doc: "extra inline style appended to the cluster, e.g. placement within a parent flex row"
+
+  def owner_avatars(assigns) do
+    assigns = assign(assigns, :avatars, build_cluster(assigns.owners, assigns.active_owner))
+
+    ~H"""
+    <div
+      :if={@avatars != []}
+      class="card-owners flex items-center"
+      style={"padding-left:2px;#{@style}"}
+    >
+      <div :for={av <- @avatars} style={av.wrap} title={av.title} data-actor-type={av.actor_type}>
+        <.avatar
+          actor={av.actor}
+          src={av.src}
+          name={av.name}
+          email={av.email}
+          size={@size}
+          tint={:role}
+          ring={av.ring}
+          grayed={av.grayed}
+        />
+      </div>
+    </div>
+    """
+  end
+
+  defp build_cluster(_owners, nil), do: []
+
+  defp build_cluster(owners, active_owner) do
+    ai_active = active_owner == :ai
+    humans = Enum.filter(owners, &(&1.actor_type == :user))
+
+    human_avatars =
+      humans
+      |> Enum.with_index()
+      |> Enum.map(fn {owner, i} ->
+        user = Map.get(owner, :user)
+
+        %{
+          actor: :human,
+          src: user && Map.get(user, :avatar_url),
+          name: user && Map.get(user, :name),
+          email: user && Map.get(user, :email),
+          title: user_name(user) || "Someone",
+          actor_type: :user,
+          ring: if(not ai_active and i == 0, do: "var(--color-primary)"),
+          grayed: ai_active,
+          wrap: cluster_wrap(i > 0)
+        }
+      end)
+
+    ai_avatars =
+      if ai_active do
+        [
+          %{
+            actor: :ai,
+            src: nil,
+            name: nil,
+            email: nil,
+            title: Hamaca.Brand.agent_name(),
+            actor_type: :agent,
+            ring: "var(--color-secondary)",
+            grayed: false,
+            wrap: cluster_wrap(humans != [])
+          }
+        ]
+      else
+        []
+      end
+
+    human_avatars ++ ai_avatars
+  end
+
+  # Overlap is the cluster's concern, not the avatar's: later circles tuck
+  # -6px behind the previous one with a 2px base-100 separation ring.
+  defp cluster_wrap(false), do: "display:flex;border-radius:50%;position:relative"
+
+  defp cluster_wrap(true) do
+    "display:flex;border-radius:50%;position:relative;margin-left:-6px;" <>
+      "box-shadow:0 0 0 2px var(--color-base-100)"
+  end
+
+  defp user_name(nil), do: nil
+  defp user_name(user), do: Map.get(user, :name) || Map.get(user, :email)
+
+  @doc """
+  The Board ↔ Story map ↔ Value stream switch (RE264, RE347) — shared board chrome, so it lives
+  here with the rest of it. Renders `docs/designs/Relay Story Map.dc.html`'s segmented control
+  (lines ~37-40) as `<.link navigate=…>` segments; `HamacaWeb.BoardLive` renders it in
+  `Layouts.app`'s `<:title>` slot, immediately after the board name, on both of its board
+  actions. The third segment (RE347) opens the board-average value stream map,
+  `HamacaWeb.ValueStreamLive`, which renders the same switch with `active: :value_stream`.
+
+  Below `sm` each segment shows only its icon (the label stays as `aria-label`/`title`) and the
+  switch may shrink and scroll inside itself; callers give `#board-name` a heavy
+  `flex-shrink` so the name truncates before the switch does. Together these keep the switch
+  off the crumb, header actions and avatar in a phone's one-row top bar.
+  """
+  attr :board_slug, :string, required: true
+  attr :active, :atom, values: [:board, :story_map, :value_stream], required: true
+
+  def board_view_tabs(assigns) do
+    assigns =
+      assign(assigns,
+        segments: [
+          {:board, "board-view-tab-board", ~p"/board/#{assigns.board_slug}", "Board", "hero-view-columns"},
+          {:story_map, "board-view-tab-story-map", ~p"/board/#{assigns.board_slug}/story-map", "Story map", "hero-map"},
+          {:value_stream, "board-view-tab-value-stream", ~p"/board/#{assigns.board_slug}/value-stream", "Value stream",
+           "hero-chart-bar"}
+        ]
+      )
+
+    # Below `sm` the three text segments (~237px) do not fit the one-row top bar (RE347 smoke),
+    # so each segment collapses to its icon (label kept as aria-label/title). The container may
+    # also shrink and scroll inside itself, so a still-narrower bar clips the switch rather than
+    # overlapping the crumb, header actions or avatar.
+    ~H"""
+    <div
+      id="board-view-tabs"
+      role="navigation"
+      aria-label="Board view"
+      class="ml-1.5 sm:ml-[13px]"
+      style="display:flex;background:var(--color-field-hover);border-radius:8px;padding:2px;flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;"
+    >
+      <.link
+        :for={{view, id, path, label, icon} <- @segments}
+        navigate={path}
+        id={id}
+        aria-current={@active == view && "page"}
+        aria-label={label}
+        title={label}
+        class="flex flex-none items-center whitespace-nowrap px-[7px] sm:px-[11px]"
+        style={board_view_tab_style(@active == view)}
+      >
+        <.icon name={icon} class="size-3.5 sm:hidden" />
+        <span class="hidden sm:inline">{label}</span>
+      </.link>
+    </div>
+    """
+  end
+
+  defp board_view_tab_style(true) do
+    "font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);padding-top:4px;padding-bottom:4px;" <>
+      "border-radius:6px;background:var(--color-base-100);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 8%, transparent);"
+  end
+
+  defp board_view_tab_style(_active) do
+    "font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);padding-top:4px;padding-bottom:4px;border-radius:6px;"
+  end
+
+  @doc """
+  The app top bar's breadcrumb trail (RE334) — the shared control every board-scoped page
+  fills through `Layouts.app`'s `crumbs` attr (`HamacaWeb.BoardCrumbs` builds the lists).
+  Each crumb renders as a navigate link followed by a `/` separator; the caller's `<:title>`
+  is the final, un-linked segment, so the current page is never in `crumbs`. `[]` renders
+  nothing.
+
+  The top bar is ONE non-wrapping row, so the trail must never push the account avatar off a
+  phone: below `md` only the root crumb, an ellipsis and the immediate parent show (middle
+  crumbs are `hidden md:flex`), and every label truncates at 160px with its full text in
+  `title=`. The look is the board page's shipped `Boards` crumb; only a crumb carrying an
+  `:icon` (the root) shows one, and below `sm` that crumb shows only its icon so the board-view
+  switch fits a phone's top bar (RE347).
+  """
+  attr :id, :string, default: "top-bar-crumb"
+
+  attr :crumbs, :list,
+    required: true,
+    doc:
+      "[%{id, label, to} + optional :icon and :patch], root first; the current page is not included. " <>
+        "A crumb with `patch: true` patches (same LiveView) instead of navigating (RE380)"
+
+  def breadcrumbs(%{crumbs: []} = assigns), do: ~H""
+
+  def breadcrumbs(assigns) do
+    [root | rest] = assigns.crumbs
+    parent_index = length(rest) - 1
+
+    assigns =
+      assign(assigns,
+        root: root,
+        rest: Enum.with_index(rest, fn crumb, index -> {crumb, index < parent_index} end),
+        collapses?: parent_index > 0
+      )
+
+    ~H"""
+    <nav id={@id} aria-label="Breadcrumb" class="flex min-w-0 items-center gap-[7px]">
+      <.crumb_segment crumb={@root} class="flex flex-none" />
+      <div
+        :if={@collapses?}
+        id={"#{@id}-ellipsis"}
+        aria-hidden="true"
+        class="flex flex-none items-center gap-[7px] md:hidden"
+      >
+        <span class="text-[13px] text-base-content/50">…</span>
+        <span class="text-[13px] text-base-content/30">/</span>
+      </div>
+      <.crumb_segment
+        :for={{crumb, collapses?} <- @rest}
+        crumb={crumb}
+        class={if(collapses?, do: "hidden md:flex min-w-0", else: "flex min-w-0")}
+      />
+    </nav>
+    """
+  end
+
+  attr :crumb, :map, required: true
+  attr :class, :string, required: true
+
+  defp crumb_segment(assigns) do
+    ~H"""
+    <div id={"#{@crumb.id}-segment"} class={["items-center gap-[7px]", @class]}>
+      <.link
+        navigate={!@crumb[:patch] && @crumb.to}
+        patch={@crumb[:patch] && @crumb.to}
+        id={@crumb.id}
+        title={@crumb.label}
+        class="flex min-w-0 max-w-[160px] items-center gap-1.5 rounded-[7px] px-[7px] py-1 text-[13px] font-semibold text-base-content/70"
+      >
+        <.icon :if={@crumb[:icon]} name={@crumb[:icon]} class="size-3.5 flex-none" />
+        <span class={["truncate", @crumb[:icon] && "hidden sm:inline"]}>{@crumb.label}</span>
+      </.link>
+      <span data-crumb-separator class="text-[13px] text-base-content/30">/</span>
+    </div>
+    """
+  end
+
+  @doc """
+  The board header's card search (RE198) — a results **popover**, not a column filter.
+
+  Filtering the rendered columns is the obvious first instinct and it is wrong here: the board
+  renders each stage as a LiveView stream (so filtering means re-streaming every stage with
+  `reset: true` on each keystroke), and the terminal Done column is a bounded window
+  (`Cards.done_page_size/0`) whose older cards are not in the stream at all — a filter would
+  structurally fail to find most finished work, which is precisely what search is for. A
+  popover queries the database instead: it sees the whole board, and costs zero stream churn.
+
+  **No artboard governs this.** Verified during RE198's brainstorm: no `docs/designs/*.dc.html`
+  contains a search control. It is built to the existing board-header idiom — daisyUI
+  `input input-sm`, the `min-h-[44px]` touch target every other header control uses, semantic
+  theme tokens only.
+
+  The form is the whole interaction: `phx-change` searches, `phx-submit` opens the first result,
+  so Enter works with **zero JavaScript** — no hook, no inline `<script>`.
+
+  Two placement decisions worth keeping: `phx-click-away` sits on the **popover**, not the
+  wrapper, so a board with nothing typed is not pushing a `search_clear` on every click anywhere
+  on the page; and Escape is a **scoped** `phx-keydown` rather than `phx-window-keydown`,
+  because the card drawer already owns window-level Escape (`close_drawer`) and two window
+  handlers would fight over the same key.
+
+  A scoped `phx-keydown` MUST sit on the **focusable input**, never on the wrapper: LiveView
+  dispatches a non-window keydown only when the event target itself carries the attribute
+  (`live_socket.js` `bind/2`), and a keydown's target is the focused element — a `<div>` that
+  cannot take focus can never be one. On the wrapper the handler is simply unreachable in a
+  browser, and a `render_keydown/2` test cannot see the difference because it pushes straight
+  at the server. Same reason the compose textarea and the story-map rename input scope their
+  Escape to the input.
+
+  Clearing is two-sided. The server empties `query`, but LiveView deliberately never patches a
+  FOCUSED input's value (`dom.js` `mergeFocusedInput`), which is exactly the state Escape leaves
+  us in — so `BoardLive` pushes `board_search_cleared` and the `BoardSearchInput` hook empties
+  the box. Same split, same reason as `InlineNameInput` (RE263).
+
+  `/` focuses the box (RE342, advertised as `aria-keyshortcuts="/"`), and that also lives in the
+  `BoardSearchInput` hook, as a `window` keydown listener rather than `phx-window-keydown` +
+  `JS.focus`. The shortcut has to stand down when focus is in an editable field (`a/b` in a title
+  is a literal slash), on a Ctrl/⌘/Alt chord, while the card drawer overlay is open (focus would be
+  stranded behind it), and when this box is `hidden` at the current width. A declarative binding
+  can express none of those guards. Keeping it in the hook means the shortcut exists exactly
+  where the box does; the storybook page passes `hook={nil}` and gets none.
+
+  Each `results` item is a plain map resolved server-side —
+  `%{ref:, title:, stage:, archived:, path:}` — which keeps this a pure presentation function
+  and lets the storybook story hand it literals.
+
+  **The box must never be pinned in the top bar, and the caller says when it is shown.** That
+  bar is one non-wrapping flex row whose only `min-w-0` item is `#top-bar-title` — the board
+  name plus the Board/Story map toggle. A `flex-none` box wins the entire space fight: the
+  title crushes to width 0 and the toggle overflows *underneath* the search input, so at 768px
+  `elementFromPoint` over "Story map" returned `board-search-input` and the toggle could not be
+  clicked at all (RE198 smoke). Hence a shrinkable `w-[210px] min-w-[150px]` here, and a
+  breakpoint `BoardLive` picks PER VIEW: `hidden lg:block` on the board, `hidden xl:block` on
+  the story map. The story-map bar carries five controls the board bar does not — `ZOOM`,
+  `Map`, `Compact`, `Full`, `Hide steps` — so at `lg` it still has no budget: the box kept
+  painting over the toggle from 1024px through 1136px until `xl` (RE198 smoke, second pass).
+  Below those widths there is no room beside "Restart stalled" either, the same reason those
+  controls drop their labels under `sm`. Callers with room of their own (the storybook page)
+  pass no class and get the box unconditionally.
+  """
+  attr :query, :string, required: true
+  attr :results, :list, default: []
+  attr :limit, :integer, default: 8
+
+  attr :hook, :string,
+    default: "BoardSearchInput",
+    doc: "nil renders the box without the hook (the storybook page, where there is no BoardLive)"
+
+  attr :class, :string,
+    default: nil,
+    doc: "wrapper class — the CALLER owns when the box is shown; see the visibility note above"
+
+  def card_search(assigns) do
+    ~H"""
+    <div id="board-search" class={["relative w-[210px] min-w-[150px]", @class]}>
+      <form id="board-search-form" phx-change="search" phx-submit="search_open_first">
+        <input
+          type="text"
+          id="board-search-input"
+          name="q"
+          value={@query}
+          autocomplete="off"
+          role="searchbox"
+          aria-label="Search cards"
+          aria-keyshortcuts="/"
+          placeholder="Search cards…"
+          phx-debounce="200"
+          phx-hook={@hook}
+          phx-keydown="search_clear"
+          phx-key="Escape"
+          class="input input-sm input-bordered min-h-[44px] w-full text-[12.5px]"
+        />
+      </form>
+      <div
+        :if={String.trim(@query) != ""}
+        id="board-search-results"
+        phx-click-away="search_clear"
+        class="absolute right-0 top-[48px] z-[60] flex w-[320px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5"
+        style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
+      >
+        <span
+          :if={@results == []}
+          id="board-search-empty"
+          class="rounded-md px-[9px] py-2 text-[12.5px] font-medium text-base-content/50"
+        >
+          No cards match "{@query}".
+        </span>
+        <.link
+          :for={row <- @results}
+          patch={row.path}
+          id={"board-search-result-#{row.ref}"}
+          class="flex items-baseline gap-2 rounded-md px-[9px] py-2 text-left text-[12.5px] hover:bg-base-200"
+        >
+          <span class="font-mono text-[11px] font-semibold text-base-content/65">{row.ref}</span>
+          <span class="min-w-0 flex-1 truncate font-medium text-base-content">{row.title}</span>
+          <span class="flex-none text-[11px] text-base-content/50">
+            {row.stage}<span :if={row.archived}> · archived</span>
+          </span>
+        </.link>
+        <span
+          :if={length(@results) >= @limit}
+          id="board-search-more"
+          class="rounded-md px-[9px] pb-1 pt-1.5 text-[11px] text-base-content/50"
+        >
+          Showing the first {@limit} — keep typing to narrow.
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  The boards-home overlapping member avatar stack (RLY-32) — mockup
+  "Relay Board.dc.html" lines ~114-124. Up to `limit` 24×24 colored-initials
+  circles (2px white ring, -7px overlap), then a neutral +N overflow chip.
+  Invited (user-less) members show email-derived initials. Renders nothing for
+  an empty list.
+
+  `members` items expose `:email` and an optional preloaded `:user`.
+  """
+  attr :members, :list, default: []
+  attr :limit, :integer, default: 4
+  attr :id, :string, default: nil
+
+  def member_stack(assigns) do
+    shown =
+      assigns.members
+      |> Enum.take(assigns.limit)
+      |> Enum.with_index()
+      |> Enum.map(fn {m, i} -> member_avatar_data(m, i) end)
+
+    ov = length(assigns.members) - length(shown)
+    assigns = assign(assigns, avatars: shown, ov: ov, ov_style: member_overflow_style())
+
+    ~H"""
+    <div :if={@members != []} id={@id} data-role="member-stack" class="flex items-center">
+      <span :for={av <- @avatars} style={av.wrap} title={av.title}>
+        <.avatar src={av.src} name={av.name} email={av.email} size={24} tint={:identity} />
+      </span>
+      <span :if={@ov > 0} data-role="member-overflow" style={@ov_style}>+{@ov}</span>
+    </div>
+    """
+  end
+
+  defp member_avatar_data(m, index) do
+    user = Map.get(m, :user)
+
+    %{
+      src: user && Map.get(user, :avatar_url),
+      name: user && Map.get(user, :name),
+      email: member_email(m),
+      title: user_name(user) || member_email(m),
+      wrap: member_wrap(index)
+    }
+  end
+
+  defp member_email(m), do: Map.get(m, :email) || ""
+
+  # The stack's separation ring (cut from the surface, so it follows the theme) + -7px tuck
+  # (mockup lines ~114-124).
+  defp member_wrap(0), do: "display:flex;border-radius:50%;box-shadow:0 0 0 2px var(--color-base-100)"
+  defp member_wrap(_index), do: member_wrap(0) <> ";margin-left:-7px"
+
+  defp member_overflow_style do
+    "width:24px;height:24px;border-radius:50%;background:var(--color-base-300);" <>
+      "color:color-mix(in oklab, var(--color-base-content) 70%, transparent);display:flex;align-items:center;justify-content:center;" <>
+      "font-size:10px;font-weight:600;flex:0 0 auto;box-sizing:border-box;" <>
+      "box-shadow:0 0 0 2px var(--color-base-100);margin-left:-7px;"
+  end
+
+  @doc """
+  Renders a single kanban card matching the hi-fi mockup
+  (`docs/designs/Relay Board.dc.html`): title, an accent left border keyed to
+  status (amber needs-you / violet working / quiet otherwise), an optional
+  violet progress bar while working, the amber needs-you box, a mono status
+  line + `#tag`, and the owner avatar cluster.
+
+  Done is a pure derivation (RLY-48, `Hamaca.Cards.done?/2`), not a stored
+  status: a `:ready` card at the board's terminal stage grays its title via
+  `done`; a `:ready` card in a mid-board Done sub-lane shows the green
+  `card-ready-chip` instead (via `stage_type`); a plain parked `:ready` card
+  elsewhere renders quiet, with no chip.
+
+  Ownership is provenance, not a stage "mismatch" (ADR 0004) — an owner may
+  legitimately sit in any stage, so this component never flags one.
+
+  Clicking the card emits a `"select_card"` event (with `phx-value-ref`)
+  for the parent LiveView — `HamacaWeb.BoardLive` answers with a patch to
+  `?card=<ref>`, opening the card drawer.
+
+  The card is natively draggable (draggable="true" + data-ref) — the
+  board-level BoardDnD hook turns drops into "move_card" events.
+
+  ## Examples
+
+      <.board_card id="cards-1" ref="RL3" title="Ship MMF 03" tag="infra" />
+      <.board_card
+        id="cards-2"
+        ref="RL4"
+        title="Migrate the posts"
+        active_owner={:ai}
+        status={:working}
+        progress={61}
+      />
+  """
+  attr :id, :string, required: true
+  attr :ref, :string, required: true, doc: "the human-facing ref, e.g. RLY-3"
+  attr :title, :string, required: true
+  attr :tag, :string, default: nil
+
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton, derived from the owner list; nil when unowned"
+
+  attr :status, :atom,
+    values: [:ready, :working, :needs_input, :in_review, :failed, nil],
+    default: nil
+
+  attr :stage_type, :atom,
+    values: [:queue, :work, :planning, :review, :done, nil],
+    default: nil,
+    doc: "the card's stage behavior type — distinguishes the three :ready renderings"
+
+  attr :done, :boolean,
+    default: false,
+    doc: "derived Done: a :ready card at the board's terminal stage (Hamaca.Cards.done?/2)"
+
+  attr :question, :string,
+    default: nil,
+    doc: "the latest needs_input question, echoed as a one-line preview on needs_input cards"
+
+  attr :progress, :integer, default: nil
+
+  attr :health, :atom,
+    values: [:live, :stale, :stopped, :none],
+    default: :none,
+    doc: "RLY-112 derived agent health (Hamaca.Cards.health/1); :none renders no strip at all"
+
+  attr :log_text, :string, default: nil, doc: "the newest entry's text, shown in the log strip"
+  attr :log_at, :any, default: nil, doc: "the newest entry's inserted_at, shown as a relative time"
+
+  attr :owners, :list, default: [], doc: "the card's loaded owner rows, for the avatar cluster"
+
+  attr :lane, :atom,
+    values: [:main, :review, :done, nil],
+    default: :main,
+    doc: "which sub-lane the card sits in — cosmetic only (stage_column also derives stage_type)"
+
+  attr :category, :atom,
+    values: [:unstarted, :planning, :in_progress, :complete, nil],
+    default: nil,
+    doc: "the stage's category — cosmetic only (accent is keyed on status, not category)"
+
+  attr :run, :any,
+    default: nil,
+    doc: "{:run, summary} | {:queued, flow} — run affordances replace the legacy strip when set (RLY-137 decision 3)"
+
+  attr :progress_at, :any, default: nil, doc: "RLY-191 last-progress timestamp for the run face age"
+  attr :stalled?, :boolean, default: false, doc: "RLY-191 run face amber-stalls when its job is stuck"
+
+  attr :rate_limited, :map,
+    default: nil,
+    doc: "RE320 %{resumes_at} when the run's queued job waits on a roster paused at its usage limits"
+
+  attr :vote_count, :integer,
+    default: 0,
+    doc: "RLY-69 public-vote count — the ↑ N badge shows in the meta row for unstarted cards with votes"
+
+  attr :blocked_count, :integer,
+    default: 0,
+    doc: "RE93 unmet blocker count — a quiet ghost lock chip in the meta row; 0 renders nothing"
+
+  attr :open, :boolean,
+    default: false,
+    doc: "RE389 the drawer is showing this card — renders a bare data-open (the focus-ring highlight)"
+
+  attr :draggable, :boolean,
+    default: true,
+    doc: "RE444 false renders draggable=\"false\" — a read-only stage_column's cards can't be picked up"
+
+  def board_card(assigns) do
+    # RLY-137: a :done run on an :in_review card is the review-blue treatment — the face
+    # tuple alone can't tell (it doesn't know the card's status), so the override lives here.
+    run =
+      if match?({:run, %{status: :done}}, assigns.run) and assigns.status == :in_review do
+        {:review, elem(assigns.run, 1)}
+      else
+        assigns.run
+      end
+
+    assigns = assign(assigns, :run, run)
+    accent_class = card_accent_class(assigns)
+
+    assigns =
+      assigns
+      |> assign(:accent_class, accent_class)
+      |> assign(:accent_color, card_accent_color(accent_class))
+      |> assign(:shell_style, card_shell_style(assigns))
+
+    ~H"""
+    <article
+      id={@id}
+      class={["board-card group", @accent_class]}
+      style={"background:var(--color-base-100);#{@shell_style}border-left:3px solid #{@accent_color};border-radius:9px;padding:10px 11px;display:flex;flex-direction:column;gap:8px;cursor:pointer;"}
+      role="button"
+      tabindex="0"
+      draggable={to_string(@draggable)}
+      data-ref={@ref}
+      data-status={@status}
+      data-health={@health}
+      data-done={to_string(@done)}
+      data-active-owner={@active_owner}
+      data-open={@open}
+      phx-click="select_card"
+      phx-value-ref={@ref}
+    >
+      <span
+        class="card-title"
+        style={"font-size:12.5px;font-weight:500;line-height:1.35;letter-spacing:-0.01em;color:#{if(@done, do: "color-mix(in oklab, var(--color-base-content) 55%, transparent)", else: "var(--color-base-content)")};"}
+      >
+        {@title}
+      </span>
+      <RunComponents.run_face
+        :if={@run}
+        run={@run}
+        ref={@ref}
+        progress_at={@progress_at}
+        stalled?={@stalled?}
+        rate_limited={@rate_limited}
+      />
+      <div
+        :if={@status == :working and @progress != nil and is_nil(@run)}
+        style="height:5px;border-radius:3px;background:color-mix(in oklab, var(--color-secondary) 15%, var(--color-base-100));overflow:hidden;"
+      >
+        <div style={"height:100%;width:#{@progress || 0}%;background:var(--color-secondary);border-radius:3px;"}>
+        </div>
+      </div>
+      <div
+        :if={@health != :none and is_nil(@run)}
+        id={"card-#{@ref}-log-strip"}
+        class="card-log-strip"
+        data-health={@health}
+        style={"display:flex;align-items:center;gap:7px;border-radius:6px;padding:6px 8px;#{strip_box_style(@health)}"}
+      >
+        <span
+          id={"card-#{@ref}-log-strip-dot"}
+          class="card-log-strip-dot"
+          data-health={@health}
+          style={strip_dot_style(@health)}
+        >
+          {if @health == :stopped, do: "!"}
+        </span>
+        <span
+          class="card-log-strip-text"
+          style={"font-size:10.5px;font-family:var(--font-mono);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#{strip_text_color(@health)};"}
+        >
+          {@log_text}
+        </span>
+        <span
+          class="card-log-strip-time"
+          style={"font-size:10.5px;font-family:var(--font-mono);flex:0 0 auto;color:#{strip_time_color(@health)};"}
+        >
+          {relative_time(@log_at)}
+        </span>
+        <.button
+          :if={@health == :stopped}
+          id={"card-#{@ref}-retry"}
+          type="button"
+          class="card-retry-chip"
+          phx-click="retry_card"
+          phx-value-ref={@ref}
+          style="font-size:10px;font-weight:600;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-error) 40%, var(--color-base-100));border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+          pending="Retrying…"
+        >
+          Retry
+        </.button>
+      </div>
+      <div
+        :if={@status == :needs_input and is_nil(@run)}
+        class="card-needs-input"
+        style="display:flex;align-items:center;gap:6px;background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));border-radius:6px;padding:6px 8px;"
+      >
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--color-warning);flex:0 0 auto;">
+        </span>
+        <span style="font-size:10px;font-weight:600;letter-spacing:0.03em;color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));font-family:var(--font-mono);">
+          needs you
+        </span>
+      </div>
+      <p
+        :if={@status == :needs_input && @question && is_nil(@run)}
+        class="card-question-preview truncate"
+        style="font-size:11px;line-height:1.3;color:color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));margin:0;"
+      >
+        {@question}
+      </p>
+      <%!-- RE321: the ref leads the meta row and never shrinks. On the busiest cards, trailing items wrap inside the card instead of pushing the avatars out. --%>
+      <div class="card-meta" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px 7px;">
+        <span
+          class="card-ref"
+          style="font-size:10.5px;font-weight:500;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 55%, transparent);flex:0 0 auto;white-space:nowrap;"
+        >
+          {@ref}
+        </span>
+        <span
+          :if={@status == :working and @health == :none and is_nil(@run)}
+          class="card-status"
+          data-status={@status}
+          style="font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-secondary) 85%, var(--color-base-content));"
+        >
+          {if(@progress, do: "working · #{@progress}%", else: "working")}
+        </span>
+        <span
+          :if={@status == :in_review}
+          class="card-review-chip badge badge-sm badge-warning font-medium"
+          style="font-size:10px;"
+        >
+          review
+        </span>
+        <span
+          :if={@status == :ready && @stage_type == :done && !@done}
+          class="card-ready-chip badge badge-sm badge-success font-medium"
+          style="font-size:10px;"
+        >
+          ready
+        </span>
+        <span
+          :if={@tag && @status != :working}
+          class="card-tag"
+          style="font-size:11px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);font-family:var(--font-mono);min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+        >
+          #{@tag}
+        </span>
+        <span
+          :if={@blocked_count > 0}
+          class="card-blocked-chip badge badge-ghost badge-sm gap-1 font-medium"
+          style="font-size:10px;white-space:nowrap;flex:0 0 auto;"
+        >
+          <.icon name="hero-lock-closed" class="size-3" />
+          Blocked by {@blocked_count} {if @blocked_count == 1, do: "card", else: "cards"}
+        </span>
+        <.support_badge
+          :if={@category == :unstarted and @vote_count > 0}
+          count={@vote_count}
+          variant={:count}
+          class="card-votes"
+        />
+        <%!-- margin-left:auto (not a flex:1 spacer) keeps the avatars at the right edge even when they wrap to a new line. --%>
+        <.owner_avatars owners={@owners} active_owner={@active_owner} style="margin-left:auto;" />
+      </div>
+    </article>
+    """
+  end
+
+  # RLY-48: the left-border accent is keyed on status. Amber for the two needs-you
+  # states; violet for working; everything else (all :ready renderings, unowned) is
+  # quiet base-300. The green "done" affordance moved off the border (there is no
+  # :done status) — a terminal ready card grays instead (see the title style).
+  #
+  # The returned `border-l-*` string is a *semantic/test hook only* — it is NOT
+  # what paints the border. The actual 3px accent colour is set inline in
+  # board_card/1 via card_accent_color/1 (an inline `style` beats the class, so
+  # the class carries no colour). Do not delete these classes as "unused": the
+  # board/card tests select on them (e.g. `.border-l-warning`).
+  # RLY-148 (supersedes the 2026-07-16 RLY-112 rejection): a dead agent DOES recolor
+  # the card — health :stale/:stopped beats the status accent (artboard §02 card
+  # chrome). Every other health state leaves the RLY-48 status accent as-is.
+  #
+  # RLY-137: run affordances take precedence over both health and status (decision
+  # 3 — the run strip replaces the legacy strip entirely), so these clauses match
+  # first, above health.
+  defp card_accent_class(%{run: {:queued, _flow}}), do: "border-l-base-300"
+  defp card_accent_class(%{run: {:review, _summary}}), do: "border-l-primary"
+
+  # RLY-191: a stalled running run gets the amber accent, not the quiet violet.
+  defp card_accent_class(%{run: {:run, %{status: :running}}, stalled?: true}), do: "border-l-warning"
+
+  defp card_accent_class(%{run: {:run, %{status: status}}}) do
+    case status do
+      :running -> "border-l-secondary"
+      :parked -> "border-l-warning"
+      :failed -> "border-l-error"
+      :done -> "border-l-success"
+      :cancelled -> "border-l-base-300"
+    end
+  end
+
+  defp card_accent_class(%{status: :failed}), do: "border-l-error"
+  defp card_accent_class(%{health: :stale}), do: "border-l-warning"
+  defp card_accent_class(%{health: :stopped}), do: "border-l-error"
+  defp card_accent_class(%{status: :needs_input}), do: "border-l-warning"
+  defp card_accent_class(%{status: :in_review}), do: "border-l-warning"
+  defp card_accent_class(%{status: :working}), do: "border-l-secondary"
+  defp card_accent_class(_assigns), do: "border-l-base-300"
+
+  defp card_accent_color("border-l-error"), do: "var(--color-error)"
+  defp card_accent_color("border-l-warning"), do: "var(--color-warning)"
+  defp card_accent_color("border-l-secondary"), do: "var(--color-secondary)"
+  defp card_accent_color("border-l-base-300"), do: "var(--color-base-300)"
+  defp card_accent_color("border-l-primary"), do: "var(--color-primary)"
+  defp card_accent_color("border-l-success"), do: "var(--color-success)"
+
+  # RLY-137: a live run must not keep the RLY-148 amber/rose health escalation shell —
+  # the run affordance is the source of truth for what's going on, so the shell goes
+  # back to quiet. Leading clause, matched before the health-keyed ones.
+  # RLY-191: a stalled live run re-earns the amber health escalation the RLY-137 quiet-shell
+  # otherwise suppresses — the run face is telling a stuck story, so the shell agrees.
+  defp card_shell_style(%{run: run, stalled?: true}) when run != nil,
+    do:
+      "border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));box-shadow:0 1px 3px color-mix(in oklab, var(--color-warning) 12%, transparent);"
+
+  defp card_shell_style(%{run: run}) when run != nil,
+    do:
+      "border:1px solid var(--color-base-300);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 5%, transparent);"
+
+  # RLY-148: the card shell escalates with health (artboard §02) — amber-tinted
+  # border + shadow when stale, rose when stopped, the quiet RLY-48 shell otherwise.
+  defp card_shell_style(%{health: :stale}),
+    do:
+      "border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));box-shadow:0 1px 3px color-mix(in oklab, var(--color-warning) 12%, transparent);"
+
+  defp card_shell_style(%{health: :stopped}),
+    do:
+      "border:1px solid color-mix(in oklab, var(--color-error) 35%, var(--color-base-100));box-shadow:0 1px 3px color-mix(in oklab, var(--color-error) 12%, transparent);"
+
+  defp card_shell_style(_assigns),
+    do:
+      "border:1px solid var(--color-base-300);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 5%, transparent);"
+
+  # RLY-148 — the collapsed log strip, full artboard fidelity. Every value is pinned to
+  # docs/designs/Relay Card Activity.dc.html §02 (violet pulse / amber tint / rose white-!
+  # disc); the light theme's --color-secondary/-warning/-error are byte-identical to the
+  # artboard's violet/amber/rose. Supersedes the 2026-07-16 gray-stale rejection.
+  defp strip_box_style(:live), do: "background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));"
+
+  defp strip_box_style(:stale),
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));"
+
+  defp strip_box_style(:stopped),
+    do:
+      "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-error) 30%, var(--color-base-100));"
+
+  defp strip_box_style(_health), do: ""
+
+  defp strip_dot_style(:live),
+    do:
+      "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--color-secondary);animation:relaypulse 1.4s ease-in-out infinite;"
+
+  defp strip_dot_style(:stale),
+    do: "width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--color-warning);"
+
+  defp strip_dot_style(:stopped),
+    do:
+      "width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:var(--color-error);color:var(--color-error-content);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;"
+
+  defp strip_dot_style(_health), do: ""
+
+  defp strip_text_color(:live), do: "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))"
+  defp strip_text_color(:stale), do: "color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content))"
+  defp strip_text_color(:stopped), do: "color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))"
+  defp strip_text_color(_health), do: "color-mix(in oklab, var(--color-base-content) 75%, transparent)"
+
+  defp strip_time_color(:live), do: "color-mix(in oklab, var(--color-base-content) 55%, transparent)"
+  defp strip_time_color(:stale), do: "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+  defp strip_time_color(:stopped), do: "color-mix(in oklab, var(--color-error) 65%, var(--color-base-content))"
+  defp strip_time_color(_health), do: "color-mix(in oklab, var(--color-base-content) 55%, transparent)"
+
+  # RLY-148 §04 header chip — amber when stale; Retry joins it on stopped (Task 2).
+  defp health_chip_color(:live), do: "var(--color-secondary)"
+  defp health_chip_color(:stale), do: "var(--color-warning)"
+  defp health_chip_color(:stopped), do: "var(--color-error)"
+  defp health_chip_color(_health), do: "var(--color-base-300)"
+
+  defp health_chip_label(:live), do: "#{Hamaca.Brand.agent_name()} is live"
+  defp health_chip_label(:stale), do: "#{Hamaca.Brand.agent_name()} has gone quiet"
+  defp health_chip_label(:stopped), do: "#{Hamaca.Brand.agent_name()} stopped"
+  defp health_chip_label(_health), do: ""
+
+  # §04 dot colour by kind. The artboard paints the Approved decision green; the spec's
+  # mapping (decision → amber) wins. :move never reaches here — it renders as a chip.
+  # :failure and :decision are always genuine agent/system events, so they stay
+  # kind-only. :action is kind/1's catch-all — it ALSO carries every legacy audit
+  # row (:created, :commented, :status_changed, :owners_changed, :archived,
+  # :unarchived), which a human can trigger. AGENTS.md reserves violet for AI and
+  # blue for human, so within :action fall back to the row's actor: an agent's
+  # runner line stays violet, a human's audit row goes blue.
+  #
+  # RESOLVED 2026-07-15 (Jeremy): actor-aware, not kind-only. This block previously
+  # read `_action -> "var(--color-secondary)"`, which the implementer correctly
+  # refused to ship — it would render a human's own :commented / :status_changed row
+  # in the AI colour, contradicting the palette rule that encodes this product's core
+  # idea (who holds the baton). The plan is the thing that was wrong. Two tests pin
+  # the shipped behaviour: board_drawer_activity_test.exs:102 and :118.
+  defp entry_dot_color(entry) do
+    # Fully qualified on purpose: `Activity` in this module is `Schemas.Activity`.
+    case Hamaca.Activity.kind(entry) do
+      :failure -> "var(--color-error)"
+      :decision -> "var(--color-warning)"
+      _action -> if entry.actor_type == :agent, do: "var(--color-secondary)", else: "var(--color-primary)"
+    end
+  end
+
+  # The artboard's compact relative time: now / 8m / 2h / 3d.
+  defp relative_time(nil), do: ""
+
+  defp relative_time(%DateTime{} = at) do
+    seconds = max(DateTime.diff(DateTime.utc_now(), at, :second), 0)
+
+    cond do
+      seconds < 60 -> "now"
+      seconds < 3600 -> "#{div(seconds, 60)}m"
+      seconds < 86_400 -> "#{div(seconds, 3600)}h"
+      true -> "#{div(seconds, 86_400)}d"
+    end
+  end
+
+  # RLY-112: %{card_id => %{state:, entry:}} -> board_card/1's three log attrs. Deriving
+  # the text here (rather than in BoardLive) keeps activity_phrase/1 — the shared fallback
+  # for audit rows, which carry no `text` — private to this module.
+  defp card_log_attrs(health_by_card, card_id) do
+    case Map.get(health_by_card, card_id) do
+      nil -> %{health: :none, log_text: nil, log_at: nil}
+      %{state: :none} -> %{health: :none, log_text: nil, log_at: nil}
+      %{state: state, entry: nil} -> %{health: state, log_text: nil, log_at: nil}
+      %{state: state, entry: entry} -> %{health: state, log_text: entry_text(entry), log_at: entry.inserted_at}
+    end
+  end
+
+  # A runner line renders its own text; an audit row has none, so it borrows the
+  # drawer's sentence. One helper, shared by the strip and the timeline.
+  defp entry_text(%Activity{text: text}) when is_binary(text) and text != "", do: text
+  defp entry_text(%Activity{} = entry), do: activity_phrase(entry)
+
+  # RLY-191 / RE320: %{card_id => %{progress_at:, stalled?:, rate_limited:}} -> board_card/1's run-face attrs.
+  defp run_meta_at(meta, id), do: meta |> Map.get(id, %{}) |> Map.get(:progress_at)
+  defp run_meta_stalled?(meta, id), do: meta |> Map.get(id, %{}) |> Map.get(:stalled?, false)
+  defp run_meta_rate_limited(meta, id), do: meta |> Map.get(id, %{}) |> Map.get(:rate_limited)
+
+  defp sublane_width(%{collapsed: true}), do: 34
+  defp sublane_width(_sub), do: 178
+
+  defp lane_color(:review), do: "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+  defp lane_color(:done), do: "color-mix(in oklab, var(--color-success) 60%, var(--color-base-content))"
+  defp lane_color(_ongoing), do: "color-mix(in oklab, var(--color-base-content) 65%, transparent)"
+
+  defp lane_tint(:review), do: "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))"
+  defp lane_tint(:done), do: "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))"
+  defp lane_tint(_ongoing), do: "transparent"
+
+  defp lane_divider(:review), do: "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-100))"
+  defp lane_divider(:done), do: "color-mix(in oklab, var(--color-success) 25%, var(--color-base-100))"
+  defp lane_divider(_ongoing), do: "var(--color-base-300)"
+
+  # RE444 — the stage note strip: FULL is the at-limit amber, WHY the explanatory info blue.
+  defp note_tone(:full), do: "warning"
+  defp note_tone(:why), do: "info"
+
+  defp note_label(:full), do: "FULL"
+  defp note_label(:why), do: "WHY"
+
+  # RLY-1 item 9 — WIP threshold: over → red, at → amber, else neutral. Effective
+  # count is the stage's main lane plus its sub-lanes (@total_count); no limit → :none.
+  defp wip_state(_count, nil), do: :none
+  defp wip_state(count, limit) when count > limit, do: :over
+  defp wip_state(count, limit) when count == limit, do: :at
+  defp wip_state(_count, _limit), do: :under
+
+  defp wip_border_color(:over), do: "var(--color-error)"
+  defp wip_border_color(:at), do: "var(--color-warning)"
+  defp wip_border_color(_state), do: "var(--color-base-300)"
+
+  defp wip_chip_colors(:over),
+    do:
+      "background:color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-error) 80%, var(--color-base-content));"
+
+  defp wip_chip_colors(:at),
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+
+  defp wip_chip_colors(_state),
+    do: "background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
+
+  @doc """
+  The drawer's one micro-label (main headings + every rail label) — RE282 change 21.
+
+  Renders the shared recipe from `Relay Card Detail v5.dc.html`: JetBrains Mono 10px / 600 /
+  0.06em tracking / uppercase / ink at 0.6 alpha
+  (`font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60`).
+  Write the label in sentence case — `uppercase` does the casing. Pass `accent` (a full
+  text-color class such as `text-secondary`) to tint it — e.g. the violet AI Result heading —
+  which replaces the default muted color.
+
+  ## Examples
+
+      <.section_label>Owners</.section_label>
+      <.section_label accent="text-secondary">AI Result</.section_label>
+  """
+  attr :accent, :string,
+    default: nil,
+    doc: "a full text-color class (e.g. \"text-secondary\") used instead of the muted default"
+
+  attr :id, :string, default: nil
+  attr :class, :any, default: nil
+  slot :inner_block, required: true
+
+  def section_label(assigns) do
+    ~H"""
+    <span
+      id={@id}
+      class={[
+        "section-label font-mono text-[10px] font-semibold uppercase tracking-[0.06em]",
+        @accent || "text-base-content/60",
+        @class
+      ]}
+    >
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  @doc """
+  The Hamaca hammock mark as inline SVG (RE476) — the geometry of
+  `docs/brand/source/hamaca-icon.svg` (512-unit space), cropped to the mark.
+
+  Purely decorative (`aria-hidden`), with no id or bindings. The belly is `fill-primary`, the
+  folds and rope are the secondary token, so it flips with the theme. The seams are cut
+  *through* the shapes with a mask rather than drawn in white, so they read on any
+  background. The mask id is unique per render because a page may show the mark many times.
+
+  Size it with a height class; the width follows the aspect ratio.
+
+  ## Examples
+
+      <.hamaca_mark class="h-[22px]" />
+  """
+  attr :class, :any, default: nil, doc: "sizing classes, e.g. \"h-[22px]\""
+  attr :rest, :global
+
+  def hamaca_mark(assigns) do
+    assigns = assign(assigns, :mask_id, "hamaca-mark-seams-#{System.unique_integer([:positive])}")
+
+    ~H"""
+    <svg
+      viewBox="30 120 450 290"
+      aria-hidden="true"
+      class={["hamaca-mark w-auto shrink-0", @class]}
+      {@rest}
+    >
+      <defs>
+        <%!-- Luminance-mask channels (white keeps, black cuts), not colors. --%>
+        <mask id={@mask_id} maskUnits="userSpaceOnUse" x="30" y="120" width="450" height="290">
+          <rect x="30" y="120" width="450" height="290" fill="white" />
+          <path
+            d="M436 194 L386.4 301 M436 194 L315 269.1 M84 166 L420 316 M84 166 L356 350"
+            stroke="black"
+            stroke-width="3"
+            stroke-linecap="round"
+            fill="none"
+          />
+        </mask>
+      </defs>
+      <g mask={"url(##{@mask_id})"}>
+        <path
+          class="stroke-secondary"
+          d="M36 130 L84 166 M476 150 L436 194"
+          stroke-width="12"
+          stroke-linecap="round"
+          fill="none"
+        />
+        <path class="fill-primary" d="M84 166 C120 310 250 400 356 350 Z" />
+        <path class="fill-secondary" d="M84 166 L356 350 L420 316 Z" />
+        <path class="fill-primary" d="M315 269.1 L436 194 L386.4 301 Z" />
+        <path class="fill-secondary" d="M292.3 259 L436 194 L315 269.1 Z" />
+        <path
+          class="fill-secondary"
+          d="M436 194 C437.4 198.6 437.1 207.9 437.1 217.5 C437.1 249.5 429.2 304.6 420 316 L386.4 301 Z"
+        />
+      </g>
+    </svg>
+    """
+  end
+
+  @doc """
+  One mockup or screenshot as a small square tile (RE370, RE374, RE380, RE390). An HTML item
+  (`kind: :html`) is a live miniature of the mockup
+  that is itself a same-tab `patch` link to the mockup viewer (`view_href` — on the board, the
+  card's own drawer URL plus `mockup=<id>`), so the board stays mounted underneath. The miniature
+  is the same sandboxed iframe, rendered at a 1280×1280 desktop viewport and CSS-scaled down to
+  the 80px square (80/1280 = 0.0625, origin top-left). It is inert (`pointer-events-none`,
+  `tabindex="-1"`, `aria-hidden`), so every click lands on the link. `sandbox` is
+  `HamacaWeb.mockup_sandbox/0`, the same token list the attachment's CSP grants: the mockup's
+  scripts run, but it can never reach Hamaca's origin, and its only network access is Google Fonts
+  (`AttachmentController.html_csp/0`).
+
+  An image item (`kind: :image`, RE390) is an `<img>` (`\#{id}-image`) filling the square,
+  cropped to the top (`object-cover object-top`). No tile carries an HTML/PNG type mark.
+
+  The caption doesn't fit in 80px. It becomes the tile's `title` (hover tooltip) and `aria-label`,
+  plus a `sr-only` `\#{id}-caption`. It falls back to `noun` ("Mockup" / "Screenshot"). Never link
+  to `src` directly: Hamaca never shows a mockup as a bare top-level page.
+
+  `current` is the viewer's sheet: `true` rings the tile and marks it `aria-current`, `false`
+  dims it, and `nil` (the drawer) does neither. `replace` makes the patch replace the history
+  entry, so switching mockups costs one Back, not one per switch.
+
+  ## Examples
+
+      <.mockup_preview
+        id="card-drawer-mockup-0"
+        src="/attachments/135e5539-…"
+        view_href="/board/payments?card=PA1&mockup=135e5539-…"
+        caption="Empty state"
+      />
+  """
+  attr :id, :string, required: true
+  attr :src, :string, required: true, doc: "the url the miniature iframe or image loads"
+  attr :kind, :atom, values: [:html, :image], default: :html, doc: "how the item is drawn (`HamacaWeb.CardMedia.kind/2`)"
+  attr :noun, :string, default: "Mockup", doc: "names the item: the caption fallback and the aria-label's verb object"
+  attr :view_href, :string, required: true, doc: "the same-tab viewer URL the tile patches to"
+  attr :caption, :string, default: nil
+  attr :current, :boolean, default: nil, doc: "true = the mockup on screen, false = another one, nil = no viewer"
+  attr :replace, :boolean, default: false, doc: "replace the history entry instead of pushing one"
+
+  def mockup_preview(assigns) do
+    assigns = assign(assigns, :label, assigns.caption || assigns.noun)
+
+    ~H"""
+    <.link
+      id={"#{@id}-open"}
+      patch={@view_href}
+      replace={@replace}
+      title={@label}
+      aria-label={"Open #{String.downcase(@noun)}: #{@label}"}
+      aria-current={@current && "true"}
+      class={[
+        "relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 transition hover:ring-2 hover:ring-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+        @current == true && "ring-2 ring-primary ring-offset-2 ring-offset-base-100",
+        @current == false && "opacity-80"
+      ]}
+    >
+      <span id={"#{@id}-caption"} class="sr-only">{@label}</span>
+      <img
+        :if={@kind == :image}
+        id={"#{@id}-image"}
+        src={@src}
+        alt=""
+        loading="lazy"
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-0 block size-full object-cover object-top"
+      />
+      <iframe
+        :if={@kind == :html}
+        id={"#{@id}-frame"}
+        src={@src}
+        sandbox={HamacaWeb.mockup_sandbox()}
+        title={@label}
+        loading="lazy"
+        tabindex="-1"
+        aria-hidden="true"
+        class="pointer-events-none absolute top-0 left-0 block h-[1280px] w-[1280px] origin-top-left scale-[0.0625] border-0"
+      >
+      </iframe>
+    </.link>
+    """
+  end
+
+  @doc """
+  A screenshot the browser can't fetch (RE390) — an agent-local path like
+  `tmp/smoke/12-review.png` — as a dashed 80px tile captioned with its file name. Not a link:
+  there is nothing to open. `card_mockups_section/1` renders it for a `:placeholder` item.
+  """
+  attr :id, :string, required: true
+  attr :caption, :string, required: true
+
+  def media_placeholder(assigns) do
+    ~H"""
+    <span
+      id={@id}
+      title={@caption}
+      class="relative flex size-20 shrink-0 items-end overflow-hidden rounded-md border border-dashed border-base-300 bg-base-200 p-1.5"
+    >
+      <span class="text-[10px] leading-tight text-base-content/55 break-all">{@caption}</span>
+    </span>
+    """
+  end
+
+  @doc false
+  # `card_drawer/1`'s `screenshot_href` default (an attr default must be a remote capture).
+  def screenshot_query(n), do: "?screenshot=#{n}"
+
+  # RE427 — the Notes composer attaches images only on the web board, with uploads allowed.
+  defp note_attach_enabled?(%{embed: embed, uploads: uploads}),
+    do: not embed and is_map(uploads) and Map.has_key?(uploads, :note_images)
+
+  defp note_images_in_flight?(%{note_images: %{entries: [_ | _]}}), do: true
+  defp note_images_in_flight?(_uploads), do: false
+
+  @doc false
+  # `card_drawer/1`'s `image_href` default (RE427).
+  def image_query(id), do: "?image=#{id}"
+
+  @doc """
+  An image note's origin tag (RE428), in the Notes row after the `<time>`: `FROM ANSWER · Q<n>` for
+  the images attached while answering question n, `FROM REJECTION` for those attached to Request
+  changes. An ordinary note (`origin` nil) renders nothing.
+  """
+  attr :id, :string, required: true
+  attr :origin, :atom, values: [nil | Schemas.Comment.origins()], default: nil
+  attr :question, :integer, default: nil, doc: "the 1-based question number of an `:answer` origin"
+
+  def note_origin_tag(assigns) do
+    ~H"""
+    <span
+      :if={@origin}
+      id={@id}
+      class="rounded bg-base-200 px-1.5 py-px font-mono text-[9.5px] font-semibold tracking-[0.04em] text-base-content/60"
+    >
+      {note_origin_label(@origin, @question)}
+    </span>
+    """
+  end
+
+  defp note_origin_label(:answer, question), do: "FROM ANSWER · Q#{question}"
+  defp note_origin_label(:rejection, _question), do: "FROM REJECTION"
+
+  # RE358 — the Notes composer's two modes. `:steer` is only offered while an agent node runs.
+  @note_modes [:note, :steer]
+
+  @doc """
+  The Notes composer's Note | ↪ Steer now toggle (RE358), shown above the composer row while an
+  agent node is working the card. A compact 11.5px track — deliberately not `segmented_control/1`,
+  whose iOS-size segments have no primary active state. Each segment sends `"note_mode"` with
+  `phx-value-mode`; the active one carries `data-active="true"`.
+
+  Ids: the track row is `@id`, the segments `\#{@id}-note` and `\#{@id}-steer`.
+  """
+  attr :id, :string, required: true
+  attr :mode, :atom, values: @note_modes, required: true
+
+  def note_mode_toggle(assigns) do
+    ~H"""
+    <div id={@id} class="flex items-center gap-2">
+      <div class="inline-flex rounded-md bg-base-200 p-[3px] text-[11.5px] font-semibold">
+        <button
+          :for={{mode, label} <- [note: "Note", steer: "↪ Steer now"]}
+          type="button"
+          id={"#{@id}-#{mode}"}
+          phx-click="note_mode"
+          phx-value-mode={mode}
+          data-active={to_string(@mode == mode)}
+          class={["rounded px-2.5 py-1", note_mode_segment_class(mode, @mode == mode)]}
+        >
+          {label}
+        </button>
+      </div>
+      <span class="font-mono text-[10px] text-base-content/45 max-sm:hidden">
+        shown while the agent works
+      </span>
+    </div>
+    """
+  end
+
+  defp note_mode_segment_class(:note, true), do: "bg-base-100 shadow-sm text-base-content"
+  defp note_mode_segment_class(:steer, true), do: "bg-primary text-primary-content shadow-sm"
+  defp note_mode_segment_class(_mode, false), do: "text-base-content/60"
+
+  @doc """
+  A steer note's receipt (RE358), under its body once a claimed agent job delivered it:
+  "✓ Sent to `<node>`", plus "· restarted, session kept" when the restarted attempt resumed the
+  stopped one's session. Once that attempt reports, its reply threads underneath — the node name,
+  when, and the first paragraph of its outcome detail, clamped to three lines with a "more"
+  toggle. Renders nothing for a steer not yet delivered (`receipt` nil).
+
+  `receipt` is one value of `Hamaca.Runs.steer_receipts/1`.
+
+  Ids: the receipt line is `@id`; the reply `\#{@id}-reply`, its body `\#{@id}-reply-body` and the
+  expand control `\#{@id}-reply-more`.
+  """
+  attr :id, :string, required: true
+  attr :receipt, :map, default: nil
+
+  def steer_receipt(assigns) do
+    ~H"""
+    <div :if={@receipt}>
+      <div
+        id={@id}
+        class="flex flex-wrap items-center gap-x-1.5 pt-0.5 font-mono text-[10px] text-base-content/55"
+      >
+        <span class="text-success">✓</span>
+        Sent to <code class="rounded bg-base-200 px-1 text-base-content/75">{@receipt.node}</code>
+        <span :if={@receipt.session_kept?} class="max-sm:hidden">· restarted, session kept</span>
+      </div>
+      <div
+        :if={@receipt.reply}
+        id={"#{@id}-reply"}
+        class="mt-2 flex items-start gap-2 border-l-2 pl-3"
+        style="border-color:color-mix(in oklab, var(--color-secondary) 45%, var(--color-base-100))"
+      >
+        <span
+          class="mt-[3px] shrink-0 rounded-full"
+          style="width:8px;height:8px;background:var(--color-secondary)"
+        >
+        </span>
+        <div class="min-w-0 text-[12px] leading-[18px] text-base-content/75">
+          <div class="flex flex-wrap items-baseline gap-x-1.5">
+            <span
+              class="font-mono text-[10.5px] font-semibold"
+              style="color:color-mix(in oklab, var(--color-secondary) 80%, var(--color-base-content))"
+            >
+              {@receipt.node}
+            </span>
+            <span class="font-mono text-[10px] text-base-content/45">
+              · {TimeAgo.ago(@receipt.reply.at)}
+            </span>
+          </div>
+          <p id={"#{@id}-reply-body"} class="line-clamp-3">
+            {first_paragraph(@receipt.reply.detail)}
+          </p>
+          <button
+            type="button"
+            id={"#{@id}-reply-more"}
+            phx-click={JS.toggle_class("line-clamp-3", to: "##{@id}-reply-body")}
+            class="font-mono text-[10px] font-semibold text-base-content/55 underline underline-offset-2"
+          >
+            more
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # The text before the first blank line, trimmed.
+  defp first_paragraph(detail), do: detail |> String.split(~r/\n\s*\n/, parts: 2) |> hd() |> String.trim()
+
+  @doc """
+  A posted note's images (RE427): a wrapping row of 108px-tall thumbnails, each patching to the
+  same-tab viewer (`image_href.(attachment.id)`). Renders nothing for a note without images. It sits
+  OUTSIDE the note's `.md` body, so the RE322 markdown lightbox never claims its clicks.
+
+  Ids: the row is `@id`, the link for attachment X is `\#{@id}-X`.
+  """
+  attr :id, :string, required: true
+  attr :images, :list, required: true, doc: "the note's `%Schemas.Attachment{}` images, in order"
+  attr :image_href, :any, required: true, doc: "attachment id -> the viewer URL its thumbnail patches to"
+
+  def note_image_row(assigns) do
+    ~H"""
+    <div :if={@images != []} id={@id} class="mt-1.5 flex flex-wrap gap-2">
+      <.link
+        :for={image <- @images}
+        id={"#{@id}-#{image.id}"}
+        patch={@image_href.(image.id)}
+        aria-label={"Open #{image.filename}"}
+        class="block"
+      >
+        <img
+          src={HamacaWeb.attachment_path(image.id)}
+          alt={image.filename}
+          class="h-[108px] w-auto max-w-[240px] rounded-md border border-base-300 bg-base-200 object-cover"
+        />
+      </.link>
+    </div>
+    """
+  end
+
+  @doc """
+  The shared image control's box (RE427): the bordered composer box that takes images by drop
+  and ⌘V paste, with the composer's own row (`inner_block`: textarea, 📎, submit) on top and the
+  pending thumbnails under it. Slice 2 reuses it for answers and rejections, so nothing here is
+  Notes-specific beyond the event-name defaults.
+
+  `pending` are images already uploaded (`%{id, filename, src}`, an unlinked attachment each);
+  `upload`'s entries are the ones still in flight, drawn from `live_img_preview` under an
+  Uploading… overlay. Every thumbnail has a ✕ — `remove_event` (`phx-value-id`) for an uploaded
+  one, `cancel_event` (`phx-value-ref`) for one in flight.
+
+  Enabled, the box is the upload's `phx-drop-target` and carries the `.ImagePaste` hook; LiveView
+  adds `phx-drop-target-active` while a file is dragged over it, which draws the dashed primary
+  border and the "Drop to attach" overlay. Below the `drawer:` breakpoint the hook ignores pasted
+  images and swallows dropped files (mobile is view-only). Disabled (the native embed, or no
+  upload at all), it is just the box.
+
+  Ids: the pending row is `\#{@id}-pending`, each thumbnail `\#{@id}-pending-<attachment id or entry ref>`.
+  """
+  attr :id, :string, required: true
+
+  attr :upload, :any,
+    required: true,
+    doc: "the `Phoenix.LiveView.UploadConfig` (`@uploads.note_images`); unused when `enabled` is false"
+
+  attr :pending, :list, default: [], doc: "uploaded images, `[%{id, filename, src}]` in upload order"
+  attr :cancel_event, :string, default: "cancel_note_image"
+  attr :remove_event, :string, default: "remove_note_image"
+  attr :enabled, :boolean, default: true, doc: "false in the native embed: no drop target, no paste hook"
+
+  attr :link_target, :string,
+    default: nil,
+    doc:
+      "RE428: the DOM id of the textarea whose `![name](url)` links the hook maintains from the " <>
+        "server's `image_link_*` push events; nil (the Notes composer) = no link handling"
+
+  attr :tone, :atom,
+    values: [:default, :primary],
+    default: :default,
+    doc: "RE358: `:primary` is the Steer now composer's 2px primary border"
+
+  attr :class, :any, default: nil, doc: "extra classes (Storybook forces `phx-drop-target-active`)"
+  slot :inner_block, required: true
+
+  def image_attach_box(assigns) do
+    assigns = assign(assigns, :entries, if(assigns.enabled && assigns.upload, do: assigns.upload.entries, else: []))
+
+    ~H"""
+    <div
+      id={@id}
+      phx-drop-target={@enabled && @upload && @upload.ref}
+      phx-hook=".ImagePaste"
+      data-upload-name={@enabled && @upload && @upload.name}
+      data-link-target={@link_target}
+      class={
+        # A colocated hook's name is only rewritten when `phx-hook` is a literal, so the hook is
+        # always attached; without `data-upload-name` (disabled) it does nothing. Enum.reject:
+        # see RE277 — a nil tail would leave a stray trailing space.
+        [
+          "group/attach relative rounded-[7px] #{attach_box_border(@tone)} bg-base-100 py-[7px] pl-[11px] pr-2",
+          "[&.phx-drop-target-active]:border-2 [&.phx-drop-target-active]:border-dashed [&.phx-drop-target-active]:border-primary",
+          @class
+        ]
+        |> Enum.reject(&is_nil/1)
+      }
+    >
+      <div
+        :if={@enabled}
+        class="absolute inset-0 z-10 hidden items-center justify-center gap-2 rounded-[7px] bg-primary/10 text-[12.5px] font-semibold text-primary group-[.phx-drop-target-active]/attach:flex"
+      >
+        <.icon name="hero-paper-clip" class="size-[15px]" /> Drop to attach
+      </div>
+      <div class="flex items-start gap-2">{render_slot(@inner_block)}</div>
+      <div
+        :if={@pending != [] or @entries != []}
+        id={"#{@id}-pending"}
+        class="flex flex-wrap gap-2 pb-1 pt-2"
+      >
+        <div :for={image <- @pending} id={"#{@id}-pending-#{image.id}"} class={attach_thumb_class()}>
+          <img src={image.src} alt={image.filename} class="h-full w-full object-cover" />
+          <.attach_remove event={@remove_event} value={[{"phx-value-id", image.id}]} />
+        </div>
+        <div :for={entry <- @entries} id={"#{@id}-pending-#{entry.ref}"} class={attach_thumb_class()}>
+          <.live_img_preview entry={entry} alt={entry.client_name} class="h-full w-full object-cover" />
+          <div class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-base-100/75">
+            <span class="loading loading-spinner loading-xs text-base-content/50"></span>
+            <span class="font-mono text-[9.5px] text-base-content/60">Uploading…</span>
+          </div>
+          <.attach_remove event={@cancel_event} value={[{"phx-value-ref", entry.ref}]} />
+        </div>
+      </div>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".ImagePaste">
+        // RE427 — ⌘V an image into the composer uploads it; text pastes are untouched. Below the
+        // drawer: breakpoint the composer is view-only: pasted images are ignored and dropped
+        // files are swallowed in the capture phase, before LiveView's drop handler sees them.
+        const hasFiles = (e) => Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes("Files")
+
+        export default {
+          mounted() {
+            if (!this.el.dataset.uploadName) return
+            this.desktop = window.matchMedia("(min-width: 45rem)")
+            this.onPaste = (e) => {
+              const files = Array.from((e.clipboardData && e.clipboardData.files) || [])
+                .filter((file) => file.type.startsWith("image/"))
+              if (files.length === 0) return
+              e.preventDefault()
+              if (this.desktop.matches) this.upload(this.el.dataset.uploadName, files)
+            }
+            this.onDrag = (e) => {
+              if (this.desktop.matches || !hasFiles(e)) return
+              e.preventDefault()
+              e.stopPropagation()
+            }
+            this.el.addEventListener("paste", this.onPaste)
+            this.el.addEventListener("dragover", this.onDrag, true)
+            this.el.addEventListener("drop", this.onDrag, true)
+            if (this.el.dataset.linkTarget) this.linkImages()
+          },
+          // RE428 — a linked box keeps one `![name](url)` line per image in its textarea. The
+          // server pushes the edits (every payload names its box); the hook makes them and
+          // dispatches `input`, so the form's phx-change stores the text server-side — LiveView
+          // never overwrites a focused textarea, so the server could not do it itself.
+          linkImages() {
+            this.caret = null
+            // Only the human's own caret moves: the hook's synthetic `input` is not trusted.
+            this.onCaret = (e) => { if (e.isTrusted) this.caret = this.note().selectionEnd }
+            this.note().addEventListener("keyup", this.onCaret)
+            this.note().addEventListener("click", this.onCaret)
+            this.note().addEventListener("input", this.onCaret)
+            const mine = (handler) => (payload) => { if (payload.box === this.el.id) handler(payload) }
+            this.handleEvent("image_link_placeholder", mine(({ placeholder }) => this.insert(placeholder)))
+            this.handleEvent("image_link_done", mine(({ placeholder, markdown }) => this.replace(placeholder, markdown)))
+            this.handleEvent("image_link_failed", mine(({ placeholder }) => this.remove(placeholder)))
+            this.handleEvent("image_link_remove", mine(({ markdown }) => this.remove(markdown)))
+          },
+          note() { return document.getElementById(this.el.dataset.linkTarget) },
+          // On its own line at the last caret (the end if the note never had focus).
+          insert(text) {
+            const note = this.note()
+            const value = note.value
+            const at = this.caret == null ? value.length : Math.min(this.caret, value.length)
+            const before = at > 0 && value[at - 1] !== "\n" ? "\n" : ""
+            const after = at < value.length && value[at] !== "\n" ? "\n" : ""
+            note.value = value.slice(0, at) + before + text + after + value.slice(at)
+            this.caret = at + before.length + text.length
+            this.changed(note)
+          },
+          // The first occurrence only; nothing if the human deleted it.
+          replace(text, by) {
+            const note = this.note()
+            const at = note.value.indexOf(text)
+            if (at < 0) return
+            note.value = note.value.slice(0, at) + by + note.value.slice(at + text.length)
+            if (this.caret != null && this.caret > at) this.caret += by.length - text.length
+            this.changed(note)
+          },
+          // The first occurrence, and its line when that leaves the line blank.
+          remove(text) {
+            const note = this.note()
+            let value = note.value
+            const at = value.indexOf(text)
+            if (at < 0) return
+            value = value.slice(0, at) + value.slice(at + text.length)
+            const start = value.lastIndexOf("\n", at - 1) + 1
+            const newline = value.indexOf("\n", at)
+            const end = newline < 0 ? value.length : newline
+            if (value.slice(start, end).trim() === "") {
+              value = start > 0 ? value.slice(0, start - 1) + value.slice(end) : value.slice(Math.min(end + 1, value.length))
+            }
+            note.value = value
+            this.caret = null
+            this.changed(note)
+          },
+          changed(note) { note.dispatchEvent(new Event("input", { bubbles: true })) },
+          destroyed() {
+            if (!this.onPaste) return
+            this.el.removeEventListener("paste", this.onPaste)
+            this.el.removeEventListener("dragover", this.onDrag, true)
+            this.el.removeEventListener("drop", this.onDrag, true)
+            const note = this.onCaret && this.note()
+            if (!note) return
+            note.removeEventListener("keyup", this.onCaret)
+            note.removeEventListener("click", this.onCaret)
+            note.removeEventListener("input", this.onCaret)
+          }
+        }
+      </script>
+    </div>
+    """
+  end
+
+  defp attach_box_border(:default), do: "border border-base-300"
+  defp attach_box_border(:primary), do: "border-2 border-primary/60"
+
+  defp attach_thumb_class,
+    do: "relative h-[108px] w-[156px] shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-200"
+
+  attr :event, :string, required: true
+  attr :value, :list, required: true, doc: "the `phx-value-*` pair naming the thumbnail"
+
+  defp attach_remove(assigns) do
+    ~H"""
+    <button
+      type="button"
+      phx-click={@event}
+      title="Remove"
+      class="absolute right-1 top-1 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-base-content/70 text-[10px] leading-none text-base-100"
+      {@value}
+    >
+      ✕
+    </button>
+    """
+  end
+
+  @doc """
+  The shared image control's 📎 (RE427): a `<label>` styled as a ghost icon button wrapping a
+  visually hidden `live_file_input` (multiple, `accept` from the upload config). Hidden below the
+  `drawer:` breakpoint — phones are view-only. Render it inside the form that has `phx-change`.
+  """
+  attr :upload, :any, required: true, doc: "the `Phoenix.LiveView.UploadConfig`"
+  attr :id, :string, default: nil
+
+  attr :label, :string,
+    default: nil,
+    doc: "RE428: visible text after the icon (the reject note's attach bar); nil = the icon-only button"
+
+  def image_attach_button(%{label: label} = assigns) when is_binary(label) do
+    ~H"""
+    <label
+      id={@id}
+      title="Attach images (or paste / drop)"
+      class="btn btn-ghost btn-xs hidden gap-1 px-1 text-[11px] font-normal text-base-content/60 drawer:inline-flex"
+    >
+      <.icon name="hero-paper-clip" class="size-[15px]" />
+      <span>{@label}</span>
+      <.live_file_input upload={@upload} class="sr-only" />
+    </label>
+    """
+  end
+
+  def image_attach_button(assigns) do
+    ~H"""
+    <label
+      id={@id}
+      title="Attach images (or paste / drop)"
+      class="btn btn-ghost btn-xs hidden h-[27px] w-[27px] shrink-0 p-0 text-base-content/60 drawer:inline-flex"
+    >
+      <.icon name="hero-paper-clip" class="size-[15px]" />
+      <span class="sr-only">Attach images</span>
+      <.live_file_input upload={@upload} class="sr-only" />
+    </label>
+    """
+  end
+
+  @doc """
+  The shared image control's line under the box (RE427): each refused-image error, then the
+  limits hint — "Paste, drop, or 📎 …" from `drawer:` up, "Attach images from the web app." below
+  it. Disabled (the native embed) shows only the web-app line, at every width. The cap, the type
+  names and the size come from `Schemas.Comment` / `Schemas.Attachment`.
+
+  Ids: error N is `\#{@id}-error-N`.
+  """
+  attr :id, :string, required: true
+  attr :errors, :list, default: [], doc: "error sentences, in the order they happened"
+  attr :enabled, :boolean, default: true
+
+  def image_attach_hint(assigns) do
+    ~H"""
+    <div id={@id}>
+      <p
+        :for={{message, n} <- Enum.with_index(@errors)}
+        id={"#{@id}-error-#{n}"}
+        class={if(n == 0, do: "mt-1.5 text-xs text-error", else: "text-xs text-error")}
+      >
+        {message}
+      </p>
+      <p :if={@enabled} class="mt-1.5 hidden font-mono text-[10px] text-base-content/45 drawer:block">
+        {image_attach_limits()}
+      </p>
+      <p class={
+        if(@enabled,
+          do: "mt-1.5 font-mono text-[10px] text-base-content/45 drawer:hidden",
+          else: "mt-1.5 font-mono text-[10px] text-base-content/45"
+        )
+      }>
+        Attach images from the web app.
+      </p>
+    </div>
+    """
+  end
+
+  defp image_attach_limits do
+    "Paste, drop, or 📎 — up to #{Schemas.Comment.max_images()} images · " <>
+      "#{Enum.join(Schemas.Attachment.image_type_names(), ", ")} · " <>
+      "#{div(Schemas.Attachment.max_bytes(), 1_048_576)} MB each"
+  end
+
+  @doc """
+  A card's Mockups or Screenshots section (RE380, RE390): the section label and a wrapping row of
+  tiles, one per `HamacaWeb.CardMedia` item — a `mockup_preview/1` patching to
+  `item_href.(item.key)`, or a `media_placeholder/1` for a `:placeholder` item. Shared by the card
+  drawer (`current` nil: the `gap-2` row, nothing else) and the viewer's left sheet, where
+  `current` is the key on screen: its tile is ringed and the row opens up to `gap-3`. The section
+  ends at the tile row — the caption, "n of m" and key hints live in the viewer's desktop
+  `mockup_viewer_header/1` (RE392). `show_label: false` drops the label row, for a caller that
+  draws its own.
+
+  Ids: the row is `\#{tile_id}-tiles` and tile N is `\#{tile_id}-N` (its link `\#{tile_id}-N-open`).
+  """
+  attr :id, :string, required: true, doc: "the section id"
+  attr :tile_id, :string, required: true, doc: "the tile id prefix"
+  attr :items, :list, required: true, doc: "`HamacaWeb.CardMedia` items (placeholders allowed)"
+  attr :item_href, :any, required: true, doc: "item key -> the URL its tile patches to"
+  attr :current, :any, default: nil, doc: "the item key on screen in the viewer, or nil"
+  attr :label, :string, default: "Mockups"
+  attr :noun, :string, default: "Mockup"
+  attr :show_label, :boolean, default: true
+  attr :replace, :boolean, default: false, doc: "tile patches replace the history entry"
+
+  attr :show_captions, :boolean,
+    default: false,
+    doc: "RE427: each tile's caption under it (the current tile's highlighted)"
+
+  def card_mockups_section(assigns) do
+    ~H"""
+    <section id={@id} class="space-y-2">
+      <.section_label :if={@show_label}>{@label}</.section_label>
+      <div
+        id={"#{@tile_id}-tiles"}
+        class={if(@current, do: "flex flex-wrap gap-3 p-0.5", else: "flex flex-wrap gap-2")}
+      >
+        <%= for {item, index} <- Enum.with_index(@items) do %>
+          <.media_placeholder
+            :if={item.kind == :placeholder}
+            id={"#{@tile_id}-#{index}"}
+            caption={item.caption}
+          />
+          <.mockup_preview
+            :if={item.kind != :placeholder and !@show_captions}
+            id={"#{@tile_id}-#{index}"}
+            src={item.src}
+            kind={item.kind}
+            noun={@noun}
+            view_href={@item_href.(item.key)}
+            caption={item.caption}
+            current={@current && item.key == @current}
+            replace={@replace}
+          />
+          <div
+            :if={item.kind != :placeholder and @show_captions}
+            id={"#{@tile_id}-#{index}-column"}
+            class="flex min-w-0 flex-col gap-1"
+          >
+            <.mockup_preview
+              id={"#{@tile_id}-#{index}"}
+              src={item.src}
+              kind={item.kind}
+              noun={@noun}
+              view_href={@item_href.(item.key)}
+              caption={item.caption}
+              current={@current && item.key == @current}
+              replace={@replace}
+            />
+            <span
+              id={"#{@tile_id}-#{index}-filename"}
+              title={item.caption}
+              class={[
+                "truncate font-mono text-[10px]",
+                if(@current && item.key == @current,
+                  do: "text-primary font-semibold",
+                  else: "text-base-content/55"
+                )
+              ]}
+            >
+              {item.caption}
+            </span>
+          </div>
+        <% end %>
+      </div>
+    </section>
+    """
+  end
+
+  @doc """
+  The iOS navigation bar a pushed embedded screen draws itself (RE393 · card mockup "Review card —
+  web nav bar replaces the native AppBar"): "‹ Label" back in primary on the left, a centered
+  17/600 truncating title, and an `:actions` slot on the right. The native shell draws no AppBar
+  over the webview; it supplies the top inset itself (CardScreen's `SafeArea`, RE405), so the
+  webview already starts below the status bar. The bar's `env(safe-area-inset-top)` padding is
+  only a fallback for a host without that `SafeArea` — inside the webview it resolves to 0. It is
+  `sticky top-0`, so render it first inside the scrolling panel.
+
+  Exactly one of `back_bridge` / `back_patch` drives the back control: `back_patch` is a
+  `<.link patch>`; `back_bridge` is a button whose `.NativeBack` hook asks the native shell to pop
+  (the hook names the handler), falling back to `history.back()` in a plain browser. A nil or blank
+  `back_label` reads "Back".
+  """
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :back_label, :string, default: nil, doc: "the screen this one was pushed from; nil/blank reads Back"
+  attr :back_bridge, :boolean, default: false, doc: "back asks the native shell to pop (the .NativeBack hook)"
+  attr :back_patch, :string, default: nil, doc: "back patches to this URL instead"
+  attr :class, :any, default: nil
+
+  slot :actions, doc: "right-hand controls (44px targets)"
+
+  def mobile_nav_bar(assigns) do
+    assigns = assign(assigns, :back_text, nav_back_text(assigns.back_label))
+
+    ~H"""
+    <header
+      id={@id}
+      class={[
+        "sticky top-0 z-20 border-b border-base-300 bg-base-100/95 px-1 backdrop-blur",
+        @class
+      ]}
+      style="padding-top: env(safe-area-inset-top);"
+    >
+      <div class="relative flex h-[44px] items-center">
+        <.link
+          :if={@back_patch}
+          id={"#{@id}-back"}
+          patch={@back_patch}
+          class={nav_back_class()}
+        >
+          <.icon name="hero-chevron-left" class="size-[22px]" />{@back_text}
+        </.link>
+        <button
+          :if={!@back_patch && @back_bridge}
+          type="button"
+          id={"#{@id}-back"}
+          phx-hook=".NativeBack"
+          class={nav_back_class()}
+        >
+          <.icon name="hero-chevron-left" class="size-[22px]" />{@back_text}
+        </button>
+        <span
+          id={"#{@id}-title"}
+          class="pointer-events-none absolute inset-x-24 truncate text-center text-(length:--m-nav-title) font-(--m-nav-title-weight)"
+        >
+          {@title}
+        </span>
+        <div id={"#{@id}-actions"} class="ml-auto flex items-center">
+          {render_slot(@actions)}
+        </div>
+      </div>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".NativeBack">
+        export default {
+          mounted() {
+            this.el.addEventListener("click", () => {
+              if (window.flutter_inappwebview) {
+                window.flutter_inappwebview.callHandler("relayNavBack")
+              } else {
+                history.back()
+              }
+            })
+          }
+        }
+      </script>
+    </header>
+    """
+  end
+
+  defp nav_back_text(label) when is_binary(label) do
+    if String.trim(label) == "", do: "Back", else: label
+  end
+
+  defp nav_back_text(_label), do: "Back"
+
+  defp nav_back_class,
+    do: "flex h-[44px] min-w-[44px] items-center gap-0.5 pr-2 text-(length:--m-nav-title) font-normal text-primary"
+
+  @doc """
+  An iOS segmented control (RE393): a rounded `bg-base-200` track of equal-width segments, the
+  active one lifted onto `bg-base-100`. One `:option` per segment; each renders a
+  `<button type="button">` carrying `data-active` and every extra attribute the entry passes
+  (`phx-click`, `phx-value-*`, `data-*`). The `:text` variant shows `label`; the `:icon` variant
+  shows the hero `icon` and uses `label` as the button's `aria-label`.
+  """
+  attr :id, :string, required: true
+  attr :aria_label, :string, default: nil, doc: "names the group (role=group)"
+  attr :variant, :atom, values: [:text, :icon], default: :text
+  attr :class, :any, default: nil
+
+  # The entry's keys are deliberately undeclared with `validate_attrs: false`: otherwise every
+  # pass-through attribute (`phx-click`, `phx-value-*`) is an "undefined attribute" warning, and
+  # precommit treats warnings as errors.
+  slot :option,
+    required: true,
+    validate_attrs: false,
+    doc: "one segment: `id` (required), `active`, `label`, `icon`, plus pass-through attributes"
+
+  def segmented_control(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      role="group"
+      aria-label={@aria_label}
+      class={[
+        "flex bg-base-200 p-[3px]",
+        if(@variant == :icon, do: "rounded-[9px]", else: "rounded-[10px]"),
+        @class
+      ]}
+    >
+      <button
+        :for={option <- @option}
+        type="button"
+        id={option.id}
+        data-active={to_string(option[:active] == true)}
+        aria-label={@variant == :icon && option[:label]}
+        class={segment_class(@variant, option[:active] == true)}
+        {segment_attrs(option)}
+      >
+        <.icon :if={@variant == :icon && option[:icon]} name={option.icon} class="size-5" />
+        <span :if={@variant == :text}>{option[:label]}</span>
+      </button>
+    </div>
+    """
+  end
+
+  # Icon segments are fixed 38px squares (the mockup viewer's render-width toggle); text
+  # segments share the track equally.
+  defp segment_class(:icon, active?) do
+    [
+      "flex h-[38px] w-[38px] items-center justify-center rounded-[7px]",
+      if(active?, do: "bg-base-100 text-base-content shadow-xs", else: "text-base-content/55")
+    ]
+  end
+
+  defp segment_class(:text, active?) do
+    [
+      "flex h-[32px] flex-1 items-center justify-center rounded-[8px] text-[14px]",
+      if(active?, do: "bg-base-100 font-semibold shadow-xs", else: "font-medium text-base-content/70")
+    ]
+  end
+
+  # The slot entry's pass-through attributes — everything but the declared keys.
+  defp segment_attrs(option), do: Map.drop(option, [:__slot__, :inner_block, :id, :active, :label, :icon])
+
+  @doc """
+  The mockup viewer's one-bar header on phones (RE380): ← back to the card, the mockup's caption
+  over an "n / m" count, and ‹ › to step through the open section (`mockup_prev` /
+  `mockup_next`, disabled at either end; their labels name the `noun`). `card_mockup_viewer/1` renders it first, `drawer:hidden`.
+  """
+  attr :id, :string, default: "mockup-viewer-bar"
+  attr :caption, :string, required: true
+  attr :index, :integer, required: true, doc: "1-based position of the mockup on screen"
+  attr :total, :integer, required: true
+  attr :back_patch, :string, required: true, doc: "the card's drawer URL"
+  attr :noun, :string, default: "Mockup"
+  attr :class, :any, default: nil
+
+  def mockup_viewer_bar(assigns) do
+    assigns = assign(assigns, :noun, String.downcase(assigns.noun))
+
+    ~H"""
+    <header
+      id={@id}
+      class={["flex items-center gap-1 border-b border-base-300 bg-base-100 px-1.5 py-1.5", @class]}
+    >
+      <.link
+        id={"#{@id}-back"}
+        patch={@back_patch}
+        aria-label="Back to card"
+        class="btn btn-ghost btn-sm btn-square text-base"
+      >
+        ←
+      </.link>
+      <div class="flex min-w-0 flex-1 flex-col px-1 leading-tight">
+        <span id={"#{@id}-caption"} class="truncate text-sm font-semibold">{@caption}</span>
+        <span id={"#{@id}-count"} class="font-mono text-[11px] text-base-content/55">
+          {@index} / {@total}
+        </span>
+      </div>
+      <button
+        type="button"
+        id={"#{@id}-prev"}
+        phx-click="mockup_prev"
+        aria-label={"Previous #{@noun}"}
+        disabled={@index == 1}
+        class="btn btn-ghost btn-sm btn-square text-2xl leading-none"
+      >
+        ‹
+      </button>
+      <button
+        type="button"
+        id={"#{@id}-next"}
+        phx-click="mockup_next"
+        aria-label={"Next #{@noun}"}
+        disabled={@index == @total}
+        class="btn btn-ghost btn-sm btn-square text-2xl leading-none"
+      >
+        ›
+      </button>
+    </header>
+    """
+  end
+
+  @doc """
+  The embedded mockup viewer's pager row (RE393 · card mockup "Mockup viewer — one nav bar,
+  phone/desktop toggle, pager above review bar"): a 48px row under the frame with 44px ‹ ›
+  chevrons (`mockup_prev` / `mockup_next`, disabled at either end, labels naming the `noun` as
+  `mockup_viewer_bar/1` does), one dot per item (the current one solid) and an "n of m" count.
+  `card_mockup_viewer/1` renders it in embed mode only, `drawer:hidden`.
+  """
+  attr :id, :string, default: "mockup-viewer-pager"
+  attr :index, :integer, required: true, doc: "1-based position of the item on screen"
+  attr :total, :integer, required: true
+  attr :noun, :string, default: "Mockup"
+  attr :class, :any, default: nil
+
+  def mockup_viewer_pager(assigns) do
+    assigns = assign(assigns, :noun, String.downcase(assigns.noun))
+
+    ~H"""
+    <nav
+      id={@id}
+      aria-label={"#{String.capitalize(@noun)} pager"}
+      class={[
+        "flex h-[48px] shrink-0 items-center justify-between border-t border-base-300 bg-base-100 px-2",
+        @class
+      ]}
+    >
+      <button
+        type="button"
+        id={"#{@id}-prev"}
+        phx-click="mockup_prev"
+        aria-label={"Previous #{@noun}"}
+        disabled={@index == 1}
+        class={pager_chevron_class(@index == 1)}
+      >
+        <.icon name="hero-chevron-left" class="size-6" />
+      </button>
+      <span class="flex items-center gap-2">
+        <span id={"#{@id}-dots"} class="flex items-center gap-2" aria-hidden="true">
+          <span
+            :for={n <- 1..@total//1}
+            class={[
+              "size-[7px] rounded-full",
+              if(n == @index, do: "bg-base-content", else: "bg-base-content/25")
+            ]}
+          >
+          </span>
+        </span>
+        <span
+          id={"#{@id}-count"}
+          class="ml-1.5 font-mono text-(length:--m-meta) text-base-content/60"
+        >
+          {@index} of {@total}
+        </span>
+      </span>
+      <button
+        type="button"
+        id={"#{@id}-next"}
+        phx-click="mockup_next"
+        aria-label={"Next #{@noun}"}
+        disabled={@index == @total}
+        class={pager_chevron_class(@index == @total)}
+      >
+        <.icon name="hero-chevron-right" class="size-6" />
+      </button>
+    </nav>
+    """
+  end
+
+  @doc """
+  The embedded mockup viewer's zoom control (RE393): − · Fit · + over the bottom-right of the
+  frame — an HTML mockup's or (RE405) a screenshot's — 44px targets. It is client-owned — no
+  `phx-click`: `card_mockup_viewer/1`'s `.MockupRenderWidth` hook handles the clicks, rewrites the
+  label (`Fit`, `150%` … `400%`, or any whole percentage in between after a pinch on a
+  screenshot, e.g. `173%`) and toggles `disabled` (− at Fit, + at 400%). + and − step to the next
+  zoom step above / below the current zoom. The server renders the Fit state, − disabled.
+  """
+  attr :id, :string, default: "mockup-viewer-zoom"
+  attr :class, :any, default: nil
+
+  def mockup_viewer_zoom(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      role="group"
+      aria-label="Zoom"
+      class={[
+        "flex items-center rounded-full border border-base-300 bg-base-100 shadow-sm",
+        @class
+      ]}
+    >
+      <button
+        type="button"
+        id={"#{@id}-out"}
+        aria-label="Zoom out"
+        disabled
+        class={zoom_button_class()}
+      >
+        <.icon name="hero-minus" class="size-5" />
+      </button>
+      <button
+        type="button"
+        id={"#{@id}-reset"}
+        aria-label="Reset zoom to fit"
+        class="flex h-11 min-w-14 items-center justify-center font-mono text-(length:--m-meta) text-base-content"
+      >
+        Fit
+      </button>
+      <button type="button" id={"#{@id}-in"} aria-label="Zoom in" class={zoom_button_class()}>
+        <.icon name="hero-plus" class="size-5" />
+      </button>
+    </div>
+    """
+  end
+
+  defp zoom_button_class, do: "flex size-11 items-center justify-center text-primary disabled:text-base-content/25"
+
+  defp pager_chevron_class(disabled?) do
+    [
+      "flex size-11 items-center justify-center",
+      if(disabled?, do: "text-base-content/25", else: "text-primary")
+    ]
+  end
+
+  @doc """
+  The mockup viewer's header on desktop (RE392): the `noun` (MOCKUP / SCREENSHOT), the item's
+  caption (truncated) and an "n of m" count, with the ←/→ · Esc key hint on the right. A label,
+  never a switcher — it has no buttons, links or `phx-click`; tiles, the arrow keys and swipe
+  switch. It has no display utility of its own: `class` supplies it (default `flex`), so
+  `card_mockup_viewer/1` renders it first in `<main>` with `hidden drawer:flex`.
+  """
+  attr :id, :string, default: "mockup-viewer-header"
+  attr :caption, :string, required: true
+  attr :index, :integer, required: true, doc: "1-based position of the item on screen"
+  attr :total, :integer, required: true
+  attr :noun, :string, default: "Mockup"
+
+  attr :count_noun, :string,
+    default: nil,
+    doc: "RE427: when set the count reads `<count_noun> n of m` and the noun label is not rendered"
+
+  attr :class, :any, default: nil, doc: "display classes; `flex` when nil"
+
+  def mockup_viewer_header(assigns) do
+    ~H"""
+    <header
+      id={@id}
+      class={[
+        "min-h-11 items-center gap-3 border-b border-base-300 bg-base-100 px-4 py-2",
+        @class || "flex"
+      ]}
+    >
+      <div class="flex min-w-0 flex-1 items-baseline gap-2">
+        <.section_label :if={!@count_noun} id={"#{@id}-noun"} class="shrink-0">
+          {@noun}
+        </.section_label>
+        <span id={"#{@id}-caption"} class="truncate text-sm font-semibold">{@caption}</span>
+        <span id={"#{@id}-count"} class="shrink-0 font-mono text-xs text-base-content/55">
+          <%= if @count_noun do %>
+            {@count_noun} {@index} of {@total}
+          <% else %>
+            {@index} of {@total}
+          <% end %>
+        </span>
+      </div>
+      <%!-- The kbds sit on their own lines so the text reads "← → switch"; whitespace between flex items never renders. --%>
+      <p id={"#{@id}-keys"} class="flex shrink-0 items-center gap-1 text-xs text-base-content/50">
+        <kbd class="kbd kbd-xs">←</kbd>
+        <kbd class="kbd kbd-xs">→</kbd> switch · <kbd class="kbd kbd-xs">Esc</kbd> back to card
+      </p>
+    </header>
+    """
+  end
+
+  @doc """
+  The same-tab viewer (RE380, RE390): the item on screen (`current_key` among `items`, the
+  `HamacaWeb.CardMedia` shape) fills the right of the screen — an HTML item framed in the sandboxed
+  iframe (`HamacaWeb.mockup_sandbox/0`), an image in an `overflow-auto` frame (on the web at its
+  natural size, never scaled to fit) — the frame box carrying the item's kind as `data-kind` — and the card shrinks to a 340px left sheet — ← Back to card, the
+  stage chip, ref and title, the `:gate` slot (the caller's `card_gate_panel/1`), then the open
+  section (`label` "Mockups" / "Screenshots") with the current tile ringed. On desktop
+  `mockup_viewer_header/1` sits over the mockup and names it (noun · caption · n of m, plus the
+  key hint) — a label, not a switcher. Below the `drawer:` breakpoint the sheet and that header
+  are hidden and `mockup_viewer_bar/1` is the one top bar.
+
+  Embedded (`embed`, RE393), the phone top bar is instead `mobile_nav_bar/1` (same
+  `\#{id}-bar` id: "‹ Card", the caption, and on HTML items the phone / desktop render-width
+  `segmented_control/1`), and `mockup_viewer_pager/1` sits under the frame. The colocated
+  `.MockupRenderWidth` hook on the stable `\#{id}-stage` owns the width: it keeps the choice in
+  sessionStorage and re-applies `data-render` on each freshly keyed frame box — desktop lays the
+  iframe out at 1280px and CSS-scales it to the box width. Embedded, `mockup_viewer_zoom/1` zooms
+  the frame; an image item (RE405) fits the box width (never upscaled past its natural width),
+  zooms by width with the control or a two-finger pinch (1×–4×) and pans with one finger.
+
+  It is a `fixed` overlay, so whatever page is underneath stays mounted. ←/→ push
+  `mockup_prev`/`mockup_next` and Esc pushes `mockup_back` (window bindings, guarded by
+  `ArrowKeyGuard` while typing), and a horizontal swipe on an HTML item at Fit does the same through
+  the colocated `.MockupSwipe` hook — an image item never pages by swipe (a sideways drag pans it).
+  """
+  attr :id, :string, default: "mockup-viewer"
+  attr :ref, :string, required: true
+  attr :card, :any, required: true, doc: "needs `title`"
+  attr :stage_name, :string, required: true
+  attr :stage_owner, :atom, values: [:human, :ai], required: true
+  attr :items, :list, required: true, doc: "the open section's `HamacaWeb.CardMedia` items (no placeholders)"
+  attr :current_key, :any, required: true, doc: "the key of the item on screen"
+  attr :back_patch, :string, required: true, doc: "the card's drawer URL"
+  attr :item_href, :any, required: true, doc: "item key -> that item's viewer URL"
+  attr :label, :string, default: "Mockups", doc: "the sheet's section label"
+  attr :noun, :string, default: "Mockup", doc: "names one item: caption fallback, frame title, arrow labels"
+  attr :embed, :boolean, default: false, doc: "native host: no web top bar to sit under"
+  attr :count_noun, :string, default: nil, doc: "RE427: the header count's noun (`Image 3 of 3`)"
+  attr :show_captions, :boolean, default: false, doc: "RE427: filenames under the sheet's tiles"
+  attr :byline, :string, default: nil, doc: "RE427: a line under the sheet's section (`From a note by …`)"
+
+  slot :gate, doc: "the card's gate panel (review or question), rendered at the top of the sheet"
+
+  def card_mockup_viewer(assigns) do
+    index = Enum.find_index(assigns.items, &(&1.key == assigns.current_key)) || 0
+    item = Enum.at(assigns.items, index) || %{key: assigns.current_key, src: nil, caption: nil, kind: :html}
+    caption = item.caption || assigns.noun
+
+    assigns =
+      assign(assigns,
+        index: index + 1,
+        item: item,
+        caption: caption,
+        zoomable: assigns.embed,
+        frame_title: "#{assigns.noun}: #{caption} (#{assigns.ref})"
+      )
+
+    ~H"""
+    <div
+      id={@id}
+      phx-hook="ArrowKeyGuard"
+      data-guard-keys="ArrowLeft,ArrowRight,Escape"
+      class={[
+        "fixed inset-0 z-50 flex flex-col bg-base-200 drawer:z-40 drawer:flex-row",
+        !@embed && "drawer:top-[53px]"
+      ]}
+    >
+      <div
+        id={"#{@id}-key-prev"}
+        class="hidden"
+        phx-window-keydown="mockup_prev"
+        phx-key="ArrowLeft"
+      >
+      </div>
+      <div
+        id={"#{@id}-key-next"}
+        class="hidden"
+        phx-window-keydown="mockup_next"
+        phx-key="ArrowRight"
+      >
+      </div>
+      <div id={"#{@id}-key-back"} class="hidden" phx-window-keydown="mockup_back" phx-key="Escape">
+      </div>
+      <.mockup_viewer_bar
+        :if={!@embed}
+        id={"#{@id}-bar"}
+        caption={@caption}
+        index={@index}
+        total={length(@items)}
+        back_patch={@back_patch}
+        noun={@noun}
+        class="drawer:hidden"
+      />
+      <.mobile_nav_bar
+        :if={@embed}
+        id={"#{@id}-bar"}
+        title={@caption}
+        back_label="Card"
+        back_patch={@back_patch}
+        class="drawer:hidden"
+      >
+        <:actions :if={@item.kind == :html}>
+          <%!-- Client-owned once mounted: `.MockupRenderWidth` moves the active segment, so a
+          server patch must never redraw it. --%>
+          <div id={"#{@id}-width-wrap"} phx-update="ignore">
+            <.segmented_control
+              id={"#{@id}-width"}
+              aria_label="Render width"
+              variant={:icon}
+              class="mr-1"
+            >
+              <:option
+                id={"#{@id}-width-phone"}
+                label="Phone width"
+                icon="hero-device-phone-mobile"
+                active
+                data-render-choice="phone"
+              />
+              <:option
+                id={"#{@id}-width-desktop"}
+                label="Desktop, fit to width"
+                icon="hero-computer-desktop"
+                data-render-choice="desktop"
+              />
+            </.segmented_control>
+          </div>
+        </:actions>
+      </.mobile_nav_bar>
+      <aside
+        id={"#{@id}-sheet"}
+        class="hidden w-[340px] shrink-0 flex-col bg-base-100 drawer:flex"
+      >
+        <div class="border-b border-base-300 px-3 py-2.5">
+          <.link
+            id={"#{@id}-back"}
+            patch={@back_patch}
+            class="btn btn-ghost btn-sm gap-1.5 px-2"
+          >
+            <span aria-hidden="true">←</span>Back to card
+          </.link>
+        </div>
+        <div class="flex flex-col gap-1.5 border-b border-base-300 px-4 py-3">
+          <div class="flex items-center gap-2">
+            <span
+              id={"#{@id}-stage-chip"}
+              class={[
+                "badge badge-sm h-5 rounded-[4px] border-none text-[12px]",
+                if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
+              ]}
+            >
+              {@stage_name}
+            </span>
+            <span class="font-mono text-xs text-base-content/65">{@ref}</span>
+          </div>
+          <h2 id={"#{@id}-card-title"} class="text-base font-semibold leading-[1.3]">
+            {@card.title}
+          </h2>
+        </div>
+        <div class="flex flex-1 flex-col gap-5 overflow-y-auto p-4">
+          {render_slot(@gate)}
+          <div>
+            <.card_mockups_section
+              id={"#{@id}-mockups"}
+              tile_id={"#{@id}-mockup"}
+              items={@items}
+              item_href={@item_href}
+              label={@label}
+              noun={@noun}
+              current={@current_key}
+              show_captions={@show_captions}
+              replace
+            />
+            <p
+              :if={@byline}
+              id={"#{@id}-byline"}
+              class="mt-3 text-[11px] leading-[1.45] text-base-content/50"
+            >
+              {@byline}
+            </p>
+          </div>
+        </div>
+      </aside>
+      <main
+        id={"#{@id}-main"}
+        phx-hook=".MockupSwipe"
+        class="flex min-h-0 min-w-0 flex-1 flex-col bg-base-200 drawer:border-l drawer:border-base-300 drawer:shadow-[-12px_0_24px_-12px_var(--color-base-300)]"
+      >
+        <.mockup_viewer_header
+          id={"#{@id}-header"}
+          caption={@caption}
+          index={@index}
+          total={length(@items)}
+          noun={@noun}
+          count_noun={@count_noun}
+          class="hidden drawer:flex"
+        />
+        <div
+          id={"#{@id}-stage"}
+          phx-hook=".MockupRenderWidth"
+          data-width-toggle={@embed && "#{@id}-width"}
+          class="relative min-h-0 flex-1 drawer:p-4"
+        >
+          <%!-- Keyed by the item on screen, so switching REPLACES the frame instead of
+          patching its src: a src change navigates the frame and pushes a joint-history entry
+          (browser Back would then step the frame, not leave the viewer), while a fresh
+          iframe's first load adds none. An image scrolls both ways — at its natural size on the
+          web, at the hook's fit × zoom width embedded: `max-w-none` undoes preflight's
+          `img { max-width: 100% }`. --%>
+          <div
+            id={"#{@id}-frame-box-#{@item.key}"}
+            data-kind={@item.kind}
+            data-render={@zoomable and @item.kind == :html and "phone"}
+            data-zoom={@zoomable && "1"}
+            class={[
+              "h-full bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm",
+              mockup_box_overflow(@item.kind, @zoomable),
+              "data-[render=desktop]:bg-base-200"
+            ]}
+          >
+            <img
+              :if={@item.kind == :image}
+              id={"#{@id}-image"}
+              src={@item.src}
+              alt={@caption}
+              class="block max-w-none"
+            />
+            <%!-- Embedded, the sizer carries the zoomed frame's scaled width (a transform never
+            changes layout size), so the box scrolls sideways when zoomed past Fit. --%>
+            <div
+              :if={@zoomable and @item.kind == :html}
+              id={"#{@id}-frame-sizer"}
+              data-zoom-sizer
+              class="relative h-full overflow-hidden"
+            >
+              <.mockup_viewer_iframe id={"#{@id}-frame"} src={@item.src} title={@frame_title} />
+            </div>
+            <.mockup_viewer_iframe
+              :if={@item.kind != :image and !@zoomable}
+              id={"#{@id}-frame"}
+              src={@item.src}
+              title={@frame_title}
+            />
+          </div>
+          <%!-- Client-owned like the width toggle: `.MockupRenderWidth` rewrites the label and
+          the disabled flags, so a server patch must never redraw it. --%>
+          <div
+            :if={@zoomable}
+            id={"#{@id}-zoom-wrap"}
+            phx-update="ignore"
+            class="absolute right-3 bottom-3 z-10"
+          >
+            <.mockup_viewer_zoom id={"#{@id}-zoom"} />
+          </div>
+        </div>
+        <.mockup_viewer_pager
+          :if={@embed}
+          id={"#{@id}-pager"}
+          index={@index}
+          total={length(@items)}
+          noun={@noun}
+          class="drawer:hidden"
+        />
+      </main>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".MockupRenderWidth">
+        // RE393 — the embedded viewer's phone / desktop render width. Phone (the server default)
+        // lets the iframe fill the frame box; desktop lays it out at a 1280px viewport and
+        // CSS-scales it to the box width (mockup_preview/1's technique), its layout height
+        // stretched so the scaled frame fills the box. The choice lives in sessionStorage, so it
+        // holds across paging and reopening for the rest of the session.
+        //
+        // The frame box is keyed by item and replaced on every switch (resetting data-render),
+        // so the hook sits on the stable stage and re-applies whenever its children change.
+        // Outside embed the stage has no toggle and the box no data-render: every step no-ops.
+        const KEY = "relay:mockup-render"
+        const DESKTOP_WIDTH = 1280
+        // Zoom multiplies the fit scale; ZOOM_STEPS[0] is Fit. Not persisted: it resets to Fit on
+        // every item switch (a new frame box) and every width-mode switch. The buttons step
+        // through ZOOM_STEPS; a pinch on a screenshot (RE405) lands anywhere between its ends.
+        const ZOOM_STEPS = [1, 1.5, 2, 3, 4]
+        const ZOOM_MIN = ZOOM_STEPS[0]
+        const ZOOM_MAX = ZOOM_STEPS[ZOOM_STEPS.length - 1]
+        const ZOOM_BUTTON = '[id$="-zoom-in"], [id$="-zoom-out"], [id$="-zoom-reset"]'
+        const clampZoom = (z) => Math.min(Math.max(z, ZOOM_MIN), ZOOM_MAX)
+        const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+
+        export default {
+          mounted() {
+            this.zoom = ZOOM_MIN
+            this.apply = () => this.render()
+            this.onClick = (e) => {
+              const zoomButton = e.target.closest(ZOOM_BUTTON)
+              if (zoomButton && this.el.contains(zoomButton)) return this.zoomBy(zoomButton.id)
+              const choice = e.target.closest("[data-render-choice]")
+              const toggleId = this.el.dataset.widthToggle
+              if (!choice || !toggleId || !choice.closest(`#${toggleId}`)) return
+              sessionStorage.setItem(KEY, choice.dataset.renderChoice)
+              this.render()
+            }
+            document.addEventListener("click", this.onClick)
+            // Pinch on an embedded screenshot. touchmove is non-passive so a two-finger move can
+            // stop the native gesture; a one-finger drag is left alone and scrolls the box.
+            this.onTouchStart = (e) => this.pinchStart(e)
+            this.onTouchMove = (e) => this.pinchMove(e)
+            this.onTouchEnd = (e) => { if (e.touches.length < 2) this.pinch = null }
+            this.el.addEventListener("touchstart", this.onTouchStart, { passive: true })
+            this.el.addEventListener("touchmove", this.onTouchMove, { passive: false })
+            this.el.addEventListener("touchend", this.onTouchEnd, { passive: true })
+            this.el.addEventListener("touchcancel", this.onTouchEnd, { passive: true })
+            // childList/subtree only: the inline styles and data-zoom render() writes are
+            // attributes, so they never re-trigger it.
+            this.mutations = new MutationObserver(this.apply)
+            this.mutations.observe(this.el, { childList: true, subtree: true })
+            this.resizes = new ResizeObserver(this.apply)
+            this.resizes.observe(this.el)
+            this.render()
+          },
+          updated() { this.render() },
+          destroyed() {
+            document.removeEventListener("click", this.onClick)
+            this.el.removeEventListener("touchstart", this.onTouchStart)
+            this.el.removeEventListener("touchmove", this.onTouchMove)
+            this.el.removeEventListener("touchend", this.onTouchEnd)
+            this.el.removeEventListener("touchcancel", this.onTouchEnd)
+            this.mutations.disconnect()
+            this.resizes.disconnect()
+          },
+          mode() {
+            return sessionStorage.getItem(KEY) === "desktop" ? "desktop" : "phone"
+          },
+          // + goes to the next step above the current zoom, − to the next below — so a pinched
+          // 173% steps to 200% or 150%.
+          zoomBy(id) {
+            if (id.endsWith("-zoom-in")) this.zoom = ZOOM_STEPS.find((z) => z > this.zoom) ?? ZOOM_MAX
+            else if (id.endsWith("-zoom-out")) this.zoom = [...ZOOM_STEPS].reverse().find((z) => z < this.zoom) ?? ZOOM_MIN
+            else this.zoom = ZOOM_MIN
+            this.render()
+          },
+          // The zoomable screenshot box, or null (an HTML item, or the web viewer's natural size).
+          imageBox() {
+            const box = this.el.querySelector('[data-kind="image"][data-zoom]')
+            const img = box && box.querySelector("img")
+            return img ? { box, img } : null
+          },
+          render() {
+            const mode = this.mode()
+            this.syncToggle(mode)
+            const image = this.imageBox()
+            if (image) return this.renderImage(image)
+            const box = this.el.querySelector("[data-render]")
+            const frame = box && box.querySelector("iframe")
+            if (!frame) return
+            if (box.dataset.render !== mode) box.dataset.render = mode
+            if (box.id !== this.zoomBoxId || mode !== this.zoomMode) this.zoom = ZOOM_MIN
+            this.zoomBoxId = box.id
+            this.zoomMode = mode
+            const z = this.zoom
+            this.syncZoom(box, z)
+            const sizer = box.querySelector("[data-zoom-sizer]")
+            if (mode === "phone" && z === ZOOM_MIN) {
+              if (sizer) sizer.style.width = ""
+              frame.style.width = frame.style.height = ""
+              frame.style.transform = frame.style.transformOrigin = ""
+              return
+            }
+            const fit = mode === "desktop" ? box.clientWidth / DESKTOP_WIDTH : 1
+            const layoutWidth = mode === "desktop" ? DESKTOP_WIDTH : box.clientWidth
+            const scale = fit * z
+            // Size the sizer first: once it overflows, a classic horizontal scrollbar takes
+            // height from the box, and the frame's layout height must account for it.
+            if (sizer) sizer.style.width = `${layoutWidth * scale}px`
+            frame.style.width = `${layoutWidth}px`
+            frame.style.height = `${box.clientHeight / scale}px`
+            frame.style.transformOrigin = "top left"
+            frame.style.transform = `scale(${scale})`
+          },
+          // RE405 — a screenshot fits the box width (never upscaled past its natural width) and
+          // zooms by its layout width, not a transform, so the overflow-auto box pans both ways.
+          renderImage({ box, img }) {
+            if (box.id !== this.zoomBoxId) this.zoom = ZOOM_MIN
+            this.zoomBoxId = box.id
+            this.syncZoom(box, this.zoom)
+            // naturalWidth is 0 until the image loads, and the stage's ResizeObserver never sees
+            // the load — re-render once it lands. Same listener + options: added at most once.
+            if (!img.complete || !img.naturalWidth) return img.addEventListener("load", this.apply, { once: true })
+            const width = `${Math.min(img.naturalWidth, box.clientWidth) * this.zoom}px`
+            if (img.style.width !== width) img.style.width = width
+          },
+          pinchStart(e) {
+            const image = e.touches.length === 2 && this.imageBox()
+            this.pinch = image && { distance: distance(...e.touches), zoom: this.zoom }
+          },
+          // Scales by the change in finger distance, keeping the content point under the
+          // fingers' midpoint under it.
+          pinchMove(e) {
+            if (e.touches.length !== 2) return
+            const image = this.imageBox()
+            if (!image) return
+            e.preventDefault()
+            if (!this.pinch) return
+            const { box } = image
+            const [a, b] = e.touches
+            const rect = box.getBoundingClientRect()
+            const x = (a.clientX + b.clientX) / 2 - rect.left - box.clientLeft
+            const y = (a.clientY + b.clientY) / 2 - rect.top - box.clientTop
+            const before = this.zoom
+            const after = clampZoom(this.pinch.zoom * distance(a, b) / this.pinch.distance)
+            const contentX = (box.scrollLeft + x) / before
+            const contentY = (box.scrollTop + y) / before
+            this.zoom = after
+            this.renderImage(image)
+            box.scrollLeft = contentX * after - x
+            box.scrollTop = contentY * after - y
+          },
+          // The zoom control is phx-update="ignore": the hook owns its label and disabled flags.
+          // Text is only written when it changes — a text write is a childList mutation.
+          syncZoom(box, z) {
+            if (box.dataset.zoom !== undefined && box.dataset.zoom !== String(z)) box.dataset.zoom = String(z)
+            const control = this.el.querySelector('[role="group"][aria-label="Zoom"]')
+            if (!control) return
+            const label = z === ZOOM_MIN ? "Fit" : `${Math.round(z * 100)}%`
+            const reset = control.querySelector('[id$="-zoom-reset"]')
+            if (reset.textContent.trim() !== label) reset.textContent = label
+            control.querySelector('[id$="-zoom-out"]').disabled = z <= ZOOM_MIN
+            control.querySelector('[id$="-zoom-in"]').disabled = z >= ZOOM_MAX
+          },
+          // The toggle is phx-update="ignore": move the active look by swapping the server's
+          // own active / inactive class lists between segments, so no class is re-typed here.
+          syncToggle(mode) {
+            const toggleId = this.el.dataset.widthToggle
+            const toggle = toggleId && document.getElementById(toggleId)
+            if (!toggle) return
+            const segments = [...toggle.querySelectorAll("[data-render-choice]")]
+            const active = segments.find((s) => s.dataset.active === "true")
+            const target = segments.find((s) => s.dataset.renderChoice === mode)
+            if (!active || !target || active === target) return
+            const activeClass = active.className
+            active.className = target.className
+            target.className = activeClass
+            active.dataset.active = "false"
+            target.dataset.active = "true"
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".MockupSwipe">
+        export default {
+          mounted() {
+            this.el.addEventListener("touchstart", (e) => {
+              // A gesture that ever had two fingers is a pinch, never a swipe.
+              if (e.touches.length > 1) this.multi = true
+              const t = e.changedTouches[0]
+              this.start = { x: t.clientX, y: t.clientY }
+            }, { passive: true })
+            this.el.addEventListener("touchend", (e) => {
+              if (e.touches.length > 0) return
+              const multi = this.multi
+              this.multi = false
+              if (!this.start || multi) return (this.start = null)
+              const t = e.changedTouches[0]
+              const dx = t.clientX - this.start.x
+              const dy = t.clientY - this.start.y
+              this.start = null
+              // A screenshot never pages by swipe: a sideways drag pans it (RE405).
+              if (this.el.querySelector('[data-kind="image"]')) return
+              // Zoomed past Fit, a sideways drag pans the mockup; it never pages.
+              const box = this.el.querySelector("[data-zoom]")
+              if (box && box.dataset.zoom !== "1") return
+              if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy)) {
+                this.pushEvent(dx < 0 ? "mockup_next" : "mockup_prev", {})
+              }
+            }, { passive: true })
+          }
+        }
+      </script>
+    </div>
+    """
+  end
+
+  # An image scrolls both ways (natural size on the web, fit-to-width and zoomable embedded);
+  # embedded HTML scrolls sideways when zoomed (vertical scroll stays inside the iframe); the web
+  # viewer's frame clips, desktop mode scrolling.
+  defp mockup_box_overflow(:image, _zoomable), do: "overflow-auto"
+  defp mockup_box_overflow(_kind, true = _zoomable), do: "overflow-x-auto overflow-y-hidden"
+  defp mockup_box_overflow(_kind, _zoomable), do: "overflow-hidden data-[render=desktop]:overflow-y-auto"
+
+  attr :id, :string, required: true
+  attr :src, :string, required: true
+  attr :title, :string, required: true
+
+  defp mockup_viewer_iframe(assigns) do
+    ~H"""
+    <iframe
+      id={@id}
+      src={@src}
+      sandbox={HamacaWeb.mockup_sandbox()}
+      title={@title}
+      class="block h-full w-full border-0"
+    >
+    </iframe>
+    """
+  end
+
+  @doc """
+  An icon button that copies `text` to the clipboard (RE324), then flips to a success check for
+  ~1.6s before reverting. The one shared copy control — use it instead of hand-writing another
+  clipboard hook. The copied state is a `data-copied="true"` attribute the colocated hook sets,
+  styled with `data-[copied=true]:` / `group-data-[copied=true]:` variants, so it uses theme
+  tokens only.
+
+  ## Examples
+
+      <.copy_button id="card-branch-copy" text={@card.branch} label="Copy branch name" />
+  """
+  attr :id, :string, required: true
+  attr :text, :string, required: true, doc: "the exact string written to the clipboard"
+  attr :label, :string, default: "Copy", doc: "the accessible name (aria-label and title)"
+  attr :class, :any, default: nil
+
+  def copy_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={@id}
+      phx-hook=".CopyButton"
+      data-copy-text={@text}
+      aria-label={@label}
+      title={@label}
+      class={[
+        "group btn btn-ghost btn-xs btn-square shrink-0 text-base-content/60 hover:text-base-content data-[copied=true]:text-success",
+        @class
+      ]}
+    >
+      <span class="copy-button-idle inline-flex group-data-[copied=true]:hidden">
+        <.icon name="hero-clipboard-document" class="size-3.5" />
+      </span>
+      <span class="copy-button-done hidden group-data-[copied=true]:inline-flex">
+        <.icon name="hero-check" class="size-3.5" />
+        <span class="sr-only">Copied</span>
+      </span>
+    </button>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".CopyButton">
+      export default {
+        mounted() {
+          this.el.addEventListener("click", () => {
+            navigator.clipboard.writeText(this.el.dataset.copyText).then(() => {
+              this.el.dataset.copied = "true"
+              clearTimeout(this.timer)
+              this.timer = setTimeout(() => { delete this.el.dataset.copied }, 1600)
+            })
+          })
+        },
+        destroyed() {
+          clearTimeout(this.timer)
+        }
+      }
+    </script>
+    """
+  end
+
+  # RE324 — the drawer rail's branch name: one truncated mono line with the full name in `title`;
+  # a new-tab link to the branch on GitHub when `href` could be derived from the card's PR URL,
+  # otherwise plain, selectable text.
+  attr :branch, :string, required: true
+  attr :href, :string, default: nil
+
+  defp branch_name(assigns) do
+    ~H"""
+    <.link
+      :if={@href}
+      id="card-branch"
+      href={@href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={@branch}
+      class="min-w-0 flex-1 truncate font-mono text-xs text-base-content/80 hover:text-primary hover:underline"
+    >
+      {@branch}
+    </.link>
+    <span
+      :if={!@href}
+      id="card-branch"
+      title={@branch}
+      class="min-w-0 flex-1 truncate font-mono text-xs text-base-content/80"
+    >
+      {@branch}
+    </span>
+    """
+  end
+
+  @doc """
+  The drawer's dependency rail list (RE93): one ghost chip per card — mono ref + truncated
+  title, a success tick and a struck-through ref when the blocker is satisfied, and a ✕ when
+  the list is editable.
+
+  One component for both directions: **Blocked by** (`removable`) and **Blocks** (read-only).
+  `satisfied?` is optional — the Blocks direction does not carry it, and its absence reads as
+  false. Semantic tokens only; no color literals.
+
+  ## Examples
+
+      <.dependency_list id="card-blocked-by" cards={@dependencies} removable />
+      <.dependency_list id="card-blocks" cards={@dependents} />
+  """
+  attr :id, :string, required: true
+
+  attr :cards, :list,
+    required: true,
+    doc: "[%{ref, title, satisfied?}] — satisfied? optional (absent in the Blocks direction)"
+
+  attr :removable, :boolean, default: false, doc: "render the ✕ that fires remove_dependency"
+  attr :empty_text, :string, default: "None"
+
+  def dependency_list(assigns) do
+    ~H"""
+    <div id={@id} class="dependency-list flex flex-col gap-1">
+      <span :if={@cards == []} class="text-base-content/55">{@empty_text}</span>
+      <div
+        :for={card <- @cards}
+        id={"#{@id}-#{card.ref}"}
+        class="dependency-chip badge badge-ghost badge-sm flex w-full items-center justify-start gap-1"
+        data-satisfied={to_string(Map.get(card, :satisfied?, false))}
+      >
+        <.icon
+          :if={Map.get(card, :satisfied?, false)}
+          name="hero-check-circle"
+          class="size-3 shrink-0 text-success"
+        />
+        <span class={["shrink-0 font-mono", Map.get(card, :satisfied?, false) && "line-through"]}>
+          {card.ref}
+        </span>
+        <span class="truncate text-base-content/65">{card.title}</span>
+        <button
+          :if={@removable}
+          type="button"
+          id={"#{@id}-remove-#{card.ref}"}
+          class="btn btn-ghost btn-xs btn-square ml-auto shrink-0"
+          phx-click="remove_dependency"
+          phx-value-ref={card.ref}
+          aria-label={"Remove #{card.ref} as a blocker"}
+        >
+          <.icon name="hero-x-mark" class="size-3" />
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  The one modal scrim (RE237).
+
+  Was a fixed, inset-0, z-50 div with a hardcoded translucent mid-grey background, repeated
+  verbatim at three call sites. The color lives in `.modal-scrim` in `app.css` (mirrored into
+  `storybook.css`) because dark needs a separately tuned veil, which a single `color-mix`
+  cannot express.
+
+  ## Examples
+
+      <.modal_scrim phx-click="close-drawer" />
+  """
+  attr :class, :string, default: nil
+  attr :rest, :global
+
+  def modal_scrim(assigns) do
+    ~H"""
+    <%!-- Enum.reject is load-bearing: a class list drops a nil VALUE but still emits the
+    separator, so `["modal-scrim", nil]` renders `class="modal-scrim "` (trailing space) and
+    fails the exact-class pin in core_components_test.exs. --%>
+    <div class={Enum.reject(["modal-scrim", @class], &is_nil/1)} {@rest}></div>
+    """
+  end
+
+  @doc """
+  The design system's small mono data/label style (RE237).
+
+  10px `--font-mono` at the `base-content/55` ink tier — the token form of the hardcoded
+  10px mono-with-grey-ink style string that repeated 12× in the flow editor. Pass `tone` to
+  recolor it (e.g. `"text-secondary"`).
+
+  ## Examples
+
+      <.meta_label>agent</.meta_label>
+      <.meta_label tone="text-secondary">AI</.meta_label>
+  """
+  attr :class, :string, default: nil
+  attr :tone, :string, default: nil
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  def meta_label(assigns) do
+    ~H"""
+    <span class={["font-mono text-[10px]", @tone || "text-base-content/55", @class]} {@rest}>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  @doc """
+  The settings/flow page `<h1>` (RE237).
+
+  22px / 600 / -0.02em at full ink — the shared form of a style string that repeated 7× across
+  settings, flow settings and flow metrics. The per-page bottom margin varies, so pass it in
+  via `class` (`mb-1` or `mb-1.5`).
+
+  ## Examples
+
+      <.page_heading class="mb-1.5">Stages</.page_heading>
+  """
+  attr :class, :string, default: nil
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  def page_heading(assigns) do
+    ~H"""
+    <h1 class={["text-[22px] font-semibold tracking-[-0.02em] text-base-content", @class]} {@rest}>
+      {render_slot(@inner_block)}
+    </h1>
+    """
+  end
+
+  @doc """
+  The full-size image viewer (RLY-157) — since RE322 a carousel over the clicked image's group.
+
+  A single native `<dialog>` rendered **once** in the root layout, shared by every image
+  on the page. `showModal()`, stepping, and the caption/counter are driven client-side by
+  `assets/js/image_lightbox.js`, which delegates a `click` listener on `document` — markdown
+  content re-renders constantly, so per-image listeners would not survive a LiveView patch.
+  The chrome inside is `image_lightbox_viewer/1`, rendered empty here for the JS to fill in.
+
+  Native `<dialog>` is deliberate: focus trapping and backdrop rendering come from the platform,
+  and the `<form method="dialog">` backdrop is click-outside-to-close with no JS. Esc is closed by
+  the JS (RE322), which is what keeps the key from also closing the card drawer behind the viewer.
+  Takes no attributes.
+
+  ## Examples
+
+      <.image_lightbox />
+  """
+  def image_lightbox(assigns) do
+    ~H"""
+    <dialog id="image-lightbox" class="modal">
+      <div class="modal-box max-w-[90vw] max-h-[90vh] bg-transparent p-0 shadow-none">
+        <.image_lightbox_viewer id="image-lightbox" />
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button aria-label="Close">close</button>
+      </form>
+    </dialog>
+    """
+  end
+
+  @doc """
+  The image viewer's chrome (RE322): the image with Previous/Next `btn btn-circle`s on its left and
+  right edges, and a caption chip plus an `N / M` position counter beneath it.
+
+  `image_lightbox/1` renders it empty — a lone image with nothing to caption — and
+  `assets/js/image_lightbox.js` fills it in and flips these same `hidden` attributes as the viewer
+  steps, so the server-rendered state and every JS state are one markup. The buttons and the
+  counter share one switch, `counter`: a single-image group shows none of them and looks exactly
+  like the pre-carousel viewer. Storybook renders it with values to show a state.
+
+  ## Examples
+
+      <.image_lightbox_viewer id="image-lightbox" />
+      <.image_lightbox_viewer id="preview" src="/images/a.png" caption="Review drawer" counter="2 / 5" />
+  """
+  attr :id, :string, required: true, doc: "prefix of the -img/-prev/-next/-caption/-counter element ids"
+  attr :src, :string, default: ""
+  attr :alt, :string, default: ""
+  attr :caption, :string, default: nil, doc: "nil hides the caption chip"
+
+  attr :counter, :string,
+    default: nil,
+    doc: ~s(the position, e.g. "2 / 5"; nil hides the counter and both buttons)
+
+  def image_lightbox_viewer(assigns) do
+    ~H"""
+    <div class="flex flex-col items-center gap-2">
+      <div class="relative flex min-w-64 justify-center">
+        <img
+          id={"#{@id}-img"}
+          src={@src}
+          alt={@alt}
+          class="max-h-[80vh] max-w-full rounded object-contain"
+        />
+        <button
+          id={"#{@id}-prev"}
+          type="button"
+          hidden={is_nil(@counter)}
+          aria-label="Previous image"
+          class={["left-2", lightbox_nav_class()]}
+        >
+          <.icon name="hero-chevron-left" class="size-5" />
+        </button>
+        <button
+          id={"#{@id}-next"}
+          type="button"
+          hidden={is_nil(@counter)}
+          aria-label="Next image"
+          class={["right-2", lightbox_nav_class()]}
+        >
+          <.icon name="hero-chevron-right" class="size-5" />
+        </button>
+      </div>
+      <div class="flex max-w-full items-center gap-2">
+        <span
+          id={"#{@id}-caption"}
+          hidden={is_nil(@caption)}
+          class="truncate rounded bg-base-100/85 px-2.5 py-1 text-sm text-base-content shadow-sm"
+        >
+          {@caption}
+        </span>
+        <span
+          id={"#{@id}-counter"}
+          hidden={is_nil(@counter)}
+          class="shrink-0 rounded bg-base-200/85 px-2 py-1 font-mono text-xs tabular-nums text-base-content/70 shadow-sm"
+        >
+          {@counter}
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  # RE322 — translucent so Previous/Next stay readable over any screenshot, on theme tokens so they
+  # flip with data-theme.
+  defp lightbox_nav_class do
+    "btn btn-circle absolute top-1/2 -translate-y-1/2 border-base-300 bg-base-100/80 text-base-content shadow-md backdrop-blur-sm hover:bg-base-100"
+  end
+
+  @doc """
+  RE356 — the card drawer's one **Plan** section (`docs/designs/Relay Card Detail v5.dc.html`,
+  scenario "Running fine · DE4", annotation #17 "Plan is a header plus tasks, written together").
+
+  The header row is the violet accent bar, `PLAN`, and — when there are tasks — the `done/total`
+  count and green progress bar. Under it, the card's `plan` text is the section header, clamped
+  behind the existing measured Expand/Collapse (`expanded_plan` / `toggle_plan`) and editable in
+  place (`edit_plan` / `save_card_plan` / `cancel_plan`); an archived card renders it read-only.
+  With no plan and no tasks the dashed box explains the empty state.
+
+  Then the tasks, as an accordion: one open at a time (`open_task_id`). A row's head holds two
+  sibling buttons — the checkbox (`toggle_sub_task`) and the disclosure (`toggle_task_open`) —
+  and shows the task's derived meta (`Hamaca.Cards.task_body_meta/1`); a body-less task has no
+  meta, no chevron and nothing to open. The open row's head is sticky; its markdown body is
+  clamped past #{@task_clamp_lines} lines behind `Show all N lines` / `Collapse`
+  (`toggle_task_full`, state `task_full?`). The row whose id is `in_flight_task_id` is tinted
+  violet with an `AGENT IS HERE` chip. The `CodeBlockCopy` hook decorates each code block with a
+  language / line-count / copy strip.
+
+  ## Examples
+
+      <.plan_tasks
+        plan={@card.plan}
+        tasks={@card.sub_tasks}
+        progress={Hamaca.Cards.sub_task_progress(@card)}
+        open_task_id={@open_task_id}
+        task_full?={@task_full?}
+        in_flight_task_id={@in_flight_task_id}
+      />
+  """
+  attr :id, :string, default: "card-plan"
+  attr :plan, :string, default: nil
+  attr :tasks, :list, default: [], doc: "position-ordered tasks: maps with :id, :title, :done and an optional :body"
+  attr :progress, :map, required: true, doc: "`Hamaca.Cards.sub_task_progress/1` — %{done, total}"
+  attr :open_task_id, :any, default: nil, doc: "the single open task's id, or nil"
+  attr :task_full?, :boolean, default: false, doc: "whether the open task's clamp is released"
+  attr :in_flight_task_id, :any, default: nil, doc: "`Hamaca.Runs.in_flight_sub_task_id/1`"
+  attr :archived, :boolean, default: false, doc: "render the plan header read-only"
+  attr :editing_plan, :boolean, default: false
+  attr :expanded_plan, :boolean, default: false
+  attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
+  attr :plan_draft_restored, :boolean, default: false, doc: "RE362 — the Plan editor was reopened from a draft"
+
+  def plan_tasks(assigns) do
+    ~H"""
+    <section id={@id} class="space-y-2">
+      <.boxed_field
+        :if={!@archived}
+        id={@id}
+        value={@plan}
+        editing={@editing_plan}
+        form={@plan_form}
+        field={:plan}
+        edit_event="edit_plan"
+        save_event="save_card_plan"
+        cancel_event="cancel_plan"
+        change_event="draft_field"
+        discard_event="discard_draft"
+        draft_restored={@plan_draft_restored}
+        placeholder={plan_placeholder(@tasks)}
+        label="Plan"
+        accent={:secondary}
+        collapsible
+        expanded={@expanded_plan}
+        toggle_event="toggle_plan"
+        markdown
+        multiline
+        rows="16"
+      >
+        <:header_extra :if={@tasks != []}>
+          <.plan_progress id={@id} progress={@progress} />
+        </:header_extra>
+      </.boxed_field>
+      <div :if={@archived} class="commit-field-header">
+        <span class="commit-field-accent bg-secondary"></span>
+        <.section_label>Plan</.section_label>
+        <.plan_progress :if={@tasks != []} id={@id} progress={@progress} />
+      </div>
+      <div
+        :if={@archived && @plan}
+        id={"#{@id}-body"}
+        class="md overflow-x-auto text-xs leading-relaxed text-base-content/80"
+      >
+        {Hamaca.Markdown.to_html(@plan)}
+      </div>
+      <ul :if={@tasks != []} id={"#{@id}-tasks"} class="flex flex-col gap-1.5">
+        <.task_row
+          :for={task <- @tasks}
+          task={task}
+          open={task.id == @open_task_id}
+          full={@task_full?}
+          in_flight={task.id == @in_flight_task_id}
+        />
+      </ul>
+    </section>
+    """
+  end
+
+  defp plan_placeholder([]), do: "No plan yet — the Plan stage writes a short header and its tasks together. Add a plan…"
+
+  defp plan_placeholder(_tasks), do: "Add a plan header…"
+
+  attr :id, :string, required: true
+  attr :progress, :map, required: true
+
+  defp plan_progress(assigns) do
+    ~H"""
+    <span id={"#{@id}-count"} class="font-mono text-[10px] text-base-content/60">
+      {@progress.done}/{@progress.total}
+    </span>
+    <div class="h-1 max-w-[120px] flex-1 overflow-hidden rounded-full bg-base-300">
+      <div
+        class="h-full rounded-full bg-success transition-all"
+        style={"width:#{Cards.sub_task_pct(@progress) || 0}%"}
+      />
+    </div>
+    """
+  end
+
+  attr :task, :map, required: true
+  attr :open, :boolean, default: false
+  attr :full, :boolean, default: false
+  attr :in_flight, :boolean, default: false
+
+  defp task_row(assigns) do
+    meta = Cards.task_body_meta(Map.get(assigns.task, :body))
+
+    assigns =
+      assigns
+      |> assign(:meta, meta)
+      |> assign(:open?, assigns.open and meta != nil)
+      |> assign(:long?, meta != nil and meta.lines > @task_clamp_lines)
+
+    ~H"""
+    <li
+      id={"sub-task-#{@task.id}"}
+      data-in-flight={to_string(@in_flight)}
+      data-open={to_string(@open?)}
+      class={["rounded-lg border", task_row_tone(@in_flight)]}
+    >
+      <div
+        id={"sub-task-#{@task.id}-head"}
+        class={["flex items-center gap-2 rounded-lg px-2 py-1.5", task_head_tone(@open?)]}
+      >
+        <button
+          type="button"
+          id={"sub-task-#{@task.id}-check"}
+          phx-click="toggle_sub_task"
+          phx-value-id={@task.id}
+          aria-label={if(@task.done, do: "Mark incomplete", else: "Mark complete")}
+          class={[
+            "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+            if(@task.done,
+              do: "border-success bg-success text-success-content",
+              else: "border-base-300 bg-base-100 hover:border-base-content/30"
+            )
+          ]}
+        >
+          <.icon :if={@task.done} name="hero-check" class="size-3" />
+        </button>
+        <.dynamic_tag
+          tag_name={if(@meta, do: "button", else: "div")}
+          type={@meta && "button"}
+          id={"sub-task-#{@task.id}-toggle"}
+          phx-click={@meta && "toggle_task_open"}
+          phx-value-id={@meta && @task.id}
+          aria-expanded={@meta && to_string(@open?)}
+          class="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <span class={[
+            "min-w-0 flex-1 truncate text-sm leading-snug",
+            if(@task.done, do: "text-base-content/55 line-through", else: "text-base-content")
+          ]}>
+            {@task.title}
+          </span>
+          <%!-- phx-no-format keeps the chip and meta text flush — no stray whitespace in their text --%>
+          <span
+            :if={@in_flight}
+            id={"sub-task-#{@task.id}-agent-here"}
+            class="shrink-0 rounded bg-secondary/10 px-1.5 py-0.5 font-mono text-[9.5px] font-semibold tracking-[0.04em] text-secondary"
+            phx-no-format
+          >AGENT IS HERE</span>
+          <span
+            :if={@meta}
+            id={"sub-task-#{@task.id}-meta"}
+            class="shrink-0 whitespace-nowrap font-mono text-[10px] text-base-content/50"
+            phx-no-format
+          >{task_meta_label(@meta)}</span>
+          <.icon
+            :if={@meta}
+            name={if(@open?, do: "hero-chevron-up", else: "hero-chevron-down")}
+            class="size-3 shrink-0 text-base-content/50"
+          />
+        </.dynamic_tag>
+      </div>
+      <div
+        :if={@open?}
+        id={"sub-task-#{@task.id}-body"}
+        phx-hook="CodeBlockCopy"
+        class={["task-body md py-3 pr-3.5 pl-8", task_clamp_class(@long?, @full)]}
+      >
+        {Hamaca.Markdown.to_html(@task.body)}
+      </div>
+      <div :if={@open? and @long?} class="pt-0.5 pr-3 pb-[11px] pl-9">
+        <button
+          type="button"
+          id={"sub-task-#{@task.id}-full"}
+          phx-click="toggle_task_full"
+          class="flex items-center gap-1 text-xs font-semibold text-primary"
+        >
+          {if(@full, do: "Collapse", else: "Show all #{@meta.lines} lines")}
+          <.icon name={if(@full, do: "hero-chevron-up", else: "hero-chevron-down")} class="size-3" />
+        </button>
+      </div>
+    </li>
+    """
+  end
+
+  defp task_row_tone(true), do: "border-secondary/40 bg-secondary/5"
+  defp task_row_tone(false), do: "border-base-300 bg-base-200"
+
+  defp task_head_tone(true), do: "sticky top-0 drawer:-top-5 z-[2] border-b border-base-300 bg-base-100"
+  defp task_head_tone(false), do: nil
+
+  defp task_clamp_class(true, false), do: "task-body-clamped"
+  defp task_clamp_class(_long?, _full), do: nil
+
+  defp task_meta_label(%{lines: lines, code_blocks: blocks}) do
+    line_part = if lines == 1, do: "1 line", else: "#{lines} lines"
+
+    case blocks do
+      0 -> line_part
+      1 -> "#{line_part} · 1 code block"
+      n -> "#{line_part} · #{n} code blocks"
+    end
+  end
+
+  @doc """
+  Renders the card detail drawer (daisyUI `drawer drawer-end`): a scrim
+  plus a right-side panel with the card's stage chip (stage name in the
+  Human/AI owner color), its ref, an editable title, the plain-text
+  description (whitespace-preserved view or a textarea editor), and a
+  properties rail (status, dependencies, owners + Reassign, tags, updated time, flow path,
+  links, and the public fields).
+
+  Render it only while a card is selected. The ✕ button and the scrim
+  are `patch` links to `close_patch`, so closing is a URL change the
+  parent LiveView handles in `handle_params/3`.
+
+  Description renders reading/editing only. Spec and Plan render as collapsible
+  boxed fields (accent bar + eyebrow label + Collapse/Expand/Add toggle): a faded
+  collapsed preview with Show more by default, expanding to a full read; empty →
+  a dashed "Add…" box. `branch` renders as a mono chip and `pr_url` as a
+  "Review PR ↗" link chip in the properties rail; both are read-only (the runner
+  sets them via the API).
+
+  Events emitted (handled by the parent LiveView): `"save_card_title"`
+  (form params `card[title]`) on title submit, `"edit_description"` when
+  the description view is clicked, `"cancel_description"` on Cancel,
+  `"save_card_description"` (form params `card[description]`) on save,
+  `"toggle_spec"` / `"toggle_plan"` (flip the Spec/Plan expanded state), `"toggle_sub_task"` (phx-value id) / `"toggle_task_open"` (phx-value id) / `"toggle_task_full"` from the Plan section's task rows (RE356, see `plan_tasks/1`),
+  `"toggle_ai_result"` (flip the AI Result box between its summary and the Changes list),
+  `"move_card"` (phx-value ref + stage_id, no index — the server appends
+  to the target stage's bottom) when a "Move to…" target is picked,
+  `"add_owner"` / `"remove_owner"` (phx-value
+  `actor_type` + `user_id`) from the owners rail's controls,
+  `"toggle_reassign"` (open/close the owners Reassign picker), `"toggle_unused_fields"` (RE282:
+  expand/collapse the rail's unused-fields group), `"start_public_desc"` /
+  `"cancel_public_desc"` / `"save_public_desc"` (param `public_description`) for the public
+  description editor,
+  `"validate_comment"` / `"post_comment"` (form params `comment[body]`)
+  from the Notes composer, and `"answer_input"` (form params
+  `answer[body]`) from the needs-input panel's composer, and the MMF 15
+  review-panel events: `"review_approve"`, `"review_open_reject"`,
+  `"review_cancel_reject"`, and `"review_reject"` (form params `reject[note]` +
+  `reject[to]`).
+
+  ## Examples
+
+      <.card_drawer
+        id="card-drawer"
+        ref="RL3"
+        card={@selected_card}
+        stage_name="Spec"
+        stage_owner={:human}
+        close_patch={~p"/board"}
+        title_form={@title_form}
+      />
+  """
+  attr :id, :string, required: true
+  attr :ref, :string, required: true, doc: "the human-facing ref, e.g. RLY-3"
+
+  attr :card, :any,
+    required: true,
+    doc:
+      "a card exposing title, description, spec, tag, status, blocked_since, branch, plan, pr_url, a loaded owners list, inserted_at, and updated_at"
+
+  attr :stage_name, :string, required: true
+  attr :stage_owner, :atom, values: [:human, :ai], required: true
+
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton, derived from the card's owner list"
+
+  attr :close_patch, :string, required: true, doc: "the patch target that closes the drawer"
+
+  attr :hold_open, :boolean,
+    default: false,
+    doc:
+      "RE362: an editor holds unsaved text, so the scrim is inert — clicking the board behind " <>
+        "the drawer must not close it. The close button and Esc still close it."
+
+  attr :title_form, :any, required: true, doc: "a Phoenix.HTML.Form for card[title]"
+  attr :editing_title, :boolean, default: false
+
+  attr :editing_tag, :boolean, default: false
+  attr :tag_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[tag]; required when editing_tag"
+
+  attr :tag_suggestions, :list,
+    default: [],
+    doc: "distinct tags in use on the board — the tag editor's datalist entries"
+
+  attr :editing_description, :boolean, default: false
+
+  attr :description_form, :any,
+    default: nil,
+    doc: "a Phoenix.HTML.Form for card[description]; required when editing_description"
+
+  attr :editing_spec, :boolean, default: false
+  attr :editing_plan, :boolean, default: false
+  attr :expanded_spec, :boolean, default: false
+  attr :expanded_plan, :boolean, default: false
+  attr :open_task_id, :any, default: nil, doc: "RE356 the Plan section's single open task id, or nil"
+  attr :task_full?, :boolean, default: false, doc: "RE356 whether the open task's clamp is released"
+
+  attr :in_flight_task_id, :any,
+    default: nil,
+    doc: "RE356 the task the agent is on (`Hamaca.Runs.in_flight_sub_task_id/1`), or nil"
+
+  attr :expanded_ai_result, :boolean,
+    default: false,
+    doc:
+      "RE316 / RE401: whether the AI Result box is expanded (Show more) to reveal its Changes; collapsed shows the Screenshots and the summary"
+
+  attr :spec_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[spec]"
+  attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
+
+  attr :editing_acceptance_criteria, :boolean, default: false
+  attr :expanded_acceptance_criteria, :boolean, default: false
+
+  attr :acceptance_criteria_form, :any,
+    default: nil,
+    doc: "a Phoenix.HTML.Form for card[acceptance_criteria]"
+
+  attr :current_user_id, :integer,
+    default: nil,
+    doc: "the signed-in user's id, for the Add me owner control"
+
+  attr :members, :list,
+    default: [],
+    doc: "resolved board memberships (:user preloaded) — reassign-picker assignables"
+
+  attr :reassign_open, :boolean,
+    default: false,
+    doc: "whether the OWNERS reassign picker popover is open"
+
+  attr :unused_fields_open, :boolean,
+    default: false,
+    doc:
+      "RE282: whether the rail's unused-fields group (empty Public support / Public description) is expanded; BoardLive resets it on every card switch"
+
+  attr :overflow_open, :boolean,
+    default: false,
+    doc: "RE281: whether the drawer header's ⋯ overflow menu (card-level actions) is open"
+
+  attr :stages, :list,
+    default: [],
+    doc:
+      "RE281: EVERY stage on the board in position order — each %{id, name, current?}. The current one is listed and marked, not hidden; fewer than two entries hides the chip's move affordance"
+
+  attr :stage_menu_open, :boolean,
+    default: false,
+    doc: "RE281: whether the header's stage (Move to) popover is open"
+
+  attr :stage_filter, :string,
+    default: "",
+    doc: "RE281: the stage popover's filter text; case-insensitive substring on the stage name"
+
+  attr :conversation, :any,
+    required: true,
+    doc: "the :conversation LiveView stream — the card's comments, oldest first"
+
+  attr :note_count, :integer,
+    default: 0,
+    doc:
+      "RE277 how many notes the :conversation stream holds — streams cannot be counted, so BoardLive keeps this in step via stream_notes/2 and insert_note/2"
+
+  attr :activity, :any,
+    required: true,
+    doc: "the :activity LiveView stream — the card's activity-log entries, newest first"
+
+  attr :health, :atom,
+    values: [:live, :stale, :stopped, :none],
+    default: :none,
+    doc: "RLY-112 derived agent health, for the Activity section's header chip"
+
+  attr :comment_form, :any, required: true, doc: "a Phoenix.HTML.Form for comment[body]"
+
+  attr :question, :string,
+    default: nil,
+    doc: "the latest :needs_input question from the timeline; nil when a human blocked without one"
+
+  attr :answer_form, :any,
+    default: nil,
+    doc: "a Phoenix.HTML.Form for answer[body]; required when the card's status is :needs_input"
+
+  attr :answer_questions, :any,
+    default: nil,
+    doc:
+      "RLY-71 structured needs-input questions (list of %{prompt, options, allow_text}); nil renders the single-textarea fallback"
+
+  attr :answer_step, :integer, default: 0, doc: "RLY-71 stepper: 0-based current question index"
+
+  attr :answer_values, :map,
+    default: %{},
+    doc: "RLY-71 stepper: %{integer => string} answer picked/typed per question index"
+
+  attr :review_gate, :any,
+    default: nil,
+    doc:
+      "MMF 15 gate info for an :in_review card on a review-type stage — %{approve_label, reject_target_name, can_reject}; nil when the card is not in a review-type stage"
+
+  attr :reject_open, :boolean,
+    default: false,
+    doc: "whether the Request-changes note sub-panel is expanded in place"
+
+  attr :reject_form, :any,
+    default: nil,
+    doc: "a Phoenix.HTML.Form for reject[note]; required when the card's status is :in_review"
+
+  attr :reject_error, :string,
+    default: nil,
+    doc: "inline prompt shown when Send back was submitted with an empty note"
+
+  attr :archived, :boolean,
+    default: false,
+    doc:
+      "whether the open card itself is archived (RLY-4): shows the read-only archived banner + Restore and suppresses the edit/status/move affordances"
+
+  attr :active_run?, :boolean,
+    default: false,
+    doc:
+      "RE335: whether the card holds an active run (`Schemas.Run.active?/1`) — the ⋯ menu's Archive confirm then warns that archiving cancels it"
+
+  attr :done, :boolean,
+    default: false,
+    doc: "derived Done (Hamaca.Cards.done?/2): shows a Done pill in the header; no banner below"
+
+  attr :body_loading, :boolean,
+    default: false,
+    doc:
+      "RLY-68 optimistic drawer: when true, the heavy sections (description/acceptance_criteria/spec/plan/ai_result/needs-input question/timeline) render daisyUI skeletons instead of their content; the async fill flips this false"
+
+  attr :embed, :boolean,
+    default: false,
+    doc:
+      "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. RE93 adds a third: both dependency rails (Blocked by / Blocks) are dropped, because editing them needs the datalist + inline-refusal affordances the native host has no room for — note the *face* chip is NOT embed-gated, so a native reader can see \"Blocked by 2 cards\" without being able to see which two. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
+
+  attr :drawer_tab, :atom,
+    values: [:detail, :run, :talk, :activity],
+    default: :detail,
+    doc: "RLY-137/RE268: which of the drawer's tab panels is visible"
+
+  attr :runs, :list,
+    default: [],
+    doc:
+      "RLY-137: the selected card's runs, newest-first, node executions preloaded — [] hides the Run tab unless queued_flow is set"
+
+  attr :run_flow, :any,
+    default: nil,
+    doc:
+      "RLY-137: the %Schemas.Flow{} the latest run belongs to (for the mini graph's happy path, and RE282's rail Flow row); nil/false when unknown"
+
+  attr :queued_flow, :any,
+    default: nil,
+    doc:
+      "RLY-137: the enabled %Schemas.Flow{} that will pick this card up next, or nil — RE282's Flow row falls back to it"
+
+  attr :advance_available?, :boolean,
+    default: false,
+    doc: "RE310: whether `Hamaca.Runs.advance_foreach_available?/1` holds for the card's latest run"
+
+  attr :rate_limited, :map,
+    default: nil,
+    doc:
+      "RE320 %{resumes_at} when the card's live run has a queued job and every connected runner is paused at its usage limits — BoardLive's :run_face_meta entry, so the Run tab and the run face agree"
+
+  attr :vote_count, :integer, default: 0, doc: "RLY-69 the card's public-vote total"
+
+  attr :dependencies, :list, default: [], doc: "RE93 [%{ref, title, satisfied?}] — the Blocked by rail"
+  attr :dependents, :list, default: [], doc: "RE93 [%{ref, title}] — the read-only Blocks rail"
+  attr :dependency_options, :list, default: [], doc: "RE93 [%{ref, title}] for the add-blocker datalist"
+  attr :dependency_error, :string, default: nil, doc: "RE93 the 422 sentence, rendered inline under the input"
+
+  attr :dependency_input, :string,
+    default: "",
+    doc:
+      "RE93 the add-blocker box's server-held text. Held in an assign rather than left uncontrolled so the LiveView can empty it after a successful add — morphdom will not clear a `value` the server never rendered."
+
+  attr :supporters, :list,
+    default: [],
+    doc: "RLY-69 up to 5 %Schemas.User{} who voted, most-recent first"
+
+  attr :public_description, :string,
+    default: nil,
+    doc: "RLY-69 the card's public-facing description, shown on the public board"
+
+  attr :editing_public_desc, :boolean,
+    default: false,
+    doc: "RLY-69 whether the inline public-description editor is open"
+
+  attr :public_desc_form, :any,
+    default: nil,
+    doc: "RLY-69 a form for public_description; required when editing_public_desc"
+
+  attr :restored_drafts, :list,
+    default: [],
+    doc: "RE362 — field atoms whose editor was reopened from an unsaved draft (shows the restored note)"
+
+  attr :card_nav_enabled, :boolean,
+    default: false,
+    doc:
+      "RLY-234 / RE400: renders the prev/next chevron cluster. In web mode (`native_nav` nil — the web board drawer) it also mounts the ArrowKeyGuard hook and binds the arrow keys, and the chevrons patch via prev_card / next_card. In native mode (the native card host with `native_nav` set) the chevrons call the `relayCardNav` bridge and bind no keys."
+
+  attr :native_nav, :map,
+    default: nil,
+    doc:
+      "RE400: nil | %{prev?: boolean, next?: boolean} — non-nil puts the chevrons in native mode (HamacaWeb.NativeCardNav): each calls the native shell's bridge instead of the server, disabled when its flag is false"
+
+  attr :prev_ref, :string,
+    default: nil,
+    doc: "RLY-227: ref of the previous card in this card's stage column, or nil at the column's start"
+
+  attr :next_ref, :string,
+    default: nil,
+    doc: "RLY-227: ref of the next card in this card's stage column, or nil at the column's end"
+
+  attr :board_slug, :string, required: true, doc: "the current board slug, for the flow-metrics deep-link"
+
+  attr :talk_session, :any,
+    default: nil,
+    doc: "RE268: the card's %Schemas.TalkSession{} (nil until the Talk tab has been opened)"
+
+  attr :talk_active_turn, :any,
+    default: nil,
+    doc: "RE268: the card's live %Schemas.TalkTurn{}, or nil — drives the composer/Stop toggle"
+
+  attr :talk_seed_open?, :boolean, default: false, doc: "RE268: whether the Talk pane's seed line is expanded"
+
+  attr :talk_events, :any, default: nil, doc: "RE268: the @streams.talk_events assign"
+
+  attr :mockup_href, :any,
+    default: &HamacaWeb.attachment_view_path/1,
+    doc:
+      "RE380: attachment id -> the URL a Mockups tile patches to. BoardLive always passes its " <>
+        "viewer-URL closure; the default exists for Storybook and component tests"
+
+  attr :screenshot_href, :any,
+    default: &HamacaWeb.CoreComponents.screenshot_query/1,
+    doc:
+      "RE390: screenshot position (1-based) -> the URL an AI Result Screenshots tile patches to. " <>
+        "BoardLive always passes its viewer-URL closure"
+
+  attr :image_href, :any,
+    default: &HamacaWeb.CoreComponents.image_query/1,
+    doc:
+      "RE427: note image attachment id -> the URL its thumbnail patches to. BoardLive always passes " <>
+        "its viewer-URL closure"
+
+  attr :uploads, :map,
+    default: nil,
+    doc:
+      "RE427: the LiveView's `@uploads` (BoardLive allows `:note_images`); nil (Storybook, tests) " <>
+        "renders the Notes composer without the 📎, drop target or paste hook"
+
+  attr :note_images_pending, :list,
+    default: [],
+    doc: "RE427: the Notes composer's uploaded-but-unposted images, `[%{id, filename, src}]`"
+
+  attr :note_image_errors, :list, default: [], doc: "RE427: the Notes composer's refused-image sentences"
+
+  attr :note_mode, :atom,
+    values: @note_modes,
+    default: :note,
+    doc: "RE358: the Notes composer's mode; `:steer` only takes effect while `steer_state` is set"
+
+  attr :steer_state, :map,
+    default: nil,
+    doc: "RE358: `Hamaca.Runs.steer_state/1` — `%{node, restarting?}` while an agent node works the card, else nil"
+
+  attr :steer_receipts, :map,
+    default: %{},
+    doc: "RE358: `Hamaca.Runs.steer_receipts/1` — each delivered `:steer` note's receipt, by comment id"
+
+  attr :reject_images_pending, :list,
+    default: [],
+    doc: "RE428: the Request-changes box's uploaded-but-unsent images, `[%{id, filename, src}]`"
+
+  attr :reject_image_errors, :list, default: [], doc: "RE428: the Request-changes box's refused-image sentences"
+
+  attr :answer_images_pending, :map,
+    default: %{},
+    doc: "RE428: the answer's uploaded-but-unsent images per 0-based question, `%{step => [%{id, filename, src}]}`"
+
+  attr :answer_image_errors, :list, default: [], doc: "RE428: the answer box's refused-image sentences"
+
+  attr :attachment_types, :map,
+    default: %{},
+    doc:
+      "RE390: the card's `%{attachment_id => content_type}` (`Hamaca.Attachments.content_types/1`) — " <>
+        "decides whether a mockup or screenshot tile is HTML or an image"
+
+  attr :hidden, :boolean,
+    default: false,
+    doc:
+      "RE380: the mockup viewer covers the drawer. It stays mounted (its streams survive) but " <>
+        "is display:none, binds no window keys and renders no gate panel — the viewer's sheet " <>
+        "renders that, and both carry fixed DOM ids"
+
+  attr :back_label, :string,
+    default: nil,
+    doc:
+      "RE393 embed only: the nav bar's back label — the screen the card was pushed from " <>
+        "(the `back` URL param); nil reads Back"
+
+  def card_drawer(assigns) do
+    assigns =
+      assigns
+      |> assign_park_state()
+      |> assign(:sub_task_progress, Cards.sub_task_progress(assigns.card))
+      |> assign(:working_progress, Cards.sub_task_pct(assigns.card))
+      # RE358 — Steer mode only while there is an agent node to steer; otherwise the composer is Note.
+      |> assign(:steering?, assigns.note_mode == :steer and assigns.steer_state != nil)
+      |> assign(:stopping?, !assigns.archived and match?(%{restarting?: true}, assigns.steer_state))
+      |> assign_blocked_state()
+      # Map.get because the drawer's `card` is any card-shaped map (Storybook passes plain maps).
+      |> assign(:mockup_items, CardMedia.mockup_items(Map.get(assigns.card, :mockups), assigns.attachment_types))
+      |> assign(:screen_items, CardMedia.screens(Map.get(assigns.card, :ai_result), assigns.attachment_types))
+      |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
+      |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
+      |> assign(:rail_flow_path, rail_flow_path(assigns.run_flow, assigns.queued_flow))
+      |> assign(
+        :unused_fields,
+        rail_unused_fields(assigns.vote_count, assigns.public_description, assigns.editing_public_desc)
+      )
+
+    ~H"""
+    <div
+      id={@id}
+      class={["drawer drawer-end", @hidden && "hidden"]}
+      phx-window-keydown={!@hidden && "close_drawer"}
+      phx-key={!@hidden && "escape"}
+    >
+      <input
+        id={"#{@id}-toggle"}
+        type="checkbox"
+        class="drawer-toggle"
+        checked
+        tabindex="-1"
+        aria-hidden="true"
+      />
+      <div class="drawer-side z-40">
+        <.link
+          :if={!@embed and !@hold_open}
+          id={"#{@id}-scrim"}
+          patch={@close_patch}
+          class="drawer-overlay"
+        >
+          <span class="sr-only">Close</span>
+        </.link>
+        <div
+          :if={!@embed and @hold_open}
+          id={"#{@id}-scrim"}
+          class="drawer-overlay"
+          aria-hidden="true"
+        >
+        </div>
+        <aside
+          id="card-drawer-panel"
+          phx-hook={web_card_nav?(assigns) && "ArrowKeyGuard"}
+          data-guard-keys={web_card_nav?(assigns) && "ArrowLeft,ArrowRight"}
+          class="drawer-panel flex h-dvh w-full flex-col overflow-y-auto bg-base-100 shadow-xl drawer:overflow-hidden drawer:w-[min(760px,94vw)]"
+        >
+          <%!--
+            RE393 — embedded, the page owns its top bar (the native shell draws no AppBar over the
+            webview): "‹ Board" pops the native stack, the ref is the centered title, and the Talk
+            button and ⋯ move up here — each still renders exactly once on the page.
+          --%>
+          <.mobile_nav_bar
+            :if={@embed}
+            id="card-drawer-nav-bar"
+            back_bridge
+            back_label={@back_label}
+            title={@ref}
+          >
+            <:actions>
+              <div class="hidden min-h-11 flex-none items-center drawer:flex">
+                <.drawer_talk_button active={@drawer_tab == :talk} />
+              </div>
+              <.drawer_overflow
+                :if={!@archived}
+                embed
+                ref={@ref}
+                open={@overflow_open}
+                active_run?={@active_run?}
+              />
+            </:actions>
+          </.mobile_nav_bar>
+          <header class="flex items-start gap-3 border-b border-base-300 p-5">
+            <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+              <div class="flex items-center gap-2">
+                <%!--
+                  RE281 — the chip IS the Move-to control. It degrades to a plain, non-clickable
+                  span when there is nowhere to move to (archived card, or a board with a single
+                  stage), which is also the archived shape the artboard never draws. The owner
+                  tint is a deliberate deviation from the artboard's fixed violet: Human = blue /
+                  AI = violet is the palette rule, and a fixed violet would erase whose stage the
+                  card is on.
+                --%>
+                <div class="relative flex-none">
+                  <button
+                    :if={!@archived and length(@stages) > 1}
+                    type="button"
+                    id="card-drawer-stage-chip"
+                    phx-click="toggle_stage_menu"
+                    aria-haspopup="listbox"
+                    aria-expanded={to_string(@stage_menu_open)}
+                    class={[
+                      stage_chip_class(@embed, :menu),
+                      if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
+                    ]}
+                  >
+                    {@stage_name}
+                    <.icon
+                      name="hero-chevron-down"
+                      class={if(@embed, do: "size-[14px]", else: "size-[11px]")}
+                    />
+                  </button>
+                  <span
+                    :if={@archived or length(@stages) <= 1}
+                    id="card-drawer-stage-chip"
+                    class={[
+                      stage_chip_class(@embed, :plain),
+                      if(@stage_owner == :human, do: "badge-primary", else: "badge-secondary")
+                    ]}
+                  >
+                    {@stage_name}
+                  </span>
+                  <div
+                    :if={@stage_menu_open and !@archived}
+                    id="card-drawer-stage-menu"
+                    class={"absolute left-0 #{if(@embed, do: "top-[38px]", else: "top-[26px]")} z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5 action-group"}
+                    style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
+                  >
+                    <span class="px-1 pt-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.6px] text-base-content/50">
+                      Move to
+                    </span>
+                    <form
+                      id="card-drawer-stage-filter-form"
+                      phx-change="filter_stages"
+                      phx-submit="filter_stages"
+                    >
+                      <input
+                        type="text"
+                        id="card-drawer-stage-filter"
+                        name="q"
+                        value={@stage_filter}
+                        autocomplete="off"
+                        phx-mounted={JS.focus()}
+                        placeholder="Filter stages…"
+                        class="w-full rounded-md border border-base-300 bg-base-200/40 px-[9px] py-1.5 text-[12px] outline-none"
+                      />
+                    </form>
+                    <div class="flex max-h-[230px] flex-col gap-px overflow-y-auto">
+                      <span
+                        :if={@visible_stages == []}
+                        id="card-drawer-stage-none"
+                        class="rounded-md px-[9px] py-1.5 text-[12.5px] font-medium text-base-content/50"
+                      >
+                        No stages match
+                      </span>
+                      <%= for stage <- @visible_stages do %>
+                        <span
+                          :if={stage.current?}
+                          id={"#{@id}-move-to-#{stage.id}"}
+                          class="flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-semibold text-base-content"
+                        >
+                          <span class="size-[6px] flex-none rounded-[2px] bg-secondary"></span>
+                          {stage.name}
+                          <span class="ml-auto flex-none font-mono text-[10px] text-secondary">
+                            current
+                          </span>
+                        </span>
+                        <button
+                          :if={!stage.current?}
+                          type="button"
+                          id={"#{@id}-move-to-#{stage.id}"}
+                          phx-click="move_card"
+                          phx-value-ref={@ref}
+                          phx-value-stage_id={stage.id}
+                          class="flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-base-content/80 hover:bg-base-300/50 pending-action"
+                        >
+                          <span class="size-[6px] flex-none rounded-[2px] bg-base-300"></span>
+                          {stage.name}
+                          <%!-- RE394 — the pressed row's face, in the trailing slot the current
+                          row's "current" tag uses; hidden until LiveView marks the row loading. --%>
+                          <span
+                            class="pending-face ml-auto flex flex-none items-center gap-1 font-mono text-[10px] text-base-content/65"
+                            aria-hidden="true"
+                          >
+                            <span class="loading loading-spinner loading-xs"></span> Moving…
+                          </span>
+                        </button>
+                      <% end %>
+                    </div>
+                  </div>
+                </div>
+                <span :if={!@embed} class="drawer-card-ref font-mono text-xs text-base-content/65">
+                  {@ref}
+                </span>
+                <span
+                  :if={@done}
+                  id="drawer-done-pill"
+                  class="badge badge-success badge-sm font-medium"
+                >
+                  Done
+                </span>
+              </div>
+              <.inline_field
+                :if={!@archived}
+                id={"#{@id}-title"}
+                value={@card.title}
+                editing={@editing_title}
+                form={@title_form}
+                field={:title}
+                edit_event="edit_title"
+                save_event="save_card_title"
+                cancel_event="cancel_title"
+                read_class={["break-words px-1", drawer_title_type(@embed)]}
+                input_class={drawer_title_type(@embed)}
+              />
+              <h2
+                :if={@archived}
+                id={"#{@id}-title-archived"}
+                class={["whitespace-pre-wrap break-words px-1", drawer_title_type(@embed)]}
+              >
+                {@card.title}
+              </h2>
+            </div>
+            <div :if={web_card_nav?(assigns)} id="card-drawer-nav" class="flex items-center gap-1">
+              <button
+                type="button"
+                id="card-drawer-prev"
+                phx-click="prev_card"
+                phx-window-keydown={!@hidden && "prev_card"}
+                phx-key={!@hidden && "ArrowLeft"}
+                disabled={is_nil(@prev_ref)}
+                class="btn btn-ghost btn-sm btn-square min-h-[44px] min-w-[44px]"
+                aria-label="Previous card"
+              >
+                <.icon name="hero-chevron-left" class="size-5" />
+              </button>
+              <button
+                type="button"
+                id="card-drawer-next"
+                phx-click="next_card"
+                phx-window-keydown={!@hidden && "next_card"}
+                phx-key={!@hidden && "ArrowRight"}
+                disabled={is_nil(@next_ref)}
+                class="btn btn-ghost btn-sm btn-square min-h-[44px] min-w-[44px]"
+                aria-label="Next card"
+              >
+                <.icon name="hero-chevron-right" class="size-5" />
+              </button>
+            </div>
+            <%!-- RE400 — native mode: the shell owns the card stack, so each chevron hands its
+            direction to the `relayCardNav` bridge and never touches the server. --%>
+            <div
+              :if={@card_nav_enabled and @native_nav != nil}
+              id="card-drawer-nav"
+              class="flex items-center gap-1"
+            >
+              <button
+                :for={chevron <- native_chevrons(@native_nav)}
+                type="button"
+                id={chevron.id}
+                phx-hook=".NativeCardNav"
+                data-handler={NativeCardNav.handler()}
+                data-dir={chevron.dir}
+                disabled={!chevron.enabled?}
+                class="btn btn-ghost btn-sm btn-square min-h-[44px] min-w-[44px]"
+                aria-label={chevron.label}
+              >
+                <.icon name={chevron.icon} class="size-5" />
+              </button>
+            </div>
+            <script :type={Phoenix.LiveView.ColocatedHook} name=".NativeCardNav">
+              // RE400 — hand the direction to the native shell; the handler name and the direction
+              // come from the server (data-handler / data-dir). A plain browser has no bridge: no-op.
+              export default {
+                mounted() {
+                  this.el.addEventListener("click", () => {
+                    if (window.flutter_inappwebview) {
+                      window.flutter_inappwebview.callHandler(this.el.dataset.handler, this.el.dataset.dir)
+                    }
+                  })
+                }
+              }
+            </script>
+            <%!--
+              RE268 — the Talk entry point, always in the same place, in every card state
+              (ADR 0009 §6 change 6: "Talk button in the header on every card, shortcut t"). Not
+              gated on @archived — Talk stays reachable on an archived (read-only) board; only
+              writes are refused there. It IS gated on the drawer breakpoint: the panel it opens
+              is desktop-only, so rendering the entry point on a phone was a tap into nothing.
+
+              Class-based, like every other control in this header, via `talk_button_class/1` —
+              the same named-helper shape the Talk tab's `drawer_tab_style/1` uses for the
+              identical active/inactive conditional. The `h-11` wrapper is what centres the
+              artboard's 28px control against the 44px chevrons beside it (RE281).
+            --%>
+            <div :if={!@embed} class="hidden h-11 flex-none items-center drawer:flex">
+              <.drawer_talk_button active={@drawer_tab == :talk} />
+            </div>
+            <%!--
+              RE281 — card-level actions. Embedded (RE393) the same ⋯ renders in the nav bar
+              instead, so `#card-drawer-overflow` is on the page exactly once.
+            --%>
+            <.drawer_overflow
+              :if={!@archived and !@embed}
+              ref={@ref}
+              open={@overflow_open}
+              active_run?={@active_run?}
+            />
+            <.link
+              :if={!@embed}
+              id={"#{@id}-close"}
+              patch={@close_patch}
+              class="btn btn-ghost btn-sm btn-square"
+              aria-label="Close card drawer"
+            >
+              <.icon name="hero-x-mark" class="size-5" />
+            </.link>
+          </header>
+
+          <%!--
+            RE279 — the blocked state, hoisted out of the tabs: one amber strip on EVERY tab. It
+            uses the same predicate as the Detail needs_input_panel (`Card.awaiting_answer?/2`,
+            which BoardLive also uses to open such a card on Detail — RE325), so the two always
+            appear and disappear together, and the card-status guard clears it the moment an
+            answer flips the baton. Renders in `embed` too.
+          --%>
+          <.blocked_strip
+            :if={Card.awaiting_answer?(@card.status, @archived)}
+            eyebrow={@strip_eyebrow}
+            question={@strip_question}
+            loading?={@body_loading}
+            blocked_since={@card.blocked_since}
+            step={@answer_step + 1}
+            step_count={length(@answer_questions || [])}
+          />
+
+          <nav
+            id="card-drawer-tabs"
+            phx-window-keydown={!@hidden && "talk_shortcut"}
+            phx-key={!@hidden && "t"}
+            phx-hook="TypingKeyGuard"
+            data-guard-keys="t"
+            class={@embed && "px-4 pb-3"}
+            style={
+              !@embed &&
+                "display:flex;gap:20px;padding:0 22px;border-bottom:1px solid var(--color-base-300);"
+            }
+          >
+            <%!-- RE393 — embedded, the tabs are an iOS segmented control; Talk (desktop-only) has
+                 no segment. The segment ids and events are the underline tabs' own. --%>
+            <.segmented_control
+              :if={@embed}
+              id="card-drawer-tab-segments"
+              aria_label="Card sections"
+            >
+              <:option
+                :for={{tab, label} <- [{:detail, "Detail"}, {:run, "Run"}, {:activity, "Activity"}]}
+                :if={tab != :run or @show_run_tab?}
+                id={"card-drawer-tab-#{tab}"}
+                label={label}
+                active={@drawer_tab == tab}
+                phx-click="drawer_tab"
+                phx-value-tab={tab}
+              />
+            </.segmented_control>
+            <button
+              :for={
+                {tab, label, show} <- [
+                  {:detail, "Detail", true},
+                  {:run, "Run", @show_run_tab?},
+                  {:talk, "Talk", true},
+                  {:activity, "Activity", true}
+                ]
+              }
+              :if={show and !@embed}
+              type="button"
+              id={"card-drawer-tab-#{tab}"}
+              phx-click="drawer_tab"
+              phx-value-tab={tab}
+              data-active={to_string(@drawer_tab == tab)}
+              class={tab == :talk && "max-drawer:hidden"}
+              style={drawer_tab_style(@drawer_tab == tab)}
+            >
+              {label}
+            </button>
+          </nav>
+
+          <div class="flex min-h-0 flex-none flex-col drawer:flex-1 drawer:flex-row drawer:overflow-hidden">
+            <%!--
+              RE268 — on Talk the body's own chrome gets out of the way, because in the artboard
+              the terminal IS the body: it spans the full drawer width and the properties rail
+              lives inside the Detail branch. Left padded with the 220px rail beside it, the
+              548px terminal rendered ~520px wide, inset 20px on all four sides. The `drawer:`
+              variants sort after the unprefixed `p-5`/`gap-6`, so they win at >=45rem — the same
+              precedence the Talk panel's own `drawer:block` relies on.
+            --%>
+            <div
+              id={"#{@id}-main"}
+              class={[
+                "flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto",
+                @drawer_tab == :talk && "drawer:gap-0 drawer:p-0"
+              ]}
+            >
+              <section
+                :if={@archived}
+                id="card-archived-banner"
+                class="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm action-group"
+                style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
+              >
+                <.icon name="hero-archive-box" class="size-4" />
+                <span class="flex-1">This card is archived.</span>
+                <.button
+                  type="button"
+                  id="restore-card-button"
+                  phx-click="restore_card"
+                  phx-value-ref={@ref}
+                  class="btn btn-sm"
+                  pending="Restoring…"
+                >
+                  Restore
+                </.button>
+              </section>
+              <div id="card-drawer-tab-panel-detail" class={[@drawer_tab != :detail && "hidden"]}>
+                <section
+                  :if={@card.rejection}
+                  id="rejection-banner"
+                  class="flex flex-col gap-1.5 rounded-[10px] border border-warning/40 bg-warning/10 p-3.5"
+                >
+                  <span class="font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-warning">
+                    Changes requested — sent back to {@card.rejection.to_stage_name} by {@card.rejection.rejected_by}
+                  </span>
+                  <div class="md text-[13.5px] leading-normal text-base-content/80">
+                    {Hamaca.Markdown.to_html(@card.rejection.note)}
+                  </div>
+                </section>
+                <%!-- RE358 — between a steer and the restarted job's claim the strip says the node
+                is being stopped; the runner sees the revoke within one heartbeat. --%>
+                <section
+                  :if={@stopping?}
+                  id="working-strip-stopping"
+                  class="flex items-center gap-2.5 rounded-[10px] px-4 py-3"
+                  style="background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
+                >
+                  <span
+                    class="loading loading-spinner loading-sm shrink-0"
+                    style="color:var(--color-secondary)"
+                  >
+                  </span>
+                  <span
+                    class="min-w-0 flex-1 text-[12.5px] font-semibold"
+                    style="color:color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content));"
+                  >
+                    Stopping <code class="font-mono">{@steer_state.node}</code>… restarting with your steer
+                  </span>
+                  <span class="font-mono text-[10.5px] text-base-content/50 max-sm:hidden">
+                    ≤ one heartbeat
+                  </span>
+                </section>
+                <section
+                  :if={@card.status == :working and !@archived and !@stopping?}
+                  id="working-strip"
+                  class="flex items-center gap-2.5 rounded-[10px] px-4 py-3"
+                  style="background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
+                >
+                  <span
+                    class="working-pulse"
+                    style="width:7px;height:7px;border-radius:50%;background:var(--color-secondary);animation:relaypulse 1.4s ease-in-out infinite;flex:0 0 auto;"
+                  >
+                  </span>
+                  <span
+                    class="text-[12.5px] font-semibold"
+                    style="color:color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content));"
+                  >
+                    {Hamaca.Brand.agent_name()} is working
+                  </span>
+                  <span
+                    :if={@steer_state}
+                    id="working-strip-node"
+                    class="font-mono text-[11px] text-base-content/55"
+                  >
+                    on <code>{@steer_state.node}</code>
+                  </span>
+                  <span
+                    :if={@working_progress}
+                    id="working-strip-pct"
+                    class="font-mono text-[11px]"
+                    style="color:color-mix(in oklab, var(--color-secondary) 85%, var(--color-base-content));"
+                  >
+                    {@working_progress}%
+                  </span>
+                  <span style="flex:1;"></span>
+                  <div
+                    id="working-strip-progress"
+                    class="h-[5px] w-24 overflow-hidden rounded-[3px] max-sm:hidden"
+                    style="background:color-mix(in oklab, var(--color-secondary) 15%, var(--color-base-100));"
+                  >
+                    <div
+                      class="h-full rounded-[3px]"
+                      style={"width:#{@working_progress || 0}%;background:var(--color-secondary);"}
+                    >
+                    </div>
+                  </div>
+                </section>
+                <%!-- RE380 — the question stepper and the review panel, shared with the mockup
+                viewer's left sheet. Not rendered while the drawer is hidden behind the viewer: the
+                sheet renders its own copy, and both carry fixed DOM ids. --%>
+                <.card_gate_panel
+                  :if={!@hidden}
+                  card={@card}
+                  archived={@archived}
+                  runs={@runs}
+                  run_flow={@run_flow}
+                  advance_available?={@advance_available?}
+                  question={@question}
+                  answer_questions={@answer_questions}
+                  answer_step={@answer_step}
+                  answer_values={@answer_values}
+                  answer_form={@answer_form}
+                  body_loading={@body_loading}
+                  review_gate={@review_gate}
+                  reject_open={@reject_open}
+                  reject_form={@reject_form}
+                  reject_error={@reject_error}
+                  embed={@embed}
+                  uploads={@uploads}
+                  reject_images_pending={@reject_images_pending}
+                  reject_image_errors={@reject_image_errors}
+                  answer_images_pending={@answer_images_pending}
+                  answer_image_errors={@answer_image_errors}
+                />
+                <section :if={@body_loading} id="ai-result-skeleton-section" class="space-y-2">
+                  <.section_label accent="text-secondary">AI Result</.section_label>
+                  <div id="ai-result-skeleton" class="skeleton h-24 w-full rounded-lg"></div>
+                </section>
+                <%!-- RE316 — the AI's hand-back is the first thing a reviewer reads, so it leads the
+                body. RE327 — gated on there being something to DRAW, not merely on the field being
+                written: a legacy blob left over from the removed deployment link is non-blank and
+                would otherwise paint an empty violet box. --%>
+                <section
+                  :if={!@body_loading and ai_result_renderable?(@card.ai_result)}
+                  id="ai-result"
+                  class="space-y-2"
+                >
+                  <.section_label accent="text-secondary">AI Result</.section_label>
+                  <div
+                    class="space-y-3 rounded-[10px] border p-3.5"
+                    style="border-color:color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));background:color-mix(in oklab, var(--color-secondary) 5%, var(--color-base-100));"
+                  >
+                    <%!-- RE401 — the screenshots lead the box and are always visible: a reviewer
+                    sees what the AI built before reading about it. The count is every tile drawn,
+                    placeholders included. --%>
+                    <div
+                      :if={ai_result_has?(@card.ai_result, "screens")}
+                      id="ai-result-screens-group"
+                      class="flex flex-col gap-1.5"
+                    >
+                      <div id="ai-result-screens-header" class="flex items-baseline justify-between">
+                        <.section_label>Screenshots</.section_label>
+                        <span id="ai-result-screens-count" class="text-[11px] text-base-content/55">
+                          {length(@screen_items)}
+                        </span>
+                      </div>
+                      <%!-- RE390 — the same 80px tiles as Mockups, patching to the
+                      same-tab viewer (`?screenshot=<n>`); an unfetchable path is a placeholder. --%>
+                      <.card_mockups_section
+                        id="ai-result-screens"
+                        tile_id="ai-result-screen"
+                        items={@screen_items}
+                        item_href={@screenshot_href}
+                        label="Screenshots"
+                        noun="Screenshot"
+                        show_label={false}
+                      />
+                    </div>
+                    <div
+                      :if={ai_text(@card.ai_result["summary"])}
+                      id="ai-result-summary"
+                      class="md text-sm leading-relaxed"
+                    >
+                      {Hamaca.Markdown.to_html(ai_text(@card.ai_result["summary"]))}
+                    </div>
+                    <%!-- RE316 / RE401 — collapsed shows the screenshots and the summary, in full;
+                    the changes are the only detail behind Show more. --%>
+                    <div
+                      :if={@expanded_ai_result and ai_result_has?(@card.ai_result, "changes")}
+                      id="ai-result-changes-group"
+                      class="flex flex-col gap-1.5"
+                    >
+                      <.section_label>Changes</.section_label>
+                      <ul id="ai-result-changes" class="space-y-1">
+                        <li
+                          :for={change <- ai_list(@card.ai_result["changes"])}
+                          class="flex items-start gap-2 text-sm"
+                        >
+                          <.icon name="hero-check" class="mt-0.5 size-4 shrink-0 text-success" />
+                          <span>{ai_change_text(change)}</span>
+                        </li>
+                      </ul>
+                    </div>
+                    <%!-- `block` keeps the link-style button on its own line; a button element
+                    is inline-block by default and would otherwise ride up beside the summary. --%>
+                    <button
+                      :if={ai_result_more?(@card.ai_result)}
+                      type="button"
+                      id="ai-result-show-more"
+                      phx-click="toggle_ai_result"
+                      aria-expanded={to_string(@expanded_ai_result)}
+                      class="commit-field-showmore block"
+                    >
+                      {if @expanded_ai_result, do: "Show less", else: "Show more"}
+                    </button>
+                  </div>
+                </section>
+                <%!-- RE370 / RE374 / RE380 / RE390 — the card's mockups (HTML or image) as small
+                square tiles in a wrapping row; each patches to the same-tab viewer (`mockup_href`). --%>
+                <.card_mockups_section
+                  :if={!@body_loading and @mockup_items != []}
+                  id={"#{@id}-mockups"}
+                  tile_id={"#{@id}-mockup"}
+                  items={@mockup_items}
+                  item_href={@mockup_href}
+                />
+                <section id={"#{@id}-description"} class="space-y-2">
+                  <.section_label>Description</.section_label>
+                  <div
+                    :if={@body_loading}
+                    id={"#{@id}-description-skeleton"}
+                    class="skeleton h-28 w-full rounded-lg"
+                  >
+                  </div>
+                  <.boxed_field
+                    :if={!@body_loading and !@archived}
+                    id={"#{@id}-description"}
+                    value={@card.description}
+                    editing={@editing_description}
+                    form={@description_form}
+                    field={:description}
+                    edit_event="edit_description"
+                    save_event="save_card_description"
+                    cancel_event="cancel_description"
+                    change_event="draft_field"
+                    discard_event="discard_draft"
+                    draft_restored={:description in @restored_drafts}
+                    placeholder="Add a description…"
+                    markdown
+                    multiline
+                    rows="12"
+                  />
+                  <div
+                    :if={!@body_loading and @archived}
+                    id={"#{@id}-description-archived"}
+                    class="md min-h-16 p-1 text-sm leading-relaxed"
+                  >
+                    {Hamaca.Markdown.to_html(@card.description || "_No description._")}
+                  </div>
+                </section>
+
+                <section
+                  :if={@body_loading}
+                  id={"#{@id}-acceptance-criteria-skeleton-section"}
+                  class="space-y-2"
+                >
+                  <.section_label>Acceptance Criteria</.section_label>
+                  <div
+                    id={"#{@id}-acceptance-criteria-skeleton"}
+                    class="skeleton h-32 w-full rounded-lg"
+                  >
+                  </div>
+                </section>
+                <section
+                  :if={!@body_loading and !@archived}
+                  id={"#{@id}-acceptance-criteria"}
+                  class="space-y-2"
+                >
+                  <.boxed_field
+                    id={"#{@id}-acceptance-criteria"}
+                    value={@card.acceptance_criteria}
+                    editing={@editing_acceptance_criteria}
+                    form={@acceptance_criteria_form}
+                    field={:acceptance_criteria}
+                    edit_event="edit_acceptance_criteria"
+                    save_event="save_card_acceptance_criteria"
+                    cancel_event="cancel_acceptance_criteria"
+                    change_event="draft_field"
+                    discard_event="discard_draft"
+                    draft_restored={:acceptance_criteria in @restored_drafts}
+                    placeholder="Add acceptance criteria…"
+                    label="Acceptance Criteria"
+                    accent={:accent}
+                    collapsible
+                    expanded={@expanded_acceptance_criteria}
+                    toggle_event="toggle_acceptance_criteria"
+                    markdown
+                    multiline
+                    rows="12"
+                  />
+                </section>
+                <section
+                  :if={(!@body_loading and @archived) && @card.acceptance_criteria}
+                  id={"#{@id}-acceptance-criteria-archived"}
+                  class="space-y-2"
+                >
+                  <.section_label>Acceptance Criteria</.section_label>
+                  <div id={"#{@id}-acceptance-criteria-view"} class="md text-sm leading-relaxed">
+                    {Hamaca.Markdown.to_html(@card.acceptance_criteria)}
+                  </div>
+                </section>
+
+                <section :if={@body_loading} id={"#{@id}-spec-skeleton-section"} class="space-y-2">
+                  <.section_label>Spec</.section_label>
+                  <div id={"#{@id}-spec-skeleton"} class="skeleton h-32 w-full rounded-lg"></div>
+                </section>
+                <section :if={!@body_loading and !@archived} id={"#{@id}-spec"} class="space-y-2">
+                  <.boxed_field
+                    id={"#{@id}-spec"}
+                    value={@card.spec}
+                    editing={@editing_spec}
+                    form={@spec_form}
+                    field={:spec}
+                    edit_event="edit_spec"
+                    save_event="save_card_spec"
+                    cancel_event="cancel_spec"
+                    change_event="draft_field"
+                    discard_event="discard_draft"
+                    draft_restored={:spec in @restored_drafts}
+                    placeholder="Add a spec…"
+                    label="Spec"
+                    accent={:primary}
+                    collapsible
+                    expanded={@expanded_spec}
+                    toggle_event="toggle_spec"
+                    markdown
+                    multiline
+                    rows="14"
+                  />
+                </section>
+                <section
+                  :if={(!@body_loading and @archived) && @card.spec}
+                  id={"#{@id}-spec-archived"}
+                  class="space-y-2"
+                >
+                  <.section_label>Spec</.section_label>
+                  <div id={"#{@id}-spec-view"} class="md text-sm leading-relaxed">
+                    {Hamaca.Markdown.to_html(@card.spec)}
+                  </div>
+                </section>
+
+                <section :if={@body_loading} id="card-plan-skeleton-section" class="space-y-2">
+                  <.section_label>Plan</.section_label>
+                  <div id="card-plan-skeleton" class="skeleton h-40 w-full rounded-lg"></div>
+                </section>
+                <.plan_tasks
+                  :if={
+                    !@body_loading and (!@archived or not is_nil(@card.plan) or @card.sub_tasks != [])
+                  }
+                  plan={@card.plan}
+                  tasks={@card.sub_tasks}
+                  progress={@sub_task_progress}
+                  open_task_id={@open_task_id}
+                  task_full?={@task_full?}
+                  in_flight_task_id={@in_flight_task_id}
+                  archived={@archived}
+                  editing_plan={@editing_plan}
+                  expanded_plan={@expanded_plan}
+                  plan_form={@plan_form}
+                  plan_draft_restored={:plan in @restored_drafts}
+                />
+                <section id={"#{@id}-notes"} class="space-y-3 border-t border-base-300 pt-4">
+                  <div class="flex items-center gap-2">
+                    <span class="h-[13px] w-[3px] shrink-0 rounded-sm bg-primary"></span>
+                    <.section_label>Notes</.section_label>
+                    <span
+                      id={"#{@id}-note-count"}
+                      class="font-mono text-[10px] text-base-content/45"
+                    >
+                      {note_count_label(@note_count)}
+                    </span>
+                    <span class="flex-1"></span>
+                    <%!-- True today: every flow node runs `relay card REF`, which prints the
+                          card's comment-kind timeline entries (see ./relay's card printer) —
+                          a note's images print as `[image]` lines there, and an agent pulls
+                          their files with `relay images REF --pull`.
+                          If that ever stops being true this chip is a lie — fix one or the other. --%>
+                    <span class="rounded bg-success/10 px-[7px] py-[2px] font-mono text-[9.5px] font-semibold tracking-[0.04em] text-success">
+                      READ BY EVERY AGENT
+                    </span>
+                  </div>
+                  <div class="flex flex-col gap-[13px] rounded-lg border border-base-300 bg-base-100 px-[14px] py-[13px]">
+                    <div
+                      :if={@body_loading}
+                      id={"#{@id}-conversation-loading"}
+                      class="flex justify-center py-4"
+                    >
+                      <span class="loading loading-spinner loading-sm text-base-content/40"></span>
+                    </div>
+                    <ol
+                      :if={!@body_loading}
+                      id={"#{@id}-conversation"}
+                      phx-update="stream"
+                      class="flex flex-col gap-[13px]"
+                    >
+                      <li
+                        id={"#{@id}-conversation-empty"}
+                        class="hidden text-sm text-base-content/55 only:block"
+                      >
+                        No notes yet
+                      </li>
+                      <li
+                        :for={{dom_id, comment} <- @conversation}
+                        id={dom_id}
+                        class="timeline-entry flex items-start gap-[10px]"
+                        data-actor-type={comment.actor_type}
+                      >
+                        <.avatar
+                          class="timeline-avatar mt-px shrink-0"
+                          size={22}
+                          tint={:role}
+                          actor={if(comment.actor_type == :agent, do: :ai, else: :human)}
+                          src={comment.user && comment.user.avatar_url}
+                          name={comment.user && comment.user.name}
+                          email={comment.user && comment.user.email}
+                        />
+                        <div class="min-w-0 flex-1 space-y-[3px]">
+                          <div class="flex items-center gap-2">
+                            <span class="timeline-author text-[12px] font-semibold">
+                              {CardMedia.author(comment)}
+                            </span>
+                            <time
+                              class="timeline-time font-mono text-[10px] text-base-content/45"
+                              datetime={DateTime.to_iso8601(comment.inserted_at)}
+                              title={Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}
+                            >
+                              {TimeAgo.ago(comment.inserted_at)}
+                            </time>
+                            <.note_origin_tag
+                              id={"#{dom_id}-origin"}
+                              origin={comment.origin}
+                              question={comment.origin_question}
+                            />
+                            <span
+                              :if={comment.kind in [:question, :changes_requested]}
+                              class="font-mono"
+                              style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));padding:1px 6px;border-radius:4px;"}
+                            >
+                              {comment_tag_label(comment.kind)}
+                            </span>
+                            <%!-- RE358 — a steer is primary (blue), never the amber treatment. --%>
+                            <span
+                              :if={comment.kind == :steer}
+                              id={"#{dom_id}-steer-tag"}
+                              class="font-mono"
+                              style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(:steer)};background:color-mix(in oklab, var(--color-primary) 13%, var(--color-base-100));padding:1px 6px;border-radius:4px;"}
+                            >
+                              {comment_tag_label(:steer)}
+                            </span>
+                            <span
+                              :if={
+                                comment.kind == :steer and
+                                  not Map.has_key?(@steer_receipts, comment.id)
+                              }
+                              id={"#{dom_id}-sending"}
+                              class="inline-flex items-center gap-1 font-mono text-[10px] text-base-content/55"
+                            >
+                              <span class="loading loading-spinner loading-sm"></span> sending…
+                            </span>
+                          </div>
+                          <%!-- No bubble: `.md` already renders the artboard's 13px / 20.15px /
+                                base-content 85% prose (assets/css/app.css). Only the amber
+                                question / changes-requested treatment keeps a box. --%>
+                          <div
+                            :if={String.trim(comment.body || "") != ""}
+                            class={
+                              # RE277 — a literal string head followed by a dynamic falsy tail in a
+                              # HEEx `class={[...]}` leaves a stray trailing space (the compiler
+                              # splits head/tail and always joins with a literal space); pipe
+                              # through Enum.reject so this is one dynamic expression instead.
+                              [
+                                "timeline-comment-body md",
+                                comment_box_style(comment.kind) && "rounded-lg px-3 py-2"
+                              ]
+                              |> Enum.reject(&(&1 in [nil, false]))
+                            }
+                            style={comment_box_style(comment.kind)}
+                          >
+                            {Hamaca.Markdown.to_html(comment.body)}
+                          </div>
+                          <%!-- RE427 — outside the `.md` body: the markdown lightbox must not
+                          claim a thumbnail click (it patches to the viewer instead). --%>
+                          <.note_image_row
+                            id={"#{dom_id}-images"}
+                            images={note_images(comment)}
+                            image_href={@image_href}
+                          />
+                          <.steer_receipt
+                            :if={comment.kind == :steer}
+                            id={"#{dom_id}-receipt"}
+                            receipt={@steer_receipts[comment.id]}
+                          />
+                        </div>
+                      </li>
+                    </ol>
+                    <.form
+                      :if={!@archived}
+                      for={@comment_form}
+                      id={"#{@id}-comment-form"}
+                      class="action-group"
+                      phx-change="validate_comment"
+                      phx-submit="post_comment"
+                    >
+                      <%!-- RE427 — the shared image control. Attaching is desktop-web only: the
+                            native embed (and a host without uploads) gets no 📎, no drop
+                            target and no paste hook — only "Attach images from the web app." --%>
+                      <%!-- RE358 — Note | ↪ Steer now, only while an agent node works the card.
+                            Steer mode is the same form and the same "post_comment" event; only
+                            the box, the placeholder, the button and the hint change. --%>
+                      <div :if={@steer_state} class="pb-2">
+                        <.note_mode_toggle
+                          id={"#{@id}-note-mode"}
+                          mode={if(@steering?, do: :steer, else: :note)}
+                        />
+                      </div>
+                      <.image_attach_box
+                        id={"#{@id}-note-images"}
+                        upload={@uploads && @uploads[:note_images]}
+                        pending={@note_images_pending}
+                        enabled={note_attach_enabled?(assigns)}
+                        tone={if(@steering?, do: :primary, else: :default)}
+                      >
+                        <textarea
+                          id={"#{@id}-comment-input"}
+                          name={@comment_form[:body].name}
+                          rows="2"
+                          phx-hook="SubmitOnCmdEnter"
+                          placeholder={
+                            if(@steering?,
+                              do: "What should #{@steer_state.node} do differently?",
+                              else: "What you did, what you found, what’s left…"
+                            )
+                          }
+                          class="min-w-0 flex-1 resize-none border-none bg-transparent p-0 text-[12.5px] leading-[18px] text-base-content focus:outline-none"
+                        >{Phoenix.HTML.Form.normalize_value("textarea", @comment_form[:body].value)}</textarea>
+                        <.image_attach_button
+                          :if={note_attach_enabled?(assigns)}
+                          id={"#{@id}-note-images-attach"}
+                          upload={@uploads[:note_images]}
+                        />
+                        <.button
+                          :if={!@steering?}
+                          type="submit"
+                          id={"#{@id}-comment-submit"}
+                          class="h-[27px] shrink-0 rounded-md border border-base-300 px-3 text-[11.5px] font-semibold text-base-content/80"
+                          pending="Adding…"
+                          disabled={note_images_in_flight?(@uploads)}
+                        >
+                          Add note
+                        </.button>
+                        <.button
+                          :if={@steering?}
+                          type="submit"
+                          id={"#{@id}-comment-submit"}
+                          class="btn btn-primary btn-sm h-[27px] min-h-0 shrink-0 rounded-md px-3 text-[11.5px] font-semibold"
+                          pending="Steering…"
+                          disabled={note_images_in_flight?(@uploads)}
+                        >
+                          Steer now
+                        </.button>
+                      </.image_attach_box>
+                      <.error :for={msg <- comment_errors(@comment_form[:body])}>{msg}</.error>
+                      <.image_attach_hint
+                        id={"#{@id}-note-images-hint"}
+                        errors={@note_image_errors}
+                        enabled={note_attach_enabled?(assigns)}
+                      />
+                      <p
+                        :if={@steer_state && !@steering?}
+                        id={"#{@id}-note-hint"}
+                        class="pt-2 font-mono text-[10.5px] leading-[1.5] text-base-content/55"
+                      >
+                        Reaches the agent at its next step. Switch to
+                        <b class="text-primary">Steer now</b>
+                        to interrupt.
+                      </p>
+                      <p
+                        :if={@steering?}
+                        id={"#{@id}-note-hint"}
+                        class="pt-2 font-mono text-[10.5px] leading-[1.5] text-primary/80"
+                      >
+                        Stops <code>{@steer_state.node}</code>
+                        and restarts it with this note — session kept.
+                      </p>
+                    </.form>
+                  </div>
+                  <p
+                    :if={!@steer_state || @archived}
+                    class="font-mono text-[10.5px] leading-[1.5] text-base-content/50"
+                  >
+                    Notes are card content, not chat — they go into every agent’s context.
+                  </p>
+                </section>
+              </div>
+
+              <div id="card-drawer-tab-panel-run" class={[@drawer_tab != :run && "hidden"]}>
+                <%= if @latest_run do %>
+                  <div style="padding:18px 22px 40px 22px;">
+                    <RunComponents.run_list
+                      entries={run_entries(@runs, @latest_detail)}
+                      task_progress={drawer_task_progress(@card)}
+                    >
+                      <:latest_body>
+                        <div
+                          id="run-tab-links"
+                          style="display:flex;flex-wrap:wrap;gap:16px;align-self:flex-start;"
+                        >
+                          <.link
+                            :if={@latest_detail.flow_key}
+                            id="run-view-in-flow-metrics"
+                            navigate={
+                              ~p"/board/#{@board_slug}/flows/#{@latest_detail.flow_key}/metrics?#{[node: @latest_detail.current_node || @latest_detail.last_node, from: @ref]}"
+                            }
+                            style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));align-self:flex-start;"
+                          >
+                            View in flow metrics →
+                          </.link>
+                          <.value_stream_link board_slug={@board_slug} ref={@ref} />
+                        </div>
+                        <RunComponents.run_state_banner
+                          :if={@rate_limited && @latest_detail.status == :running}
+                          variant={:rate_limited}
+                          rate_limited={@rate_limited}
+                        />
+                        <RunComponents.run_state_banner
+                          :if={@card.rejection && @latest_detail.status == :running}
+                          variant={:reentry}
+                          card={@card}
+                        />
+                        <RunComponents.run_state_banner
+                          :if={@latest_detail.status == :cancelled}
+                          variant={:revoked}
+                          detail={@latest_detail}
+                          card={@card}
+                          claimer={human_owner_name(@card)}
+                        />
+                        <%!-- RLY-179: the loud :circuit banner is only honest when the breaker
+                              actually tripped; every other failure mode gets the neutral one. --%>
+                        <RunComponents.run_state_banner
+                          :if={@latest_detail.breaker_tripped?}
+                          variant={:circuit}
+                          detail={@latest_detail}
+                          advance_available?={@advance_available?}
+                        />
+                        <RunComponents.run_state_banner
+                          :if={
+                            @latest_detail.status == :failed and not @latest_detail.breaker_tripped?
+                          }
+                          variant={:failed}
+                          detail={@latest_detail}
+                          advance_available?={@advance_available?}
+                        />
+                        <RunComponents.run_mini_graph
+                          :if={@latest_detail.status == :running and @run_flow}
+                          path={Hamaca.Runs.happy_path(@run_flow)}
+                          run={@latest_detail}
+                          task_progress={drawer_task_progress(@card)}
+                        />
+                      </:latest_body>
+                    </RunComponents.run_list>
+                  </div>
+                <% else %>
+                  <div
+                    id="run-tab-queued"
+                    style="padding:18px 22px;display:flex;flex-direction:column;gap:14px;"
+                  >
+                    <.value_stream_link board_slug={@board_slug} ref={@ref} />
+                    <RunComponents.run_face
+                      :if={@queued_flow}
+                      ref="drawer"
+                      run={{:queued, %{key: @queued_flow.key}}}
+                    />
+                  </div>
+                <% end %>
+              </div>
+
+              <%!--
+                RE268 — the Talk pane (ADR 0009). The tab-hide is the OUTER div and nothing else:
+                `hidden` there hides the whole subtree at every width, so no viewport rule can
+                override it (`drawer:block` and `hidden` are equal specificity and `drawer:block`
+                sorts later in the built stylesheet — carrying both on the same element, as this
+                did before, rendered the terminal under every tab on desktop).
+
+                The breakpoint split lives one level down: the 548px terminal is desktop-only, so
+                below 45rem the panel says so rather than rendering an empty tab. The header
+                button and the tab are gated to the same breakpoint; this notice is what the `t`
+                shortcut lands on, since a keydown has no breakpoint.
+              --%>
+              <div
+                id="card-drawer-tab-panel-talk"
+                class={if @drawer_tab == :talk, do: "block", else: "hidden"}
+              >
+                <div class="max-drawer:hidden drawer:block">
+                  <TalkComponents.talk_pane
+                    id="talk-pane"
+                    ref={@ref}
+                    title={@card.title}
+                    seed_summary={(@talk_session && @talk_session.seed_summary) || ""}
+                    seed_fields={(@talk_session && @talk_session.seed_fields) || []}
+                    seed_open?={@talk_seed_open?}
+                    busy?={talk_busy?(@talk_active_turn)}
+                    awaiting?={@card.status == :needs_input}
+                    run_working?={@steer_state != nil}
+                    stream={@talk_events}
+                  />
+                </div>
+                <p id="card-drawer-talk-narrow" class="text-sm text-base-content/65 drawer:hidden">
+                  Talk needs a wider screen — open this card on a desktop to use the terminal.
+                </p>
+              </div>
+
+              <div id="card-drawer-tab-panel-activity" class={[@drawer_tab != :activity && "hidden"]}>
+                <section class="space-y-2 border-t border-base-300 pt-4">
+                  <.section_label>Activity</.section_label>
+                  <div
+                    :if={@health != :none}
+                    id={"#{@id}-activity-health-chip"}
+                    class="activity-health-chip flex items-center gap-2"
+                    style={"border-radius:7px;padding:7px 10px;#{strip_box_style(@health)}"}
+                    data-health={@health}
+                  >
+                    <span style={"width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#{health_chip_color(@health)};#{if(@health == :live, do: "animation:relaypulse 1.4s ease-in-out infinite;")}"}>
+                    </span>
+                    <span
+                      class="text-[11.5px]"
+                      style={"font-family:var(--font-mono);color:#{strip_text_color(@health)};"}
+                    >
+                      <%!-- RE320: a quiet card whose runners are paused at their usage
+                            limit is waiting on purpose, not gone quiet. --%>
+                      {if @rate_limited && @health == :stale,
+                        do: RunComponents.rate_limited_label(@rate_limited),
+                        else: health_chip_label(@health)}
+                    </span>
+                    <.button
+                      :if={@health == :stopped and !@archived}
+                      id={"#{@id}-activity-retry"}
+                      type="button"
+                      class="activity-retry-chip"
+                      phx-click="retry_card"
+                      phx-value-ref={@ref}
+                      style="margin-left:auto;font-size:10px;font-weight:600;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-error) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-error) 40%, var(--color-base-100));border-radius:5px;padding:2px 7px;flex:0 0 auto;cursor:pointer;"
+                      pending="Retrying…"
+                    >
+                      Retry
+                    </.button>
+                  </div>
+                  <div
+                    :if={@body_loading}
+                    id={"#{@id}-activity-loading"}
+                    class="flex justify-center py-3"
+                  >
+                    <span class="loading loading-spinner loading-sm text-base-content/40"></span>
+                  </div>
+                  <ol
+                    :if={!@body_loading}
+                    id={"#{@id}-activity"}
+                    phx-update="stream"
+                    class="relative space-y-1 pl-[18px]"
+                  >
+                    <li
+                      id={"#{@id}-activity-empty"}
+                      class="hidden text-sm text-base-content/55 only:block"
+                    >
+                      No activity yet
+                    </li>
+                    <li
+                      :for={{dom_id, entry} <- @activity}
+                      id={dom_id}
+                      class="activity-entry relative py-1"
+                      data-kind={Hamaca.Activity.kind(entry)}
+                      data-actor-type={entry.actor_type}
+                    >
+                      <%= if Hamaca.Activity.kind(entry) == :move do %>
+                        <span
+                          class="activity-move-chip inline-flex items-center gap-2"
+                          style="background:var(--color-field-hover);border:1px solid var(--color-field-border);border-radius:20px;padding:4px 12px;font-size:11.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
+                        >
+                          moved
+                          <span
+                            class="font-semibold"
+                            style="color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
+                          >
+                            {entry.meta["from_stage"]} → {entry.meta["to_stage"]}
+                          </span>
+                          · {relative_time(entry.inserted_at)}
+                        </span>
+                      <% else %>
+                        <span
+                          class="activity-entry-dot absolute"
+                          style={"left:-16.5px;top:7px;width:7px;height:7px;border-radius:50%;background:#{entry_dot_color(entry)};box-shadow:0 0 0 2.5px var(--color-base-100);"}
+                        >
+                        </span>
+                        <div class="flex items-baseline gap-1.5">
+                          <span class="timeline-activity-phrase min-w-0 text-[13px] leading-snug text-base-content/70">
+                            {entry_text(entry)}
+                          </span>
+                          <time class="timeline-time ml-auto shrink-0 font-mono text-[11px] text-base-content/45">
+                            {relative_time(entry.inserted_at)}
+                          </time>
+                        </div>
+                      <% end %>
+                    </li>
+                  </ol>
+                </section>
+              </div>
+            </div>
+
+            <div
+              id={"#{@id}-rail"}
+              class={[
+                "flex w-full shrink-0 flex-col gap-[18px] border-t border-base-300 bg-base-200/30 px-[18px] py-5 text-sm drawer:w-[224px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0",
+                @drawer_tab == :talk && "drawer:hidden"
+              ]}
+            >
+              <%!-- RE282 (Relay Card Detail v5.dc.html, changes 15/21/23): Status → Blocked by → Blocks →
+                   Owners → Tags → Updated → Flow → Links → public fields → unused-fields row.
+                   Every row is a direct-child .rail-section whose first child is its section_label. --%>
+              <div class="rail-section flex flex-col gap-1.5">
+                <.section_label>Status</.section_label>
+                <div class="rail-status">
+                  <.status_badge status={@card.status} />
+                </div>
+              </div>
+
+              <%!-- BLOCKED BY (RE93) — editable; hidden on @embed, the native card host. Sits beside
+                   Status because it explains why a card is blocked. --%>
+              <div :if={!@embed} class="rail-section flex flex-col gap-1.5">
+                <.section_label>Blocked by</.section_label>
+                <.dependency_list
+                  id={"#{@id}-blocked-by"}
+                  cards={@dependencies}
+                  removable={not @archived}
+                />
+                <form
+                  :if={not @archived}
+                  id={"#{@id}-add-dependency"}
+                  phx-change="validate_dependency"
+                  phx-submit="add_dependency"
+                  class="flex items-center gap-1"
+                >
+                  <%!-- RE363 — SubmitOnDatalistPick submits on a suggestion pick, so a click in
+                       the list saves the blocker; typed refs still wait for Enter. --%>
+                  <input
+                    type="text"
+                    id={"#{@id}-dependency-input"}
+                    name="ref"
+                    value={@dependency_input}
+                    list={"#{@id}-dependency-options"}
+                    placeholder="+ Add"
+                    autocomplete="off"
+                    phx-hook="SubmitOnDatalistPick"
+                    class="input input-xs w-full border border-dashed border-base-300 font-mono"
+                  />
+                  <datalist id={"#{@id}-dependency-options"}>
+                    <option :for={opt <- @dependency_options} value={opt.ref}>{opt.title}</option>
+                  </datalist>
+                </form>
+                <p
+                  :if={@dependency_error}
+                  id={"#{@id}-dependency-error"}
+                  class="text-xs text-error"
+                >
+                  {@dependency_error}
+                </p>
+              </div>
+
+              <%!-- BLOCKS (RE93) — read-only, hidden entirely when empty --%>
+              <div :if={!@embed and @dependents != []} class="rail-section flex flex-col gap-1.5">
+                <.section_label>Blocks</.section_label>
+                <.dependency_list id={"#{@id}-blocks"} cards={@dependents} />
+              </div>
+
+              <%!-- OWNERS: avatars + names, active owner ringed; Reassign stays here because it acts on this field --%>
+              <div class="rail-section flex flex-col gap-1.5">
+                <.section_label>Owners</.section_label>
+                <div class="rail-owners space-y-2">
+                  <div
+                    :for={owner <- @card.owners}
+                    class={[
+                      "rail-owner action-group flex items-center gap-2 rounded-md px-1.5 py-1",
+                      active_owner?(owner, @active_owner) &&
+                        if(owner.actor_type == :agent,
+                          do: "rail-owner-active ring-2 ring-secondary/60",
+                          else: "rail-owner-active ring-2 ring-primary/60"
+                        )
+                    ]}
+                    data-actor-type={owner.actor_type}
+                    data-active={to_string(active_owner?(owner, @active_owner))}
+                  >
+                    <span class="text-sm">{owner_name(owner)}</span>
+                    <.button
+                      :if={!@archived and owner.actor_type == :agent}
+                      type="button"
+                      id={"#{@id}-take-over"}
+                      class="rail-take-over btn btn-primary btn-xs"
+                      phx-click="take_over"
+                      pending="Taking over…"
+                    >
+                      Take over
+                    </.button>
+                    <button
+                      :if={!@archived}
+                      type="button"
+                      id={"#{@id}-remove-owner-#{owner_dom_suffix(owner)}"}
+                      class="btn btn-ghost btn-xs btn-square"
+                      phx-click="remove_owner"
+                      phx-value-actor_type={owner.actor_type}
+                      phx-value-user_id={owner.user_id}
+                      aria-label={"Remove #{owner_name(owner)} as owner"}
+                    >
+                      <.icon name="hero-x-mark" class="size-3" />
+                    </button>
+                  </div>
+                  <span :if={@card.owners == []} class="text-base-content/55">None</span>
+                  <button
+                    :if={!@archived}
+                    type="button"
+                    id={"#{@id}-reassign-toggle"}
+                    class="cursor-pointer self-start rounded-md px-1 py-0.5 text-left text-[11.5px] font-semibold text-primary transition-colors hover:bg-base-200"
+                    phx-click="toggle_reassign"
+                  >
+                    {if @reassign_open, do: "Done", else: "Reassign"}
+                  </button>
+                  <div
+                    :if={!@archived and @reassign_open}
+                    id={"#{@id}-reassign-picker"}
+                    class="flex flex-col gap-1 rounded-[9px] border border-base-300 bg-base-100 p-[7px]"
+                  >
+                    <button
+                      :for={m <- reassignable_members(@members)}
+                      type="button"
+                      id={"#{@id}-assign-user-#{m.user_id}"}
+                      phx-click="add_owner"
+                      phx-value-actor_type="user"
+                      phx-value-user_id={m.user_id}
+                      class="flex cursor-pointer items-center gap-2 rounded-[7px] px-1.5 py-[5px] text-left transition-colors hover:bg-base-200"
+                    >
+                      <.avatar
+                        size={22}
+                        tint={:identity}
+                        src={m.user && m.user.avatar_url}
+                        name={m.user && m.user.name}
+                        email={m.user && m.user.email}
+                      />
+                      <span class="flex-1 text-[12.5px] text-base-content/90">
+                        {user_name(m.user)}
+                      </span>
+                      <span :if={user_owner?(@card, m.user_id)} class="text-[11px] text-primary">
+                        ✓
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      id={"#{@id}-assign-ai"}
+                      phx-click="add_owner"
+                      phx-value-actor_type="agent"
+                      class="flex cursor-pointer items-center gap-2 rounded-[7px] px-1.5 py-[5px] text-left transition-colors hover:bg-base-200"
+                    >
+                      <.avatar size={22} actor={:ai} />
+                      <span class="flex-1 text-[12.5px] text-base-content/90">
+                        {Hamaca.Brand.agent_name()}
+                      </span>
+                      <span :if={agent_owner?(@card)} class="text-[11px] text-primary">
+                        ✓
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <%!-- TAGS --%>
+              <div class="rail-section flex flex-col gap-1.5">
+                <.section_label>Tags</.section_label>
+                <div class="rail-tags">
+                  <.inline_field
+                    :if={!@archived}
+                    id="card-tag"
+                    value={@card.tag && "##{@card.tag}"}
+                    placeholder="None"
+                    editing={@editing_tag}
+                    form={@tag_form}
+                    field={:tag}
+                    edit_event="edit_tag"
+                    save_event="save_card_tag"
+                    cancel_event="cancel_tag"
+                    datalist={@tag_suggestions}
+                    read_class={@card.tag && "badge badge-ghost badge-sm"}
+                  />
+                  <span :if={@archived && @card.tag} class="badge badge-ghost badge-sm">
+                    #{@card.tag}
+                  </span>
+                  <span :if={@archived && !@card.tag} class="text-base-content/55">None</span>
+                </div>
+              </div>
+
+              <%!-- UPDATED (RE282) — replaces Dates; Created left the drawer. UTC, artboard format. --%>
+              <div class="rail-section flex flex-col gap-1.5">
+                <.section_label>Updated</.section_label>
+                <span class="rail-updated font-mono text-xs text-base-content/80">
+                  {Calendar.strftime(@card.updated_at, "%b %d · %H:%M")}
+                </span>
+              </div>
+
+              <%!-- FLOW (RE282) — static happy path of the latest run's flow, else the queued flow;
+                   no row at all with neither --%>
+              <div :if={@rail_flow_path != []} class="rail-section flex flex-col gap-1.5">
+                <.section_label>Flow</.section_label>
+                <span class="rail-flow font-mono text-xs text-base-content/80">
+                  {Enum.join(@rail_flow_path, " → ")}
+                </span>
+              </div>
+
+              <%!-- LINKS: the branch on its own full-width line, then the PR chip; nothing when both
+                   absent. RE324 — a long branch used to wrap inside the fixed-height badge and overlap;
+                   now it is one truncated line (full name in the tooltip) with a copy control, and it
+                   links to GitHub's tree only when the PR URL names the repo. --%>
+              <div :if={@card.branch || @card.pr_url} class="rail-section flex flex-col gap-1.5">
+                <.section_label>Links</.section_label>
+                <div class="rail-links flex min-w-0 flex-col items-start gap-1.5">
+                  <div
+                    :if={@card.branch}
+                    id="card-branch-row"
+                    class="flex w-full min-w-0 items-center gap-1.5"
+                  >
+                    <.icon name="hero-share" class="size-3 shrink-0 text-base-content/60" />
+                    <.branch_name
+                      branch={@card.branch}
+                      href={Hamaca.Markdown.github_branch_url(@card.pr_url, @card.branch)}
+                    />
+                    <.copy_button id="card-branch-copy" text={@card.branch} label="Copy branch name" />
+                  </div>
+                  <.link
+                    :if={@card.pr_url}
+                    id="card-pr"
+                    href={@card.pr_url}
+                    target="_blank"
+                    class="badge badge-ghost badge-sm gap-1 font-mono"
+                  >
+                    <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
+                  </.link>
+                </div>
+              </div>
+
+              <%!-- PUBLIC SUPPORT (RLY-69) — a normal rail row once it has supporters; otherwise it
+                   waits in the unused-fields group below (RE282) --%>
+              <div
+                :if={:public_support not in @unused_fields}
+                id={"#{@id}-public-support"}
+                class="rail-section flex flex-col gap-1.5"
+              >
+                <.section_label>Public support</.section_label>
+                <.supporters_row supporters={supporter_faces(@supporters)} total={@vote_count} />
+              </div>
+
+              <%!-- PUBLIC DESCRIPTION (RLY-69) — a normal rail row once written or while its editor is open --%>
+              <div
+                :if={:public_description not in @unused_fields}
+                id={"#{@id}-public-description"}
+                class="rail-section flex flex-col gap-1.5"
+              >
+                <.section_label>Public description</.section_label>
+                <p
+                  :if={!@editing_public_desc}
+                  class="m-0 whitespace-pre-wrap text-[13px] leading-[1.55] text-base-content/80"
+                >
+                  {@public_description}
+                </p>
+                <.form
+                  :if={@editing_public_desc}
+                  for={@public_desc_form}
+                  id="public-desc-form"
+                  class="action-group"
+                  phx-submit="save_public_desc"
+                  phx-change="draft_field"
+                >
+                  <textarea
+                    id="public-desc-input"
+                    name="public_description"
+                    phx-debounce="300"
+                    class="textarea textarea-primary textarea-sm min-h-[62px] w-full text-[12.5px] leading-normal"
+                  >{Phoenix.HTML.Form.normalize_value("textarea", @public_desc_form[:public_description].value)}</textarea>
+                  <div class="mt-2 flex flex-wrap items-center gap-[7px]">
+                    <.button type="submit" class="btn btn-primary btn-xs" pending="Saving…">
+                      Save
+                    </.button>
+                    <button
+                      type="button"
+                      phx-click="cancel_public_desc"
+                      class="btn btn-ghost btn-xs border border-base-300"
+                    >
+                      Cancel
+                    </button>
+                    <span
+                      :if={:public_description in @restored_drafts}
+                      id="public-desc-draft-restored"
+                      class="commit-field-hint"
+                    >
+                      Unsaved draft restored ·
+                      <button
+                        type="button"
+                        id="public-desc-discard"
+                        phx-click="discard_draft"
+                        phx-value-field="public_description"
+                        class="link link-hover font-semibold text-primary"
+                      >
+                        Discard
+                      </button>
+                    </span>
+                  </div>
+                </.form>
+              </div>
+
+              <%!-- UNUSED FIELDS (RE282 change 15) — empty public fields fold behind one dashed row;
+                   expanded, they render ABOVE the button (Relay Card Detail v5.dc.html). --%>
+              <div
+                :if={@unused_fields != []}
+                id={"#{@id}-unused-fields"}
+                class="flex flex-col gap-[9px]"
+              >
+                <div :if={@unused_fields_open} class="flex flex-col gap-3.5">
+                  <div
+                    :if={:public_support in @unused_fields}
+                    id={"#{@id}-unused-public-support"}
+                    class="flex flex-col gap-[5px]"
+                  >
+                    <.section_label>Public support</.section_label>
+                    <span class="text-[12.5px] text-base-content/45">no supporters yet</span>
+                  </div>
+                  <div
+                    :if={:public_description in @unused_fields}
+                    id={"#{@id}-unused-public-description"}
+                    class="flex flex-col gap-[5px]"
+                  >
+                    <.section_label>Public description</.section_label>
+                    <span class="text-[12.5px] text-base-content/45">not written</span>
+                    <button
+                      id="add-public-desc"
+                      type="button"
+                      phx-click="start_public_desc"
+                      class="cursor-pointer self-start rounded-md px-1 py-0.5 text-left text-xs font-semibold text-primary transition-colors hover:bg-base-200"
+                    >
+                      + Add a public description
+                    </button>
+                  </div>
+                </div>
+                <button
+                  id={"#{@id}-unused-toggle"}
+                  type="button"
+                  phx-click="toggle_unused_fields"
+                  class="w-full cursor-pointer rounded-[7px] border border-dashed border-base-300 px-[9px] py-[7px] text-left font-mono text-[11px] font-semibold text-base-content/55 transition-colors hover:border-base-content/30 hover:bg-base-200 hover:text-base-content/80"
+                >
+                  {unused_fields_label(@unused_fields, @unused_fields_open)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+    """
+  end
+
+  # RLY-69 — %Schemas.User{} rows -> the maps supporters_row/1 expects.
+  defp supporter_faces(users) do
+    Enum.map(users, fn u -> %{name: u.name, email: u.email, src: u.avatar_url} end)
+  end
+
+  @doc """
+  RE282 change 15 — which of the drawer's public fields are *unused*, in rail order, so they
+  fold behind the one dashed "N unused fields" row instead of each taking a slot to say "nothing
+  yet". Public support is unused with no votes; public description is unused when unwritten AND
+  its editor is closed — an open editor counts as in use, so the form never vanishes behind a
+  collapsed row mid-edit. This is the one definition of "unused"; the rail renders from it.
+  """
+  def rail_unused_fields(vote_count, public_description, editing_public_desc) do
+    Enum.filter(
+      [vote_count == 0 && :public_support, is_nil(public_description) && !editing_public_desc && :public_description],
+      & &1
+    )
+  end
+
+  defp unused_fields_label(_fields, true), do: "Hide unused fields"
+  defp unused_fields_label([_one], false), do: "1 unused field"
+  defp unused_fields_label(fields, false), do: "#{length(fields)} unused fields"
+
+  attr :eyebrow, :string, required: true, doc: "RE279: what asked and exited — build it with `blocked_strip_eyebrow/3`"
+
+  attr :question, :string,
+    default: nil,
+    doc: "RE279: the question as ONE line of plain text (`Hamaca.Markdown.to_plain/1`); nil renders no line"
+
+  attr :loading?, :boolean,
+    default: false,
+    doc: "RE279: RLY-68 optimistic drawer — a one-line skeleton stands in for the question"
+
+  attr :blocked_since, :any,
+    default: nil,
+    doc: "RE279: `Card.blocked_since` (a DateTime); nil omits the wait value and its sub-label"
+
+  attr :step, :integer, default: 1, doc: "RE279: 1-based index of the question the stepper is on"
+
+  attr :step_count, :integer,
+    default: 1,
+    doc: "RE279: questions in the batch — the `N/M` counter renders only when this is > 1"
+
+  @doc """
+  RE279 — the blocked state hoisted out of the tabs: ONE amber strip under the card drawer's
+  header, above the tab bar, visible on every tab. An eyebrow naming what asked and exited, the
+  question on one ellipsis-truncated line, the wait time at 21px mono, and an **Answer** button.
+
+  Presentation only — no card or run reasoning lives here; `card_drawer/1` derives every attr
+  (`blocked_strip_eyebrow/3`, `Hamaca.Markdown.to_plain/1`). Matches the "persistent needs-you strip"
+  in `docs/designs/Relay Card Detail v5.dc.html` (lines ~88–102), with its literals mapped to the
+  daisyUI warning tokens so dark mode flips.
+
+  **Answer** pushes `answer_jump`. The LiveView selects the Detail tab and pushes `focus-answer`,
+  which the colocated `.BlockedStrip` hook turns into focus on the first answer control inside
+  `#needs-input-panel` — after the patch, so the panel is no longer hidden. A pure client
+  `JS.focus` chain cannot do this: the Detail panel is still hidden until the server re-renders.
+  """
+  def blocked_strip(assigns) do
+    ~H"""
+    <section
+      id="card-drawer-blocked-strip"
+      phx-hook=".BlockedStrip"
+      aria-label="Waiting on you"
+      class="flex flex-none items-center gap-[14px] px-5 py-3"
+      style="background:color-mix(in oklab, var(--color-warning) 8%, var(--color-base-100));border-top:1px solid color-mix(in oklab, var(--color-warning) 30%, var(--color-base-100));border-bottom:1px solid color-mix(in oklab, var(--color-warning) 30%, var(--color-base-100));"
+    >
+      <span
+        id="card-drawer-blocked-strip-accent"
+        class="w-[3px] flex-none self-stretch rounded-[2px]"
+        style="background:var(--color-warning);"
+      >
+      </span>
+      <div id="card-drawer-blocked-strip-text" class="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span
+          id="card-drawer-blocked-strip-eyebrow"
+          class="font-mono text-[10px] font-semibold uppercase tracking-[0.6px]"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+        >
+          {@eyebrow}
+        </span>
+        <div
+          :if={@loading?}
+          id="card-drawer-blocked-strip-question-skeleton"
+          class="skeleton h-[19px] w-3/4 rounded"
+        >
+        </div>
+        <span
+          :if={!@loading? and @question != nil}
+          id="card-drawer-blocked-strip-question"
+          title={@question}
+          class="truncate text-[13.5px] font-semibold leading-[1.4]"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+        >
+          {@question}
+        </span>
+      </div>
+      <div
+        :if={@blocked_since != nil or @step_count > 1}
+        id="card-drawer-blocked-strip-meta"
+        class="flex flex-none flex-col items-end"
+      >
+        <div class="flex items-baseline gap-2">
+          <span
+            :if={@step_count > 1}
+            id="card-drawer-blocked-strip-counter"
+            class="font-mono text-[11px] font-semibold tabular-nums"
+            style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+          >
+            {@step}/{@step_count}
+          </span>
+          <span
+            :if={@blocked_since != nil}
+            id="card-drawer-blocked-strip-wait"
+            class="font-mono text-[21px] font-semibold leading-none tracking-[-0.02em] tabular-nums"
+            style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+          >
+            {wait_duration(@blocked_since)}
+          </span>
+        </div>
+        <span
+          :if={@blocked_since != nil}
+          id="card-drawer-blocked-strip-wait-label"
+          class="mt-0.5 font-mono text-[9.5px] font-semibold tracking-[0.5px]"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));opacity:0.8;"
+        >
+          waiting on you
+        </span>
+      </div>
+      <button
+        type="button"
+        id="card-drawer-blocked-answer"
+        phx-click="answer_jump"
+        class="h-[30px] flex-none whitespace-nowrap rounded-[7px] border-none px-[13px] text-[12px] font-semibold text-warning-content"
+        style="background:var(--color-warning);"
+      >
+        Answer
+      </button>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".BlockedStrip">
+        export default {
+          mounted() {
+            this.handleEvent("focus-answer", () => {
+              requestAnimationFrame(() => {
+                const panel = document.getElementById("needs-input-panel")
+                const target = panel && panel.querySelector("button:not([disabled]), textarea")
+                if (!target) return
+                target.focus({preventScroll: true})
+                target.scrollIntoView({block: "nearest"})
+              })
+            })
+          }
+        }
+      </script>
+    </section>
+    """
+  end
+
+  @doc """
+  RE279 — the blocked strip's eyebrow, and the ONE place its wording is decided.
+
+  `parked?` is whether the card has a parked run. `park_kind` is the drawer's already-classified
+  kind (`Hamaca.Runs.park_kind/1`, with its nil → `:question` policy applied once in `card_drawer/1`)
+  — never classify again here. `node` is the run's current node key, upcased as-is. With no parked
+  run, or no node key (e.g. a human set the block by hand), the eyebrow is `NEEDS YOUR ANSWER`.
+
+  Public only so its three rows are unit-testable without a database.
+  """
+  @spec blocked_strip_eyebrow(boolean(), :question | :escalation | :infrastructure, String.t() | nil) :: String.t()
+  def blocked_strip_eyebrow(true, :question, node) when is_binary(node) and node != "",
+    do: "#{String.upcase(node)} ASKED AND EXITED"
+
+  def blocked_strip_eyebrow(true, :escalation, node) when is_binary(node) and node != "",
+    do: "#{String.upcase(node)} FAILED — YOUR CALL"
+
+  def blocked_strip_eyebrow(true, :infrastructure, node) when is_binary(node) and node != "",
+    do: "#{String.upcase(node)} COULD NOT RUN"
+
+  def blocked_strip_eyebrow(_parked?, _park_kind, _node), do: "NEEDS YOUR ANSWER"
+
+  attr :card, :any, required: true
+  attr :question, :string, default: nil
+  attr :answer_questions, :list, default: nil
+  attr :answer_step, :integer, default: 0
+  attr :answer_values, :map, default: %{}
+  attr :answer_form, :any, default: nil
+  attr :body_loading, :boolean, default: false
+
+  attr :upload, :any,
+    default: nil,
+    doc:
+      "RE428: the `:answer_images` `Phoenix.LiveView.UploadConfig`; nil (the native embed, " <>
+        "Storybook without one) = no 📎, drop target or paste"
+
+  attr :images_pending, :list, default: [], doc: "RE428: the current question's uploaded images, `[%{id, filename, src}]`"
+  attr :image_errors, :list, default: [], doc: "RE428: the answer box's refused-image sentences"
+
+  attr :park_kind, :atom,
+    default: :question,
+    values: [:question, :escalation, :infrastructure],
+    doc:
+      "RE253/RE308: from `Hamaca.Runs.park_kind/1` — :question is an agent ask (A1), :escalation a routed node failure (A4), :infrastructure an agent that could not run at all (A11)"
+
+  attr :node, :string, default: nil, doc: "RE253: the failed node's key, for the :escalation sentence"
+  attr :attempt, :integer, default: nil, doc: "RE253: attempts spent on that node"
+  attr :failure_detail, :string, default: nil, doc: "RE253: the failed execution's detail text"
+
+  attr :advance_available?, :boolean,
+    default: false,
+    doc:
+      "RE279/RE310: render the foreach advance control — true only for a parked run whose `Hamaca.Runs.advance_foreach_available?/1` holds; card_drawer/1 combines the two, this component never re-derives the rule"
+
+  @doc """
+  The needs-input answer panel (RLY-71/RLY-109/RE253): structured stepper when questions exist,
+  single composer otherwise.
+
+  Two faces, chosen by `park_kind` — the classification lives in `Hamaca.Runs.park_kind/1`, never
+  here:
+
+    * `:question` (A1) — the agent asked something. Renders exactly as it always has.
+    * `:escalation` (A4) — a node failed and the flow's `--on failed --> needs_input` edge handed
+      the card to a human. Names the node and its attempts, shows the failure output in the dark
+      `<pre>` the `:failed` banner uses, and offers Retry beside the answer box. The markdown
+      question is suppressed *only when that `<pre>` renders*: the engine posts the failure detail
+      as the question (`ensure_card_blocked/2`), so it is usually the same text twice, and
+      multi-line failure output renders badly through `Hamaca.Markdown.to_html/1`. The two
+      derivations are not equivalent, though — `RunDetail.last_failure_detail/1` keeps `:failed`
+      executions only, so an A9 (`:partial`) escalation has no `<pre>`, and there the question is
+      the only surviving copy of the failure text. Never suppress both (RE253).
+    * `:infrastructure` (A11, RE308) — the node's agent could not run at all (an expired login, a
+      usage limit). Shows the cause in the same dark `<pre>` (falling back to the question, which
+      the engine posts with the same text) and a Retry, and nothing else: there is nothing to
+      answer, since the fix is outside the card, and no attempt count, since no retry was spent.
+
+  Answering either face is the same event (`answer_input`) and the same resume: `Cards.answer_input/3`
+  unblocks the card, the Listener resumes the run in the same visit with the human's note as
+  `findings` and the agent's Claude session restored.
+
+  In the structured stepper, a step commits in one action (RE323): clicking an option, or ⌘/Ctrl+Enter
+  in the textarea (`answer_commit`), moves on to the next question or sends the batch on the last one.
+
+  Renders exactly once, on the drawer's Detail tab (RE279): the Run tab's parked banner that held a
+  second copy is gone, and the blocked state itself — what asked, the one-line question, the wait
+  time — is hoisted into `blocked_strip/1` above the tabs. That strip's **Answer** focuses the first
+  enabled button or textarea in `#needs-input-panel`, so the RE310 advance control stays last in DOM
+  order.
+  """
+  def needs_input_panel(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :stepper_question,
+        assigns.answer_questions && Enum.at(assigns.answer_questions, assigns.answer_step)
+      )
+
+    ~H"""
+    <section
+      id="needs-input-panel"
+      class="flex flex-col gap-4 rounded-[10px] p-5 action-group"
+      style="background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));"
+    >
+      <%!-- RE279: no wait readout here — the blocked strip above the tabs is the one place the wait
+      time shows. --%>
+      <div class="flex items-center justify-between">
+        <span
+          class="font-mono text-[10px] font-semibold tracking-[0.05em]"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+        >
+          {panel_label(@park_kind)}
+        </span>
+      </div>
+      <%!-- RE253 (A4): the flow escalated a node failure to a human. Say which node, how many
+      attempts, and show the output — the old :stopped banner had this text and showed none of it. --%>
+      <div
+        :if={@park_kind == :escalation}
+        id="needs-input-escalation"
+        class="flex flex-col gap-3"
+      >
+        <p
+          class="text-[13px] leading-normal"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+        >
+          <strong>{@node}</strong>
+          failed after {attempt_label(@attempt)} — the flow handed this card to you.
+        </p>
+        <pre
+          :if={@failure_detail}
+          id="needs-input-failure-detail"
+          style="background:var(--color-neutral);color:var(--color-neutral-content);border:1px solid var(--color-base-300);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
+        ><%= @failure_detail %></pre>
+      </div>
+      <%!-- RE308 (A11): the agent never ran — an expired login or a usage limit. Nothing to answer
+      (the fix is outside the card) and no attempt count (no retry was spent): the cause and a Retry. --%>
+      <div
+        :if={@park_kind == :infrastructure}
+        id="needs-input-infrastructure"
+        class="flex flex-col gap-3"
+      >
+        <p
+          class="text-[13px] leading-normal"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+        >
+          Agent could not run <strong>{@node}</strong>
+          — nothing about the code failed and no retry was spent. Fix the cause below, then retry.
+        </p>
+        <pre
+          :if={@failure_detail || @question}
+          id="needs-input-failure-detail"
+          style="background:var(--color-neutral);color:var(--color-neutral-content);border:1px solid var(--color-base-300);font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;border-radius:6px;padding:8px 10px;margin:0;overflow-x:auto;"
+        ><%= @failure_detail || @question %></pre>
+        <div class="flex items-center gap-2">
+          <.button
+            id="needs-input-retry"
+            type="button"
+            phx-click="retry_run"
+            class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+            style="background:var(--color-warning);"
+            pending="Retrying…"
+          >
+            Retry {@node}
+          </.button>
+        </div>
+      </div>
+      <%!-- RLY-71 stepper: one structured question at a time. An A4 park never reaches this
+      branch — a plain-string block writes no meta["questions"], so answer_questions is nil. --%>
+      <div
+        :if={@answer_questions && @park_kind != :infrastructure}
+        id="needs-input-stepper"
+        class="flex flex-col gap-4"
+      >
+        <div
+          id="needs-input-progress"
+          class="font-mono text-[10px]"
+          style="color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));"
+        >
+          Question {@answer_step + 1} of {length(@answer_questions)}
+        </div>
+        <div
+          id="needs-input-question"
+          class="needs-input-question md text-[13.5px] leading-normal break-words"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+        >
+          {Hamaca.Markdown.to_html(@stepper_question["prompt"])}
+        </div>
+        <div :if={@stepper_question["options"] != []} class="flex flex-col gap-2">
+          <%!-- phx-value-option, not phx-value-value: "value" collides with the
+          button's intrinsic DOM .value property (empty for a value-less <button>),
+          which wins over the phx-value-* attribute when a real browser serializes
+          the click — silently sending "" instead of the picked option. --%>
+          <button
+            :for={{option, index} <- Enum.with_index(@stepper_question["options"])}
+            type="button"
+            id={"needs-input-option-#{index}"}
+            phx-click="answer_select"
+            phx-value-index={@answer_step}
+            phx-value-option={option}
+            class={
+              [
+                "btn btn-sm justify-start rounded-[7px] font-normal",
+                # daisyUI's .btn is a fixed-height (`height: var(--size)`)
+                # nowrap flex row, which clips a long option. Real agent
+                # options are sentences, so let them grow to as many lines
+                # as they need while a short one keeps the compact height.
+                "h-auto min-h-8 whitespace-normal px-3 py-2 text-left leading-snug",
+                Map.get(@answer_values, @answer_step) == option &&
+                  "needs-input-option-selected text-warning-content"
+              ]
+            }
+            style={
+              if(Map.get(@answer_values, @answer_step) == option,
+                do: "background:var(--color-warning);border-color:var(--color-warning);",
+                else:
+                  "background:transparent;border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+              )
+            }
+          >
+            {option}
+          </button>
+        </div>
+        <form
+          :if={@stepper_question["allow_text"]}
+          id="needs-input-text-form"
+          phx-change="answer_custom"
+          phx-submit="answer_commit"
+        >
+          <input type="hidden" name="answer[index]" value={@answer_step} />
+          <%!-- RE428 — the answer sits in the shared image control, per question: each image
+          uploads at once and the box's hook keeps an absolute `![name](url)` line for it in the
+          text; Send posts each question's images as a FROM ANSWER · Q<n> note. --%>
+          <.answer_image_box
+            upload={@upload}
+            images_pending={@images_pending}
+            image_errors={@image_errors}
+            link_target="needs-input-text"
+          >
+            <%!-- RE323: ⌘/Ctrl+Enter commits the typed answer — next question, or send on the last. data-step/data-value let SubmitOnCmdEnter reset the (focused, reused) box when the step changes. --%>
+            <textarea
+              id="needs-input-text"
+              name="answer[text]"
+              rows="3"
+              autocomplete="off"
+              phx-hook="SubmitOnCmdEnter"
+              data-step={@answer_step}
+              data-value={
+                stepper_custom_text(@answer_values, @answer_step, @stepper_question["options"])
+              }
+              placeholder={
+                if(@stepper_question["options"] == [],
+                  do: "Type your answer…",
+                  else: "Or type your own…"
+                )
+              }
+              class="w-full min-w-0 resize-none border-none bg-transparent p-0 text-[13px] leading-[1.45] outline-none"
+              style="color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
+            ><%= stepper_custom_text(
+              @answer_values,
+              @answer_step,
+              @stepper_question["options"]
+            ) %></textarea>
+          </.answer_image_box>
+        </form>
+        <div class="flex items-center justify-between">
+          <button
+            :if={@answer_step > 0}
+            id="needs-input-back"
+            type="button"
+            phx-click="answer_back"
+            disabled={uploading?(@upload)}
+            class="btn btn-sm btn-ghost rounded-[7px]"
+          >
+            ← Back
+          </button>
+          <span :if={@answer_step == 0}></span>
+          <button
+            :if={@answer_step < length(@answer_questions) - 1}
+            id="needs-input-next"
+            type="button"
+            phx-click="answer_next"
+            disabled={not Map.has_key?(@answer_values, @answer_step) or uploading?(@upload)}
+            class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+            style="background:var(--color-warning);"
+          >
+            Next →
+          </button>
+          <.button
+            :if={@answer_step == length(@answer_questions) - 1}
+            id="needs-input-send"
+            type="button"
+            phx-click="answer_submit"
+            disabled={not Map.has_key?(@answer_values, @answer_step) or uploading?(@upload)}
+            class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+            style="background:var(--color-warning);"
+            pending="Sending…"
+          >
+            Send to AI →
+          </.button>
+        </div>
+      </div>
+      <%!-- fallback: today's single-textarea composer for plain-string / human blocks --%>
+      <div :if={is_nil(@answer_questions) and @park_kind != :infrastructure}>
+        <div
+          :if={@body_loading}
+          id="needs-input-question-skeleton"
+          class="skeleton h-5 w-3/4 rounded"
+        >
+        </div>
+        <div
+          :if={!@body_loading && @question && !(@park_kind == :escalation && @failure_detail)}
+          id="needs-input-question"
+          class="needs-input-question md text-[13.5px] leading-normal"
+          style="color:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-content));"
+        >
+          {Hamaca.Markdown.to_html(@question)}
+        </div>
+        <.form
+          for={@answer_form}
+          id="needs-input-form"
+          class="flex flex-col items-start gap-[11px]"
+          phx-change="answer_change"
+          phx-submit="answer_input"
+        >
+          <div class="w-full">
+            <.answer_image_box
+              upload={@upload}
+              images_pending={@images_pending}
+              image_errors={@image_errors}
+              link_target="needs-input-answer"
+            >
+              <%!-- Borderless inside the box, like the reject note: the box is the field. --%>
+              <textarea
+                id="needs-input-answer"
+                name="answer[body]"
+                rows="3"
+                placeholder={answer_placeholder(@park_kind)}
+                phx-hook="SubmitOnCmdEnter"
+                class="w-full min-w-0 resize-none border-none bg-transparent p-0 text-[13px] leading-[1.45] text-base-content outline-none"
+              >{Phoenix.HTML.Form.normalize_value("textarea", @answer_form && @answer_form[:body].value)}</textarea>
+            </.answer_image_box>
+          </div>
+          <div class="flex items-center gap-2">
+            <.button
+              id="needs-input-send"
+              disabled={uploading?(@upload)}
+              type="submit"
+              class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+              style="background:var(--color-warning);"
+              pending="Sending…"
+            >
+              Send to AI →
+            </.button>
+            <%!-- Retry differs from answering and stays useful: it re-enters with NO session and
+            +1 retry-budget bonus, where an answer resumes the session with the note as findings. --%>
+            <%!-- RE394 — stays type="button": a no-submitter requestSubmit() (⌘↵) puts
+            phx-submit-loading on every button in the form, and only a [type="submit"] reads as
+            pressed on submit, so Retry keeps its idle label while Send shows Sending…. --%>
+            <.button
+              :if={@park_kind == :escalation}
+              id="needs-input-retry"
+              type="button"
+              phx-click="retry_run"
+              class="btn btn-sm rounded-[7px] font-semibold"
+              style="background:transparent;border:1px solid color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
+              pending="Retrying…"
+            >
+              Retry {@node}
+            </.button>
+          </div>
+        </.form>
+      </div>
+      <%!-- RE279/RE310 — relocated from the Run tab's deleted parked banner. Last in DOM order so the
+      blocked strip's Answer focuses an answer control, never this. --%>
+      <div :if={@advance_available?} id="needs-input-advance">
+        <RunComponents.advance_button available?={@advance_available?} />
+      </div>
+    </section>
+    """
+  end
+
+  defp panel_label(:escalation), do: "NODE FAILED · YOUR CALL"
+  defp panel_label(:infrastructure), do: "AGENT COULD NOT RUN"
+  defp panel_label(_kind), do: String.upcase(Hamaca.Brand.agent_name()) <> " NEEDS YOUR INPUT"
+
+  defp answer_placeholder(:escalation), do: "Tell the agent what to do differently — it retries this node with your note…"
+
+  defp answer_placeholder(_kind), do: "Type your answer — the AI picks up where it left off…"
+
+  defp attempt_label(n) when is_integer(n) and n > 1, do: "#{n} attempts"
+  defp attempt_label(_n), do: "1 attempt"
+
+  @doc """
+  The review gate's green panel (MMF 15, RE380): READY FOR YOUR REVIEW, Approve / Request changes,
+  and the in-place reject note. Extracted from `card_drawer/1` so the mockup viewer's left sheet
+  renders the very same control; the caller decides whether to render it (in review, not
+  archived). Its children's ids are fixed (`review-approve`, `review-reject-form`, …), so only one
+  copy may be on the page at a time.
+
+  `compact` is the left sheet's face: Approve says just "Approve", the returns-to hint drops its
+  explanatory suffix, the note gets 8 rows, and two lines sit under it — an optional
+  "+ Quote “caption”" button (`quote_caption`, wired by the colocated `.QuoteCaption` hook) and a
+  reminder that the note survives switching mockups. In both faces the form reports every
+  keystroke (`phx-change="review_reject_change"`), so the note is held server-side.
+
+  `embed` (the native host) drops the decision buttons and the reject note, as in the drawer.
+  """
+  attr :id, :string, default: "review-panel"
+
+  attr :review_gate, :any,
+    default: nil,
+    doc: "%{approve_label, reject_target_name, can_reject}, or nil for a stage that is not a review gate"
+
+  attr :reject_open, :boolean, default: false, doc: "whether the Request-changes note is expanded"
+  attr :reject_form, :any, default: nil, doc: "a Phoenix.HTML.Form for reject[note]"
+  attr :reject_error, :string, default: nil, doc: "inline prompt after an empty Send back"
+  attr :embed, :boolean, default: false, doc: "native host: no decision buttons, no note"
+  attr :compact, :boolean, default: false, doc: "the mockup viewer's left-sheet face"
+
+  attr :quote_caption, :string,
+    default: nil,
+    doc: "compact only: the current mockup's caption, offered as a one-click quote into the note"
+
+  attr :upload, :any,
+    default: nil,
+    doc:
+      "RE428: the `:reject_images` `Phoenix.LiveView.UploadConfig`; nil (the native embed, " <>
+        "Storybook without one) = no 📎, drop target or paste"
+
+  attr :images_pending, :list, default: [], doc: "RE428: uploaded reject images, `[%{id, filename, src}]`"
+  attr :image_errors, :list, default: [], doc: "RE428: the reject box's refused-image sentences"
+
+  def card_review_panel(assigns) do
+    ~H"""
+    <section
+      id={@id}
+      class="flex flex-col gap-3 rounded-[10px] p-3.5 action-group"
+      style="background:color-mix(in oklab, var(--color-success) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-success) 30%, var(--color-base-100));"
+    >
+      <span
+        class="font-mono text-[10px] font-semibold tracking-[0.05em]"
+        style="color:color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));"
+      >
+        READY FOR YOUR REVIEW
+      </span>
+      <p
+        class="text-[13px] leading-normal"
+        style="color:color-mix(in oklab, var(--color-success) 30%, var(--color-base-content));"
+      >
+        {review_hint(@review_gate, @embed)}
+      </p>
+      <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
+        <.button
+          id="review-approve"
+          type="button"
+          phx-click="review_approve"
+          class="btn btn-sm flex-1 rounded-lg border-none font-semibold text-success-content"
+          style="background:var(--color-success);"
+          pending="Approving…"
+        >
+          {if @compact, do: "Approve", else: @review_gate.approve_label}
+        </.button>
+        <button
+          :if={@review_gate.can_reject}
+          id="review-request-changes"
+          type="button"
+          phx-click="review_open_reject"
+          class="btn btn-sm flex-1 rounded-lg bg-base-100 font-semibold"
+          style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 85%, transparent);"
+        >
+          Request changes
+        </button>
+      </div>
+      <div
+        :if={@review_gate && @reject_open && !@embed}
+        id="review-reject-panel"
+        class="flex flex-col gap-2 rounded-lg bg-base-100 p-3"
+        style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));"
+      >
+        <div
+          class="flex items-center gap-2 rounded-lg px-3 py-2"
+          style="background:color-mix(in oklab, var(--color-accent) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-accent) 25%, var(--color-base-100));"
+        >
+          <span
+            class="text-[13px] leading-none"
+            style="color:color-mix(in oklab, var(--color-accent) 50%, var(--color-base-content));"
+          >
+            ↩
+          </span>
+          <span
+            class="text-[12.5px] leading-normal"
+            style="color:color-mix(in oklab, var(--color-accent) 35%, var(--color-base-content));"
+          >
+            Returns to
+            <b style="color:color-mix(in oklab, var(--color-accent) 20%, var(--color-base-content));">
+              {@review_gate.reject_target_name}
+            </b>
+            <%= if !@compact do %>
+              — the reject target set on this stage.
+            <% end %>
+          </span>
+        </div>
+        <.form
+          for={@reject_form}
+          id="review-reject-form"
+          class="flex flex-col gap-2"
+          phx-change="review_reject_change"
+          phx-submit="review_reject"
+        >
+          <%!-- RE306 — the panel opens on a button click, so without this the caret
+          stays on "Request changes" and the first words of the note are typed at the
+          window. `commit={:form}` renders a plain <.input>, which has no CommitField
+          hook to honour `data-autofocus`, so the caret is moved the same way the
+          Move-to filter does it. --%>
+          <%!-- RE428 — the note sits in the shared image control. Each image the human attaches
+          uploads at once and the box's hook keeps an absolute `![name](url)` line for it in the
+          note; Reject posts the images as a FROM REJECTION note. Borderless inside the box. --%>
+          <.image_attach_box
+            id="review-reject-images"
+            upload={@upload}
+            pending={@images_pending}
+            enabled={@upload != nil}
+            link_target="review-request-note"
+            cancel_event="cancel_reject_image"
+            remove_event="remove_reject_image"
+          >
+            <div class="flex min-w-0 flex-1 flex-col">
+              <textarea
+                id="review-request-note"
+                name={@reject_form[:note].name}
+                rows={if @compact, do: "8", else: "3"}
+                placeholder="What needs to change? This note goes to the AI…"
+                phx-mounted={JS.focus()}
+                phx-hook="SubmitOnCmdEnter"
+                class="w-full min-w-0 resize-none border-none bg-transparent p-0 text-[12.5px] leading-[18px] text-base-content focus:outline-none"
+              >{Phoenix.HTML.Form.normalize_value("textarea", @reject_form[:note].value)}</textarea>
+              <div
+                :if={@upload}
+                class="flex items-center gap-2 border-t border-base-300 px-[9px] py-1.5"
+              >
+                <.image_attach_button
+                  id="review-reject-images-attach"
+                  upload={@upload}
+                  label="Attach images"
+                />
+                <span class="flex-1"></span>
+                <span class="hidden font-mono text-[10px] text-base-content/45 drawer:inline">
+                  or paste / drop
+                </span>
+              </div>
+            </div>
+          </.image_attach_box>
+          <.image_attach_hint
+            id="review-reject-images-hint"
+            errors={@image_errors}
+            enabled={@upload != nil}
+          />
+          <button
+            :if={@compact && @quote_caption}
+            type="button"
+            id="review-quote-caption"
+            phx-hook=".QuoteCaption"
+            data-quote={"“#{@quote_caption}”"}
+            class="btn btn-ghost btn-xs justify-start gap-1 px-1 text-xs text-base-content/65"
+          >
+            + Quote “{@quote_caption}”
+          </button>
+          <p :if={@compact} id="review-note-stays" class="text-xs text-base-content/55">
+            Your note stays put while you switch mockups.
+          </p>
+          <p
+            :if={@reject_error}
+            id="review-note-error"
+            class="text-xs text-error"
+          >
+            {@reject_error}
+          </p>
+          <div class="flex items-center gap-2">
+            <.button
+              id="review-send-back"
+              type="submit"
+              disabled={@upload != nil and @upload.entries != []}
+              class="btn btn-sm rounded-[7px] border-none font-semibold text-warning-content"
+              style="background:var(--color-warning);"
+              pending="Sending back…"
+            >
+              Reject → {@review_gate.reject_target_name}
+            </.button>
+            <button
+              id="review-cancel-reject"
+              type="button"
+              phx-click="review_cancel_reject"
+              class="btn btn-ghost btn-sm text-xs"
+              style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+            >
+              Cancel
+            </button>
+          </div>
+        </.form>
+      </div>
+    </section>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".QuoteCaption">
+      export default {
+        mounted() {
+          this.el.addEventListener("click", () => {
+            const note = document.getElementById("review-request-note")
+            if (!note) return
+            const quote = this.el.dataset.quote
+            const start = note.selectionStart ?? note.value.length
+            const end = note.selectionEnd ?? note.value.length
+            note.value = note.value.slice(0, start) + quote + note.value.slice(end)
+            const caret = start + quote.length
+            note.focus()
+            note.setSelectionRange(caret, caret)
+            note.dispatchEvent(new Event("input", { bubbles: true }))
+          })
+        }
+      }
+    </script>
+    """
+  end
+
+  @doc """
+  The card's gate panel, as the drawer's Detail tab shows it (RE380): the needs-input panel
+  (question stepper, escalation or infrastructure face) while the card awaits an answer, then the
+  review panel while it is in review — never both, since the two statuses are exclusive. The park
+  facts (`park_kind`, the failed node, attempts, failure detail, the advance control) come from the
+  same private helper `card_drawer/1` uses, so the drawer and the mockup viewer's left sheet can
+  never disagree about which face a parked card wears.
+  """
+  attr :card, :any, required: true
+  attr :archived, :boolean, default: false
+  attr :runs, :list, default: [], doc: "the card's runs, newest-first"
+  attr :run_flow, :any, default: nil, doc: "the %Schemas.Flow{} the latest run belongs to"
+  attr :advance_available?, :boolean, default: false
+  attr :question, :string, default: nil
+  attr :answer_questions, :any, default: nil
+  attr :answer_step, :integer, default: 0
+  attr :answer_values, :map, default: %{}
+  attr :answer_form, :any, default: nil
+  attr :body_loading, :boolean, default: false
+  attr :review_gate, :any, default: nil
+  attr :reject_open, :boolean, default: false
+  attr :reject_form, :any, default: nil
+  attr :reject_error, :string, default: nil
+  attr :embed, :boolean, default: false
+  attr :compact, :boolean, default: false
+  attr :quote_caption, :string, default: nil
+  attr :uploads, :map, default: nil, doc: "RE428: the LiveView's `@uploads` (`:reject_images`, `:answer_images`)"
+  attr :reject_images_pending, :list, default: []
+  attr :reject_image_errors, :list, default: []
+  attr :answer_images_pending, :map, default: %{}, doc: "RE428: `%{step => [image]}`, the answer's pending images"
+  attr :answer_image_errors, :list, default: []
+
+  def card_gate_panel(assigns) do
+    assigns = assign_park_state(assigns)
+
+    ~H"""
+    <.needs_input_panel
+      :if={Card.awaiting_answer?(@card.status, @archived)}
+      card={@card}
+      question={@question}
+      answer_questions={@answer_questions}
+      answer_step={@answer_step}
+      answer_values={@answer_values}
+      answer_form={@answer_form}
+      body_loading={@body_loading}
+      park_kind={@park_kind}
+      node={@latest_detail && @latest_detail.current_node}
+      attempt={@latest_detail && @latest_detail.parked_attempt}
+      failure_detail={@latest_detail && @latest_detail.last_failure_detail}
+      advance_available?={@panel_advance_available?}
+      upload={answer_upload(@uploads, @embed)}
+      images_pending={Map.get(@answer_images_pending, @answer_step, [])}
+      image_errors={@answer_image_errors}
+    />
+    <.card_review_panel
+      :if={@card.status == :in_review and !@archived}
+      review_gate={@review_gate}
+      reject_open={@reject_open}
+      reject_form={@reject_form}
+      reject_error={@reject_error}
+      embed={@embed}
+      compact={@compact}
+      quote_caption={@quote_caption}
+      upload={reject_upload(@uploads, @embed)}
+      images_pending={@reject_images_pending}
+      image_errors={@reject_image_errors}
+    />
+    """
+  end
+
+  # RE428 — in-flight answer images hold the stepper on its step and hold Send.
+  defp uploading?(%{entries: [_ | _]}), do: true
+  defp uploading?(_upload), do: false
+
+  attr :upload, :any, required: true, doc: "the `:answer_images` UploadConfig, or nil (no 📎, drop or paste)"
+  attr :images_pending, :list, required: true
+  attr :image_errors, :list, required: true
+  attr :link_target, :string, required: true, doc: "the answer textarea's DOM id"
+  slot :inner_block, required: true
+
+  # RE428 — the needs-input panel's answer textarea inside RE427's shared image control, with the
+  # attach bar under it (the reject note's layout). One box id for both faces: they never render
+  # together.
+  defp answer_image_box(assigns) do
+    ~H"""
+    <.image_attach_box
+      id="needs-input-images"
+      upload={@upload}
+      pending={@images_pending}
+      enabled={@upload != nil}
+      link_target={@link_target}
+      cancel_event="cancel_answer_image"
+      remove_event="remove_answer_image"
+    >
+      <div class="flex min-w-0 flex-1 flex-col">
+        {render_slot(@inner_block)}
+        <div :if={@upload} class="flex items-center gap-2 border-t border-base-300 px-[9px] py-1.5">
+          <.image_attach_button id="needs-input-images-attach" upload={@upload} label="Attach images" />
+          <span class="flex-1"></span>
+          <span class="hidden font-mono text-[10px] text-base-content/45 drawer:inline">
+            or paste / drop
+          </span>
+        </div>
+      </div>
+    </.image_attach_box>
+    <.image_attach_hint id="needs-input-images-hint" errors={@image_errors} enabled={@upload != nil} />
+    """
+  end
+
+  # RE428 — Request changes attaches images only on the web board, with the upload allowed
+  # (RE427's `note_attach_enabled?/1` rule).
+  defp reject_upload(%{reject_images: upload}, false = _embed), do: upload
+  defp reject_upload(_uploads, _embed), do: nil
+
+  # RE428 — the same rule for answering.
+  defp answer_upload(%{answer_images: upload}, false = _embed), do: upload
+  defp answer_upload(_uploads, _embed), do: nil
+
+  # RE253/RE279/RE310 — the park facts every reader of the latest run shares, worked out ONCE:
+  # `card_drawer/1` (blocked strip, Run tab) and `card_gate_panel/1` (the needs-input panel) both
+  # call this, so the drawer and the mockup viewer's sheet cannot drift apart.
+  defp assign_park_state(assigns) do
+    latest = List.first(assigns.runs)
+    # The card-status guard clears the blocked strip's run eyebrow and the panel's advance control
+    # the moment an answer flips the baton, before the engine's own run row update lands.
+    parked_run = latest && latest.status == :parked && assigns.card.status == :needs_input && latest
+
+    # RE253 — which face the panel wears is decided by park provenance, and `Hamaca.Runs.park_kind/1`
+    # is the ONE place that decision lives. It is nil for a card with no parked run at all, and for
+    # a park that is none of A1, A4 or A11 (e.g. a :runner_gone re-park of an already-blocked card).
+    # Both degrade to the question face, and that nil policy is applied ONCE here so every consumer
+    # (the Detail panel and the blocked strip's eyebrow, RE279) shares it — passing nil down would
+    # fall outside needs_input_panel's declared `values:`.
+    park_kind = (parked_run && Hamaca.Runs.park_kind(parked_run)) || :question
+
+    assigns
+    |> assign(:latest_run, latest)
+    |> assign(:latest_detail, latest && Hamaca.Runs.run_detail(latest, assigns.run_flow))
+    |> assign(:parked_run, parked_run)
+    |> assign(:park_kind, park_kind)
+    # RE310's advance control used to sit only in the Run tab's parked banner; it now renders in
+    # the Detail panel, still only for a parked run. The rule itself stays in the LiveView.
+    |> assign(:panel_advance_available?, parked_run not in [nil, false] and assigns.advance_available?)
+  end
+
+  # RE279 — what the blocked strip shows, worked out ONCE from the park state
+  # `assign_park_state/1` already derived (with its nil → :question policy applied).
+  defp assign_blocked_state(assigns) do
+    parked? = assigns.parked_run not in [nil, false]
+    node = assigns.latest_detail && assigns.latest_detail.current_node
+
+    assigns
+    |> assign(:strip_eyebrow, blocked_strip_eyebrow(parked?, assigns.park_kind, node))
+    |> assign(:strip_question, strip_question(assigns))
+  end
+
+  # RE279 — the strip's one-line question follows the stepper: the prompt of the step the human is
+  # on for a structured batch, else the plain question.
+  defp strip_question(%{answer_questions: [_ | _] = questions, answer_step: step}),
+    do: questions |> Enum.at(step, %{}) |> Map.get("prompt") |> plain_line()
+
+  defp strip_question(%{question: question}), do: plain_line(question)
+
+  # Blank flattens to nil, so the strip renders no empty question line.
+  defp plain_line(markdown) do
+    case Hamaca.Markdown.to_plain(markdown) do
+      "" -> nil
+      plain -> plain
+    end
+  end
+
+  # ---------- RLY-137: Run tab helpers ----------
+
+  # RE347 — the card's own stream on the value stream map, beside "View in flow metrics →" and
+  # shown whether or not the card has a run.
+  attr :board_slug, :string, required: true
+  attr :ref, :string, required: true
+
+  defp value_stream_link(assigns) do
+    ~H"""
+    <.link
+      id="card-value-stream-link"
+      navigate={~p"/board/#{@board_slug}/value-stream?#{[card: @ref]}"}
+      style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content));"
+    >
+      Value stream →
+    </.link>
+    """
+  end
+
+  # RE426 — every run as a `run_list` entry, newest first. The head reuses `latest_detail` (built
+  # with the card's flow, so its type tags and pending tail survive); earlier runs are terminal,
+  # so a `nil` flow is behavior-neutral for them (RLY-207).
+  defp run_entries([_latest | earlier] = runs, latest_detail) do
+    total = length(runs)
+
+    earlier_entries =
+      earlier
+      |> Enum.with_index(1)
+      |> Enum.map(fn {run, index} -> %{detail: Hamaca.Runs.run_detail(run, nil), number: total - index} end)
+
+    [%{detail: latest_detail, number: total} | earlier_entries]
+  end
+
+  defp human_owner_name(%{owners: owners}) when is_list(owners) do
+    Enum.find_value(owners, fn
+      %{actor_type: :user, user: %{name: name}} when is_binary(name) -> name
+      _owner -> nil
+    end)
+  end
+
+  defp human_owner_name(_card), do: nil
+
+  defp drawer_task_progress(card) do
+    case Cards.sub_task_progress(card) do
+      %{total: 0} -> nil
+      progress -> progress
+    end
+  end
+
+  # RE281 — presentation-only narrowing of the header's stage list. BoardLive.move_targets/2
+  # owns "which stages exist and which one is current"; this owns "which of them the filter
+  # box is showing", so neither has to re-derive the other's answer. Matching is a
+  # case-insensitive substring on the DISPLAYED name, so "rev" finds "Code · Review".
+  defp filter_stages(stages, filter) do
+    case filter |> to_string() |> String.trim() |> String.downcase() do
+      "" -> stages
+      query -> Enum.filter(stages, &String.contains?(String.downcase(&1.name), query))
+    end
+  end
+
+  # RE335 D5 — archiving from the board cancels the card's active run (the runs Listener closes
+  # it on {:card_archived, _}), so the native confirm says so. Otherwise the copy is unchanged.
+  defp archive_confirm(true),
+    do: "Archive this card? Its active run will be cancelled. You can restore the card from Archived."
+
+  defp archive_confirm(false), do: "Archive this card? You can restore it from Archived."
+
+  # RE282 — the rail's Flow row: the latest run's flow, else the flow queued to pick the card up.
+  # BoardLive passes `run_flow` as `false` when the card has no runs, so `||` covers both `false`
+  # and `nil`. An empty happy path (no `start` edge) hides the row like no flow does.
+  defp rail_flow_path(run_flow, queued_flow) do
+    case run_flow || queued_flow do
+      nil -> []
+      flow -> Hamaca.Runs.happy_path(flow)
+    end
+  end
+
+  # RE268 — the header's Talk button. Same 28px / radius-7 / 1px-border artboard idiom the
+  # overflow button spells in classes, plus the active/inactive flip. `border-base-content/60`
+  # and `bg-base-content/5` composite over the opaque `bg-base-100` behind them, which is what
+  # the artboard's `color-mix(… , var(--color-base-100))` draws.
+  # RE393 — the stage chip's box: embedded it is the mockup's 32px, 15/600 rounded-lg chip; on the
+  # web it keeps the v5 artboard's 20px, 12/500 tag (the Move-to button leaves room for its
+  # chevron). The owner tint is the caller's.
+  defp stage_chip_class(true, kind),
+    do: [
+      "drawer-stage-chip badge badge-sm h-8 whitespace-nowrap rounded-lg border-none px-3 py-0 text-(length:--m-body) font-semibold",
+      kind == :menu && "gap-[5px]"
+    ]
+
+  defp stage_chip_class(false, :menu),
+    do:
+      "drawer-stage-chip badge badge-sm h-5 gap-[5px] whitespace-nowrap rounded-[4px] border-none py-0 pl-[9px] pr-[7px] text-[12px] font-medium"
+
+  defp stage_chip_class(false, :plain),
+    do:
+      "drawer-stage-chip badge badge-sm h-5 whitespace-nowrap rounded-[4px] border-none px-[9px] py-0 text-[12px] font-medium"
+
+  # RE393 — the drawer title's type: the mobile scale's 22/700 title embedded, 18/600 on the web.
+  # RE400 — the web drawer's server-driven ‹ › (phx-click + arrow keys + ArrowKeyGuard): never in
+  # native mode, where the shell owns card-to-card nav.
+  defp web_card_nav?(assigns), do: assigns.card_nav_enabled and is_nil(assigns.native_nav)
+
+  # RE400 — the native-mode chevrons, ‹ then ›, each carrying its `relayCardNav` direction token.
+  defp native_chevrons(native_nav) do
+    [prev, next] = NativeCardNav.directions()
+
+    [
+      %{dir: prev, id: "card-drawer-prev", enabled?: native_nav.prev?, icon: "hero-chevron-left", label: "Previous card"},
+      %{dir: next, id: "card-drawer-next", enabled?: native_nav.next?, icon: "hero-chevron-right", label: "Next card"}
+    ]
+  end
+
+  defp drawer_title_type(true), do: "text-(length:--m-title) font-(--m-title-weight) leading-[28px] tracking-[-0.01em]"
+
+  defp drawer_title_type(false), do: "text-lg font-semibold leading-[1.3]"
+
+  # RE268 — the header's Talk button (`t`). One component so the web header and the embed nav bar
+  # (RE393) render the same control; the caller owns the wrapper that hides it below the drawer
+  # breakpoint.
+  attr :active, :boolean, required: true
+
+  defp drawer_talk_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id="card-drawer-talk-button"
+      phx-click="drawer_tab"
+      phx-value-tab="talk"
+      data-active={to_string(@active)}
+      class={talk_button_class(@active)}
+    >
+      <.icon name="hero-command-line" class="size-[14px]" /> Talk
+      <span class="rounded-[3px] border border-base-300 px-[3px] font-mono text-[9.5px] font-semibold leading-[13px] text-base-content/45">
+        t
+      </span>
+    </button>
+    """
+  end
+
+  # RE281 — card-level actions (⋯ → Archive). Renders in `embed` too: @embed suppresses dismissal
+  # affordances (scrim, ✕), and Archive is not one. On the web the h-11 wrapper centres the
+  # artboard's 28×28 square against the 44px prev/next chevrons; embedded (RE393) it is the nav
+  # bar's 44px iOS icon button.
+  attr :ref, :string, required: true
+  attr :open, :boolean, required: true
+  attr :active_run?, :boolean, required: true
+  attr :embed, :boolean, default: false
+
+  defp drawer_overflow(assigns) do
+    ~H"""
+    <div class="relative flex h-11 flex-none items-center">
+      <button
+        type="button"
+        id="card-drawer-overflow"
+        phx-click="toggle_overflow_menu"
+        aria-haspopup="menu"
+        aria-expanded={to_string(@open)}
+        aria-label="Card actions"
+        class={
+          if(@embed,
+            do: "flex size-11 items-center justify-center text-primary",
+            else:
+              "flex size-7 items-center justify-center rounded-[7px] border border-base-300 bg-base-100 p-0"
+          )
+        }
+      >
+        <.icon :if={@embed} name="hero-ellipsis-horizontal-circle" class="size-[26px]" />
+        <.icon :if={!@embed} name="hero-ellipsis-horizontal" class="size-[17px]" />
+      </button>
+      <div
+        :if={@open}
+        id="card-drawer-overflow-menu"
+        role="menu"
+        class={"absolute right-0 #{if(@embed, do: "top-[44px]", else: "top-[33px]")} z-[22] flex w-[190px] flex-col gap-px rounded-[9px] border border-base-300 bg-base-100 p-1.5 action-group"}
+        style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
+      >
+        <.button
+          type="button"
+          id="archive-card-button"
+          role="menuitem"
+          phx-click="archive_card"
+          phx-value-ref={@ref}
+          data-confirm={archive_confirm(@active_run?)}
+          class="flex w-full items-center rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-error hover:bg-base-300/50"
+          pending="Archiving…"
+        >
+          Archive
+        </.button>
+      </div>
+    </div>
+    """
+  end
+
+  defp talk_button_class(active?) do
+    [
+      "flex h-7 items-center gap-[7px] rounded-[7px] border px-[11px] text-xs font-semibold text-base-content/85",
+      if(active?, do: "border-base-content/60 bg-base-content/5", else: "border-base-300 bg-base-100")
+    ]
+  end
+
+  defp drawer_tab_style(true) do
+    "font-size:13px;padding:0 0 10px 0;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);" <>
+      "border-bottom:2px solid var(--color-secondary);margin-bottom:-1px;background:transparent;border-left:none;border-right:none;border-top:none;cursor:pointer;"
+  end
+
+  defp drawer_tab_style(false) do
+    "font-size:13px;padding:0 0 10px 0;font-weight:500;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);" <>
+      "background:transparent;border:none;cursor:pointer;"
+  end
+
+  # RE268 — the pane's chip/composer flip on whether a turn is still live
+  # (`Schemas.TalkTurn.active_statuses/0`), never on a re-typed status list.
+  defp talk_busy?(nil), do: false
+  defp talk_busy?(%{status: status}), do: status in Schemas.TalkTurn.active_statuses()
+
+  defp owner_name(%{actor_type: :agent}), do: Hamaca.Brand.agent_name()
+  defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email
+
+  # RLY-43: the active owner is the baton-holder — ringed inside OWNERS (the old
+  # standalone ACTIVE WORKER row is gone). Agent owner is active when the baton is AI's;
+  # a user owner when it's a human's.
+  defp active_owner?(%{actor_type: :agent}, :ai), do: true
+  defp active_owner?(%{actor_type: :user}, :human), do: true
+  defp active_owner?(_owner, _active_owner), do: false
+
+  defp agent_owner?(card), do: Enum.any?(card.owners, &(&1.actor_type == :agent))
+
+  defp user_owner?(card, user_id) do
+    Enum.any?(card.owners, &(&1.actor_type == :user and &1.user_id == user_id))
+  end
+
+  # RLY-32: only resolved members (with a user) can own a card; invited
+  # (user-less) rows are skipped in the reassign picker.
+  defp reassignable_members(members), do: Enum.filter(members, & &1.user_id)
+
+  defp owner_dom_suffix(%{actor_type: :agent}), do: "agent"
+  defp owner_dom_suffix(%{actor_type: :user, user_id: user_id}), do: "user-#{user_id}"
+
+  defp note_images(%{images: images}) when is_list(images), do: images
+  defp note_images(_comment), do: []
+
+  defp comment_tag_label(:question), do: "QUESTION"
+  defp comment_tag_label(:changes_requested), do: "CHANGES REQUESTED"
+  defp comment_tag_label(:steer), do: "STEER"
+
+  defp comment_tag_color(:question), do: "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+
+  defp comment_tag_color(:changes_requested),
+    do: "color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content))"
+
+  defp comment_tag_color(:steer), do: "color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content))"
+
+  # A note's body box: amber for a question / changes requested, primary for a steer (RE358); an
+  # ordinary note has no box (nil).
+  defp comment_box_style(kind) when kind in [:question, :changes_requested],
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100));"
+
+  defp comment_box_style(:steer),
+    do:
+      "background:color-mix(in oklab, var(--color-primary) 8%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100));"
+
+  defp comment_box_style(_kind), do: nil
+
+  defp note_count_label(1), do: "1 note"
+  defp note_count_label(count), do: "#{count} notes"
+
+  # The Notes composer is hand-rolled markup — `<.input>` cannot produce the artboard's
+  # bordered row with an inline button — so it renders its own errors the same way
+  # `input/1` does, off the same `used_input?/1` predicate.
+  defp comment_errors(%FormField{} = field) do
+    if Phoenix.Component.used_input?(field),
+      do: Enum.map(field.errors, &translate_error/1),
+      else: []
+  end
+
+  defp activity_phrase(%Activity{type: :created}), do: "created this card"
+
+  defp activity_phrase(%Activity{type: :moved, meta: meta}), do: "moved #{meta["from_stage"]} → #{meta["to_stage"]}"
+
+  defp activity_phrase(%Activity{type: :status_changed, meta: meta}), do: "set status to #{meta["to_status"]}"
+
+  defp activity_phrase(%Activity{type: :owners_changed, meta: %{"action" => "added"} = meta}),
+    do: "added #{meta["owner"]} as owner"
+
+  defp activity_phrase(%Activity{type: :owners_changed, meta: %{"action" => "removed"} = meta}),
+    do: "removed #{meta["owner"]} as owner"
+
+  defp activity_phrase(%Activity{type: :owners_changed, meta: %{"action" => "set", "owners" => []}}),
+    do: "cleared the owners"
+
+  defp activity_phrase(%Activity{type: :owners_changed, meta: %{"action" => "set", "owners" => owners}}),
+    do: "set owners to #{Enum.join(owners, ", ")}"
+
+  defp activity_phrase(%Activity{type: :commented}), do: "commented"
+
+  defp activity_phrase(%Activity{type: :approved, meta: %{"from_stage" => same, "to_stage" => same}}),
+    do: "approved this card as done"
+
+  defp activity_phrase(%Activity{type: :approved, meta: meta}), do: "approved #{meta["from_stage"]} → #{meta["to_stage"]}"
+
+  defp activity_phrase(%Activity{type: :rejected, meta: meta}), do: "requested changes — sent back to #{meta["to_stage"]}"
+
+  defp activity_phrase(%Activity{type: :needs_input}), do: "asked for input"
+
+  defp activity_phrase(%Activity{type: :input_answered}), do: "answered the question"
+  defp activity_phrase(%Activity{type: :archived}), do: "archived this card"
+  defp activity_phrase(%Activity{type: :unarchived}), do: "restored this card"
+  defp activity_phrase(%Activity{type: :action}), do: "agent activity"
+  defp activity_phrase(%Activity{type: :failure}), do: "the agent stopped"
+
+  # RE93 — a dependencies_changed entry's meta is %{"added" => [ref], "removed" => [ref]};
+  # a no-op re-set never logs (see Cards.set_dependencies/4), so at least one side is non-empty.
+  defp activity_phrase(%Activity{type: :dependencies_changed, meta: meta}) do
+    added = Map.get(meta, "added", [])
+    removed = Map.get(meta, "removed", [])
+
+    [
+      added != [] && "blocked by #{Enum.join(added, ", ")}",
+      removed != [] && "unblocked from #{Enum.join(removed, ", ")}"
+    ]
+    |> Enum.filter(& &1)
+    |> Enum.join(", ")
+  end
+
+  # The one-line hint under READY FOR YOUR REVIEW (MMF 15): a gated stage
+  # offers the approve/send-back pair; an ungated one has no drawer decision
+  # button (RLY-37) — move it forward by drag or Move to… when ready. Embedded
+  # (RE393), a gated stage's pair is the native review bar under the page.
+  defp review_hint(nil, _embed),
+    do: "#{Hamaca.Brand.agent_name()} finished this. Drag it or use Move to… when you're ready."
+
+  defp review_hint(_gate, true), do: "#{Hamaca.Brand.agent_name()} finished this. Approve or reject below."
+
+  defp review_hint(_gate, _embed),
+    do: "#{Hamaca.Brand.agent_name()} finished this. Approve to move it forward, or send it back with a note."
+
+  # RE279 — compact time since `Card.blocked_since` ("47m", "3h", "2d"), clamped to >= 0. The ONE
+  # copy of the minute/hour/day thresholds; the blocked strip's 21px wait value renders it.
+  defp wait_duration(%DateTime{} = blocked_since) do
+    minutes = max(DateTime.diff(DateTime.utc_now(), blocked_since, :minute), 0)
+
+    cond do
+      minutes < 60 -> "#{minutes}m"
+      minutes < 1440 -> "#{div(minutes, 60)}h"
+      true -> "#{div(minutes, 1440)}d"
+    end
+  end
+
+  # RLY-71 — the text-box value for the current step: the stored answer when it's a free-typed
+  # custom string, blank when it's one of the presented options (or unanswered).
+  defp stepper_custom_text(values, step, options) do
+    case Map.get(values, step) do
+      nil -> ""
+      value -> if value in options, do: "", else: value
+    end
+  end
+
+  # A paused chip's one tooltip / title / aria-label (RE432) — the board banner says why.
+  @flow_paused_tip "Flow paused — see the banner"
+
+  @doc """
+  RE409 — the violet AI chip: the link to the flow that works in a stage (a stage is
+  AI-enabled iff a flow works in it — `Hamaca.Flows.stage_flows/1`). Card mockup "AI chip is the
+  flow link — shown iff a flow works in the stage".
+
+  Variants: `:header` (the stage column header — dot · `AI` · ↗, with a daisyUI bottom tooltip),
+  `:mini` (the collapsed strip — the dot alone, tooltip text in `title`) and `:settings` (the board
+  settings stage row — dot · `<key> flow` · ↗, no tooltip). `pager` pads the chip for touch and
+  drops the tooltip. A disabled flow renders grey, dashed and struck through, and still links.
+
+  `read_only` (an archived board) renders an enabled flow as a plain label — no link, no ↗ — and
+  a disabled one as nothing at all.
+
+  `paused` (RE432 — `Hamaca.Flows.paused?/1`: on, but stopped by a broken board shape) turns the
+  chip amber in every variant, read-only included; `:header` reads `AI paused`, `:settings` keeps
+  `<key> flow`, `:mini` keeps the dot alone, and the tooltip / `title` / `aria-label` becomes
+  "Flow paused — see the banner".
+
+  Every chip carries `data-flow-key`, `data-flow-enabled` and `data-flow-paused`.
+
+  ## Examples
+
+      <.flow_chip id="stage-col-4-ai-listening" flow={%{key: "code", enabled: true}} board_slug="acme" />
+  """
+  attr :id, :string, required: true
+  attr :flow, :map, required: true, doc: "`%{key: String.t(), enabled: boolean()}`"
+  attr :board_slug, :string, default: nil, doc: "required unless read_only"
+  attr :read_only, :boolean, default: false
+  attr :variant, :atom, values: [:header, :mini, :settings], default: :header
+  attr :pager, :boolean, default: false
+
+  attr :paused, :boolean,
+    default: false,
+    doc: "the flow is paused by a broken board shape (`Hamaca.Flows.paused?/1`) — amber, \"AI paused\" on `:header`"
+
+  def flow_chip(%{read_only: true, flow: %{enabled: false}} = assigns), do: ~H""
+
+  def flow_chip(assigns) do
+    %{key: key, enabled: enabled} = assigns.flow
+    mini? = assigns.variant == :mini
+    tooltip? = not assigns.read_only and assigns.variant == :header and not assigns.pager
+
+    assigns =
+      assigns
+      |> assign(:key, key)
+      |> assign(:enabled, enabled)
+      |> assign(:mini?, mini?)
+      |> assign(:tip, if(assigns.paused, do: @flow_paused_tip, else: flow_chip_tip(key, enabled)))
+      |> assign(:tooltip?, tooltip?)
+      |> assign(:label, flow_chip_label(assigns.variant, key, assigns.paused))
+      |> assign(:chip_style, flow_chip_style(enabled, mini?, assigns.pager, assigns.paused))
+
+    ~H"""
+    <.link
+      :if={!@read_only}
+      id={@id}
+      navigate={~p"/board/#{@board_slug}/flows/#{@key}"}
+      class={[
+        "flow-chip group",
+        @tooltip? && "tooltip tooltip-bottom",
+        (@enabled and !@paused) &&
+          "border border-transparent bg-[color-mix(in_oklab,var(--color-secondary)_10%,var(--color-base-100))] hover:bg-[color-mix(in_oklab,var(--color-secondary)_18%,var(--color-base-100))] hover:border-[color-mix(in_oklab,var(--color-secondary)_40%,transparent)]"
+      ]}
+      style={@chip_style}
+      data-tip={@tooltip? && @tip}
+      title={@mini? && @tip}
+      aria-label={@tip}
+      data-flow-key={@key}
+      data-flow-enabled={to_string(@enabled)}
+      data-flow-paused={to_string(@paused)}
+    >
+      <.flow_chip_dot enabled={@enabled} paused={@paused} />
+      <span :if={!@mini?} style={if(!@enabled, do: "text-decoration:line-through;")}>{@label}</span>
+      <.icon
+        :if={!@mini?}
+        name="hero-arrow-up-right-mini"
+        class="size-[9px] opacity-55 group-hover:opacity-100"
+      />
+    </.link>
+    <span
+      :if={@read_only}
+      id={@id}
+      class="flow-chip"
+      style={
+        if(@paused,
+          do: @chip_style,
+          else:
+            "#{@chip_style}background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));"
+        )
+      }
+      title={if(@paused, do: @tip, else: "#{Hamaca.Brand.agent_name()} works this stage")}
+      aria-label={@paused && @tip}
+      data-flow-key={@key}
+      data-flow-enabled={to_string(@enabled)}
+      data-flow-paused={to_string(@paused)}
+    >
+      <.flow_chip_dot enabled={@enabled} paused={@paused} />
+      <span :if={!@mini?}>{@label}</span>
+    </span>
+    """
+  end
+
+  attr :enabled, :boolean, required: true
+  attr :paused, :boolean, default: false
+
+  defp flow_chip_dot(assigns) do
+    assigns = assign(assigns, :fill, flow_chip_dot_fill(assigns.enabled, assigns.paused))
+
+    ~H"""
+    <span style={"width:10px;height:10px;border-radius:50%;background:#{@fill};display:flex;align-items:center;justify-content:center;flex:0 0 auto;"}>
+      <span style="width:4px;height:4px;border-radius:50%;border:1px solid var(--color-secondary-content);">
+      </span>
+    </span>
+    """
+  end
+
+  defp flow_chip_dot_fill(_enabled, true), do: "var(--color-warning)"
+  defp flow_chip_dot_fill(true, false), do: "var(--color-secondary)"
+  defp flow_chip_dot_fill(false, false), do: "color-mix(in oklab, var(--color-base-content) 30%, transparent)"
+
+  defp flow_chip_tip(key, true), do: "Edit the #{key} flow →"
+  defp flow_chip_tip(key, false), do: "The #{key} flow is off — edit to turn it on →"
+
+  defp flow_chip_label(:settings, key, _paused), do: "#{key} flow"
+  defp flow_chip_label(:header, _key, true), do: "AI paused"
+  defp flow_chip_label(_variant, _key, _paused), do: "AI"
+
+  # Shape shared by every variant; the enabled background/border live in classes (so hover can
+  # deepen them), the disabled look is fixed and inline. A paused chip (RE432) is amber, inline.
+  defp flow_chip_style(enabled, mini?, pager?, paused?) do
+    spacing =
+      cond do
+        mini? -> "padding:3px;gap:0;"
+        pager? -> "padding:6px 9px;gap:4px;font-size:10px;"
+        true -> "padding:2px 6px;gap:4px;font-size:9px;"
+      end
+
+    colors =
+      cond do
+        paused? ->
+          "color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));" <>
+            "background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));border:1px solid transparent;"
+
+        enabled ->
+          "color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
+
+        true ->
+          "background:var(--color-base-200);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);" <>
+            "border:1px dashed color-mix(in oklab, var(--color-base-content) 25%, transparent);"
+      end
+
+    "display:inline-flex;align-items:center;font-weight:600;letter-spacing:0.06em;font-family:var(--font-mono);" <>
+      "border-radius:5px;flex:0 0 auto;text-decoration:none;" <> spacing <> colors
+  end
+
+  @doc """
+  Renders one stage as the mockup's rounded stage card
+  (`docs/designs/Relay Board.dc.html`): a header (owner square swatch, name,
+  count, and a `+` add button) above a row of side-by-side lanes. The main
+  "In progress" lane is 240px; each Review/Done sub-lane is 178px, tinted
+  (amber/green) and split off by a vertical divider. The stage card grows to
+  fit its lanes.
+
+  `cards` accepts a LiveView stream (preferred) or a list of
+  `{dom_id, card}` tuples; each card needs `title`, `tag`, `ref_number`,
+  `status`, a loaded `owners` list, and (for the derived working-progress
+  bar/label) a loaded `sub_tasks` list. Each lane's `phx-update="stream"`
+  list (`.stage-cards`) sits inside a `.stage-drop` zone carrying
+  `data-stage-id` (the main stage id for the ongoing lane, each child stage
+  id for the sub-lanes) — `.stage-drop` owns the DnD drop contract,
+  `.stage-cards` is purely the stream list (RLY-116). The empty-state
+  placeholder is CSS-hidden (`only:block`) once the lane has cards.
+
+  The compose control emits events handled by the parent LiveView:
+  `"compose"` (with `phx-value-stage-id`) to open the composer,
+  `"create_card"` (form params `card[title]` plus hidden `stage_id`) on
+  submit, and `"cancel_compose"` on Cancel, Escape, or click-away.
+
+  When `collapsed` (MMF 12c), the stage renders instead as the mockup's 44px dashed
+  vertical strip — owner swatch, rotated name, total count — which remains a
+  `.stage-drop[data-stage-id]` drop zone and emits `"expand_stage"`
+  (`phx-value-stage-id`) on click. The expanded header's stage name is itself the
+  collapse control (RLY-145): clicking it emits `"collapse_stage"`
+  (`phx-value-stage-id`), completing the strip's expand/collapse toggle on every stage.
+
+  When `collapsed` and `pager` (RE377 — the phone-width pager is active), the stage renders
+  instead as a compact page: header with a `collapsed` badge and a **Show cards** button
+  (`"expand_stage"`), then one-line `compact_card_row/1` rows (main lane, then each sub-lane),
+  and for the terminal stage a "N more" button (`"show_more_done"`). In pager mode an expanded
+  stage's header carries **Show as list** (`"collapse_stage"`).
+
+  ## Examples
+
+      <.stage_column id="stage-col-1" name="Backlog" type={:queue} stage_id={1} />
+  """
+  attr :id, :string, required: true
+  attr :name, :string, required: true
+  attr :type, :atom, values: [:queue, :work, :planning, :review, :done], required: true
+
+  attr :flow, :map,
+    default: nil,
+    doc:
+      "RE409 — the stage's `Hamaca.Flows.stage_flows/1` entry (`%{key:, enabled:}`) or nil; " <>
+        "any flow makes the stage AI-enabled and renders the AI chip linking to it"
+
+  attr :paused, :boolean,
+    default: false,
+    doc:
+      "RE432 — the stage's flow is paused by a broken board shape (`Hamaca.Flows.paused?/1`): the chip reads \"AI paused\""
+
+  attr :board_slug, :string, default: nil, doc: "the board's slug, for the AI chip's flow link"
+  attr :count, :integer, default: nil, doc: "the number of cards in the main lane; count hidden when nil"
+
+  attr :wip_limit, :integer,
+    default: nil,
+    doc: "the stage's optional WIP limit (MMF 11); the header chip is hidden when nil"
+
+  attr :category, :atom,
+    values: [:unstarted, :planning, :in_progress, :complete, nil],
+    default: nil,
+    doc: "the stage's category, forwarded to its cards for the green accent"
+
+  attr :stage_id, :any, default: nil, doc: "the stage's database id, echoed back in compose events"
+  attr :board_key, :string, default: "RL", doc: "the board's ref prefix, e.g. RL in RL3"
+  attr :cards, :any, default: [], doc: "a LiveView stream or a list of {dom_id, card} tuples"
+  attr :composing, :boolean, default: false
+  attr :compose_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[title]; required when composing"
+
+  attr :composable, :boolean,
+    default: true,
+    doc:
+      "RLY-126 — false hides the header compose + (embed mode: the native New-card " <>
+        "sheet is the single create path in the app)"
+
+  attr :sublanes, :list,
+    default: [],
+    doc:
+      "the stage's Review/Done child lanes, each a %{id, name, lane, owner, count, cards} " <>
+        "with an optional collapsed: true to render the lane as its 34px strip (MMF 12c)"
+
+  attr :collapsed, :boolean,
+    default: false,
+    doc: "render the whole stage as the mockup's 44px dashed strip (still a drop target)"
+
+  attr :pager, :boolean,
+    default: false,
+    doc:
+      "RE377 — the phone-width pager is active: a collapsed stage renders as its compact " <>
+        "row page instead of the 44px strip, and an expanded one gains a Show as list button"
+
+  attr :main_collapsed, :boolean,
+    default: false,
+    doc: "render the main 'In progress' lane as a 44px strip (RLY-1 item 3)"
+
+  attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
+
+  attr :terminal, :boolean, default: false, doc: "true when this is the board's terminal (Done) stage"
+
+  attr :revealed, :integer,
+    default: nil,
+    doc:
+      "RLY-53 — how many terminal Done cards are shown; the 'Show N more' button appears " <>
+        "when @count exceeds it. nil (non-terminal) hides the button."
+
+  attr :page_size, :integer,
+    default: 8,
+    doc:
+      "RLY-53 — the reveal batch size, capping the button's count " <>
+        "(keep in sync with BoardLive @done_page_size)"
+
+  attr :questions, :map, default: %{}, doc: "card_id => latest needs_input question, for previews"
+
+  attr :health, :map,
+    default: %{},
+    doc: "RLY-112 card_id => %{state:, entry:}, from BoardLive's :health_by_card assign"
+
+  attr :runs, :map,
+    default: %{},
+    doc: "RLY-137 card_id => run face tuple, from BoardLive's :face_runs assign"
+
+  attr :run_meta, :map,
+    default: %{},
+    doc: "RLY-191/RE320 card_id => %{progress_at:, stalled?:, rate_limited:}, from BoardLive's :run_face_meta assign"
+
+  attr :vote_counts, :map,
+    default: %{},
+    doc: "RLY-69 card_id => public vote count, from BoardLive's :vote_counts assign"
+
+  attr :blocked_by, :map,
+    default: %{},
+    doc: "RE93 %{card_id => [unmet blocker id]} — the face chip's count comes from this"
+
+  attr :open_ref, :string,
+    default: nil,
+    doc: "RE389 the ref of the card the drawer is showing, from BoardLive's :open_ref assign; that card renders data-open"
+
+  attr :note, :map,
+    default: nil,
+    doc:
+      "RE444 `%{kind: :full | :why, text:}` — the example boards' FULL / WHY strip, rendered " <>
+        "under the expanded header only"
+
+  def stage_column(assigns) do
+    sublanes = Enum.map(assigns.sublanes, &Map.put_new(&1, :collapsed, false))
+    total_count = (assigns.count || 0) + Enum.sum(Enum.map(sublanes, & &1.count))
+
+    assigns =
+      assigns
+      |> assign(:sublanes, sublanes)
+      |> assign(:labeled, sublanes != [])
+      |> assign(:stage_width, 240 + Enum.sum(Enum.map(sublanes, &sublane_width/1)))
+      |> assign(:total_count, total_count)
+      |> assign(:wip_state, wip_state(total_count, assigns.wip_limit))
+      |> assign(:show_flow_chip, assigns.flow != nil and assigns.category != :complete)
+      |> assign(:compose_cta, if(assigns.flow == nil, do: "Add", else: "Hand to AI"))
+      |> assign(
+        :compose_placeholder,
+        if(assigns.flow == nil,
+          do: "Add work to #{assigns.name}…",
+          else: "Describe work to hand to the AI…"
+        )
+      )
+
+    ~H"""
+    <%= cond do %>
+      <% @collapsed and @pager -> %>
+        <.stage_compact_page
+          id={@id}
+          name={@name}
+          stage_id={@stage_id}
+          board_key={@board_key}
+          total_count={@total_count}
+          count={@count}
+          terminal={@terminal}
+          revealed={@revealed}
+          cards={@cards}
+          sublanes={@sublanes}
+        />
+      <% @collapsed -> %>
+        <section
+          id={"stage-strip-#{@stage_id}"}
+          class="stage-column stage-strip stage-drop"
+          data-stage-id={@stage_id}
+          phx-click="expand_stage"
+          phx-value-stage-id={@stage_id}
+          aria-label={"Expand stage #{@name}"}
+          style="flex:0 0 auto;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;border-radius:11px;background:var(--color-field-hover);border:1px dashed var(--color-field-border);cursor:pointer;box-sizing:border-box;"
+        >
+          <.stage_type_icon type={@type} />
+          <.flow_chip
+            :if={@show_flow_chip}
+            id={"#{@id}-ai-listening"}
+            flow={@flow}
+            paused={@paused}
+            board_slug={@board_slug}
+            read_only={@read_only}
+            variant={:mini}
+          />
+          <h3
+            class="stage-strip-name"
+            style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12px;font-weight:600;letter-spacing:0.01em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);white-space:nowrap;"
+          >
+            {@name}
+          </h3>
+          <span
+            class="stage-count"
+            style="font-size:10px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
+          >
+            {@total_count}
+          </span>
+        </section>
+      <% true -> %>
+        <section
+          id={@id}
+          class="stage-column"
+          data-stage-id={@stage_id}
+          data-wip={@wip_state}
+          style={"flex:0 0 auto;width:#{@stage_width}px;display:flex;flex-direction:column;height:100%;background:var(--color-base-100);border:1px solid #{wip_border_color(@wip_state)};border-radius:14px;overflow:hidden;box-shadow:0 1px 3px color-mix(in oklab, var(--color-neutral) 6%, transparent);"}
+        >
+          <header style="display:flex;align-items:center;gap:8px;padding:15px 15px 12px 15px;flex:0 0 auto;border-bottom:1px solid var(--color-base-300);">
+            <.stage_type_icon type={@type} />
+            <h3
+              id={"#{@id}-name"}
+              class="stage-name"
+              phx-click="collapse_stage"
+              phx-value-stage-id={@stage_id}
+              aria-label={"Collapse stage #{@name}"}
+              style="font-size:13px;font-weight:600;letter-spacing:-0.01em;color:var(--color-base-content);cursor:pointer;"
+            >
+              {@name}
+            </h3>
+            <.flow_chip
+              :if={@show_flow_chip}
+              id={"#{@id}-ai-listening"}
+              flow={@flow}
+              paused={@paused}
+              board_slug={@board_slug}
+              read_only={@read_only}
+              pager={@pager}
+            />
+            <span
+              :if={@count}
+              class="stage-count"
+              style="font-size:10.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
+            >
+              {@count}
+            </span>
+            <span
+              :if={@wip_limit}
+              class="stage-wip"
+              data-over={@total_count > @wip_limit}
+              data-wip={@wip_state}
+              style={"font-size:11px;font-weight:600;font-family:var(--font-mono);padding:2px 7px;border-radius:5px;flex:0 0 auto;#{wip_chip_colors(@wip_state)}"}
+            >
+              wip {@total_count}/{@wip_limit}
+            </span>
+            <span style="flex:1;"></span>
+            <button
+              :if={@pager}
+              type="button"
+              id={"#{@id}-show-as-list"}
+              phx-click="collapse_stage"
+              phx-value-stage-id={@stage_id}
+              class="btn btn-ghost btn-sm min-h-11 px-2 text-[12px] text-primary"
+            >
+              Show as list
+            </button>
+            <button
+              :if={@composable and !@composing and !@read_only}
+              type="button"
+              id={"#{@id}-new-card"}
+              class="stage-compose"
+              phx-click="compose"
+              phx-value-stage-id={@stage_id}
+              title="Add work"
+              aria-label="New card"
+              style="min-width:44px;min-height:44px;border-radius:6px;border:1px solid var(--color-base-300);background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 75%, transparent);font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;flex:0 0 auto;"
+            >
+              +
+            </button>
+          </header>
+          <div
+            :if={@note}
+            id={"#{@id}-note"}
+            class="stage-note"
+            data-kind={@note.kind}
+            style={"display:flex;gap:7px;align-items:flex-start;padding:8px 13px;border-bottom:1px solid var(--color-base-300);flex:0 0 auto;background:color-mix(in oklab, var(--color-#{note_tone(@note.kind)}) 7%, var(--color-base-100));"}
+          >
+            <span style={"font-size:10px;font-weight:700;font-family:var(--font-mono);flex:0 0 auto;color:color-mix(in oklab, var(--color-#{note_tone(@note.kind)}) 70%, var(--color-base-content));"}>
+              {note_label(@note.kind)}
+            </span>
+            <span style={"font-size:11.5px;line-height:1.4;color:color-mix(in oklab, var(--color-#{note_tone(@note.kind)}) 45%, var(--color-base-content));"}>
+              {@note.text}
+            </span>
+          </div>
+          <div class="stage-lanes" style="display:flex;gap:0;flex:1;min-height:0;">
+            <%!-- main / ongoing lane (RLY-1 item 3: collapsible; item 7: full-height drop zone) --%>
+            <%= if @main_collapsed do %>
+              <div
+                id={"#{@id}-main-strip"}
+                class="main-lane-strip stage-drop"
+                data-stage-id={@stage_id}
+                phx-click="toggle_collapse"
+                phx-value-stage-id={@stage_id}
+                aria-label="Expand In progress lane"
+                style="flex:0 0 44px;width:44px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0;box-sizing:border-box;cursor:pointer;border-right:1px solid var(--color-base-300);"
+              >
+                <span style={"writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};white-space:nowrap;"}>
+                  In progress
+                </span>
+                <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;flex:0 0 auto;"}>
+                  {@count}
+                </span>
+              </div>
+            <% else %>
+              <div
+                class="stage-main-lane"
+                style="flex:0 0 240px;width:240px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;"
+              >
+                <div
+                  :if={@labeled}
+                  id={"#{@id}-main-lane-header"}
+                  phx-click="toggle_collapse"
+                  phx-value-stage-id={@stage_id}
+                  aria-label="Collapse In progress lane"
+                  style="display:flex;align-items:center;gap:6px;padding:11px 15px 7px 15px;flex:0 0 auto;cursor:pointer;"
+                >
+                  <span
+                    class="stage-lane-label"
+                    style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(:ongoing)};"}
+                  >
+                    In progress
+                  </span>
+                  <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(:ongoing)};opacity:0.7;"}>
+                    {@count}
+                  </span>
+                </div>
+                <div
+                  id={"#{@id}-scroll"}
+                  phx-hook="PreserveScroll"
+                  style={"flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:#{if(@labeled, do: "0", else: "13px")} 13px 13px 15px;"}
+                >
+                  <div
+                    :if={@composing}
+                    id={"#{@id}-composer"}
+                    phx-click-away="cancel_compose"
+                    style="background:var(--color-base-100);border:1px solid var(--color-primary);border-radius:9px;padding:9px;box-shadow:0 2px 8px color-mix(in oklab, var(--color-neutral) 10%, transparent);"
+                  >
+                    <.form
+                      for={@compose_form}
+                      id={"#{@id}-compose-form"}
+                      phx-change="validate_card"
+                      phx-submit="create_card"
+                      class="flex flex-col gap-2"
+                    >
+                      <input type="hidden" name="stage_id" value={@stage_id} />
+                      <textarea
+                        id={"#{@id}-compose-title"}
+                        name="card[title]"
+                        rows="2"
+                        placeholder={@compose_placeholder}
+                        autofocus
+                        autocomplete="off"
+                        phx-hook="SubmitOnEnter"
+                        phx-keydown="cancel_compose"
+                        phx-key="escape"
+                        class="w-full resize-none border-none bg-transparent p-0 text-[13px] leading-[1.4] text-base-content outline-none focus:outline-none"
+                      >{Phoenix.HTML.Form.normalize_value("textarea", @compose_form[:title].value)}</textarea>
+                      <div class="flex items-center gap-1.5">
+                        <button
+                          type="submit"
+                          id={"#{@id}-compose-submit"}
+                          class="btn btn-xs min-h-[44px] border-none font-semibold text-primary-content"
+                          style="background:var(--color-primary);"
+                        >
+                          {@compose_cta}
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-xs min-h-[44px]"
+                          style="color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+                          phx-click="cancel_compose"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </.form>
+                  </div>
+                  <div
+                    id={"#{@id}-drop"}
+                    class="stage-drop"
+                    data-stage-id={@stage_id}
+                    style="flex:1 1 auto;min-height:100%;display:flex;flex-direction:column;gap:8px;"
+                  >
+                    <div
+                      id={"#{@id}-cards"}
+                      phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}
+                      class="stage-cards"
+                      style="flex:0 0 auto;display:flex;flex-direction:column;gap:8px;"
+                    >
+                      <div
+                        id={"#{@id}-empty"}
+                        class="stage-empty hidden only:block"
+                        style="border:1px dashed var(--color-base-300);border-radius:8px;padding:18px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);"
+                      >
+                        No cards yet
+                      </div>
+                      <.board_card
+                        :for={{dom_id, card} <- @cards}
+                        {card_log_attrs(@health, card.id)}
+                        id={dom_id}
+                        title={card.title}
+                        tag={card.tag}
+                        ref={Card.format_ref(@board_key, card.ref_number)}
+                        status={card.status}
+                        stage_type={@type}
+                        done={@terminal and card.status == :ready}
+                        question={Map.get(@questions, card.id)}
+                        progress={Cards.sub_task_pct(card)}
+                        owners={card.owners}
+                        active_owner={Cards.active_owner_type(card)}
+                        lane={:main}
+                        category={@category}
+                        run={Map.get(@runs, card.id)}
+                        progress_at={run_meta_at(@run_meta, card.id)}
+                        stalled?={run_meta_stalled?(@run_meta, card.id)}
+                        rate_limited={run_meta_rate_limited(@run_meta, card.id)}
+                        vote_count={Map.get(@vote_counts, card.id, 0)}
+                        blocked_count={length(Map.get(@blocked_by, card.id, []))}
+                        open={open_card?(@open_ref, @board_key, card)}
+                        draggable={!@read_only}
+                      />
+                    </div>
+                    <%!--
+                    RLY-116 — the .stage-drop wrapper owns the droppable region: it keeps the
+                    min-height:100% stretch so a column's empty space stays a drop target
+                    (RLY-1), while the .stage-cards list above is natural-height so this
+                    button flows directly after the last card (reversing RLY-53's pinned
+                    footer). The button must stay OUTSIDE the -cards div: that is a
+                    phx-update="stream" container and may only hold stream items.
+                  --%>
+                    <button
+                      :if={(@terminal and @revealed) && @count > @revealed}
+                      type="button"
+                      id={"#{@id}-show-more-done"}
+                      phx-click="show_more_done"
+                      phx-value-stage-id={@stage_id}
+                      class="stage-show-more"
+                      style="flex:0 0 auto;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
+                    >
+                      Show
+                      <span style="font-family:var(--font-mono);">
+                        {min(@page_size, @count - @revealed)}
+                      </span>
+                      more
+                    </button>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+            <%!-- Review / Done sub-lanes, side by side; empty ones collapse to 34px strips --%>
+            <%= for sub <- @sublanes do %>
+              <div
+                :if={sub.collapsed}
+                id={"sublane-#{sub.id}-strip"}
+                class="sublane-strip stage-drop"
+                data-stage-id={sub.id}
+                phx-click="toggle_collapse"
+                phx-value-stage-id={sub.id}
+                aria-label={"Expand #{sub.name} lane"}
+                style={"flex:0 0 34px;width:34px;display:flex;flex-direction:column;align-items:center;gap:9px;padding:12px 0;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};cursor:pointer;"}
+              >
+                <span
+                  class="sublane-strip-dot"
+                  style={"width:6px;height:6px;border-radius:50%;background:#{lane_color(sub.lane)};opacity:0.6;flex:0 0 auto;"}
+                >
+                </span>
+                <span
+                  class="sublane-strip-name"
+                  style={"writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};white-space:nowrap;"}
+                >
+                  {sub.name}
+                </span>
+                <span
+                  class="sublane-strip-count"
+                  style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;flex:0 0 auto;"}
+                >
+                  {sub.count}
+                </span>
+              </div>
+              <div
+                :if={!sub.collapsed}
+                id={"sublane-#{sub.id}"}
+                class="sublane"
+                style={"flex:0 0 178px;width:178px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;background:#{lane_tint(sub.lane)};border-left:1px solid #{lane_divider(sub.lane)};"}
+              >
+                <div
+                  id={"sublane-#{sub.id}-header"}
+                  phx-click="toggle_collapse"
+                  phx-value-stage-id={sub.id}
+                  aria-label={"Collapse #{sub.name} lane"}
+                  style="display:flex;align-items:center;gap:6px;padding:11px 13px 7px 13px;flex:0 0 auto;cursor:pointer;"
+                >
+                  <span style={"font-size:10px;font-weight:600;letter-spacing:0.05em;font-family:var(--font-mono);color:#{lane_color(sub.lane)};"}>
+                    {sub.name}
+                  </span>
+                  <span style={"font-size:10px;font-family:var(--font-mono);color:#{lane_color(sub.lane)};opacity:0.7;"}>
+                    {sub.count}
+                  </span>
+                </div>
+                <div
+                  id={"sublane-#{sub.id}-cards"}
+                  phx-update="stream"
+                  phx-hook="PreserveScroll"
+                  data-stage-id={sub.id}
+                  class="stage-cards stage-drop"
+                  style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;padding:0 13px 13px 13px;"
+                >
+                  <div
+                    id={"sublane-#{sub.id}-empty"}
+                    class="stage-empty hidden only:block"
+                    style="border:1px dashed var(--color-base-300);border-radius:8px;padding:14px 8px;text-align:center;font-size:11px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 40%, transparent);"
+                  >
+                    Empty
+                  </div>
+                  <.board_card
+                    :for={{dom_id, card} <- sub.cards}
+                    {card_log_attrs(@health, card.id)}
+                    id={dom_id}
+                    title={card.title}
+                    tag={card.tag}
+                    ref={Card.format_ref(@board_key, card.ref_number)}
+                    status={card.status}
+                    stage_type={sub.lane}
+                    done={false}
+                    question={Map.get(@questions, card.id)}
+                    progress={Cards.sub_task_pct(card)}
+                    owners={card.owners}
+                    active_owner={Cards.active_owner_type(card)}
+                    lane={sub.lane}
+                    category={@category}
+                    run={Map.get(@runs, card.id)}
+                    progress_at={run_meta_at(@run_meta, card.id)}
+                    stalled?={run_meta_stalled?(@run_meta, card.id)}
+                    rate_limited={run_meta_rate_limited(@run_meta, card.id)}
+                    vote_count={Map.get(@vote_counts, card.id, 0)}
+                    blocked_count={length(Map.get(@blocked_by, card.id, []))}
+                    open={open_card?(@open_ref, @board_key, card)}
+                    draggable={!@read_only}
+                  />
+                </div>
+              </div>
+            <% end %>
+          </div>
+        </section>
+    <% end %>
+    """
+  end
+
+  # RE389 — whether `card` is the one the drawer has open (BoardLive's :open_ref). Both
+  # board_card call sites (main lanes and sub-lanes) ask this, so they cannot drift.
+  defp open_card?(nil, _board_key, _card), do: false
+  defp open_card?(open_ref, board_key, card), do: Card.format_ref(board_key, card.ref_number) == open_ref
+
+  @doc """
+  RE377 — one card as a single compact line on a collapsed stage's phone page (card mockup
+  "B — collapsed stage stays a page, rendered as a compact one-line list"): a baton/status
+  dot · the mono ref (fixed width) · the title, which truncates with an ellipsis and never
+  wraps. At least 44px tall. Tapping it emits `"select_card"` (`phx-value-ref`), exactly
+  like a `board_card/1` face. Not draggable — the pager does not drag between pages.
+
+  ## Examples
+
+      <.compact_card_row id="stage_cards_9-1" ref="RE376" title="Ship it" status={:ready} done />
+  """
+  attr :id, :string, required: true
+  attr :ref, :string, required: true, doc: "the human-facing ref, e.g. RE376"
+  attr :title, :string, required: true
+
+  attr :status, :atom,
+    values: Card.statuses() ++ [nil],
+    default: nil
+
+  attr :active_owner, :atom,
+    values: [:human, :ai, nil],
+    default: nil,
+    doc: "who holds the baton (Cards.active_owner_type/1); colors the dot when no status does"
+
+  attr :done, :boolean, default: false, doc: "derived Done (a :ready card at the terminal stage)"
+
+  def compact_card_row(assigns) do
+    assigns = assign(assigns, :dot_class, compact_row_dot_class(assigns))
+
+    ~H"""
+    <li
+      id={@id}
+      class="compact-card-row flex min-h-11 cursor-pointer items-center gap-2.5 border-b border-base-300 px-3"
+      role="button"
+      tabindex="0"
+      data-ref={@ref}
+      phx-click="select_card"
+      phx-value-ref={@ref}
+    >
+      <span class={"compact-card-row-dot size-1.5 flex-none rounded-full #{@dot_class}"}></span>
+      <span class="compact-card-row-ref w-12 flex-none font-mono text-[10px] text-base-content/50">
+        {@ref}
+      </span>
+      <span class="compact-card-row-title min-w-0 flex-1 truncate text-[13px]">{@title}</span>
+    </li>
+    """
+  end
+
+  # RE377 — the compact row's dot: Done green, then the card's status (failed rose,
+  # needs-you amber, working violet), then the baton holder (Human = blue, AI = violet).
+  defp compact_row_dot_class(%{done: true}), do: "bg-success"
+  defp compact_row_dot_class(%{status: :failed}), do: "bg-error"
+  defp compact_row_dot_class(%{status: :needs_input}), do: "bg-warning"
+  defp compact_row_dot_class(%{status: :in_review}), do: "bg-warning"
+  defp compact_row_dot_class(%{status: :working}), do: "bg-secondary"
+  defp compact_row_dot_class(%{active_owner: :ai}), do: "bg-secondary"
+  defp compact_row_dot_class(%{active_owner: :human}), do: "bg-primary"
+  defp compact_row_dot_class(_assigns), do: "bg-base-300"
+
+  # RE377 — a collapsed stage's phone page (card mockup "B — collapsed stage stays a page,
+  # rendered as a compact one-line list"). Still a `.stage-column[data-stage-id]` so the
+  # BoardPager hook treats it as a snap page. Each lane is its own stream list, stacked so
+  # they read as one list. The bordered box keeps its stream containers in the DOM even when
+  # empty (hidden), so a card streamed into an empty collapsed stage is never dropped.
+  attr :id, :string, required: true
+  attr :name, :string, required: true
+  attr :stage_id, :any, required: true
+  attr :board_key, :string, required: true
+  attr :total_count, :integer, required: true
+  attr :count, :integer, default: nil
+  attr :terminal, :boolean, default: false
+  attr :revealed, :integer, default: nil
+  attr :cards, :any, default: []
+  attr :sublanes, :list, default: []
+
+  defp stage_compact_page(assigns) do
+    ~H"""
+    <section
+      id={@id}
+      class="stage-column stage-compact flex h-full flex-col overflow-y-auto bg-base-100"
+      data-stage-id={@stage_id}
+      data-collapsed="true"
+    >
+      <header id={"#{@id}-compact-header"} class="flex flex-none items-center gap-2 px-3 pb-2 pt-2.5">
+        <h3 class="stage-name text-[13px] font-semibold">{@name}</h3>
+        <span class="stage-count font-mono text-[10.5px] text-base-content/45">{@total_count}</span>
+        <span
+          id={"#{@id}-collapsed-badge"}
+          class="badge badge-ghost badge-sm gap-1 border-dashed border-base-content/25 font-mono text-[9.5px] text-base-content/60"
+        >
+          collapsed
+        </span>
+        <span class="flex-1"></span>
+        <button
+          type="button"
+          id={"#{@id}-show-cards"}
+          phx-click="expand_stage"
+          phx-value-stage-id={@stage_id}
+          class="btn btn-ghost btn-sm min-h-11 px-2 text-[12px] text-primary"
+        >
+          Show cards
+        </button>
+      </header>
+      <p
+        :if={@total_count == 0}
+        id={"#{@id}-compact-empty"}
+        class="mx-3 rounded-[10px] border border-dashed border-base-300 py-4 text-center font-mono text-[11px] text-base-content/45"
+      >
+        No cards yet
+      </p>
+      <div
+        id={"#{@id}-list"}
+        class={[
+          "mx-3 flex-none overflow-hidden rounded-[10px] border-x border-t border-base-300 bg-base-100",
+          @total_count == 0 && "hidden"
+        ]}
+      >
+        <ul id={"#{@id}-rows"} phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}>
+          <.compact_card_row
+            :for={{dom_id, card} <- @cards}
+            id={dom_id}
+            ref={Card.format_ref(@board_key, card.ref_number)}
+            title={card.title}
+            status={card.status}
+            active_owner={Cards.active_owner_type(card)}
+            done={@terminal and card.status == :ready}
+          />
+        </ul>
+        <ul
+          :for={sub <- @sublanes}
+          id={"#{@id}-rows-#{sub.id}"}
+          phx-update={is_struct(sub.cards, Phoenix.LiveView.LiveStream) && "stream"}
+        >
+          <.compact_card_row
+            :for={{dom_id, card} <- sub.cards}
+            id={dom_id}
+            ref={Card.format_ref(@board_key, card.ref_number)}
+            title={card.title}
+            status={card.status}
+            active_owner={Cards.active_owner_type(card)}
+          />
+        </ul>
+      </div>
+      <button
+        :if={(@terminal and @revealed) && @count > @revealed}
+        type="button"
+        id={"#{@id}-rows-more"}
+        phx-click="show_more_done"
+        phx-value-stage-id={@stage_id}
+        class="btn btn-ghost btn-sm mx-3 my-2 flex-none font-mono text-[11px] text-base-content/65"
+      >
+        {@count - @revealed} more
+      </button>
+    </section>
+    """
+  end
+
+  @doc """
+  Renders a [Heroicon](https://heroicons.com).
+
+  Heroicons come in three styles – outline, solid, and mini.
+  By default, the outline style is used, but solid and mini may
+  be applied by using the `-solid` and `-mini` suffix.
+
+  You can customize the size and colors of the icons by setting
+  width, height, and background color classes.
+
+  Icons are extracted from the `deps/heroicons` directory and bundled within
+  your compiled app.css by the plugin in `assets/vendor/heroicons.js`.
+
+  ## Examples
+
+      <.icon name="hero-x-mark" />
+      <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
+  """
+  attr :name, :string, required: true
+  attr :class, :any, default: "size-4"
+
+  def icon(%{name: "hero-" <> _} = assigns) do
+    ~H"""
+    <span class={[@name, @class]} />
+    """
+  end
+
+  defp field_blank?(nil), do: true
+  defp field_blank?(value) when is_binary(value), do: String.trim(value) == ""
+  defp field_blank?(_), do: false
+
+  attr :id, :string, required: true
+  attr :cancel_event, :string, required: true
+  attr :hint, :string, default: "Enter · Esc"
+  attr :hidden, :boolean, default: false
+
+  defp commit_pill(assigns) do
+    ~H"""
+    <%!-- RE394 — the ✓ is a fixed 26×24 square, so its pressed face is the spinner alone (not
+    `<.button pending>`, which would widen it); the hint carries the Saving… text instead. --%>
+    <div id={"#{@id}-pill"} class={["commit-pill action-group", @hidden && "hidden"]}>
+      <button
+        type="submit"
+        id={"#{@id}-save"}
+        class="commit-pill-save pending-action"
+        aria-label="Save"
+      >
+        <span class="pending-stack">
+          <span class="pending-idle"><.icon name="hero-check" class="size-3.5" /></span>
+          <span class="pending-face" aria-hidden="true">
+            <span class="loading loading-spinner loading-xs"></span>
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        id={"#{@id}-cancel"}
+        class="commit-pill-cancel"
+        phx-click={@cancel_event}
+        aria-label="Cancel"
+      >
+        <.icon name="hero-x-mark" class="size-3.5" />
+      </button>
+      <span class="commit-pill-hint pending-status">
+        <span class="pending-stack">
+          <span class="pending-idle">{@hint}</span>
+          <span class="pending-face" aria-hidden="true">Saving…</span>
+        </span>
+      </span>
+    </div>
+    """
+  end
+
+  @doc """
+  A plain-text field for primary content that *is* the thing (card title, stage
+  name). Reads as text with a quiet hover tint; editing swaps in a single-line
+  input with the blue focus ring and a floating ✓/✕ commit pill (Enter saves,
+  Esc reverts). The parent LiveView owns `editing` and `form`; the `CommitField`
+  JS hook owns focus/caret-at-end and the keyboard chord.
+  """
+  attr :id, :string, required: true
+  attr :editing, :boolean, default: false
+  attr :value, :string, default: nil
+  attr :placeholder, :string, default: "Untitled"
+  attr :form, :any, default: nil
+  attr :field, :atom, default: nil
+  attr :edit_event, :string, required: true
+  attr :save_event, :string, required: true
+  attr :cancel_event, :string, required: true
+  attr :edit_attrs, :map, default: %{}
+  attr :read_class, :any, default: nil
+  attr :input_class, :any, default: nil
+
+  attr :datalist, :list,
+    default: [],
+    doc: "datalist suggestion strings; when non-empty the edit input gets list=\"{id}-datalist\""
+
+  slot :hidden
+
+  def inline_field(assigns) do
+    ~H"""
+    <div id={@id} class="inline-field">
+      <div
+        :if={!@editing}
+        id={"#{@id}-display"}
+        role="button"
+        tabindex="0"
+        phx-click={@edit_event}
+        phx-hook="CommitField"
+        data-field-role="display"
+        class={["inline-field-rest", @read_class]}
+        {@edit_attrs}
+      >
+        <span :if={!field_blank?(@value)} class="whitespace-pre-wrap">{@value}</span>
+        <span :if={field_blank?(@value)} class="font-normal italic text-base-content/55">
+          {@placeholder}
+        </span>
+      </div>
+      <.form
+        :if={@editing}
+        for={@form}
+        id={"#{@id}-form"}
+        phx-submit={@save_event}
+        phx-click-away={@cancel_event}
+        class="commit-field-form"
+      >
+        {render_slot(@hidden)}
+        <.input
+          field={@form[@field]}
+          type="text"
+          id={"#{@id}-input"}
+          class={["commit-field-input", @input_class]}
+          phx-hook="CommitField"
+          data-field-role="edit"
+          data-commit="enter"
+          data-autofocus="true"
+          data-cancel-id={"#{@id}-cancel"}
+          list={@datalist != [] && "#{@id}-datalist"}
+        />
+        <datalist :if={@datalist != []} id={"#{@id}-datalist"}>
+          <option :for={entry <- @datalist} value={entry}></option>
+        </datalist>
+        <.commit_pill id={@id} cancel_event={@cancel_event} hint="Enter · Esc" />
+      </.form>
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :label, :string, required: true
+  attr :accent, :atom, default: nil
+  attr :toggle?, :boolean, default: false
+  attr :expanded, :boolean, default: false
+  attr :value, :string, default: nil
+  attr :toggle_event, :string, default: nil
+  attr :edit_event, :string, default: nil
+  attr :header_extra, :list, default: [], doc: "slot entries rendered right after the label (RE356)"
+
+  defp field_header(assigns) do
+    ~H"""
+    <div class="commit-field-header">
+      <span :if={@accent} class={["commit-field-accent", accent_bar_class(@accent)]}></span>
+      <.section_label>{@label}</.section_label>
+      {render_slot(@header_extra)}
+      <span class="flex-1"></span>
+      <button
+        :if={@toggle?}
+        type="button"
+        id={"#{@id}-toggle"}
+        phx-click={if(field_blank?(@value), do: @edit_event, else: @toggle_event)}
+        class="commit-field-toggle"
+      >
+        {toggle_label(@expanded, @value)}
+      </button>
+    </div>
+    """
+  end
+
+  defp accent_bar_class(:primary), do: "bg-primary"
+  defp accent_bar_class(:secondary), do: "bg-secondary"
+  defp accent_bar_class(:accent), do: "bg-accent"
+
+  defp toggle_label(true, _value), do: "Collapse"
+  defp toggle_label(false, value), do: if(field_blank?(value), do: "Add", else: "Expand")
+
+  @doc """
+  A form field you fill in. Always visibly a box; single-line and multi-line share
+  identical styling. `commit={:form}` renders only a styled input bound to
+  `@form[@field]` (the parent form's button submits). `commit={:self}` owns its own
+  commit via ⌘/Ctrl+Enter or ✓, reverting on Esc/✕: with `edit_event` set it is a
+  server-toggled rest↔edit field (markdown renders at rest); without `edit_event` it
+  is always editable and the pill appears once dirty (board name/slug).
+  Editing never cancels on click-away (RE362): only Save commits and only Cancel/Esc
+  discard; pass change_event to receive debounced keystrokes, and
+  draft_restored/discard_event to show the "Unsaved draft restored · Discard" note.
+  """
+  attr :id, :string, required: true
+  attr :commit, :atom, values: [:self, :form], default: :self
+  attr :value, :string, default: nil
+  attr :placeholder, :string, default: nil
+  attr :multiline, :boolean, default: false
+  attr :markdown, :boolean, default: false
+  attr :rows, :string, default: "6"
+  attr :editing, :boolean, default: false
+  attr :form, :any, default: nil
+  attr :field, :atom, default: nil
+  attr :edit_event, :string, default: nil
+  attr :save_event, :string, default: nil
+  attr :cancel_event, :string, default: nil
+
+  attr :change_event, :string,
+    default: nil,
+    doc: "RE362 — editing only: phx-change on the edit form (textarea debounced 300ms) so the parent can keep a draft"
+
+  attr :draft_restored, :boolean,
+    default: false,
+    doc: "RE362 — editing only: show the 'Unsaved draft restored · Discard' note"
+
+  attr :discard_event, :string,
+    default: nil,
+    doc: "RE362 — the note's Discard button event; sends phx-value-field={@field}"
+
+  attr :edit_attrs, :map, default: %{}
+  attr :prefix, :string, default: nil
+  attr :input_class, :any, default: nil
+  attr :label, :string, default: nil, doc: "eyebrow header text; when set the field renders its own header row"
+
+  attr :accent, :atom,
+    values: [:primary, :secondary, :accent, nil],
+    default: nil,
+    doc: "left accent bar color"
+
+  attr :collapsible, :boolean,
+    default: false,
+    doc: "collapse content into a faded preview by default"
+
+  attr :expanded, :boolean,
+    default: false,
+    doc: "server-owned: show the full read instead of the preview"
+
+  attr :toggle_event, :string,
+    default: nil,
+    doc: "event the header toggle / Show more fires to flip expanded"
+
+  attr :rest, :global, include: ~w(autocomplete)
+  slot :hidden
+
+  slot :header_extra,
+    doc: "RE356 — extra header-row content after the label (the Plan section's done/total count + bar)"
+
+  def boxed_field(%{commit: :form} = assigns) do
+    ~H"""
+    <.input
+      field={@form[@field]}
+      type={if(@multiline, do: "textarea", else: "text")}
+      id={@id}
+      rows={@multiline && @rows}
+      placeholder={@placeholder}
+      class={["commit-field-input", @input_class]}
+      {@rest}
+    />
+    """
+  end
+
+  def boxed_field(%{commit: :self, editing: true} = assigns) do
+    ~H"""
+    <div class="commit-field-section">
+      <.field_header
+        :if={@label}
+        id={@id}
+        label={@label}
+        accent={@accent}
+        toggle?={false}
+        header_extra={@header_extra}
+      />
+      <%!-- RE362 — no phx-click-away: clicking elsewhere must not throw the typed text away.
+           Save commits; Cancel and Esc (CommitField clicks Cancel) are the only discards. --%>
+      <.form
+        for={@form}
+        id={"#{@id}-form"}
+        phx-submit={@save_event}
+        phx-change={@change_event}
+        class="commit-field-form"
+      >
+        {render_slot(@hidden)}
+        <.input
+          field={@form[@field]}
+          type={if(@multiline, do: "textarea", else: "text")}
+          id={"#{@id}-input"}
+          rows={@multiline && @rows}
+          class={["commit-field-input", @markdown && "commit-field-mono", @input_class]}
+          phx-hook="CommitField"
+          phx-debounce={@change_event && "300"}
+          data-field-role="edit"
+          data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
+          data-autofocus="true"
+          data-cancel-id={"#{@id}-cancel"}
+        />
+        <div class="commit-field-actions action-group">
+          <.button type="submit" id={"#{@id}-save"} class="btn btn-sm btn-primary" pending="Saving…">
+            Save
+          </.button>
+          <button type="button" id={"#{@id}-cancel"} phx-click={@cancel_event} class="btn btn-sm">
+            Cancel
+          </button>
+          <span :if={@draft_restored} id={"#{@id}-draft-restored"} class="commit-field-hint">
+            Unsaved draft restored ·
+            <button
+              type="button"
+              id={"#{@id}-discard"}
+              phx-click={@discard_event}
+              phx-value-field={@field}
+              class="link link-hover font-semibold text-primary"
+            >
+              Discard
+            </button>
+          </span>
+          <span class="commit-field-hint">
+            Markdown supported · <span class="font-mono">⌘↵</span> saves · Esc cancels
+          </span>
+        </div>
+      </.form>
+    </div>
+    """
+  end
+
+  def boxed_field(%{commit: :self, edit_event: edit_event} = assigns) when is_binary(edit_event) do
+    ~H"""
+    <div class="commit-field-section">
+      <.field_header
+        :if={@label}
+        id={@id}
+        label={@label}
+        accent={@accent}
+        toggle?={@collapsible}
+        expanded={@expanded}
+        value={@value}
+        toggle_event={@toggle_event}
+        edit_event={@edit_event}
+        header_extra={@header_extra}
+      />
+      <%!-- empty: dashed Add box --%>
+      <div
+        :if={field_blank?(@value)}
+        id={"#{@id}-display"}
+        role="button"
+        tabindex="0"
+        phx-click={@edit_event}
+        phx-hook="CommitField"
+        data-field-role="display"
+        class="commit-field-rest"
+        {@edit_attrs}
+      >
+        <div class="commit-field-placeholder">{@placeholder}</div>
+      </div>
+      <%!-- collapsed preview: collapsible + has content + not expanded --%>
+      <div :if={!field_blank?(@value) && @collapsible && !@expanded} class="commit-field-preview-box">
+        <div
+          id={"#{@id}-display"}
+          role="button"
+          tabindex="0"
+          phx-click={@edit_event}
+          phx-hook="CommitField"
+          data-field-role="display"
+          class="commit-field-preview"
+          {@edit_attrs}
+        >
+          <div :if={@markdown} id={"#{@id}-view"} class="md">{Hamaca.Markdown.to_html(@value)}</div>
+          <div :if={!@markdown} id={"#{@id}-view"} class="whitespace-pre-wrap">{@value}</div>
+        </div>
+        <button
+          type="button"
+          id={"#{@id}-show-more"}
+          phx-click={@toggle_event}
+          class="commit-field-showmore"
+        >
+          Show more
+        </button>
+      </div>
+      <%!-- full read: non-collapsible OR expanded, has content --%>
+      <div
+        :if={!field_blank?(@value) && (!@collapsible || @expanded)}
+        id={"#{@id}-display"}
+        role="button"
+        tabindex="0"
+        phx-click={@edit_event}
+        phx-hook="CommitField"
+        data-field-role="display"
+        class="commit-field-rest"
+        {@edit_attrs}
+      >
+        <div :if={@markdown} id={"#{@id}-view"} class="md">{Hamaca.Markdown.to_html(@value)}</div>
+        <div :if={!@markdown} id={"#{@id}-view"} class="commit-field-input whitespace-pre-wrap">
+          {@value}
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  def boxed_field(%{commit: :self} = assigns) do
+    ~H"""
+    <.form for={@form} id={"#{@id}-form"} phx-submit={@save_event} class="commit-field-form">
+      {render_slot(@hidden)}
+      <div :if={@prefix} class="commit-field-prefixed">
+        <span class="commit-field-prefix font-mono">{@prefix}</span>
+        <input
+          type="text"
+          id={"#{@id}-input"}
+          name={@form[@field].name}
+          value={Phoenix.HTML.Form.normalize_value("text", @form[@field].value)}
+          phx-hook="CommitField"
+          data-field-role="edit"
+          data-commit="enter"
+          data-dirty-pill="true"
+          data-cancel-id={"#{@id}-cancel"}
+          class={["commit-field-bare font-mono", @input_class]}
+        />
+      </div>
+      <.input
+        :if={!@prefix}
+        field={@form[@field]}
+        type={if(@multiline, do: "textarea", else: "text")}
+        id={"#{@id}-input"}
+        rows={@multiline && @rows}
+        placeholder={@placeholder}
+        class={["commit-field-input", @input_class]}
+        phx-hook="CommitField"
+        data-field-role="edit"
+        data-commit={if(@multiline, do: "cmd-enter", else: "enter")}
+        data-dirty-pill="true"
+        data-cancel-id={"#{@id}-cancel"}
+      />
+      <p
+        :for={msg <- Enum.map(@form[@field].errors, &translate_error/1)}
+        :if={@prefix}
+        id={"#{@id}-error"}
+        class="mt-1 text-sm text-error"
+      >
+        {msg}
+      </p>
+      <.commit_pill
+        id={@id}
+        cancel_event={@cancel_event}
+        hint={if(@multiline, do: "⌘↵ · Esc", else: "Enter · Esc")}
+        hidden
+      />
+    </.form>
+    """
+  end
+
+  ## JS Commands
+
+  def show(js \\ %JS{}, selector) do
+    JS.show(js,
+      to: selector,
+      time: 300,
+      transition:
+        {"transition-all ease-out duration-300", "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95",
+         "opacity-100 translate-y-0 sm:scale-100"}
+    )
+  end
+
+  def hide(js \\ %JS{}, selector) do
+    JS.hide(js,
+      to: selector,
+      time: 200,
+      transition:
+        {"transition-all ease-in duration-200", "opacity-100 translate-y-0 sm:scale-100",
+         "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"}
+    )
+  end
+
+  @doc """
+  Translates an error message using gettext.
+  """
+  def translate_error({msg, opts}) do
+    # When using gettext, we typically pass the strings we want
+    # to translate as a static argument:
+    #
+    #     # Translate the number of files with plural rules
+    #     dngettext("errors", "1 file", "%{count} files", count)
+    #
+    # However the error messages in our forms and APIs are generated
+    # dynamically, so we need to translate them by calling Gettext
+    # with our gettext backend as first argument. Translations are
+    # available in the errors.po file (as we use the "errors" domain).
+    if count = opts[:count] do
+      Gettext.dngettext(HamacaWeb.Gettext, "errors", msg, msg, count, opts)
+    else
+      Gettext.dgettext(HamacaWeb.Gettext, "errors", msg, opts)
+    end
+  end
+
+  @doc """
+  Translates the errors for a field from a keyword list of errors.
+  """
+  def translate_errors(errors, field) when is_list(errors) do
+    for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
+  end
+
+  # `ai_result` is a free-form JSON blob an agent writes over the API, so the drawer can never
+  # assume a caller honoured the documented shape — and a raise here kills the LiveView on every
+  # mount (TH8, TH95). Every read of the blob goes through a shape-tolerant reader; the list
+  # coercion and the screenshot readers live in `HamacaWeb.CardMedia` (RE390), so the changes
+  # list and the screens tiles share one coercion.
+  defp ai_text(value) when is_binary(value), do: value
+  defp ai_text(_value), do: nil
+
+  defp ai_list(value), do: CardMedia.ai_list(value)
+
+  # RE316 — whether one of `ai_result`'s list keys ("changes", "screens") has anything to show.
+  # Coerced through `ai_list/1` so Show more and the group `:if`s agree with what renders.
+  defp ai_result_has?(ai_result, key), do: ai_list(ai_result[key]) != []
+
+  # RE327 — whether the blob has anything the drawer can actually draw. Deliberately NOT
+  # `Cards.ai_result_blank?/1`, which answers "was the field written" for the `writes` contract
+  # (RE244) and is shared with `blank_contract_field?/2`: a blob can be non-blank — a legacy key
+  # left over from the removed deployment link — and still render nothing but an empty box.
+  defp ai_result_renderable?(ai_result) do
+    ai_text(ai_result["summary"]) != nil or ai_result_has?(ai_result, "changes") or
+      ai_result_has?(ai_result, "screens")
+  end
+
+  # RE316 / RE401 — the AI Result box offers Show more only when there are Changes behind it;
+  # the screenshots are always visible, so they never need revealing.
+  defp ai_result_more?(ai_result), do: ai_result_has?(ai_result, "changes")
+
+  # `ai_result["changes"]` items may be plain strings (the documented shape) or structured maps
+  # (%{"change"=>_, "file"=>_, "lines"=>_}) that some agents write. HEEx cannot interpolate a map
+  # (no Phoenix.HTML.Safe impl) — `{change}` on one crashed the whole drawer (TH8 crash loop). Coerce
+  # any shape to a string here so the render can never raise on a caller's blob.
+  defp ai_change_text(change) when is_binary(change), do: change
+
+  defp ai_change_text(%{} = change) do
+    text = change["change"] || change["summary"] || change["description"] || ""
+    loc = [change["file"], change["lines"]] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(":")
+    if loc == "", do: text, else: "#{text} (#{loc})"
+  end
+
+  defp ai_change_text(other), do: inspect(other)
+end

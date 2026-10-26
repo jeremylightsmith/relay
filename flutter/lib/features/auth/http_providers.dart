@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../config.dart';
 
-/// The session cookie store. F2's native sign-in writes `_relay_key` here; push
+/// The session cookie store. F2's native sign-in writes `_hamaca_key` here; push
 /// registration (RLY-81) reads it back by riding the same client.
 final cookieJarProvider = Provider<CookieJar>((ref) => CookieJar());
 

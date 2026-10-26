@@ -2,9 +2,9 @@ defmodule Storybook.ValueStream.FlowMap do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  alias RelayWeb.ValueStreamFlowLayout, as: FlowLayout
+  alias HamacaWeb.ValueStreamFlowLayout, as: FlowLayout
 
-  def function, do: &RelayWeb.ValueStreamComponents.flow_map/1
+  def function, do: &HamacaWeb.ValueStreamComponents.flow_map/1
   def render_source, do: :function
 
   def template do
@@ -33,7 +33,7 @@ defmodule Storybook.ValueStream.FlowMap do
   end
 
   defp code_flow do
-    attrs = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
+    attrs = Enum.find(Hamaca.Flows.DefaultLibrary.all(), &(&1.key == "code"))
 
     %Schemas.Flow{board_id: 0}
     |> Schemas.Flow.changeset(Map.put(attrs, :stage_id, 0))

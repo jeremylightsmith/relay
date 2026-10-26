@@ -22,7 +22,7 @@ import "phoenix_html"
 // Establish Phoenix Socket and LiveView configuration.
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
-import {hooks as colocatedHooks} from "phoenix-colocated/relay"
+import {hooks as colocatedHooks} from "phoenix-colocated/hamaca"
 import topbar from "../vendor/topbar"
 import BoardDnD from "./hooks/board_dnd"
 import PreserveScroll from "./hooks/preserve_scroll"

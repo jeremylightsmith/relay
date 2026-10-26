@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddResumeRefusalToRuns do
+defmodule Hamaca.Repo.Migrations.AddResumeRefusalToRuns do
   use Ecto.Migration
 
   def change do

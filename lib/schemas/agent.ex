@@ -6,7 +6,7 @@ defmodule Schemas.Agent do
   subagent definition.
 
   `model` must be in the harness's `models` when the agent is written. A harness edit may later
-  drop it — that agent is then **red** (`Relay.Agents.red?/1`) and refuses to run.
+  drop it — that agent is then **red** (`Hamaca.Agents.red?/1`) and refuses to run.
   """
 
   use Ecto.Schema

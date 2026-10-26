@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddFreeBoardChoiceToBillingAccounts do
+defmodule Hamaca.Repo.Migrations.AddFreeBoardChoiceToBillingAccounts do
   # RE471: the owner's pick of which counted board stays editable on Free (nil = the most
   # recently active, RE469's rule — no backfill), and when the one-time "Which board stays
   # editable?" prompt was shown (cleared on leaving Free). Calls no app modules.

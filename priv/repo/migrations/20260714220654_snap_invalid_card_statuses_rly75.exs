@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.SnapInvalidCardStatusesRly75 do
+defmodule Hamaca.Repo.Migrations.SnapInvalidCardStatusesRly75 do
   use Ecto.Migration
 
   # One-time data repair (RLY-75): the runner's Code→Review hand-off set `:ready` on cards

@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.NoteModeToggle do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.note_mode_toggle/1
+  def function, do: &HamacaWeb.CoreComponents.note_mode_toggle/1
   def render_source, do: :function
 
   # RE358 — the Notes composer's Note | ↪ Steer now toggle, shown above the composer row only while

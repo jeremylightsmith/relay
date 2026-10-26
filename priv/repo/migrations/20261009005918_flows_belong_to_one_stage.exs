@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.FlowsBelongToOneStage do
+defmodule Hamaca.Repo.Migrations.FlowsBelongToOneStage do
   @moduledoc """
   RE429: a flow belongs to exactly one stage. `works_in_stage_id` becomes `stage_id`
   (`NOT NULL`, unique, `on_delete: :delete_all` — deleting a stage deletes its flow, while
@@ -11,7 +11,7 @@ defmodule Relay.Repo.Migrations.FlowsBelongToOneStage do
 
   `down` restores the three nullable trigger columns. `works_in_stage_id` is backfilled from
   `stage_id`; `pulls_from_stage_id` / `lands_on_stage_id` are left nil (the derivation lives in
-  `Relay.Flows.neighbours/2` and is not repeated in SQL), so a rolled-back flow must have its
+  `Hamaca.Flows.neighbours/2` and is not repeated in SQL), so a rolled-back flow must have its
   pickup and drop-off re-pointed before it can be enabled. Pruned flows are not restored.
   """
   use Ecto.Migration

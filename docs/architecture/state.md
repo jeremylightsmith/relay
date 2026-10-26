@@ -6,7 +6,7 @@ the seams between them are where the bugs are. This page brings them together.
 ## Closed vocabularies
 
 The closed sets that move a card and its run through a flow, generated from the schema that owns
-each one by `mix relay.gen_vocab` (a stale block fails `mix precommit`). **This table is the
+each one by `mix hamaca.gen_vocab` (a stale block fails `mix precommit`). **This table is the
 authority on what values these sets take.** [`../glossary.md`](../glossary.md) is the authority on
 what each term *means*; the sections below say what each value *does*.
 
@@ -14,15 +14,15 @@ what each term *means*; the sections below say what each value *does*.
 | Vocabulary | Values | Owner |
 | --- | --- | --- |
 | Billing admin action | `comp` · `uncomp` · `hold` · `lift_hold` · `extend` · `retry_charge` | `Schemas.BillingAdminEntry.actions/0` |
-| Billing admin refusal | `already_comped` · `not_comped` · `reason_required` · `already_held` · `not_held` · `invalid_days` · `no_paid_through` · `not_retryable` | `Relay.Billing.admin_refusals/0` |
+| Billing admin refusal | `already_comped` · `not_comped` · `reason_required` · `already_held` · `not_held` · `invalid_days` · `no_paid_through` · `not_retryable` | `Hamaca.Billing.admin_refusals/0` |
 | Billing attempt kind | `trial_end` · `renewal` · `returned` | `Schemas.BillingPaymentAttempt.kinds/0` |
-| Billing attempt outcome | `paid` · `declined` · `unknown` · `not_charged` | `Relay.Billing.attempt_outcomes/0` |
+| Billing attempt outcome | `paid` · `declined` · `unknown` · `not_charged` | `Hamaca.Billing.attempt_outcomes/0` |
 | Billing attempt source | `clock` · `card_saved` · `admin` · `upgrade` | `Schemas.BillingPaymentAttempt.sources/0` |
 | Billing attempt status | `pending` · `succeeded` · `failed` · `unknown` · `not_charged` | `Schemas.BillingPaymentAttempt.statuses/0` |
 | Billing notice kind | `card_declined` · `dropped_to_free` | `Schemas.BillingNotice.kinds/0` |
-| Billing pause reason | `hold` | `Relay.Billing.Standing.pause_reasons/0` |
-| Billing promo refusal | `already_redeemed` · `unknown` · `disabled` · `expired` · `full` | `Relay.Billing.promo_refusals/0` |
-| Billing standing kind | `free` · `active` · `past_due` · `cancelled` · `comped` · `paused` | `Relay.Billing.Standing.kinds/0` |
+| Billing pause reason | `hold` | `Hamaca.Billing.Standing.pause_reasons/0` |
+| Billing promo refusal | `already_redeemed` · `unknown` · `disabled` · `expired` · `full` | `Hamaca.Billing.promo_refusals/0` |
+| Billing standing kind | `free` · `active` · `past_due` · `cancelled` · `comped` · `paused` | `Hamaca.Billing.Standing.kinds/0` |
 | Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` · `blocked` | `Schemas.NodeExecution.outcomes/0` |
 | Node-job kind | `node` · `talk` | `Schemas.NodeJob.kinds/0` |
@@ -39,19 +39,19 @@ what each term *means*; the sections below say what each value *does*.
 <!-- END generated: vocabularies -->
 
 The **Billing** rows (RE460, RE462, RE464) are a board owner's plan, not a card's motion: the standing
-kinds and pause reasons are owned by the pure `Relay.Billing.Standing` (standing is derived from a
+kinds and pause reasons are owned by the pure `Hamaca.Billing.Standing` (standing is derived from a
 `Schemas.BillingAccount`'s facts and never stored — see [`domain.md`](domain.md)), the attempt
 sets by `Schemas.BillingPaymentAttempt`, whose `open_statuses/0` (pending · unknown) is the
 "at most one open attempt per account" subset, and the notice kinds by
 `Schemas.BillingNotice.kinds/0` — one `billing_notices` row per email sent, the unique index
 `billing_notices_once` on `(billing_account_id, kind, period_key)` making each email
 once-per-period. The promo refusal row (RE462) is owned by
-`Relay.Billing.promo_refusals/0`, listed in the order `Relay.Billing.redeem_code/3` checks them —
+`Hamaca.Billing.promo_refusals/0`, listed in the order `Hamaca.Billing.redeem_code/3` checks them —
 first match wins, so an account that already holds a code is `already_redeemed` whatever it typed.
 The admin rows (RE463) are the superadmin's side panel on `/admin/users`: each admin action
 (`Schemas.BillingAdminEntry.actions/0`) writes one append-only `billing_admin_entries` row; a
-refused one answers one of `Relay.Billing.admin_refusals/0` and writes nothing. The attempt
-outcome row is how the admin pages read an attempt's status — `Relay.Billing.attempt_outcome/1`
+refused one answers one of `Hamaca.Billing.admin_refusals/0` and writes nothing. The attempt
+outcome row is how the admin pages read an attempt's status — `Hamaca.Billing.attempt_outcome/1`
 is the one status → outcome map (pending and unknown both read `unknown`) — and the attempt
 source `admin` marks a "Retry charge now" charge, which never sends the card-declined email.
 
@@ -62,14 +62,14 @@ owned exactly the same way, by one accessor or `Ecto.Enum` on their schema, and 
 [`runner.md`](runner.md). The rule does not vary: the schema owns the set, nothing re-types it.
 
 The board's **shared story-map view settings** are a closed key set of the same kind:
-`Relay.StoryMap.view_defaults/0` owns both the keys and their defaults —
+`Hamaca.StoryMap.view_defaults/0` owns both the keys and their defaults —
 
 | key | default | shape | written by |
 |---|---|---|---|
 | `tray_open` | `true` | boolean | `toggle_view/2` |
 | `zoom` | `"compact"` | string | `put_view/3` |
 | `hide_steps` | `false` | boolean | `toggle_view/2` |
-| `owner_filter` | `[]` | list of `RelayWeb.StoryMapFilter` owner keys | `toggle_view_member/4` |
+| `owner_filter` | `[]` | list of `HamacaWeb.StoryMapFilter` owner keys | `toggle_view_member/4` |
 | `needs_input_filter` | `false` | boolean | `toggle_view/2` |
 | `collapsed` | `[]` | list of `story_activity` ids | `toggle_view_member/4` |
 | `focus` | `nil` | one `story_activity` id or nil | `merge_view/2` |
@@ -85,13 +85,13 @@ broadcasts once — so a multi-key change ("expand this activity **and** turn Hi
 off") is atomic. They live in the `boards.story_map_view` jsonb column — a bag rather than
 a column per setting, which is why RE259 (filter & focus) added four keys and RE276
 (`hide_complete`) an eighth, all with no migration. Values are jsonb, so `zoom` is stored as
-a string and read back through `RelayWeb.StoryMapComponents.parse_zoom/1`.
+a string and read back through `HamacaWeb.StoryMapComponents.parse_zoom/1`.
 
-Three of the eight are **filters** — `Relay.StoryMap.filter_keys/0` owns that subset
+Three of the eight are **filters** — `Hamaca.StoryMap.filter_keys/0` owns that subset
 (`owner_filter`, `needs_input_filter`, `hide_complete`), so `Clear` resets exactly them by
 merging `Map.take(view_defaults(), filter_keys())` rather than re-typing a literal.
 `hide_complete` defaults to **`true`**, which is why "is a filter on" is
-`Relay.StoryMap.filters_active?/1` — *do these keys differ from the defaults* — rather than
+`Hamaca.StoryMap.filters_active?/1` — *do these keys differ from the defaults* — rather than
 "is any of them truthy": with a default-on filter, "off" and "default" are different places
 and the default is the one `Clear` returns to.
 
@@ -101,7 +101,7 @@ A card's status says whose turn it is and whether anything is holding it. Which 
 valid depends on the **stage type** it sits on (ADR 0003) — the stage type also fixes the
 status a card takes on entry.
 
-Every arrow below is a status change, and each goes through one writer — `Relay.Cards.set_status/3`
+Every arrow below is a status change, and each goes through one writer — `Hamaca.Cards.set_status/3`
 — **never as a silent side effect of a move**. A cross-stage move re-snaps status only when the
 carried value is *invalid* for the destination stage type (`snap_status/3`, `cards.ex:1174`); a
 status still valid for the new stage rides across unchanged. That **valid-but-stale** branch is the
@@ -197,7 +197,7 @@ mark-done, the scheduler's capacity marking (`ready ↔ queued`), a manual drag 
 | `working` | A run is executing a node against this card. | The run starts, or resumes after a park. |
 | `needs_input` | Blocked on a human. The card shows in the "needs you" rollup. | A node reports the `needs_input` outcome. |
 | `in_review` | Waiting at a review gate for a human to approve or reject. | The card lands on a `review` stage. |
-| `failed` | A run ended terminally. Set by `Relay.Cards.mark_failed/3`, never by a human. Valid in `work`/`planning` stages only. Distinct from `needs_input`: answering cannot resume a dead run, so the drawer offers no composer. `blocked_since` is not stamped; `needs_you?/2` counts it anyway. | A run fails terminally (no route left for its outcome, loop budget exhausted, visit cap exceeded, or the circuit breaker trips). |
+| `failed` | A run ended terminally. Set by `Hamaca.Cards.mark_failed/3`, never by a human. Valid in `work`/`planning` stages only. Distinct from `needs_input`: answering cannot resume a dead run, so the drawer offers no composer. `blocked_since` is not stamped; `needs_you?/2` counts it anyway. | A run fails terminally (no route left for its outcome, loop budget exhausted, visit cap exceeded, or the circuit breaker trips). |
 
 `needs_input` is the only status that both blocks the card **and** parks its run; the
 scheduler skips `needs_input` and `failed` cards by rule, so nothing else can pick the card up
@@ -210,9 +210,9 @@ A run is one traversal of a flow for one card.
 | Status | Meaning | Leaves it by |
 | --- | --- | --- |
 | `running` | A node is executing, or the next one is about to be dispatched. | Any of the four below. |
-| `parked` | Suspended, carrying a `parked_reason`. Resumable. | The reason clearing — a human answers, a runner claims, a runner returns — or the reaper giving up on an unresumable refusal (`Relay.Runs.abandon_unresumable_runs/1`, RE297), which fails it. |
+| `parked` | Suspended, carrying a `parked_reason`. Resumable. | The reason clearing — a human answers, a runner claims, a runner returns — or the reaper giving up on an unresumable refusal (`Hamaca.Runs.abandon_unresumable_runs/1`, RE297), which fails it. |
 | `done` | The flow reached its `done` target. Terminal. | — |
-| `failed` | The engine decided the run cannot continue. | A human retry (`Relay.Runs.retry_run/2`, RLY-189) — the only way back to `running`. |
+| `failed` | The engine decided the run cannot continue. | A human retry (`Hamaca.Runs.retry_run/2`, RLY-189) — the only way back to `running`. |
 | `cancelled` | A human stopped the run, or it was closed as a leak. Terminal. | — |
 
 `failed` is the one non-terminal-looking terminal: nothing in the engine ever leaves it, but a
@@ -227,23 +227,23 @@ same card finds the tasks already present and stays `false`. It feeds the audit'
 
 A run is closed `:cancelled` — never relabelled `:done` — when its card reaches a terminal-type
 stage (`Schemas.Stage.terminal_types/0`) **or is archived** (`archived_at` set, RE335) while the
-run is still active (`running`/`parked`, any `parked_reason`, RLY-233): the card-event `Relay.Runs.Listener`'s first reconcile rule closes it within one event,
-and the `Relay.Runs.RunnerReaper`'s 30s sweep (`Relay.Runs.close_orphaned_runs/0`) catches
+run is still active (`running`/`parked`, any `parked_reason`, RLY-233): the card-event `Hamaca.Runs.Listener`'s first reconcile rule closes it within one event,
+and the `Hamaca.Runs.RunnerReaper`'s 30s sweep (`Hamaca.Runs.close_orphaned_runs/0`) catches
 anything the event path missed. A legitimately completed run is already `:done` before its card
 moves off the stage, so it is never selected by either path and never relabelled. Run dispatch
-(`Relay.Runs.start_run/3`) moves the card into the flow's work lane and inserts the run row in one
+(`Hamaca.Runs.start_run/3`) moves the card into the flow's work lane and inserts the run row in one
 transaction, so no committed state ever has an active run sitting on a terminal-type stage except
 a genuine leak. Both paths judge that leak from a single `run → card → stage` snapshot
-(`Relay.Runs.leaked?/1`, the reaper's join) — never a card stage read apart from the run — so a
+(`Hamaca.Runs.leaked?/1`, the reaper's join) — never a card stage read apart from the run — so a
 concurrent `Spec:Done → Plan` dispatch landing between two reads can't make the Listener mistake a
 freshly-dispatched run for a leak and cancel it (RLY-233 / RE239). No grace window or time
 threshold is needed to tell the two apart.
 Archiving from the board is not guarded, so the archived half of the rule is what stops a
 parked run on a hidden card from pinning its `exclusive` worktree forever: once the run is
-`:cancelled`, `Relay.Runs.releasable_held/2` names the ref on the next heartbeat and the
+`:cancelled`, `Hamaca.Runs.releasable_held/2` names the ref on the next heartbeat and the
 runner removes the worktree (auto-salvaging dirty edits; the branch stays). The timeline reads
 `run cancelled — card archived` or `run cancelled — card already completed`, chosen once by
-`Relay.Runs.leak_reason/1`. Unarchiving never revives the cancelled run.
+`Hamaca.Runs.leak_reason/1`. Unarchiving never revives the cancelled run.
 
 A human can also free a parked run's `exclusive` worktree **without** ending the run (RE337):
 *Release worktree* on the runners page records the ref in `runners.release_requests`, the next
@@ -252,9 +252,9 @@ When it resumes, the runner rebuilds the worktree from the card's branch (commit
 survives; uncommitted edits were stashed as `auto-salvage`). The request is cleared once a beat
 reports the ref absent or `running`. The card timeline records `worktree released on runner <name>`.
 
-The from → to edges of that machine — the source of truth is `Relay.Runs.Transitions`'
-`@transitions` data, and this table is generated from it by `mix relay.gen_state` (a stale block
-fails `mix precommit`). Every run-status write goes through `Relay.Runs.Transitions.transition/4`,
+The from → to edges of that machine — the source of truth is `Hamaca.Runs.Transitions`'
+`@transitions` data, and this table is generated from it by `mix hamaca.gen_state` (a stale block
+fails `mix precommit`). Every run-status write goes through `Hamaca.Runs.Transitions.transition/4`,
 a guarded `UPDATE` that refuses (and logs) a transition from an unexpected state.
 
 <!-- BEGIN generated: run-transitions -->
@@ -276,10 +276,10 @@ a guarded `UPDATE` that refuses (and logs) a transition from an unexpected state
 | --- | --- |
 | `needs_input` | A human to answer the node's question in the card drawer. |
 | `claimed` | A runner that has claimed the node-job to report its outcome. |
-| `runner_gone` | A runner that stopped heartbeating; the reaper parks the run so it can be re-dispatched rather than lost — and fails it if the resume stays refused past `Relay.Runs.unresumable_after_s/0` (RE297). |
+| `runner_gone` | A runner that stopped heartbeating; the reaper parks the run so it can be re-dispatched rather than lost — and fails it if the resume stays refused past `Hamaca.Runs.unresumable_after_s/0` (RE297). |
 
 Whether an agent may work a card at all — the human-baton gate, the fresh-pull gate, and the
-`:runner_gone` resume gate — is decided by `Relay.Runs.Policy` (`agent_may_hold?/1`,
+`:runner_gone` resume gate — is decided by `Hamaca.Runs.Policy` (`agent_may_hold?/1`,
 `pullable?/1`, `resumable?/2`), one shared definition the scheduler, the run listener, and the
 board card face all call. It is a set of predicates, not a closed data table, so there is nothing
 to generate; the drift protection there is the shared-predicate test suite.
@@ -313,7 +313,7 @@ claims it, runs it, and reports back.
 | `done` | The runner reported a typed outcome. Terminal. | — |
 | `revoked` | Withdrawn — the run was cancelled (`cancel_run`); a human took the card over (`park_claimed/1`); an exclusive run's runner went stale (`park_for_reclaim/1`); or a re-entry withdrew the leftover job — a needs-input resume, a hand-back, a retry, or a boot resume of a run with no active job (`RunServer.reenter/2`). A stale runner's `shared_clean` job is **requeued** to `queued` (`requeue_job/3`), not revoked, and a server restart adopts a live job rather than revoking it (RE410). Terminal. | — |
 
-A revoked job never produces an outcome; a re-entry starts a fresh attempt of the node instead. A same-node re-entry is capped at `Relay.Runs.max_outcomeless_reentries/0` consecutive outcome-less attempts, after which the run parks `needs_input` instead of starting another (RE410, failures A12).
+A revoked job never produces an outcome; a re-entry starts a fresh attempt of the node instead. A same-node re-entry is capped at `Hamaca.Runs.max_outcomeless_reentries/0` consecutive outcome-less attempts, after which the run parks `needs_input` instead of starting another (RE410, failures A12).
 
 ### Node-job kind
 
@@ -349,8 +349,8 @@ from the `node_jobs` row that carries it to a runner.
 the pane shows Stop **in place of** the composer, which is removed while a turn is live, and a
 second `post_message/3` on the same session is refused while one is active.
 
-`queued → claimed` is written by `RelayWeb.Api.NodeJobController` (via `Relay.Talk.mark_claimed/1`)
-off the claim it just granted, not by `Relay.Runs.claim_next_job/1` — the run lifecycle claims a
+`queued → claimed` is written by `HamacaWeb.Api.NodeJobController` (via `Hamaca.Talk.mark_claimed/1`)
+off the claim it just granted, not by `Hamaca.Runs.claim_next_job/1` — the run lifecycle claims a
 job and only Talk knows a job can carry a turn. Only a `:queued` turn moves, so a claim landing
 just after Stop cannot drag a `:stopped` turn back to live.
 
@@ -396,10 +396,10 @@ flowchart LR
 ## Usage visits (RE475)
 
 Not a card machine, but state that changes over time: a `usage_visits` row is one visit, keyed
-by `(user_id, started_at)` (a unique index). `Relay.Usage.Tracker` holds the open visit per user
+by `(user_id, started_at)` (a unique index). `Hamaca.Usage.Tracker` holds the open visit per user
 in memory and upserts it on that key — `last_at`, `seconds`, `board_id`, `card_refs` and
 `updated_at` are replaced in place; `started_at` never changes. A touch more than
-`Relay.Usage.idle_gap/0` after the last one closes the visit (written on the next flush) and
+`Hamaca.Usage.idle_gap/0` after the last one closes the visit (written on the next flush) and
 opens a new row; an out-of-order earlier touch only extends the open visit. Nothing else writes
 or prunes the table.
 
@@ -408,7 +408,7 @@ or prunes the table.
 - A node reporting `needs_input` moves **two** machines at once: the run parks and the card
   blocks. Reconciliation self-heals either ordering, so neither write depends on the other
   landing first.
-- A run reaching `failed` marks the card `failed` (`Relay.Cards.mark_failed/3`) — a dead run
+- A run reaching `failed` marks the card `failed` (`Hamaca.Cards.mark_failed/3`) — a dead run
   always ends up in front of a human, never silently, but never as an unanswerable question
   either. This is a different path from `needs_input`: `ensure_card_blocked/2` handles the
   genuine question, `card_fail_effects/2` handles the terminal failure, and the two never

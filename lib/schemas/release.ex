@@ -8,7 +8,7 @@ defmodule Schemas.Release do
   genuinely optional and independent of its activity/step: a card can be mapped to a cell
   with its release still undecided.
 
-  Not to be confused with `Relay.Release`, the Phoenix release-task module — different
+  Not to be confused with `Hamaca.Release`, the Phoenix release-task module — different
   namespace, no collision.
   """
 
@@ -42,9 +42,9 @@ defmodule Schemas.Release do
 
   @doc """
   The releases every board is seeded with, in `position` order — the ONE definition.
-  `Relay.Boards.create_board/2`'s seed and the tests all read it here. The
+  `Hamaca.Boards.create_board/2`'s seed and the tests all read it here. The
   `backfill_story_map_releases` migration carries a deliberately frozen copy, pinned to this
-  list by `test/relay/migrations/backfill_story_map_releases_test.exs`.
+  list by `test/hamaca/migrations/backfill_story_map_releases_test.exs`.
   """
   def seed_names, do: ["MVP", "Fast follow", "Later"]
 end

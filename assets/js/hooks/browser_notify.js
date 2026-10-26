@@ -1,4 +1,4 @@
-// RE399 — browser notifications. RelayWeb.BrowserNotify pushes "relay:notify" (one per push-worthy
+// RE399 — browser notifications. HamacaWeb.BrowserNotify pushes "relay:notify" (one per push-worthy
 // card status change, the same copy APNs carries) to this hook, mounted by Layouts.app on
 // #browser-notify. Per event:
 //   * focused tab   → an in-page toast cloned from the kind's <template>, plus the horn;
@@ -16,7 +16,7 @@
 // live here, installed once; mounted() only re-points `current` and re-syncs the UI.
 //
 // No color literal anywhere: the dot reads the theme's --color-warning token. The horn URL comes
-// from data-sound (Relay.Push.web_sound_path/0). Toast text is set as text, never parsed as HTML.
+// from data-sound (Hamaca.Push.web_sound_path/0). Toast text is set as text, never parsed as HTML.
 const SOUND_KEY = "relay:notify-sound"
 const LOCK_HOLD_MS = 5000
 const BACKGROUND_DELAY_MS = 300

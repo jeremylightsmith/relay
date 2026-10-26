@@ -2,11 +2,11 @@ defmodule Storybook.RunComponents.RateLimitNote do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.rate_limit_note/1
+  def function, do: &HamacaWeb.RunComponents.rate_limit_note/1
   def render_source, do: :function
 
   # The Runners-page line for a runner paused at its usage limits — every installed harness paused
-  # (RE320, per harness since RE436). The map is `Relay.Runs.active_rate_limit/2`'s: the harness
+  # (RE320, per harness since RE436). The map is `Hamaca.Runs.active_rate_limit/2`'s: the harness
   # pause that lifts first.
   def variations do
     [

@@ -1,9 +1,9 @@
-defmodule Relay.Repo.Migrations.CreateBillingAdminEntries do
+defmodule Hamaca.Repo.Migrations.CreateBillingAdminEntries do
   use Ecto.Migration
 
   # RE463 — the superadmin's billing history. One append-only `billing_admin_entries` row per
   # admin action (comp, uncomp, hold, lift hold, extend, retry charge), written by
-  # `Relay.Billing.Admin` in the same transaction as the account change. Nothing updates or
+  # `Hamaca.Billing.Admin` in the same transaction as the account change. Nothing updates or
   # deletes a row; deleting the account deletes its history, deleting the admin keeps the entry.
   def change do
     create table(:billing_admin_entries) do

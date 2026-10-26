@@ -1,6 +1,6 @@
-# Relay architecture — the system, today
+# Hamaca architecture — the system, today
 
-The current-state map of how Relay is built: what the pieces are, how a request and a card
+The current-state map of how Hamaca is built: what the pieces are, how a request and a card
 move through them, and where each piece's code lives. Start with the system map below, then
 follow the page that covers the layer you care about — the domain contexts, the runtime and
 its supervised processes, the runner, the state machines, or the dependencies.
@@ -20,8 +20,8 @@ flowchart LR
         agents["Agents & runner<br/>./relay · claude sessions"]
     end
     subgraph fly["Phoenix app — Fly app 'relayboard'"]
-        web["RelayWeb<br/>LiveViews · REST controllers"]
-        domain["Relay<br/>domain contexts"]
+        web["HamacaWeb<br/>LiveViews · REST controllers"]
+        domain["Hamaca<br/>domain contexts"]
         schemas["Schemas (peer)<br/>Ecto structs — ADR 0002"]
         web --> domain
         web --> schemas
@@ -40,8 +40,8 @@ flowchart LR
     domain --> apns
 ```
 
-Three layers, enforced by the `boundary` compiler: **`RelayWeb`** (LiveViews + REST
-controllers) may call the domain only through **`Relay`**'s exported contexts; contexts
+Three layers, enforced by the `boundary` compiler: **`HamacaWeb`** (LiveViews + REST
+controllers) may call the domain only through **`Hamaca`**'s exported contexts; contexts
 never reach into the web layer; **`Schemas`** is a peer both may use (ADR 0002). LiveView
 is the primary UI: it serves the web, and the mobile app embeds it for content (board, card
 body, spec/plan, comments, mockups). Around it, ADR 0005 scopes a small native (Flutter)
@@ -62,7 +62,7 @@ CLI/runner.
 | [deps.md](deps.md) | What do modules and the app depend on, internally and externally? |
 
 ---
-*Sources of truth: `lib/relay.ex`, `lib/relay_web.ex`, `lib/schemas.ex`,
+*Sources of truth: `lib/hamaca.ex`, `lib/hamaca_web.ex`, `lib/schemas.ex`,
 `docs/adr/0001`, `docs/adr/0002`, `fly.toml`.*
 
 ## Keeping these pages current

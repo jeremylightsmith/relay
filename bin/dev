@@ -53,7 +53,7 @@ seed-examples() {
   if [[ "${argc_reset:-0}" == 1 ]]; then
     args+=(--reset)
   fi
-  exec mix relay.examples.seed "${args[@]}"
+  exec mix hamaca.examples.seed "${args[@]}"
 }
 
 # @cmd Install zsh tab completion for prod and dev.

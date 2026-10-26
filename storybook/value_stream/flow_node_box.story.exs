@@ -2,7 +2,7 @@ defmodule Storybook.ValueStream.FlowNodeBox do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.ValueStreamComponents.flow_node_box/1
+  def function, do: &HamacaWeb.ValueStreamComponents.flow_node_box/1
   def render_source, do: :function
 
   def template do

@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreatePromoCodes do
+defmodule Hamaca.Repo.Migrations.CreatePromoCodes do
   use Ecto.Migration
 
   # RE462 — promo codes (X paid months at Y% off, ADR 0012). A code is stored upper-case and

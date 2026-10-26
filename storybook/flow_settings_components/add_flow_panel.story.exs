@@ -2,7 +2,7 @@ defmodule Storybook.FlowSettingsComponents.AddFlowPanel do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowSettingsComponents.add_flow_panel/1
+  def function, do: &HamacaWeb.FlowSettingsComponents.add_flow_panel/1
   def render_source, do: :function
 
   # The + Add flow panel inside a work stage's dashed no-flow band (RE431, card mockup "A —

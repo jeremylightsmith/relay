@@ -52,7 +52,7 @@ body you need to judge coverage or a cross-task interface.
 - **Cross-task issues:** anything that only emerges when viewing the whole diff (a half-wired
   integration, an interface one task defined and another consumed differently).
 - **Architecture & production readiness:** sound boundaries (the `boundary` exports in
-  `lib/relay.ex`), sensible error handling, security (no injection / unsafe `String.to_atom` on
+  `lib/hamaca.ex`), sensible error handling, security (no injection / unsafe `String.to_atom` on
   input / missing authz), migrations safe and reversible, backward compatibility considered.
 - **Runner contract:** if the branch changes `./relay`, `RUNNER_VERSION` was bumped, and any
   vocabulary mirrored across the wire is pinned in `test/fixtures/runner_contract.json`.

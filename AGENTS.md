@@ -1,6 +1,6 @@
-## What Relay is
+## What Hamaca is
 
-Relay is an **AI-first kanban board**. The core idea is *passing the baton*: work moves
+Hamaca is an **AI-first kanban board**. The core idea is *passing the baton*: work moves
 back and forth between humans and AI agents, and the board makes that hand-off explicit —
 whose turn it is, what's blocked on a human, and what an agent is actively working. Treat
 "who holds the baton" (human vs. agent) as a first-class property of a card, not an
@@ -43,7 +43,7 @@ client-side or API surface.
   already does.
 - **LiveView Native** remains the documented future path, adopted for iOS and Android together.
 
-**Working Relay from Claude Code:** the `mix relay` CLI + REST API let a Claude session pull a
+**Working Hamaca from Claude Code:** the `mix relay` CLI + REST API let a Claude session pull a
 card, work it, and hand it back. See [`relay.md`](relay.md).
 
 **Deploying:** the RE board doesn't deploy from CI. The Code flow squashes and fast-forwards
@@ -89,7 +89,7 @@ use them.
   file.** A running
   `relay start` holds the version it started with in memory, so an unbumped fix reaches
   nobody: the server compares the runner's declared version against
-  `Relay.Runs.min_runner_version/0` and **refuses work** to anything below it (409
+  `Hamaca.Runs.min_runner_version/0` and **refuses work** to anything below it (409
   `runner_outdated`), which is the only thing that turns "the fix was merged" into "the fix
   is running". `bin/test_relay.py`'s `RunnerVersionBumpGuardTest` (RE425) enforces this: when
   `./relay`'s masked contents changed since the merge-base with `origin/main`, it requires
@@ -98,12 +98,12 @@ use them.
   bump again). It never fetches, and skips with a `WARNING:` on stderr when `origin/main` (or
   a merge-base) isn't available, e.g. a shallow CI checkout. `RunnerFingerprintGuardTest`
   hashes `./relay` with the two constant lines masked and fails with the exact fingerprint to
-  paste into `RUNNER_FINGERPRINT`. Raise `@min_runner_version` in `lib/relay/runs.ex` only when
+  paste into `RUNNER_FINGERPRINT`. Raise `@min_runner_version` in `lib/hamaca/runs.ex` only when
   running the old runner is genuinely worse than a stopped one.
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 - **The current-state architecture lives in [`docs/architecture/`](docs/architecture/README.md)** and staying current is a gate: if your branch adds or changes a **context, PubSub topic, API endpoint, or supervised process**, update the matching `docs/architecture/` page in the same branch. The whole-branch final review treats a stale page as a blocking finding.
 - **Architecture decisions live in [`docs/adr/`](docs/adr/README.md)** — read the index before changing cross-cutting structure. Notably [ADR 0001](docs/adr/0001-client-architecture.md) + [ADR 0005](docs/adr/0005-mobile-app-scope-and-architecture.md) fix the LiveView-first, hybrid-native client strategy: keep UI and real-time logic in LiveView; native work is limited to ADR 0005's decision surfaces and the `/api/all` API that feeds them; do not build a parallel mobile client that re-implements content surfaces.
-- **Context boundaries are enforced by [`boundary`](https://hexdocs.pm/boundary)** (wired into the compiler). The web layer (`RelayWeb`) may only call the domain through `Relay`'s exported contexts; contexts may not reach into the web layer. Each context is its own sub-boundary declared in `lib/relay.ex` — when you add a context, give it `use Boundary` and add it to `Relay`'s `exports`. A boundary violation fails compilation.
+- **Context boundaries are enforced by [`boundary`](https://hexdocs.pm/boundary)** (wired into the compiler). The web layer (`HamacaWeb`) may only call the domain through `Hamaca`'s exported contexts; contexts may not reach into the web layer. Each context is its own sub-boundary declared in `lib/hamaca.ex` — when you add a context, give it `use Boundary` and add it to `Hamaca`'s `exports`. A boundary violation fails compilation.
 - **A magic value is defined exactly once.** Closed sets (statuses, outcomes, job states, node
   kinds, isolation classes) and policy numbers (thresholds, caps, grace windows) live as ONE
   named function/attribute on the module that owns the concept — the schema for a vocabulary
@@ -125,7 +125,7 @@ use them.
   `border-base-300`, `var(--color-primary)`, `color-mix(in oklab, var(--color-warning) 15%,
   var(--color-base-100))` — and prefer a shared control over a repeated inline style. The
   literal → token mapping is documented at the top of the theming section of `app.css` and
-  enforced by `test/relay_web/theme_tokens_test.exs` (RE237). A **genuine** exception — a color
+  enforced by `test/hamaca_web/theme_tokens_test.exs` (RE237). A **genuine** exception — a color
   no brand role can express, such as a per-entity hash-derived hue or a third-party brand mark —
   is opted out explicitly: put a trailing `# theme-tokens:allow: <reason>` comment on the one
   offending line (the usual case; it exempts that line only), or add an `@allowlist` entry in

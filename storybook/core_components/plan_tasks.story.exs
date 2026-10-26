@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.PlanTasks do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.plan_tasks/1
+  def function, do: &HamacaWeb.CoreComponents.plan_tasks/1
   def render_source, do: :function
 
   # Built rather than typed so no literal triple-backtick appears in this source.

@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.BackfillStoryMapReleases do
+defmodule Hamaca.Repo.Migrations.BackfillStoryMapReleases do
   use Ecto.Migration
 
   import Ecto.Query

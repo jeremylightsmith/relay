@@ -1,0 +1,210 @@
+defmodule Hamaca.Runs.Listener do
+  @moduledoc """
+  Reconciles card events with runs (ADR 0006 §5). `Hamaca.Cards` cannot
+  depend on `Hamaca.Runs` (the dependency runs the other way), so the
+  engine observes: one GenServer subscribes to the `Hamaca.Events`
+  firehose and, on any event naming a card, compares current card state
+  against run state and fixes mismatches — stateless, so a missed
+  broadcast self-heals on the next event, and reconciliation triggered by
+  its own writes converges to a no-op.
+
+  A boot sweep (`init/1`'s `{:continue, :boot_reconcile}`) reconciles every card holding a
+  `:parked` run at startup, so an answer that arrived while this process was down is not lost
+  — the scheduler is no longer a backstop for `:needs_input`/`:claimed` parks (RLY-200).
+
+  Rules, in order:
+    * card in a terminal-type stage (`Stage.terminal_types/0`) **or archived** + active run →
+      cancel the run with `Hamaca.Runs.leak_reason/1` (RLY-233, RE335); first, so a parked run
+      whose card reached Done or was archived is closed, not resumed. `{:card_archived, card}`
+      is one of the events that triggers a reconcile.
+    * active `:running` run + human owner present → revoke the active job
+      and park the run `:claimed` at its last checkpoint (the card is not
+      touched).
+    * parked `:needs_input` + card no longer `:needs_input` (the answer
+      arrived) → resume the SAME node with the stored `session_id` (none for an `:infrastructure` park, RE308)
+      (`claude -p --resume`; the only session-resuming re-entry).
+    * parked `:claimed` + card AI-owned again (hand-back) → resume fresh
+      (the human may have changed anything).
+    * no active run + open rejection + card `:ready` (handed back for rework — a
+      reject leaves it `:ready`, a failure leaves it `:failed`) + AI-owned + the
+      card sits in the works-in stage of an enabled flow → start a new run. The rejection
+      note is not carried as run context (RE358): it is a `:changes_requested` comment, and
+      it reaches every job as live guidance (`Hamaca.Runs.guidance_for/2`, whose window opens
+      at the rejection's `rejected_at`). Keying re-entry off *card* status
+      (not the prior run's) lets a reject after a failed run re-enter while a genuine
+      `:failed` card is never auto-restarted (RLY-156/RLY-216) — mirroring the
+      scheduler's own `:failed` exclusion.
+    * an archived card with no active run → nothing (RE335): an archived card never starts or
+      resumes a run from here.
+  """
+
+  use GenServer
+
+  import Ecto.Query
+
+  alias Hamaca.Repo
+  alias Hamaca.Runs
+  alias Hamaca.Runs.Policy
+  alias Schemas.Card
+  alias Schemas.NodeExecution
+  alias Schemas.Run
+
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+
+  @impl true
+  def init(opts) do
+    Hamaca.Runs.Instance.adopt_callers(opts)
+    # Traps its supervisor's :shutdown exit signal into a message instead of
+    # dying mid-reconcile: an untrapped signal can land while a Repo call is
+    # in flight (e.g. a test's stop_supervised!/1 racing a queued firehose
+    # event), which — in the test sandbox's shared connection — poisons the
+    # one shared connection for the rest of the test. Trapping lets the
+    # current handle_info finish, then GenServer's default handling of the
+    # parent's {:EXIT, ...} message stops it normally.
+    Process.flag(:trap_exit, true)
+    :ok = Hamaca.Events.subscribe_firehose()
+    {:ok, %{}, {:continue, :boot_reconcile}}
+  end
+
+  @impl true
+  def handle_continue(:boot_reconcile, state) do
+    Run
+    |> where([r], r.status == :parked)
+    |> select([r], r.card_id)
+    |> Repo.all()
+    |> Enum.each(&reconcile/1)
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({_board_id, event}, state) do
+    case card_id_of(event) do
+      nil -> :ok
+      card_id -> reconcile(card_id)
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info(_other, state), do: {:noreply, state}
+
+  defp card_id_of({:card_upserted, %Card{id: id}}), do: id
+  defp card_id_of({:card_moved, %Card{id: id}, _from_stage_id}), do: id
+  defp card_id_of({:card_archived, %Card{id: id}}), do: id
+  defp card_id_of({:timeline_appended, card_id, _entry}), do: card_id
+  defp card_id_of(_event), do: nil
+
+  defp reconcile(card_id) do
+    case Repo.get(Card, card_id) do
+      nil -> :ok
+      card -> card |> Repo.preload(:owners) |> reconcile_card()
+    end
+  end
+
+  defp reconcile_card(card), do: reconcile_card(card, Runs.active_run(card))
+
+  # RE335 D7 — an archived card never starts a run: the only rule an archived card may trigger
+  # is the leak close below. Without this, an archived :ready card with an open rejection would
+  # be re-entered here and pin a fresh run on a card nobody can see.
+  defp reconcile_card(card, nil) do
+    if Card.archived?(card), do: :ok, else: maybe_reenter_after_rejection(card)
+  end
+
+  # RLY-233 / RE335: FIRST active-run rule. A card that has genuinely reached a terminal-type
+  # stage, or has been archived, must not keep an active run — close it (freeing its runner slot,
+  # and letting releasable_held/2 free its worktree) before any resume rule can re-dispatch it.
+  # Being first, it pre-empts the :needs_input/:claimed resume clauses in reconcile_active/2, so a
+  # parked run whose card was moved to Done or archived is CANCELLED, not resumed (which would
+  # regenerate a zombie). The timeline reason comes from Runs.leak_reason/1 — the same one the
+  # RunnerReaper sweep logs — never decided here.
+  #
+  # The leak test is a SINGLE-SNAPSHOT query (Runs.leak_reason/1), not this handler's separately-
+  # read card stage. Atomic dispatch guarantees no committed state pairs an active run with a card
+  # at a :done-type pull stage, but reading the card (from the triggering event) and the active run
+  # in two queries can straddle a concurrent Spec:Done → Plan dispatch — seeing the stale done stage
+  # alongside the fresh plan run and cancelling it (RLY-233 / RE239). One snapshot never sees that.
+  defp reconcile_card(card, %Run{} = run) do
+    case Runs.leak_reason(run) do
+      nil ->
+        reconcile_active(card, run)
+
+      reason ->
+        _ = Runs.cancel_run(run, reason: reason)
+        :ok
+    end
+  end
+
+  defp reconcile_active(card, %Run{status: :running} = run) do
+    if !Policy.agent_may_hold?(%{active_owner: Hamaca.Cards.active_owner_type(card)}) do
+      Runs.park_claimed(run)
+    end
+
+    :ok
+  end
+
+  defp reconcile_active(card, %Run{status: :parked, parked_reason: :needs_input} = run) do
+    if card.status != :needs_input do
+      _ = Runs.resume_run(run, resume_session: resume_session_for(run))
+    end
+
+    :ok
+  end
+
+  defp reconcile_active(card, %Run{status: :parked, parked_reason: :claimed} = run) do
+    if Hamaca.Cards.active_owner_type(card) == :ai do
+      _ = Runs.resume_run(run)
+    end
+
+    :ok
+  end
+
+  # Defensive fallback: any other run shape (e.g. a parked run with an
+  # unexpected/missing `parked_reason`, such as data seeded or migrated
+  # outside `Hamaca.Runs`'s own park_* functions) is left untouched rather
+  # than crashing the reconciler — reconciliation self-heals on the next
+  # event, so a no-op here is safe.
+  defp reconcile_active(_card, %Run{}), do: :ok
+
+  # RE308: an infrastructure park's node never ran, so there is no conversation to continue — and
+  # the node's OLDER session (an earlier visit) would resume a context the fresh attempt must not
+  # inherit. Only a question or an escalation resumes a session.
+  defp resume_session_for(%Run{} = run) do
+    if Runs.park_kind(run) == :infrastructure, do: nil, else: last_session(run)
+  end
+
+  defp last_session(%Run{} = run) do
+    Repo.one(
+      from e in NodeExecution,
+        where: e.run_id == ^run.id and e.node_key == ^run.current_node and not is_nil(e.session_id),
+        order_by: [desc: e.id],
+        limit: 1,
+        select: e.session_id
+    )
+  end
+
+  defp maybe_reenter_after_rejection(%Card{rejection: nil}), do: :ok
+
+  # RE93 — deliberately NOT gated on `Hamaca.Cards.unmet_dependencies/2`. A send-back continues a
+  # loop on a card an agent has already worked, so it is a resume, not a fresh pull, and the
+  # dependency gate is a fresh-pull gate (`Hamaca.Runs.Policy.pullable?/1` documents both
+  # carve-outs). Gating it here would also strand the card outright: nothing re-reconciles a
+  # dependent when its *blocker* later reaches Done, because the listener reacts to the blocker's
+  # event, not the dependent's.
+  defp maybe_reenter_after_rejection(%Card{status: :ready} = card) do
+    flow = Hamaca.Flows.working_flow(card)
+
+    if flow && Hamaca.Cards.active_owner_type(card) == :ai do
+      _result = Runs.start_run(card, flow)
+    end
+
+    :ok
+  end
+
+  # Any other status — notably :failed — is never auto-restarted. RLY-156/RLY-179: the
+  # loop-guard now lives in *card* status. A reject leaves the card :ready
+  # (Hamaca.Cards.move_and_reject), a failure leaves it :failed, so the two are distinguishable;
+  # this mirrors the scheduler's own :failed exclusion. Recovery from a genuine failure is a
+  # human call.
+  defp maybe_reenter_after_rejection(%Card{}), do: :ok
+end

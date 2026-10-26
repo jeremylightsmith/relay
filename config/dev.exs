@@ -1,29 +1,11 @@
 import Config
 
-# Do not include metadata nor timestamps in development logs
-config :logger, :default_formatter, format: "[$level] $message\n"
-
-# Initialize plugs at runtime for faster development compilation
-config :phoenix, :plug_init_mode, :runtime
-
-# Set a higher stacktrace during development. Avoid configuring such
-# in production as building large stacktraces may be expensive.
-config :phoenix, :stacktrace_depth, 20
-
-config :phoenix_live_view,
-  # Include debug annotations and locations in rendered markup.
-  # Changing this configuration will require mix clean and a full recompile.
-  debug_heex_annotations: true,
-  debug_attributes: true,
-  # Enable helpful, but potentially expensive runtime checks
-  enable_expensive_runtime_checks: true
-
 # Configure your database
-config :relay, Relay.Repo,
+config :hamaca, Hamaca.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "relay_dev",
+  database: "hamaca_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
@@ -34,7 +16,7 @@ config :relay, Relay.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :relay, RelayWeb.Endpoint,
+config :hamaca, HamacaWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}],
@@ -43,9 +25,9 @@ config :relay, RelayWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "AFIPqzFJsRUrOe1Q+1u4zAcL6Ete47JHD7ai+q47847KaB8dt/VBYQs6WYBjbam0",
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:relay, ~w(--sourcemap=inline --watch)]},
+    esbuild: {Esbuild, :install_and_run, [:hamaca, ~w(--sourcemap=inline --watch)]},
     esbuild: {Esbuild, :install_and_run, [:storybook, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:relay, ~w(--watch)]},
+    tailwind: {Tailwind, :install_and_run, [:hamaca, ~w(--watch)]},
     tailwind: {Tailwind, :install_and_run, [:storybook, ~w(--watch)]}
   ]
 
@@ -73,7 +55,7 @@ config :relay, RelayWeb.Endpoint,
 # different ports.
 
 # Reload browser tabs when matching files change.
-config :relay, RelayWeb.Endpoint,
+config :hamaca, HamacaWeb.Endpoint,
   live_reload: [
     web_console_logger: true,
     patterns: [
@@ -82,21 +64,39 @@ config :relay, RelayWeb.Endpoint,
       # Gettext translations
       ~r"priv/gettext/.*\.po$"E,
       # Router, Controllers, LiveViews and LiveComponents
-      ~r"lib/relay_web/router\.ex$"E,
-      ~r"lib/relay_web/(controllers|live|components)/.*\.(ex|heex)$"E
+      ~r"lib/hamaca_web/router\.ex$"E,
+      ~r"lib/hamaca_web/(controllers|live|components)/.*\.(ex|heex)$"E
     ]
   ]
 
 # Billing (RE460): dev charges through the in-process Local payments adapter, so the app can be
 # smoked with `BILLING_ENABLED=true` and no Stripe account (see config/runtime.exs).
-config :relay, billing_payments: Relay.Billing.Payments.Local
+config :hamaca, billing_payments: Hamaca.Billing.Payments.Local
 
 # Enable dev routes (dashboard, storybook)
-config :relay, dev_routes: true
+config :hamaca, dev_routes: true
 
 # Billing emails (RE464): delivered to Swoosh's Local adapter — read them at /dev/mailbox.
-config :relay, mail_enabled: true
+config :hamaca, mail_enabled: true
 
 # RLY-133: per-board schedulers run in dev; the engine stays Noop until a real
-# adapter onto Relay.Runs's run-execution engine is wired up.
-config :relay, runs_auto_start: true
+# adapter onto Hamaca.Runs's run-execution engine is wired up.
+config :hamaca, runs_auto_start: true
+
+# Do not include metadata nor timestamps in development logs
+config :logger, :default_formatter, format: "[$level] $message\n"
+
+# Initialize plugs at runtime for faster development compilation
+config :phoenix, :plug_init_mode, :runtime
+
+# Set a higher stacktrace during development. Avoid configuring such
+# in production as building large stacktraces may be expensive.
+config :phoenix, :stacktrace_depth, 20
+
+config :phoenix_live_view,
+  # Include debug annotations and locations in rendered markup.
+  # Changing this configuration will require mix clean and a full recompile.
+  debug_heex_annotations: true,
+  debug_attributes: true,
+  # Enable helpful, but potentially expensive runtime checks
+  enable_expensive_runtime_checks: true

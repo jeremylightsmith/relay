@@ -2,7 +2,7 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.StoryMapComponents.story_map_filter_bar/1
+  def function, do: &HamacaWeb.StoryMapComponents.story_map_filter_bar/1
   def render_source, do: :function
 
   defp dana(selected?) do
@@ -28,7 +28,7 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
   end
 
   defp ai(selected?) do
-    %{key: "agent", actor: :ai, name: "Relay AI", email: nil, avatar_url: nil, selected?: selected?}
+    %{key: "agent", actor: :ai, name: "Hamaca AI", email: nil, avatar_url: nil, selected?: selected?}
   end
 
   def variations do

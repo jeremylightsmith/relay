@@ -1,1 +1,1 @@
-call "%~dp0\relay" eval Relay.Release.migrate
+call "%~dp0\hamaca" eval Hamaca.Release.migrate

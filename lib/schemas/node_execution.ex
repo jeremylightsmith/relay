@@ -17,7 +17,7 @@ defmodule Schemas.NodeExecution do
 
   `run_branch_id` (RE437) is set on every execution inside a `fan_out` region's branch and nil
   everywhere else — including the `fan_out` and `fan_in` control executions themselves. It is the
-  key `Relay.Runs.RunServer` scopes a branch's decision history to. Programmatic, never cast.
+  key `Hamaca.Runs.RunServer` scopes a branch's decision history to. Programmatic, never cast.
 
   `no_changes` records that the node ASSERTED "succeeded, and no changes were needed" (RE310) —
   what was claimed, not what the engine decided, so a rejected claim is still readable as
@@ -30,11 +30,11 @@ defmodule Schemas.NodeExecution do
 
   `resume_at` (RE267) is set ONLY on a `:blocked` row, and only when the runner knew when the
   usage limit that refused the agent resets (a rejected `rate_limit_event`'s `resetsAt`). Its
-  presence is what `Relay.Runs.Engine.decide/4` reads to requeue the node instead of parking it;
+  presence is what `Hamaca.Runs.Engine.decide/4` reads to requeue the node instead of parking it;
   an auth failure, `billing_error`, or a phrase-only usage limit leaves it nil and parks (RE308).
 
   `:steered` (RE358) is stamped ONLY by the server, when a human's Steer now stops this attempt
-  and restarts the same node as the next attempt of the same visit (`Relay.Runs.steer/4`). It is
+  and restarts the same node as the next attempt of the same visit (`Hamaca.Runs.steer/4`). It is
   in `all_outcomes/0` (the enum) but in `server_only_outcomes/0`, so it is neither something a
   runner may report (`outcomes/0`, the wire contract) nor something a flow edge may route on. A
   steered row ends RE410's outcome-less streak and spends no `max_loops` budget.
@@ -107,7 +107,7 @@ defmodule Schemas.NodeExecution do
   The outcomes after which the run is HELD rather than handed off (RE345): `:needs_input` asked a
   human; `:blocked` (RE308) could not run at all — an auth failure or a usage limit, which
   includes every `resume_at` (RE267) requeue. The idle gap before the next execution is charged
-  as `held` time instead of plain hand-off `wait` by `Relay.Runs.node_waits_for_flow/2`. The ONE
+  as `held` time instead of plain hand-off `wait` by `Hamaca.Runs.node_waits_for_flow/2`. The ONE
   definition of this set — consumers call it, never retype it.
   """
   def holding_outcomes, do: @holding_outcomes

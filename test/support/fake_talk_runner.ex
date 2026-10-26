@@ -1,16 +1,16 @@
-defmodule Relay.FakeTalkRunner do
+defmodule Hamaca.FakeTalkRunner do
   @moduledoc """
   RE268 — the test seam ADR 0009 names: claims a talk job the way `relay start` would and
-  posts canned event batches through the real `Relay.Talk` API. No model, no HTTP, no worktree —
+  posts canned event batches through the real `Hamaca.Talk` API. No model, no HTTP, no worktree —
   it covers post -> claim -> append -> render, which is most of the feature's surface.
   """
 
-  alias Relay.Runs
-  alias Relay.Talk
+  alias Hamaca.Runs
+  alias Hamaca.Talk
 
   @doc """
   Claims the next job for `runner` and returns the talk turn it carries, or nil. Marks the
-  turn `:claimed` exactly where `RelayWeb.Api.NodeJobController` does, so a test driving this
+  turn `:claimed` exactly where `HamacaWeb.Api.NodeJobController` does, so a test driving this
   seam sees the same turn status a real runner's claim produces.
   """
   def claim(runner) do

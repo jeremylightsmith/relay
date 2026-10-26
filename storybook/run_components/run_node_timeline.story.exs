@@ -2,7 +2,7 @@ defmodule Storybook.RunComponents.RunNodeTimeline do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.run_node_timeline/1
+  def function, do: &HamacaWeb.RunComponents.run_node_timeline/1
   def render_source, do: :function
 
   defp run(attrs) do
@@ -32,7 +32,7 @@ defmodule Storybook.RunComponents.RunNodeTimeline do
     )
   end
 
-  defp detail(run_attrs, nes), do: Relay.Runs.run_detail(Map.put(run(run_attrs), :node_executions, nes), nil)
+  defp detail(run_attrs, nes), do: Hamaca.Runs.run_detail(Map.put(run(run_attrs), :node_executions, nes), nil)
 
   def variations do
     [

@@ -1,0 +1,78 @@
+defmodule HamacaWeb.Api.BoardController do
+  use HamacaWeb, :controller
+
+  alias Hamaca.AgentLog
+  alias Hamaca.Boards
+  alias Hamaca.BoardWatch
+  alias Hamaca.Cards
+  alias Hamaca.Runs
+
+  action_fallback HamacaWeb.Api.FallbackController
+
+  def show(conn, params) do
+    board = conn.assigns.current_board
+    stages = Boards.list_stages(board)
+    render(conn, :show, board: board, stages: stages, cards: index_cards(board, stages, params))
+  end
+
+  def version(conn, _params) do
+    version = BoardWatch.version(conn.assigns.current_board.id)
+
+    conn
+    |> put_resp_header("etag", Integer.to_string(version))
+    |> json(%{version: version})
+  end
+
+  def logs(conn, params) do
+    entries = Map.get(params, "_json", [])
+    :ok = AgentLog.record(conn.assigns.current_board.id, entries)
+    send_resp(conn, 200, "")
+  end
+
+  def heartbeat(conn, params) do
+    board = conn.assigns.current_board
+    refs = Map.get(params, "refs", [])
+    refs = if is_list(refs), do: refs, else: []
+    {stamped, _} = Cards.touch_heartbeats(board, refs)
+
+    # RLY-134/RLY-136: a runner beat is a superset — it carries `name` + `capacity`,
+    # upserts the durable Runner row, AND advertises capacity into Hamaca.Runs.Capacity
+    # (the ETS store the scheduler reads). Keyed by the durable Runner row id. The
+    # `capacity` carried here is the runner's *configured* per-class slot count, not a
+    # live free count — Hamaca.Runs.Scheduler.Server debits in-flight :running runs from
+    # it server-side before planning (see Hamaca.Runs.Capacity's moduledoc).
+    #
+    # TRAP for the runner-side cutover: ./relay's RunnerPool.capacity() (used today
+    # only for /api/node-jobs/claim, not this route) returns CURRENTLY-FREE capacity,
+    # already decremented as slots are taken. Whichever client first posts `capacity` on
+    # this route must send the configured total (cfg["capacity"]) — posting the live-free
+    # count here would double-debit every already-running run.
+    :ok = maybe_advertise_runner(board, params)
+
+    json(conn, %{stamped: stamped})
+  end
+
+  defp maybe_advertise_runner(board, %{"capacity" => capacity, "name" => name} = params)
+       when is_map(capacity) and is_binary(name) and name != "" do
+    # RLY-201: the raw client map goes straight to the domain. Runs.Capacity.put/3 and
+    # Runs.upsert_runner/2 both normalize through Hamaca.Runs.Capacity.normalize/1, so
+    # the ETS store and the runner row cannot disagree about a malformed payload.
+    case Runs.upsert_runner(board, params) do
+      {:ok, runner} -> Runs.Capacity.put(runner.id, runner.board_id, capacity)
+      _error -> :ok
+    end
+  end
+
+  defp maybe_advertise_runner(_board, _params), do: :ok
+
+  # RLY-67: the board index drops the top-level Done column unless ?include_done is set.
+  defp index_cards(board, stages, params) do
+    if include_done?(params) do
+      Cards.list_cards(board)
+    else
+      Cards.list_cards(board, exclude_stage_ids: Boards.top_level_done_stage_ids(stages))
+    end
+  end
+
+  defp include_done?(params), do: params["include_done"] in ["1", "true", true]
+end

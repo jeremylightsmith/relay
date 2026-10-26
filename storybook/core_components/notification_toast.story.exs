@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.NotificationToast do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.notification_toast/1
+  def function, do: &HamacaWeb.CoreComponents.notification_toast/1
   def render_source, do: :function
 
   def variations do

@@ -2,7 +2,7 @@ defmodule Storybook.RunComponents.RunList do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.run_list/1
+  def function, do: &HamacaWeb.RunComponents.run_list/1
   def render_source, do: :function
 
   defp ne(node_key, attempt, outcome, attrs) do
@@ -33,7 +33,7 @@ defmodule Storybook.RunComponents.RunList do
         Map.put(run_attrs, :node_executions, nes)
       )
 
-    Relay.Runs.run_detail(run, nil)
+    Hamaca.Runs.run_detail(run, nil)
   end
 
   defp ago(seconds), do: DateTime.add(DateTime.utc_now(), -seconds, :second)

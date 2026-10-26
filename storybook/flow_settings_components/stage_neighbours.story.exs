@@ -2,7 +2,7 @@ defmodule Storybook.FlowSettingsComponents.StageNeighbours do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowSettingsComponents.stage_neighbours/1
+  def function, do: &HamacaWeb.FlowSettingsComponents.stage_neighbours/1
   def render_source, do: :function
 
   def variations do

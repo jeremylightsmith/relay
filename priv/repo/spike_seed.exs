@@ -4,10 +4,10 @@
 
 import Ecto.Query
 
-alias Relay.Accounts
-alias Relay.Boards
-alias Relay.Cards
-alias Relay.Repo
+alias Hamaca.Accounts
+alias Hamaca.Boards
+alias Hamaca.Cards
+alias Hamaca.Repo
 alias Schemas.Board
 
 user = Accounts.ensure_dev_user!()

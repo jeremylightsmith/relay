@@ -2,7 +2,7 @@ defmodule Storybook.FlowSettingsComponents.FlowBand do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowSettingsComponents.flow_band/1
+  def function, do: &HamacaWeb.FlowSettingsComponents.flow_band/1
   def render_source, do: :function
 
   # A stage row's foot on Board Settings → Stages (RE431, card mockup "A — stage row owns its
@@ -28,7 +28,7 @@ defmodule Storybook.FlowSettingsComponents.FlowBand do
       %{id: 18, name: "Plan · Done", type: :done, parent_id: 16}
     ]
 
-    [problem] = Relay.Flows.Shape.problems(stages, [%{key: "plan", stage_id: 16, enabled: true}])
+    [problem] = Hamaca.Flows.Shape.problems(stages, [%{key: "plan", stage_id: 16, enabled: true}])
     problem
   end
 

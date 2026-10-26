@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AllowMultipleApiKeysPerBoard do
+defmodule Hamaca.Repo.Migrations.AllowMultipleApiKeysPerBoard do
   use Ecto.Migration
 
   # RE361: a board may hold any number of named keys (one per machine). The

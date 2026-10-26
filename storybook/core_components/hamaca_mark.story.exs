@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.HamacaMark do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.hamaca_mark/1
+  def function, do: &HamacaWeb.CoreComponents.hamaca_mark/1
   def render_source, do: :function
 
   def variations do

@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.CardReviewPanel do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.card_review_panel/1
+  def function, do: &HamacaWeb.CoreComponents.card_review_panel/1
   def render_source, do: :function
 
   defp gate, do: %{approve_label: "Approve → Done", reject_target_name: "Code", can_reject: true}

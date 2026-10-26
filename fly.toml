@@ -1,4 +1,4 @@
-# fly.toml app configuration for relayboard (Relay).
+# fly.toml app configuration for relayboard (Hamaca).
 # See https://fly.io/docs/reference/configuration/ for details.
 
 app = 'relayboard'

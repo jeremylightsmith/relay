@@ -2,13 +2,13 @@ defmodule Storybook.FlowShapeComponents.PausedFlowBanners do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  alias Relay.Flows.Shape
+  alias Hamaca.Flows.Shape
 
-  def function, do: &RelayWeb.FlowShapeComponents.paused_flow_banners/1
+  def function, do: &HamacaWeb.FlowShapeComponents.paused_flow_banners/1
   def render_source, do: :function
 
   # RE432, card mockup "C — board banner per paused flow, with Fix in Stages". Each flow is a
-  # literal struct whose `problem` is built by the domain (`Relay.Flows.Shape.problems/2` over
+  # literal struct whose `problem` is built by the domain (`Hamaca.Flows.Shape.problems/2` over
   # in-memory stages), so the WHY sentence is the real one.
   @stages [
     %{id: 1, name: "Spec", type: :planning, parent_id: nil},

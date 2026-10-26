@@ -1,6 +1,6 @@
 # Design mockups
 
-High-fidelity mockups for Relay's core UI, pulled from the **Claude Design** project
+High-fidelity mockups for Hamaca's core UI, pulled from the **Claude Design** project
 [8062faff](https://claude.ai/design/p/8062faff-4bcd-4ddd-a160-25ec64cec793). These are the
 visual source of truth — build the LiveView UI to match them, and re-pull if the design
 project changes.
@@ -13,8 +13,8 @@ project changes.
 | `Relay Story Map.dc.html` | The **Story Map** — a second lens on the board: an Activities→Tasks backbone × Release swimlanes (MVP / Fast follow / Later) grid, real board cards in each cell, zoom (Map/Compact/Full), owner/needs filters + focus/hide-tasks, drag-to-assign, an **UNMAPPED** tray + "No task yet" column for unplaced cards, AI "Relay suggests", and live presence. **Fidelity source for the Story Map cards (RE265 → RE257).** |
 | `Relay Landing.dc.html` | Marketing landing page — hero, "how it works", the flow, configurable stages. |
 | `Relay Design System.dc.html` | The design system — typography, palette, actors/avatars, controls, board components, and an **implementation map to daisyUI/Tailwind primitives**. Read this first. |
-| `Relay Flow Metrics.dc.html` | The per-flow Metrics tab — stat band (total runs, completed %, total spend, median end-to-end), per-node table (runs, duration, cost, attempts, verdict split, loop-laps), empty state, and the deep-link banner from a card's Run panel. **Fidelity source for `RelayWeb.FlowMetricsLive`.** |
-| `Relay Mobile Brief.dc.html` | **Mobile platform brief** — what Relay is/isn't on a phone, the surfaces (Inbox/Board keep, Stream drop), the two primary actions, the hybrid native-shell architecture, and the ship plan. Read alongside [ADR 0005](../adr/0005-mobile-app-scope-and-architecture.md). |
+| `Relay Flow Metrics.dc.html` | The per-flow Metrics tab — stat band (total runs, completed %, total spend, median end-to-end), per-node table (runs, duration, cost, attempts, verdict split, loop-laps), empty state, and the deep-link banner from a card's Run panel. **Fidelity source for `HamacaWeb.FlowMetricsLive`.** |
+| `Relay Mobile Brief.dc.html` | **Mobile platform brief** — what Hamaca is/isn't on a phone, the surfaces (Inbox/Board keep, Stream drop), the two primary actions, the hybrid native-shell architecture, and the ship plan. Read alongside [ADR 0005](../adr/0005-mobile-app-scope-and-architecture.md). |
 | `Relay Mobile.dc.html` | **Mobile screen flow (for build)** — the tappable Inbox & Board prototype: login, core review loop, needs-input, board, settings, comments/screenshot viewer. Source for the mobile cards. |
 | `Relay Docs.dc.html` | The public documentation site — top nav, sectioned left sidebar, "on this page" TOC, and the content styles (callouts, numbered steps, code blocks, tables). **Fidelity source for the `/docs` pages.** |
 | `Relay API Reference.dc.html` | The REST API reference page styling — endpoint/method treatment and code samples. **Fidelity source for `/docs/api`.** |

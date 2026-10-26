@@ -1,0 +1,288 @@
+defmodule HamacaWeb.Api.PlanFlowE2ETest do
+  @moduledoc """
+  RLY-138 / W12 — the Plan cutover, proved end to end over the real REST API with no `claude`
+  invocation: a card in *Spec:Done* is dispatched by the server-side scheduler, claimed by a
+  scripted runner over `POST /api/node-jobs/claim`, reported `succeeded` over
+  `POST /api/node-jobs/:id/outcome`, and lands on *Plan:Done*.
+
+  The second case is the real point of the card: **Spec and Plan enabled at once**, competing
+  for one advertised `shared_clean` budget, both completing without interference. That is the
+  test that would catch a Spec-specific assumption baked into W5-W8.
+
+  Uses `Hamaca.Runs.Scheduler.ScriptedRunner` (W11's harness, `test/support/scripted_runner.ex`)
+  for the claim/outcome HTTP calls rather than re-implementing them here.
+  """
+  use HamacaWeb.ConnCase, async: true
+
+  alias Hamaca.Cards
+  alias Hamaca.Flows
+  alias Hamaca.Repo
+  alias Hamaca.Runs
+  alias Hamaca.Runs.Capacity
+  alias Hamaca.Runs.Scheduler.ScriptedRunner, as: Exec
+  alias Hamaca.Runs.Scheduler.Server
+
+  @runner_name "e2e-runner"
+  @default_capacity %{"shared_clean" => 1, "exclusive" => 0}
+
+  # A stable, known name for this file's private engine's Listener child — settle/1 looks it up
+  # directly (Process.whereis/1) to drain its mailbox before asserting. Module-scoped so it
+  # cannot collide with listener_test.exs's / code_flow_e2e_test.exs's own pinned Listener names
+  # now that all three run async (RE298).
+  @listener :plan_flow_e2e_listener
+
+  setup %{conn: conn} do
+    start_engine!(listener: @listener)
+
+    user = insert(:user)
+    {:ok, board} = Hamaca.Boards.create_board(user, %{name: "Cutover Board"})
+    {:ok, %{token: token}} = Hamaca.ApiKeys.create_key(board, user)
+
+    conn = put_req_header(conn, "authorization", "Bearer " <> token)
+
+    # Subscribe so each test can wait on the run's real terminal event before it returns
+    # (mirrors W11's spec_flow_e2e_test.exs). `:sys.get_state` alone is not enough: it only
+    # drains what is ALREADY in the Listener's mailbox, so a broadcast still in flight lands
+    # after the drain and reconciles into a torn-down sandbox.
+    :ok = Runs.subscribe(board.id)
+
+    %{conn: conn, board: board}
+  end
+
+  defp stage(board, name), do: Enum.find(board.stages, &(&1.name == name))
+
+  defp enable(board, key) do
+    {:ok, flow} = board |> Flows.get_flow!(key) |> Flows.enable_flow()
+    flow
+  end
+
+  # The scripted runner here runs no real skill, so a card that goes on to report
+  # `succeeded` must already carry the fields the shipped Spec/Plan flows declare they write
+  # (RE244) — the Spec e2e card carries `spec` + `acceptance_criteria`, the Plan e2e card
+  # carries `spec` + `acceptance_criteria` + `plan` + tasks — otherwise the guard rewrites that
+  # `succeeded` to `failed`.
+  defp card_in(board, stage_name, attrs) do
+    {:ok, card} = Cards.create_card(stage(board, stage_name), Map.take(attrs, [:title]))
+    {:ok, card} = Cards.update_card(card, Map.delete(attrs, :title))
+    card
+  end
+
+  # Delegates the HTTP claim to ScriptedRunner (W11's harness) — returns the decoded
+  # payload map, or nil on 204 (nothing claimable).
+  defp claim(conn, capacity \\ @default_capacity), do: Exec.claim(conn, @runner_name, capacity)
+
+  # Delegates the HTTP outcome report to ScriptedRunner.
+  defp report(conn, job_id, outcome), do: Exec.outcome(conn, job_id, %{"outcome" => outcome, "detail" => "ok"})
+
+  # Announce the runner over HTTP (a 204 claim doubles as the heartbeat that upserts it),
+  # then publish its free slots so the scheduler can name it in a dispatch.
+  defp announce(conn, board, slots) do
+    capacity = %{"shared_clean" => slots.shared_clean, "exclusive" => slots.exclusive}
+    assert claim(conn, capacity) == nil
+    runner = Repo.get_by!(Schemas.Runner, board_id: board.id, name: @runner_name)
+    :ok = Capacity.put(runner.id, runner.board_id, slots)
+    runner
+  end
+
+  defp start_scheduler(board) do
+    start_supervised!(
+      {Server,
+       [
+         board_id: board.id,
+         tick_ms: 3_600_000,
+         debounce_ms: 5,
+         name: :"e2e_sched_#{board.id}",
+         callers: [self()]
+       ]}
+    )
+  end
+
+  # Belt-and-braces drain of the two async DB readers (the Listener, reconciling off run
+  # broadcasts, and the per-test scheduler) so neither is mid-query when the test returns —
+  # being killed mid-query is what produces the `client #PID exited` Postgrex disconnect.
+  #
+  # What actually makes this deterministic is the `assert_receive` on the run's terminal
+  # broadcast that every caller does FIRST: it proves the reconcile-triggering message has
+  # arrived, and `:sys.get_state` only drains what has already arrived. Note this does NOT
+  # close the scheduler's debounce race on its own — `mark_dirty/1` arms a `send_after`, and a
+  # pending timer survives a mailbox drain; that one is closed by ExUnit teardown order
+  # (`OnExitHandler.run/1` terminates supervised children before the sandbox owner is stopped).
+  defp settle(server) do
+    _ = :sys.get_state(Process.whereis(@listener))
+    _ = :sys.get_state(server)
+    :ok
+  end
+
+  defp stage_name(board, card_id) do
+    card = Cards.get_card(board, card_id)
+    Enum.find(board.stages, &(&1.id == card.stage_id)).name
+  end
+
+  describe "the Plan flow, end to end" do
+    test "a card in Spec:Done is dispatched, claimed, reported, and lands on Plan:Done",
+         %{conn: conn, board: board} do
+      enable(board, "plan")
+
+      card =
+        card_in(board, "Spec:Done", %{
+          title: "Has a spec",
+          spec: "# An approved spec\n\nDo the thing.",
+          plan: "A plan (pre-seeded, RE244)."
+        })
+
+      # RE357: write_plan declares `writes: [plan, sub_tasks]`, and this scripted runner runs no
+      # real skill, so the card carries its tasks up front — otherwise the writes guard rewrites
+      # the `succeeded` below to `failed`.
+      {:ok, _tasks} = Cards.add_tasks(card, [%{title: "Only task", body: "Do the thing."}])
+
+      ref = Cards.ref(board, card)
+
+      announce(conn, board, %{shared_clean: 1, exclusive: 0})
+      server = start_scheduler(board)
+      :ok = Server.reconcile_now(server)
+
+      # The scheduler started a real run via Hamaca.Runs.Scheduler.RunsEngine.
+      assert [run] = Runs.active_runs(board.id)
+      assert run.card_id == card.id
+      assert run.flow_key == "plan"
+      # start_run moved the card into the flow's works_in stage.
+      assert stage_name(board, card.id) == "Plan"
+
+      # The runner claims the node-job. The payload carries the RAW, unexpanded run string —
+      # template expansion is the runner's job, not the server's.
+      body = claim(conn)
+      assert body["run_id"] == run.id
+      assert body["node_id"] == "write_plan"
+      assert body["node_type"] == "agent"
+      assert body["isolation"] == "shared_clean"
+      assert body["run"] == "/write-plan {ref}"
+      assert body["vars"]["ref"] == ref
+
+      assert report(conn, body["id"], "succeeded") == %{"status" => "ok", "run_state" => "done"}
+
+      assert Runs.get_run!(run.id).status == :done
+      assert stage_name(board, card.id) == "Plan:Done"
+
+      # Wait for the run's terminal broadcast, THEN drain the Listener. Waiting first is what
+      # makes the drain meaningful — it guarantees the reconcile-triggering message has landed
+      # in the Listener's mailbox rather than still being in flight toward it.
+      assert_receive {:run_finished, %{id: finished_id}}, 2_000
+      assert finished_id == run.id
+      settle(server)
+    end
+
+    test "a needs_input outcome parks the run and blocks the card instead of landing it",
+         %{conn: conn, board: board} do
+      # The plan flow has only `write_plan -> done on: :succeeded`; the engine parks on
+      # needs_input WITHOUT an edge, which is what lets /write-plan raise needs-input on a
+      # card with no approved spec rather than silently landing an empty plan.
+      enable(board, "plan")
+      card = card_in(board, "Spec:Done", %{title: "No spec at all"})
+
+      announce(conn, board, %{shared_clean: 1, exclusive: 0})
+      server = start_scheduler(board)
+      :ok = Server.reconcile_now(server)
+
+      assert [run] = Runs.active_runs(board.id)
+      body = claim(conn)
+
+      assert Exec.outcome(conn, body["id"], %{"outcome" => "needs_input", "detail" => "no approved spec"}) ==
+               %{"status" => "ok", "run_state" => "parked"}
+
+      assert Runs.get_run!(run.id).status == :parked
+      assert Cards.get_card(board, card.id).status == :needs_input
+      refute stage_name(board, card.id) == "Plan:Done"
+
+      # Wait for the park broadcast before draining (see the other test in this describe
+      # block for why the order matters).
+      assert_receive {:run_parked, %{id: parked_id}}, 2_000
+      assert parked_id == run.id
+      settle(server)
+    end
+  end
+
+  describe "Spec and Plan enabled at once" do
+    test "both flows complete through one scheduler and one advertised budget",
+         %{conn: conn, board: board} do
+      enable(board, "spec")
+      enable(board, "plan")
+
+      spec_card =
+        card_in(board, "Next up", %{
+          title: "Needs a spec",
+          spec: "# Spec (pre-seeded, RE244)",
+          acceptance_criteria: "1. It works."
+        })
+
+      plan_card =
+        card_in(board, "Spec:Done", %{
+          title: "Needs a plan",
+          spec: "# Approved",
+          plan: "A plan (pre-seeded, RE244)."
+        })
+
+      # RE357: write_plan also writes sub_tasks, so the pre-seeded card carries its tasks too.
+      {:ok, _tasks} = Cards.add_tasks(plan_card, [%{title: "Only task", body: "Do the thing."}])
+
+      announce(conn, board, %{shared_clean: 2, exclusive: 0})
+      server = start_scheduler(board)
+      :ok = Server.reconcile_now(server)
+
+      assert length(Runs.active_runs(board.id)) == 2
+
+      # Claim and complete both jobs, keying each by its node so claim order is irrelevant.
+      capacity = %{"shared_clean" => 2, "exclusive" => 0}
+
+      payloads =
+        for _ <- 1..2 do
+          body = claim(conn, capacity)
+          assert report(conn, body["id"], "succeeded") == %{"status" => "ok", "run_state" => "done"}
+          body
+        end
+
+      by_node = Map.new(payloads, &{&1["node_id"], &1})
+
+      assert by_node["brainstorm"]["run"] == "/brainstorm {ref}"
+      assert by_node["brainstorm"]["vars"]["ref"] == Cards.ref(board, spec_card)
+      assert by_node["write_plan"]["run"] == "/write-plan {ref}"
+      assert by_node["write_plan"]["vars"]["ref"] == Cards.ref(board, plan_card)
+
+      # No interference: each card walked its own flow to its own lands_on stage.
+      assert stage_name(board, spec_card.id) == "Spec:Review"
+      assert stage_name(board, plan_card.id) == "Plan:Done"
+      assert Runs.active_runs(board.id) == []
+
+      # Both runs finished, so wait for BOTH terminal broadcasts before draining (see the
+      # "Plan flow, end to end" tests above for why the order matters).
+      assert_receive {:run_finished, _}, 2_000
+      assert_receive {:run_finished, _}, 2_000
+      settle(server)
+    end
+
+    test "with only one shared slot, the Plan card is worked and the Spec card waits",
+         %{conn: conn, board: board} do
+      # The live counterpart of Task 2's pure-scheduler case: rightmost-works_in-first means
+      # Plan preempts Spec for the single shared_clean slot.
+      enable(board, "spec")
+      enable(board, "plan")
+
+      spec_card = card_in(board, "Next up", %{title: "Waits its turn"})
+      plan_card = card_in(board, "Spec:Done", %{title: "Goes first", spec: "# Approved"})
+
+      announce(conn, board, %{shared_clean: 1, exclusive: 0})
+      server = start_scheduler(board)
+      :ok = Server.reconcile_now(server)
+
+      assert [run] = Runs.active_runs(board.id)
+      assert run.card_id == plan_card.id
+      assert run.flow_key == "plan"
+      assert stage_name(board, spec_card.id) == "Next up"
+
+      # This test deliberately leaves the run :running, so settle the start broadcasts before
+      # the sandbox tears down (see the "Plan flow, end to end" tests for why).
+      assert_receive {:run_started, _}, 2_000
+      assert_receive {:node_started, _, _}, 2_000
+      settle(server)
+    end
+  end
+end

@@ -2,7 +2,7 @@ defmodule Storybook.RunComponents.RunStatus do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunStatus.descriptor_row/1
+  def function, do: &HamacaWeb.RunStatus.descriptor_row/1
   def render_source, do: :function
 
   def variations do

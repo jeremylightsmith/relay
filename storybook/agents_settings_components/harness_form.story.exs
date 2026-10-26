@@ -2,7 +2,7 @@ defmodule Storybook.AgentsSettingsComponents.HarnessForm do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.AgentsSettingsComponents.harness_form/1
+  def function, do: &HamacaWeb.AgentsSettingsComponents.harness_form/1
   def render_source, do: :function
 
   # The Edit / Add harness card (RE433, card mockup 01), with the closed Advanced <details> and
@@ -21,7 +21,7 @@ defmodule Storybook.AgentsSettingsComponents.HarnessForm do
 
   # RE436 — the USAGE block for each source, from the seed harnesses.
   defp seed(key, id) do
-    seed = Enum.find(Relay.Agents.seed_harnesses(), &(&1.key == key))
+    seed = Enum.find(Hamaca.Agents.seed_harnesses(), &(&1.key == key))
     struct(Schemas.Harness, Map.put(seed, :id, id))
   end
 
@@ -39,7 +39,7 @@ defmodule Storybook.AgentsSettingsComponents.HarnessForm do
           harness: claude,
           agent_count: 3,
           usage_test_line: @allowed,
-          usage_test: Relay.Agents.try_usage_line(claude.usage, @allowed, ~U[2026-10-10 00:00:00Z])
+          usage_test: Hamaca.Agents.try_usage_line(claude.usage, @allowed, ~U[2026-10-10 00:00:00Z])
         }
       },
       %Variation{

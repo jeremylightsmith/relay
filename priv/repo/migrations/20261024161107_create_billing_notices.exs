@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateBillingNotices do
+defmodule Hamaca.Repo.Migrations.CreateBillingNotices do
   use Ecto.Migration
 
   # RE464 — billing emails (ADR 0012 decision 10). One `billing_notices` row per email sent: the

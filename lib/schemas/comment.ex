@@ -1,8 +1,8 @@
 defmodule Schemas.Comment do
   @moduledoc """
   A comment on a card, authored by an actor: a user (`actor_type: :user`
-  + `user_id`) or the single Relay AI agent (`actor_type: :agent`, no
-  `user_id` — renders as "Relay AI"). Only `body` is user input;
+  + `user_id`) or the single Hamaca AI agent (`actor_type: :agent`, no
+  `user_id` — renders as "Hamaca AI"). Only `body` is user input;
   `card_id`, `actor_type`, `user_id`, and `kind` are set programmatically,
   never cast from input.
 
@@ -16,7 +16,7 @@ defmodule Schemas.Comment do
   RE358 — `:steer` is a note a human wrote to steer an in-flight agent node. `guidance_kinds/0`
   names the kinds a **user** comment may carry and still reach the agent as live guidance.
   `delivered_execution_id` is a steer's receipt: the node execution whose agent job was claimed
-  carrying it (set by `Relay.Runs` at claim time, first delivery wins). Only a `:steer` comment
+  carrying it (set by `Hamaca.Runs` at claim time, first delivery wins). Only a `:steer` comment
   ever has it set; programmatic, never cast.
   """
 
@@ -57,7 +57,7 @@ defmodule Schemas.Comment do
   @doc """
   The kinds a **user** comment may carry and still count as live guidance for the agent working
   the card (RE358): plain comments, rejection notes and steers — never a `:question`. This is
-  the guidance filter's one definition; `Relay.Runs.guidance_for/2` reads it.
+  the guidance filter's one definition; `Hamaca.Runs.guidance_for/2` reads it.
   """
   @spec guidance_kinds() :: [:comment | :changes_requested | :steer]
   def guidance_kinds, do: @guidance_kinds

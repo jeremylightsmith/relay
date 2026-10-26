@@ -4,7 +4,7 @@ defmodule Storybook.SetupComponents.SetupChecklist do
 
   alias Schemas.BoardSetupStep
 
-  def function, do: &RelayWeb.SetupComponents.setup_checklist/1
+  def function, do: &HamacaWeb.SetupComponents.setup_checklist/1
   def render_source, do: :function
 
   # RE443, card mockups "Wizard — docked left on the empty board, every step state + expert
@@ -12,7 +12,7 @@ defmodule Storybook.SetupComponents.SetupChecklist do
   # D, F1, F2 and E; RE455 adds step 3's "I've saved it — next" and "Lost it?" (card mockup "B — step
   # 3: explicit “I've saved it — next” button"); RE456 adds a finished checklist with step 3's peek
   # open (card mockup "Peek — finished steps expand in place, stay done"). Fixture checklists come
-  # from `Relay.Setup.preview_checklist/2`, the same builder `Relay.Setup.checklist/1` uses, with
+  # from `Hamaca.Setup.preview_checklist/2`, the same builder `Hamaca.Setup.checklist/1` uses, with
   # no database.
   def variations do
     [pending, active, waiting, done, failed, skipped] = BoardSetupStep.statuses()
@@ -58,13 +58,13 @@ defmodule Storybook.SetupComponents.SetupChecklist do
         attributes: %{
           id: "setup-story-peek",
           checklist:
-            Relay.Setup.preview_checklist(Map.new(Relay.Setup.steps(), &{&1.id, done}), %{
+            Hamaca.Setup.preview_checklist(Map.new(Hamaca.Setup.steps(), &{&1.id, done}), %{
               template: "Bare minimum",
-              llm: Relay.Setup.onboarding_llm("claude-code"),
+              llm: Hamaca.Setup.onboarding_llm("claude-code"),
               key_hint: %{token_prefix: "k7f2q9", last_four: "3a9c"}
             }),
           token: "relay_8e1d0c7b6a5f_fedcba9876543210fedcba9876543210",
-          peeks: MapSet.new([Relay.Setup.step_id(:key)])
+          peeks: MapSet.new([Hamaca.Setup.step_id(:key)])
         }
       },
       %Variation{
@@ -136,7 +136,7 @@ defmodule Storybook.SetupComponents.SetupChecklist do
       },
       %Variation{
         id: :hide_explanations,
-        description: "\"I know Relay, hide explanations\": no why lines, no What this does",
+        description: "\"I know Hamaca, hide explanations\": no why lines, no What this does",
         attributes: %{
           id: "setup-story-expert",
           checklist: checklist(%{"1" => done, "2" => active}),
@@ -249,9 +249,9 @@ defmodule Storybook.SetupComponents.SetupChecklist do
     ]
   end
 
-  # `Relay.Setup.preview_checklist/2`: `states` maps a step id to a status, or to a row-shaped
+  # `Hamaca.Setup.preview_checklist/2`: `states` maps a step id to a status, or to a row-shaped
   # map; every other step is pending.
   defp checklist(states) do
-    Relay.Setup.preview_checklist(states, %{template: "Bare minimum", llm: Relay.Setup.onboarding_llm("claude-code")})
+    Hamaca.Setup.preview_checklist(states, %{template: "Bare minimum", llm: Hamaca.Setup.onboarding_llm("claude-code")})
   end
 end

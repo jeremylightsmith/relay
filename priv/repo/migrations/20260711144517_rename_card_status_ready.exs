@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.RenameCardStatusReady do
+defmodule Hamaca.Repo.Migrations.RenameCardStatusReady do
   use Ecto.Migration
 
   def up do

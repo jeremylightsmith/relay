@@ -2,7 +2,7 @@ defmodule Storybook.StoryMapComponents.StoryMapColumnHeader do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.StoryMapComponents.story_map_column_header/1
+  def function, do: &HamacaWeb.StoryMapComponents.story_map_column_header/1
   def render_source, do: :function
 
   def variations do

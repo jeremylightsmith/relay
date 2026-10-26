@@ -1,11 +1,11 @@
-defmodule Relay.Repo.Migrations.AddUsageToHarnesses do
+defmodule Hamaca.Repo.Migrations.AddUsageToHarnesses do
   use Ecto.Migration
 
   # RE436 — every harness gets a board-stored usage rule (`Schemas.HarnessUsage`): how the runner
   # reads that CLI's usage and when it pauses it. The column defaults to `{"source":"none"}`, and
   # each existing board's three seeded harnesses are backfilled with their seed rule.
   #
-  # The rules below are a FROZEN copy of the `usage` in `Relay.Agents.seed_harnesses/0`, in the
+  # The rules below are a FROZEN copy of the `usage` in `Hamaca.Agents.seed_harnesses/0`, in the
   # wire shape `Schemas.HarnessUsage.wire/1` stores — the one sanctioned exception to the
   # magic-value rule: a migration must replay identically forever, so it never calls app code
   # that may change after it ships.

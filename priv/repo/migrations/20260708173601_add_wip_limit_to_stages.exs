@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddWipLimitToStages do
+defmodule Hamaca.Repo.Migrations.AddWipLimitToStages do
   use Ecto.Migration
 
   def change do

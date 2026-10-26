@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateVotes do
+defmodule Hamaca.Repo.Migrations.CreateVotes do
   use Ecto.Migration
 
   def change do

@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.List do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.list/1
+  def function, do: &HamacaWeb.CoreComponents.list/1
   def render_source, do: :function
 
   def template do

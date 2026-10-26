@@ -1,8 +1,8 @@
-# Relay — Product Vision
+# Hamaca — Product Vision
 
 ## One line
 
-**Relay is an AI-first kanban board where work is a baton passed back and forth between
+**Hamaca is an AI-first kanban board where work is a baton passed back and forth between
 humans and AI agents.**
 
 ## The problem
@@ -15,7 +15,7 @@ into copy-paste and lost context.
 
 ## The idea: passing the baton
 
-Relay makes the hand-off the center of the product, and it does so through the **columns**.
+Hamaca makes the hand-off the center of the product, and it does so through the **columns**.
 Each stage of the board is owned by either **humans** or **AI** — a stage is a human-run lane
 or an AI-run lane. A card's current holder is simply **whoever owns the stage it sits in**, so
 the baton passes every time a card moves across a hand-off between a human stage and an AI
@@ -62,7 +62,7 @@ is direction, not a schema.
 - **Card** — a unit of work (title, description, tag, sub-tasks, comments, activity). Its
   **owner is derived from its stage**; it also carries a **status** (`queued` / `working` /
   `needs input` / `in review` / `done`) and a hand-off history.
-- **Agent** — an AI worker (the "Relay AI" member) that holds the baton while a card is in an
+- **Agent** — an AI worker (the "Hamaca AI" member) that holds the baton while a card is in an
   AI stage, reports progress and results, asks when unsure, and hands the card back.
 - **Hand-off** — a card moving between a human stage and an AI stage, carrying its context
   (description, comments, results) across.

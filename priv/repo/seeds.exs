@@ -16,7 +16,7 @@
 import Ecto.Query
 
 alias Ecto.Changeset
-alias Relay.Repo
+alias Hamaca.Repo
 alias Schemas.Board
 alias Schemas.Card
 alias Schemas.CardOwner
@@ -160,10 +160,10 @@ make_plan = fn title, target ->
 
     **Files touched**
 
-    - `lib/relay/<context>.ex` — new/changed context function
-    - `lib/relay_web/live/<view>.ex` — wire the event and re-stream the affected column
-    - `test/relay/<context>_test.exs` — unit coverage
-    - `test/relay_web/live/<view>_test.exs` — LiveView coverage
+    - `lib/hamaca/<context>.ex` — new/changed context function
+    - `lib/hamaca_web/live/<view>.ex` — wire the event and re-stream the affected column
+    - `test/hamaca/<context>_test.exs` — unit coverage
+    - `test/hamaca_web/live/<view>_test.exs` — LiveView coverage
 
     **Sketch**
 
@@ -209,7 +209,7 @@ build_board = fn %{name: name, slug: slug, key: key} = board_attrs, stage_specs,
     |> Repo.insert!()
 
   # RE433: the board's harnesses + agents, before any flow whose nodes name them in `llm`.
-  :ok = Relay.Agents.ensure_seeded!(board)
+  :ok = Hamaca.Agents.ensure_seeded!(board)
 
   stages =
     for {{sname, category, type, _flow_works_here, wip}, pos} <- Enum.with_index(stage_specs, 1) do
@@ -227,10 +227,10 @@ build_board = fn %{name: name, slug: slug, key: key} = board_attrs, stage_specs,
   # A spec's 4th element means "a flow works here" — AI-enabled is derived from flows (RE409),
   # so each such stage gets a disabled flow on it, reusing the library "code" graph. A stage
   # holds at most one flow (RE429), so one the board's default flows already occupy is skipped.
-  code_flow = Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
+  code_flow = Enum.find(Hamaca.Flows.DefaultLibrary.all(), &(&1.key == "code"))
 
   for {{_sname, _category, _type, true, _wip}, stage} <- Enum.zip(stage_specs, stages),
-      is_nil(Relay.Flows.stage_flow(stage)) do
+      is_nil(Hamaca.Flows.stage_flow(stage)) do
     flow_key = stage.name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
 
     attrs =
@@ -238,7 +238,7 @@ build_board = fn %{name: name, slug: slug, key: key} = board_attrs, stage_specs,
       |> Map.delete(:trigger)
       |> Map.merge(%{key: flow_key, stage_id: stage.id})
 
-    {:ok, _flow} = Relay.Flows.create_flow(board, attrs)
+    {:ok, _flow} = Hamaca.Flows.create_flow(board, attrs)
   end
 
   last_ref =

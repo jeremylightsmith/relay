@@ -2,7 +2,7 @@ defmodule Storybook.RunComponents.RunStateBanner do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.run_state_banner/1
+  def function, do: &HamacaWeb.RunComponents.run_state_banner/1
   def render_source, do: :function
 
   defp ne(node_key, attempt, outcome, attrs) do
@@ -25,7 +25,7 @@ defmodule Storybook.RunComponents.RunStateBanner do
     )
   end
 
-  defp detail(run_attrs, nes), do: Relay.Runs.run_detail(Map.put(run_attrs, :node_executions, nes), nil)
+  defp detail(run_attrs, nes), do: Hamaca.Runs.run_detail(Map.put(run_attrs, :node_executions, nes), nil)
 
   def variations do
     [

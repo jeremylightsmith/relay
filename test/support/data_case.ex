@@ -1,4 +1,4 @@
-defmodule Relay.DataCase do
+defmodule Hamaca.DataCase do
   @moduledoc """
   This module defines the setup for tests requiring
   access to the application's data layer.
@@ -10,7 +10,7 @@ defmodule Relay.DataCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use Relay.DataCase, async: true`, although
+  by setting `use Hamaca.DataCase, async: true`, although
   this option is not recommended for other databases.
   """
 
@@ -18,23 +18,23 @@ defmodule Relay.DataCase do
   use ExUnit.CaseTemplate
 
   alias Ecto.Adapters.SQL.Sandbox
-  alias Relay.Runs.Capacity
-  alias Relay.Runs.Instance
+  alias Hamaca.Runs.Capacity
+  alias Hamaca.Runs.Instance
 
   using do
     quote do
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
-      import Relay.DataCase
-      import Relay.Factory
+      import Hamaca.DataCase
+      import Hamaca.Factory
 
-      alias Relay.Repo
+      alias Hamaca.Repo
     end
   end
 
   setup tags do
-    Relay.DataCase.setup_sandbox(tags)
+    Hamaca.DataCase.setup_sandbox(tags)
     :ok
   end
 
@@ -42,7 +42,7 @@ defmodule Relay.DataCase do
   Sets up the sandbox based on the test tags.
   """
   def setup_sandbox(tags) do
-    pid = Sandbox.start_owner!(Relay.Repo, shared: not tags[:async])
+    pid = Sandbox.start_owner!(Hamaca.Repo, shared: not tags[:async])
     on_exit(fn -> Sandbox.stop_owner(pid) end)
   end
 
@@ -54,7 +54,7 @@ defmodule Relay.DataCase do
 
   Use this whenever the test itself holds the pid of a process that touches the database. When a
   `DynamicSupervisor` severs the chain and the test never sees the pid, use `$callers`
-  propagation instead (`Relay.Runs.Instance.adopt_callers/1`).
+  propagation instead (`Hamaca.Runs.Instance.adopt_callers/1`).
 
   Tolerates a process that is already an owner or already allowed, and the shared-mode case, so
   the call is safe in a module that is still `async: false`.
@@ -68,7 +68,7 @@ defmodule Relay.DataCase do
   > `async: true` — see ADR 0009's Consequences and `board_logs_test.exs`.
   """
   def allow!(pid) when is_pid(pid) do
-    case Sandbox.allow(Relay.Repo, self(), pid) do
+    case Sandbox.allow(Hamaca.Repo, self(), pid) do
       :ok ->
         pid
 
@@ -84,12 +84,12 @@ defmodule Relay.DataCase do
   end
 
   @doc """
-  Starts a `Relay.Runs.Capacity` owning this test's own ETS table and registers it on the calling
-  process's `Relay.Runs.Instance`, so the test's advertised capacity is invisible to — and
+  Starts a `Hamaca.Runs.Capacity` owning this test's own ETS table and registers it on the calling
+  process's `Hamaca.Runs.Instance`, so the test's advertised capacity is invisible to — and
   unwipeable by — every concurrent test (ADR 0009). Returns the table name.
 
   `start_engine!/1` already does this; call one or the other, never both (they share the
-  `Relay.Runs.Capacity` supervised-child id).
+  `Hamaca.Runs.Capacity` supervised-child id).
   """
   def start_capacity! do
     n = System.unique_integer([:positive])
@@ -108,20 +108,20 @@ defmodule Relay.DataCase do
   @doc """
   Starts this test's own runs engine — Registry, run `DynamicSupervisor`, `Listener`,
   `RunnerReaper`, boot-resume `Task` and a private capacity table — under unique names, and
-  registers them on the calling process's `Relay.Runs.Instance`. Returns the instance.
+  registers them on the calling process's `Hamaca.Runs.Instance`. Returns the instance.
 
-  Replaces `start_supervised!(Relay.Runs.Supervisor)`, which started a globally-named tree and so
+  Replaces `start_supervised!(Hamaca.Runs.Supervisor)`, which started a globally-named tree and so
   could only ever exist once per VM (ADR 0009 rule 2). `callers: [self()]` re-seeds the chain the
   supervisor would sever, which is what gives every engine process the test's sandbox connection
   and its instance.
 
-  Supervised under the child id `Relay.Runs.Supervisor`, so `stop_supervised!(Relay.Runs.Supervisor)`
+  Supervised under the child id `Hamaca.Runs.Supervisor`, so `stop_supervised!(Hamaca.Runs.Supervisor)`
   still stops it; use `restart_engine!/0` to bring it back under the same names.
 
   > #### The `Listener` is NOT isolated {: .warning}
   >
-  > The names are per-instance; the event topic is not. `Relay.Runs.Listener` subscribes to the
-  > process-global `Relay.Events.subscribe_firehose/0`, so the `Listener` this starts receives
+  > The names are per-instance; the event topic is not. `Hamaca.Runs.Listener` subscribes to the
+  > process-global `Hamaca.Events.subscribe_firehose/0`, so the `Listener` this starts receives
   > **every concurrent test's** card events and reconciles them on *this* test's sandbox
   > connection. Harmless when a test's cards are its own (a foreign reconcile is a no-op), but a
   > test that asserts on *how many times* the engine reacted, or that stops the tree mid-flight,
@@ -171,13 +171,13 @@ defmodule Relay.DataCase do
   pinned a name via `start_engine!(listener: Listener)` needs the pin to survive.
 
   Tolerates the tree already being down (a test that needs a real down window — e.g. answering a
-  card while nothing is listening — calls `stop_supervised!(Relay.Runs.Supervisor)` itself first,
+  card while nothing is listening — calls `stop_supervised!(Hamaca.Runs.Supervisor)` itself first,
   then this to bring it back), so it is safe whether or not a stop already ran.
   """
   def restart_engine!(opts \\ []) do
     quiesce_engine!()
 
-    case ExUnit.Callbacks.stop_supervised(Relay.Runs.Supervisor) do
+    case ExUnit.Callbacks.stop_supervised(Hamaca.Runs.Supervisor) do
       :ok -> :ok
       {:error, :not_found} -> :ok
     end
@@ -186,14 +186,14 @@ defmodule Relay.DataCase do
     Instance.current()
   end
 
-  # Names are stashed in the calling process's dictionary (not `Relay.Runs.Instance` — this is a
+  # Names are stashed in the calling process's dictionary (not `Hamaca.Runs.Instance` — this is a
   # `DataCase`-only stability contract, not part of "which engine tree do I belong to") so a bare
   # `restart_engine!()` reuses the exact names `start_engine!/1` picked, instead of rolling fresh
   # random ones that orphan any `Process.whereis(pinned_name)` the test relies on.
   @engine_opts_key :relay_data_case_engine_opts
 
   @doc """
-  Blocks until this test's engine boot task (`Relay.Runs.resume_all/0`) has finished. Call it
+  Blocks until this test's engine boot task (`Hamaca.Runs.resume_all/0`) has finished. Call it
   right after `start_engine!/0` in a test that starts runs itself: otherwise the boot task can
   list a run the test inserts a moment later and adopt it in `:attach` first, so the test's own
   `{:dispatch, job_id}` start finds the server already running and nothing is dispatched.
@@ -273,13 +273,13 @@ defmodule Relay.DataCase do
     Process.put(@engine_opts_key, resolved)
 
     ExUnit.Callbacks.start_supervised!(
-      Supervisor.child_spec({Relay.Runs.Supervisor, resolved}, id: Relay.Runs.Supervisor)
+      Supervisor.child_spec({Hamaca.Runs.Supervisor, resolved}, id: Hamaca.Runs.Supervisor)
     )
   end
 
   @doc """
   Runs `fun` and returns `{result, count}`, where `count` is the number of Repo queries
-  (`[:relay, :repo, :query]` telemetry events) **issued by `pid`** while it ran.
+  (`[:hamaca, :repo, :query]` telemetry events) **issued by `pid`** while it ran.
 
   Ecto emits repo telemetry in the process that issued the query, so filtering on `pid` keeps
   this safe under `async: true` — pass `self()` to count the test's own queries, or a server's
@@ -294,7 +294,7 @@ defmodule Relay.DataCase do
 
     :telemetry.attach(
       handler_id,
-      [:relay, :repo, :query],
+      [:hamaca, :repo, :query],
       fn _event, _measurements, _meta, _config ->
         if self() == pid or pid in (Process.get(:"$callers") || []), do: send(test, {:repo_query, tag})
       end,

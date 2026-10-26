@@ -10,7 +10,7 @@ import Config
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",
-  relay: [
+  hamaca: [
     args:
       ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
@@ -22,7 +22,7 @@ config :esbuild,
     cd: Path.expand("../assets", __DIR__),
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ],
-  # Docs-only bundle (mermaid). Kept out of the `relay` bundle so board pages never fetch it.
+  # Docs-only bundle (mermaid). Kept out of the `hamaca` bundle so board pages never fetch it.
   # Two entries, neither bundled: docs.js has no imports of its own, and vendor/mermaid.min.js
   # must run as its own top-level classic script (not required into another module) for its
   # `globalThis["mermaid"] = ...` assignment to land — see the comment in assets/js/docs.js.
@@ -38,6 +38,71 @@ config :esbuild,
 # single HTTP client.
 config :ex_aws, http_client: ExAws.Request.Req
 
+# RLY-13: attachment byte storage. Dev/test use the hermetic filesystem
+# adapter; prod overrides to S3 (Tigris) in config/runtime.exs.
+config :hamaca, Hamaca.Attachments, storage: Hamaca.Attachments.Storage.Local
+
+# Billing emails (RE464): `Hamaca.Mailer` (Swoosh). Off unless switched on — `:mail_enabled` is read
+# through `Hamaca.Config.get/2`, and a disabled notifier only logs what it would have sent. Dev
+# delivers to the Local adapter (browse it at /dev/mailbox), test to the Test adapter, and prod
+# to Resend once config/runtime.exs sees RESEND_API_KEY + MAIL_FROM. `:app_url` is the absolute
+# origin email links point at (the domain may not reach `HamacaWeb.Endpoint.url/0`). No hackney:
+# only prod makes HTTP calls, through `Swoosh.ApiClient.Req` (config/prod.exs).
+config :hamaca, Hamaca.Mailer, adapter: Swoosh.Adapters.Local
+
+# Push (RLY-81). The Log adapter is the default so dev runs — and the whole
+# trigger→recipient→dispatch pipeline is exercisable — without Apple credentials.
+# config/runtime.exs swaps in the real APNS adapter in prod when creds are present.
+config :hamaca, Hamaca.Push, adapter: Hamaca.Push.Delivery.Log, async: true
+
+# Runs engine (ADR 0006 card 02 / RLY-132): runaway-protection knobs and the
+# dispatch behaviour implementation ("give this node-job to a runner").
+# NoopDispatcher = jobs sit :queued for the pull model (04's runners poll).
+config :hamaca, Hamaca.Runs, breaker_threshold: 3, visit_cap: 20
+
+# Configure the endpoint
+config :hamaca, HamacaWeb.Endpoint,
+  url: [host: "localhost"],
+  adapter: Bandit.PhoenixAdapter,
+  render_errors: [
+    formats: [html: HamacaWeb.ErrorHTML, json: HamacaWeb.ErrorJSON],
+    layout: false
+  ],
+  pubsub_server: Hamaca.PubSub,
+  live_view: [signing_salt: "c7EFJnnN"]
+
+# Sign in with Apple (RE106): the identity-token `aud` allowlist — the iOS bundle id.
+# This is the one definition of the default; config/runtime.exs overrides it only
+# when APPLE_CLIENT_IDS is set (comma-separated).
+config :hamaca, :apple_client_ids, ["com.jeremylightsmith.Relay"]
+config :hamaca, :runs_dispatcher, Hamaca.Runs.NoopDispatcher
+
+# Billing (RE460, ADR 0012): off unless switched on — a self-hosted install never bills.
+# config/runtime.exs turns it on from BILLING_ENABLED (+ Stripe keys); tests turn it on with
+# `Process.put(:billing_enabled, true)`. All are read through `Hamaca.Config.get/2`; the monthly
+# price's default lives once, in `Hamaca.Billing.price_cents/0` (STRIPE_PRICE_CENTS overrides it).
+config :hamaca,
+  billing_enabled: false,
+  billing_payments: Hamaca.Billing.Payments.Stripe
+
+config :hamaca,
+  ecto_repos: [Hamaca.Repo],
+  generators: [timestamp_type: :utc_datetime]
+
+# Other hostnames that serve this app (RE480); config/runtime.exs fills it from PHX_EXTRA_HOSTS.
+# Their browser pages 301 to the canonical host (`HamacaWeb.Plugs.CanonicalHost`).
+config :hamaca, extra_hosts: []
+
+config :hamaca,
+  mail_enabled: false,
+  mail_from: "Hamaca <billing@localhost>",
+  app_url: "http://localhost:4000"
+
+# Server-side scheduler shell (ADR 0006 / RLY-133): off by default (no auto-start
+# of a per-board scheduler) and bound to the real Hamaca.Runs adapter (RLY-136 / W11).
+# NoopEngine stays in the tree — W8's scheduler tests still inject it directly.
+config :hamaca, runs_auto_start: false, runs_engine: Hamaca.Runs.Scheduler.RunsEngine
+
 # Configure Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
@@ -46,77 +111,12 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
-# RLY-13: attachment byte storage. Dev/test use the hermetic filesystem
-# adapter; prod overrides to S3 (Tigris) in config/runtime.exs.
-config :relay, Relay.Attachments, storage: Relay.Attachments.Storage.Local
-
-# Billing emails (RE464): `Relay.Mailer` (Swoosh). Off unless switched on — `:mail_enabled` is read
-# through `Relay.Config.get/2`, and a disabled notifier only logs what it would have sent. Dev
-# delivers to the Local adapter (browse it at /dev/mailbox), test to the Test adapter, and prod
-# to Resend once config/runtime.exs sees RESEND_API_KEY + MAIL_FROM. `:app_url` is the absolute
-# origin email links point at (the domain may not reach `RelayWeb.Endpoint.url/0`). No hackney:
-# only prod makes HTTP calls, through `Swoosh.ApiClient.Req` (config/prod.exs).
-config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Local
-
-# Push (RLY-81). The Log adapter is the default so dev runs — and the whole
-# trigger→recipient→dispatch pipeline is exercisable — without Apple credentials.
-# config/runtime.exs swaps in the real APNS adapter in prod when creds are present.
-config :relay, Relay.Push, adapter: Relay.Push.Delivery.Log, async: true
-
-# Runs engine (ADR 0006 card 02 / RLY-132): runaway-protection knobs and the
-# dispatch behaviour implementation ("give this node-job to a runner").
-# NoopDispatcher = jobs sit :queued for the pull model (04's runners poll).
-config :relay, Relay.Runs, breaker_threshold: 3, visit_cap: 20
-
-# Configure the endpoint
-config :relay, RelayWeb.Endpoint,
-  url: [host: "localhost"],
-  adapter: Bandit.PhoenixAdapter,
-  render_errors: [
-    formats: [html: RelayWeb.ErrorHTML, json: RelayWeb.ErrorJSON],
-    layout: false
-  ],
-  pubsub_server: Relay.PubSub,
-  live_view: [signing_salt: "c7EFJnnN"]
-
-# Sign in with Apple (RE106): the identity-token `aud` allowlist — the iOS bundle id.
-# This is the one definition of the default; config/runtime.exs overrides it only
-# when APPLE_CLIENT_IDS is set (comma-separated).
-config :relay, :apple_client_ids, ["com.jeremylightsmith.Relay"]
-config :relay, :runs_dispatcher, Relay.Runs.NoopDispatcher
-
-# Billing (RE460, ADR 0012): off unless switched on — a self-hosted install never bills.
-# config/runtime.exs turns it on from BILLING_ENABLED (+ Stripe keys); tests turn it on with
-# `Process.put(:billing_enabled, true)`. All are read through `Relay.Config.get/2`; the monthly
-# price's default lives once, in `Relay.Billing.price_cents/0` (STRIPE_PRICE_CENTS overrides it).
-config :relay,
-  billing_enabled: false,
-  billing_payments: Relay.Billing.Payments.Stripe
-
-config :relay,
-  ecto_repos: [Relay.Repo],
-  generators: [timestamp_type: :utc_datetime]
-
-# Other hostnames that serve this app (RE480); config/runtime.exs fills it from PHX_EXTRA_HOSTS.
-# Their browser pages 301 to the canonical host (`RelayWeb.Plugs.CanonicalHost`).
-config :relay, extra_hosts: []
-
-config :relay,
-  mail_enabled: false,
-  mail_from: "Hamaca <billing@localhost>",
-  app_url: "http://localhost:4000"
-
-# Server-side scheduler shell (ADR 0006 / RLY-133): off by default (no auto-start
-# of a per-board scheduler) and bound to the real Relay.Runs adapter (RLY-136 / W11).
-# NoopEngine stays in the tree — W8's scheduler tests still inject it directly.
-config :relay, runs_auto_start: false, runs_engine: Relay.Runs.Scheduler.RunsEngine
-
 config :swoosh, :api_client, false
 
 # Configure tailwind (the version is required)
 config :tailwind,
   version: "4.3.1",
-  relay: [
+  hamaca: [
     args: ~w(
       --input=assets/css/app.css
       --output=priv/static/assets/css/app.css

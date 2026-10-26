@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.NoteImageRow do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.note_image_row/1
+  def function, do: &HamacaWeb.CoreComponents.note_image_row/1
   def render_source, do: :function
 
   # RE427 — a posted note's images. Each thumbnail's src is `/attachments/<id>`, so the story's

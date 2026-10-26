@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.StatusBadge do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.status_badge/1
+  def function, do: &HamacaWeb.CoreComponents.status_badge/1
   def render_source, do: :function
 
   def variations do

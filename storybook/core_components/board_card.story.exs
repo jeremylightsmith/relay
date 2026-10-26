@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.board_card/1
+  def function, do: &HamacaWeb.CoreComponents.board_card/1
   def render_source, do: :function
 
   # RE321: render every variant at the board's real card width (240px lane − 13px

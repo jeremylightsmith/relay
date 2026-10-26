@@ -2,9 +2,9 @@ defmodule Storybook.ValueStream.StreamBox do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  alias RelayWeb.ValueStreamLayout
+  alias HamacaWeb.ValueStreamLayout
 
-  def function, do: &RelayWeb.ValueStreamComponents.stream_box/1
+  def function, do: &HamacaWeb.ValueStreamComponents.stream_box/1
   def render_source, do: :function
 
   def template do

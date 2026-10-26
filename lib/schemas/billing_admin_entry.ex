@@ -1,7 +1,7 @@
 defmodule Schemas.BillingAdminEntry do
   @moduledoc """
   One superadmin action on a billing account (RE463) — the account's admin history, shown in the
-  `/admin/users` side panel. Append-only: written once by `Relay.Billing.Admin`'s one entry
+  `/admin/users` side panel. Append-only: written once by `Hamaca.Billing.Admin`'s one entry
   writer, in the same transaction as the account change (a retry's after the charge returns),
   and never updated or deleted.
 

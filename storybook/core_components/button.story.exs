@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.Button do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.button/1
+  def function, do: &HamacaWeb.CoreComponents.button/1
   def render_source, do: :function
 
   def variations do

@@ -2,7 +2,7 @@
 """Write example boards' stages and flows into their template files.
 
 The writer behind `prod pull-demo-flows`. Reads `{slug: {"stages", "flows"}}` as JSON on
-stdin (`Relay.Release.example_template_parts/1`) and replaces those two keys in
+stdin (`Hamaca.Release.example_template_parts/1`) and replaces those two keys in
 docs/designs/templates/<slug>.json. Everything else in the file — the picker copy and the
 agents — is kept.
 

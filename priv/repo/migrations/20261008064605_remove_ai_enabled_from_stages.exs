@@ -1,7 +1,7 @@
-defmodule Relay.Repo.Migrations.RemoveAiEnabledFromStages do
+defmodule Hamaca.Repo.Migrations.RemoveAiEnabledFromStages do
   @moduledoc """
   RE409: "AI-enabled" is no longer a stage setting — a stage is AI-enabled iff a flow works in it
-  (`Relay.Flows.ai_stage_ids/1`). `down` re-adds the column and backfills it from flows, for the
+  (`Hamaca.Flows.ai_stage_ids/1`). `down` re-adds the column and backfills it from flows, for the
   work/planning stages only (the old changeset forced every other type to `false`).
   """
   use Ecto.Migration

@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddCapabilitiesToExecutors do
+defmodule Hamaca.Repo.Migrations.AddCapabilitiesToExecutors do
   use Ecto.Migration
 
   def change do

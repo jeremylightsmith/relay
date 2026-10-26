@@ -1,7 +1,7 @@
 defmodule Schemas.FlowVersion do
   @moduledoc """
   Immutable snapshot of a flow's versioned definition (isolation, nodes, edges) at a given
-  `version`. Written by `Relay.Flows` in the same transaction as every definition-changing
+  `version`. Written by `Hamaca.Flows` in the same transaction as every definition-changing
   save; never edited. Rows have no `updated_at`. Every flow always has a snapshot row for its
   current version — the invariant the Runs engine relies on to pin a mid-run card to the
   definition it started on.
@@ -23,7 +23,7 @@ defmodule Schemas.FlowVersion do
   end
 
   @doc false
-  # Internal to Relay.Flows — snapshots are never edited after insert.
+  # Internal to Hamaca.Flows — snapshots are never edited after insert.
   def snapshot_changeset(version, attrs) do
     version
     |> cast(attrs, [:flow_id, :version, :isolation])

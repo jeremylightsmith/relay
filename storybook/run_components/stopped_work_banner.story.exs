@@ -2,10 +2,10 @@ defmodule Storybook.RunComponents.StoppedWorkBanner do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.stopped_work_banner/1
+  def function, do: &HamacaWeb.RunComponents.stopped_work_banner/1
   def render_source, do: :function
 
-  # The reasons `Relay.Runs.stopped_work/2` can return, with the sentences
+  # The reasons `Hamaca.Runs.stopped_work/2` can return, with the sentences
   # `stopped_work_detail/3` actually builds — copy is the verdict's, never the banner's.
   def variations do
     [
@@ -37,7 +37,7 @@ defmodule Storybook.RunComponents.StoppedWorkBanner do
             reason: :runner_outdated,
             detail:
               "No jobs claimed in 7m · every connected runner is running old code and is being " <>
-                "refused — running v0/unversioned, requires v#{Relay.Runs.min_runner_version()}. " <>
+                "refused — running v0/unversioned, requires v#{Hamaca.Runs.min_runner_version()}. " <>
                 "Restart it to pick up current code."
           }
         }

@@ -14,7 +14,7 @@ defmodule Schemas.Scope do
   def for_user(nil), do: nil
 
   # For now a superadmin is a fixed allowlist of emails; later this becomes a
-  # real role. Gates everything under /admin (see RelayWeb.Auth).
+  # real role. Gates everything under /admin (see HamacaWeb.Auth).
   @superadmin_emails ["jeremy.lightsmith@gmail.com"]
 
   @doc "The superadmin allowlist — the one definition; callers (and tests) read it, never re-type it."

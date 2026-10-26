@@ -6,7 +6,7 @@ defmodule Storybook.RunComponents.RunRegionGroup do
 
   # Rendered through the timeline so the waiting / resolved `fan_in` and the row after it show
   # around the group (RE440, card mockup "Run view — branches grouped under the fan-out").
-  def function, do: &RelayWeb.RunComponents.run_node_timeline/1
+  def function, do: &HamacaWeb.RunComponents.run_node_timeline/1
   def render_source, do: :function
 
   @t0 ~U[2026-07-20 00:00:00Z]
@@ -82,7 +82,7 @@ defmodule Storybook.RunComponents.RunRegionGroup do
         run_attrs
       )
 
-    Relay.Runs.run_detail(Map.put(run, :node_executions, nes), flow)
+    Hamaca.Runs.run_detail(Map.put(run, :node_executions, nes), flow)
   end
 
   defp head,

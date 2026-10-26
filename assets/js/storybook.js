@@ -19,7 +19,7 @@
 // mode from the storybook's own switcher writes back to `phx:theme`, so the choice follows you
 // into the app.
 //
-// Loaded via `js_path` in RelayWeb.Storybook, which the storybook's root layout emits as a
+// Loaded via `js_path` in HamacaWeb.Storybook, which the storybook's root layout emits as a
 // synchronous <script> in <head> — before first paint, and before PhoenixStorybook's own bundle
 // reads its key. Both the chrome document and the story <iframe> documents run it.
 (() => {

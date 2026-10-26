@@ -1,8 +1,8 @@
-defmodule Relay.Repo.Migrations.CreateUsageVisits do
+defmodule Hamaca.Repo.Migrations.CreateUsageVisits do
   use Ecto.Migration
 
   # RE475 — signed-in usage, one row per visit (a run of activity with no gap longer than
-  # `Relay.Usage.idle_gap/0`). Written only by `Relay.Usage.Tracker`, which upserts on the unique
+  # `Hamaca.Usage.idle_gap/0`). Written only by `Hamaca.Usage.Tracker`, which upserts on the unique
   # `(user_id, started_at)` key, so it never has to track row ids. Deleting the user deletes their
   # visits; deleting the board keeps the visit and forgets where it happened.
   def change do

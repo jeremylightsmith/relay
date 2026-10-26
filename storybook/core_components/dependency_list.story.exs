@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.DependencyList do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.dependency_list/1
+  def function, do: &HamacaWeb.CoreComponents.dependency_list/1
   def render_source, do: :function
 
   def variations do

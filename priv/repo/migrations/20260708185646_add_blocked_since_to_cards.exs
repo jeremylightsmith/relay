@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddBlockedSinceToCards do
+defmodule Hamaca.Repo.Migrations.AddBlockedSinceToCards do
   use Ecto.Migration
 
   def change do

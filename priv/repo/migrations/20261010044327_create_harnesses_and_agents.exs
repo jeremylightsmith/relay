@@ -1,11 +1,11 @@
-defmodule Relay.Repo.Migrations.CreateHarnessesAndAgents do
+defmodule Hamaca.Repo.Migrations.CreateHarnessesAndAgents do
   use Ecto.Migration
 
   # RE433 — a board owns harnesses (an agent CLI's command template + its closed model list) and
   # named agents (harness + model), one of which is the board default. Every existing board is
   # seeded here so no flow node is left without an agent to run on.
   #
-  # The seed below is a FROZEN copy of `Relay.Agents.seed_harnesses/0` and the legacy agent table
+  # The seed below is a FROZEN copy of `Hamaca.Agents.seed_harnesses/0` and the legacy agent table
   # `Schemas.Flow.Node.legacy_models/0` — the one sanctioned exception to the magic-value rule: a
   # migration must replay identically forever, so it never calls app code that may change after
   # it ships.

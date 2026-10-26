@@ -8,7 +8,7 @@ defmodule Schemas.RunBranch do
   `state` walks `queued → running → ended` (`states/0`); `:parked` is a branch waiting on a human
   while its siblings keep running. `current_node` is the branch node in flight (nil once ended);
   the run's own `current_node` stays the `fan_out` key while the region is open. `outcome` and
-  `detail` are what the `fan_in` joins (`Relay.Runs.Engine.join/1`): set when the branch ends,
+  `detail` are what the `fan_in` joins (`Hamaca.Runs.Engine.join/1`): set when the branch ends,
   and left nil when a cancel or close ends it. All fields programmatic, never cast.
   """
 

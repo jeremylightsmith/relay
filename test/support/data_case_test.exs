@@ -1,4 +1,4 @@
-defmodule Relay.DataCaseTest do
+defmodule Hamaca.DataCaseTest do
   @moduledoc """
   Exercises `allow!/1`'s shared-mode branch and `restart_engine!/1`'s name-stability contract
   (ADR 0009) directly. Every other `allow!/1` call site in the suite is already `async: true`, so
@@ -6,9 +6,9 @@ defmodule Relay.DataCaseTest do
   to reach the `:not_found` branch that `Sandbox.allow/3` returns when the caller holds no
   checkout of its own.
   """
-  use Relay.DataCase, async: false
+  use Hamaca.DataCase, async: false
 
-  alias Relay.Activity.Pruner
+  alias Hamaca.Activity.Pruner
 
   test "allow!/1 tolerates shared mode and grants the sandbox connection to a supervised child" do
     pruner = allow!(start_supervised!({Pruner, name: :"data_case_pruner_#{System.unique_integer([:positive])}"}))

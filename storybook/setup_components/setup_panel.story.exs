@@ -4,7 +4,7 @@ defmodule Storybook.SetupComponents.SetupPanel do
 
   alias Schemas.BoardSetupStep
 
-  def function, do: &RelayWeb.SetupComponents.setup_panel/1
+  def function, do: &HamacaWeb.SetupComponents.setup_panel/1
   def render_source, do: :function
 
   # The panel's controls use the page-wide `setup-` ids, so each variation gets its own iframe.
@@ -17,8 +17,8 @@ defmodule Storybook.SetupComponents.SetupPanel do
   # RE443, card mockup "Wizard — docked left on the empty board, every step state + expert
   # toggle": frames A (key step active), B (LLM pick with the Three-brain warning) and C (install
   # failed in preflight), D (the onboard loop running, RE445), plus the expert toggle on.
-  # Fixture checklists come from `Relay.Setup.preview_checklist/2`, the same builder
-  # `Relay.Setup.checklist/1` uses, with no database.
+  # Fixture checklists come from `Hamaca.Setup.preview_checklist/2`, the same builder
+  # `Hamaca.Setup.checklist/1` uses, with no database.
   def variations do
     [_pending, active, waiting, done, failed, _skipped] = BoardSetupStep.statuses()
     install = "curl -fsSL https://hamaca.app/b/streaks/install | sh"
@@ -107,7 +107,7 @@ defmodule Storybook.SetupComponents.SetupPanel do
           board_slug: "acme-web",
           install_command: "curl -fsSL https://hamaca.app/b/acme-web/install | sh",
           checklist: payoff_checklist(key_hint: key_hint()),
-          peeks: MapSet.new([Relay.Setup.step_id(:install)])
+          peeks: MapSet.new([Hamaca.Setup.step_id(:install)])
         }
       },
       %Variation{
@@ -122,11 +122,11 @@ defmodule Storybook.SetupComponents.SetupPanel do
           checklist: payoff_checklist(key_hint: key_hint()),
           peeks:
             MapSet.new([
-              hd(Relay.Setup.steps()).id,
-              Relay.Setup.step_id(:llm),
-              Relay.Setup.step_id(:key),
-              Relay.Setup.step_id(:onboard),
-              Relay.Setup.step_id(:runner)
+              hd(Hamaca.Setup.steps()).id,
+              Hamaca.Setup.step_id(:llm),
+              Hamaca.Setup.step_id(:key),
+              Hamaca.Setup.step_id(:onboard),
+              Hamaca.Setup.step_id(:runner)
             ])
         }
       },
@@ -143,7 +143,7 @@ defmodule Storybook.SetupComponents.SetupPanel do
       },
       %Variation{
         id: :hide_explanations,
-        description: "I know Relay: no diagram, why lines or What this does",
+        description: "I know Hamaca: no diagram, why lines or What this does",
         attributes: %{
           id: "setup-panel",
           board_name: "Streaks",
@@ -180,11 +180,11 @@ defmodule Storybook.SetupComponents.SetupPanel do
   # Every step done, setup taking 40 minutes from the board's creation to the first claim.
   defp payoff_checklist(opts \\ []) do
     [_pending, _active, _waiting, done, _failed, _skipped] = BoardSetupStep.statuses()
-    runner = Relay.Setup.step_id(:runner)
-    claim = Relay.Setup.step_id(:first_claim)
-    [created | _] = Relay.Setup.steps()
+    runner = Hamaca.Setup.step_id(:runner)
+    claim = Hamaca.Setup.step_id(:first_claim)
+    [created | _] = Hamaca.Setup.steps()
 
-    Relay.Setup.steps()
+    Hamaca.Setup.steps()
     |> Map.new(&{&1.id, done})
     |> Map.merge(%{
       created.id => %{status: done, completed_at: ~U[2026-10-12 14:02:00Z], evidence: "6 stages · 2 flows · 14:02"},
@@ -199,34 +199,34 @@ defmodule Storybook.SetupComponents.SetupPanel do
     |> checklist(opts)
   end
 
-  # An unsaved connect (RE446, frame D): `Relay.Setup.connect_skips/0` skipped, step 3 active and
+  # An unsaved connect (RE446, frame D): `Hamaca.Setup.connect_skips/0` skipped, step 3 active and
   # the board's first claim read into step 7's board-wide evidence.
   defp connect_checklist do
     [_pending, active, _waiting, done, _failed, skipped] = BoardSetupStep.statuses()
-    [created | _] = Relay.Setup.steps()
-    evidence = %{created.id => "already set up", Relay.Setup.step_id(:llm) => "board-wide · already chosen"}
+    [created | _] = Hamaca.Setup.steps()
+    evidence = %{created.id => "already set up", Hamaca.Setup.step_id(:llm) => "board-wide · already chosen"}
 
     rows =
-      Relay.Setup.connect_skips()
+      Hamaca.Setup.connect_skips()
       |> Map.new(&{&1, %{status: skipped, evidence: evidence[&1]}})
-      |> Map.put(Relay.Setup.step_id(:key), active)
+      |> Map.put(Hamaca.Setup.step_id(:key), active)
 
-    Relay.Setup.preview_checklist(rows, %{
+    Hamaca.Setup.preview_checklist(rows, %{
       template: "Bare minimum",
-      llm: Relay.Setup.onboarding_llm("claude-code"),
+      llm: Hamaca.Setup.onboarding_llm("claude-code"),
       connect?: true,
       board_name: "Streaks",
       board_claim: %{status: done, completed_at: ~U[2026-10-12 14:42:00Z], data: %{"card_ref" => "STR1"}}
     })
   end
 
-  # `Relay.Setup.preview_checklist/2`: `states` maps a step id to a status, or to a row-shaped
+  # `Hamaca.Setup.preview_checklist/2`: `states` maps a step id to a status, or to a row-shaped
   # map; every other step is pending.
   defp checklist(states, opts \\ []) do
-    Relay.Setup.preview_checklist(states, %{
+    Hamaca.Setup.preview_checklist(states, %{
       template: Keyword.get(opts, :template, "Bare minimum"),
       template_warning: Keyword.get(opts, :warning),
-      llm: Relay.Setup.onboarding_llm("claude-code"),
+      llm: Hamaca.Setup.onboarding_llm("claude-code"),
       key_hint: Keyword.get(opts, :key_hint)
     })
   end

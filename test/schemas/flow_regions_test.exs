@@ -5,7 +5,7 @@ defmodule Schemas.FlowRegionsTest do
   """
   use ExUnit.Case, async: true
 
-  import Relay.FanOutFixtures
+  import Hamaca.FanOutFixtures
 
   alias Schemas.Flow
 

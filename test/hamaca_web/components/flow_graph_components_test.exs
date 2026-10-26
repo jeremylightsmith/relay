@@ -1,0 +1,581 @@
+defmodule HamacaWeb.FlowGraphComponentsTest do
+  use HamacaWeb.ConnCase, async: true
+
+  import Phoenix.LiveViewTest
+
+  alias HamacaWeb.FlowGraphComponents
+  alias HamacaWeb.FlowLayout
+
+  defp graph(nodes, edges, opts) do
+    assigns =
+      Map.merge(
+        %{
+          nodes: nodes,
+          edges: edges,
+          layout: FlowLayout.layout(nodes, edges),
+          selected: nil,
+          interactive?: false,
+          node_states: %{},
+          lands_on: "Review"
+        },
+        Map.new(opts)
+      )
+
+    render_component(&FlowGraphComponents.flow_graph/1, assigns)
+  end
+
+  defp one_node(type) do
+    nodes = [%{key: "n", type: type, run: "go", llm: nil, effort: nil}]
+    edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+    graph(nodes, edges, [])
+  end
+
+  # edge paths are the SVG paths whose `d` starts with "M " (a space); the arrowhead marker
+  # paths in <defs> start "M0,0" (no space), so this filter keeps only real edges, in order.
+  defp edge_ds(html), do: ~r/d="(M [^"]*)"/ |> Regex.scan(html) |> Enum.map(fn [_, d] -> d end)
+  defp edge_d(html, idx), do: Enum.at(edge_ds(html), idx)
+  defp path_nums(d), do: ~r/-?\d+/ |> Regex.scan(d) |> Enum.map(fn [n] -> String.to_integer(n) end)
+  defp path_xs(d), do: d |> path_nums() |> Enum.take_every(2)
+  defp vertical?(d), do: d |> path_xs() |> Enum.uniq() |> length() == 1
+
+  defp code_flow do
+    flow = Enum.find(Hamaca.Flows.DefaultLibrary.all(), &(&1.key == "code"))
+    {flow.nodes, flow.edges}
+  end
+
+  # an agent that can park, feeding a gate that cannot.
+  defp parked_flow do
+    nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "g", type: :gate, run: "mix test"}]
+
+    edges = [
+      %{from: "start", to: "a", on: nil},
+      %{from: "a", to: "g", on: :succeeded},
+      %{from: "a", to: "needs_input", on: :failed},
+      %{from: "g", to: "done", on: :succeeded}
+    ]
+
+    {nodes, edges}
+  end
+
+  defp badge_tag(html, key) do
+    [tag] = Regex.run(~r/<span[^>]*data-park="#{key}"[^>]*>/, html)
+    tag
+  end
+
+  # #flow-graph's data-adjacency JSON, HTML-unescaped.
+  defp adjacency(html) do
+    [_, json] = Regex.run(~r/data-adjacency="([^"]*)"/, html)
+    json |> String.replace("&quot;", ~s(")) |> Jason.decode!()
+  end
+
+  defp hot_indices(html, attr) do
+    ~r/#{attr}="(\d+)" data-hot/ |> Regex.scan(html) |> Enum.map(fn [_, i] -> String.to_integer(i) end) |> Enum.sort()
+  end
+
+  describe "node shapes/colors by type (Relay Flow Editor.dc.html typeMeta, lines ~366-395)" do
+    test "agent node: white fill, violet accent stripe + tag" do
+      html = one_node(:agent)
+      assert html =~ ~s(data-node="n")
+      assert html =~ ~s(data-type="agent")
+      # violet accent + AGENT tag
+      assert html =~ "border-left:4px solid var(--color-secondary)"
+      assert html =~ "AGENT"
+    end
+
+    test "shell node: slate accent stripe + SHELL tag" do
+      html = one_node(:shell)
+      assert html =~ "border-left:4px solid color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100))"
+      assert html =~ "SHELL"
+    end
+
+    test "gate node: amber diamond clip-path" do
+      html = one_node(:gate)
+      assert html =~ "clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)"
+    end
+
+    test "human node: blue hexagon clip-path" do
+      html = one_node(:human)
+      assert html =~ "clip-path:polygon(14% 0,86% 0,100% 50%,86% 100%,14% 100%,0 50%)"
+    end
+
+    # Scenario 27 (RE437); RE439 draws it as the accent pill's 7% fill.
+    test "fan_out node: FAN OUT tag on the accent fill" do
+      html = one_node(:fan_out)
+      assert html =~ "color-mix(in oklab, var(--color-accent) 7%, var(--color-base-100))"
+      assert html =~ "FAN OUT"
+    end
+
+    test "fan_in node: FAN IN tag on the accent fill" do
+      html = one_node(:fan_in)
+      assert html =~ "color-mix(in oklab, var(--color-accent) 7%, var(--color-base-100))"
+      assert html =~ "FAN IN"
+    end
+  end
+
+  describe "agent node label surfaces the bound subagent" do
+    # Scenario 19 (RE433): the LLM is the canvas subtitle's job, not the sub-label's.
+    test "an agent node's sub-label is subagent · effort, without the llm" do
+      nodes = [%{key: "n", type: :agent, run: "go", llm: "Claude Sonnet", effort: "high", agent: "plan-implementer"}]
+      edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+      html = graph(nodes, edges, [])
+      assert html =~ "plan-implementer · high"
+      refute html =~ "Claude Sonnet"
+    end
+
+    test "a generic agent node (no `agent` field) still shows its effort" do
+      nodes = [%{key: "n", type: :agent, run: "go", llm: "Claude Sonnet", effort: "high"}]
+      edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+      html = graph(nodes, edges, [])
+      assert html =~ "high"
+      refute html =~ "Claude Sonnet"
+    end
+  end
+
+  describe "edges and end pill" do
+    test "failed edges render dashed; loop badge shows outcome · max N" do
+      nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "b", type: :agent, run: "y"}]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "a", on: :failed, max_loops: 3},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      html = graph(nodes, edges, [])
+      assert html =~ ~s(stroke-dasharray="5 4")
+      assert html =~ "failed · max 3"
+      # canonical vocabulary only — never the artboard's display labels
+      refute html =~ "passed"
+      refute html =~ "fixed"
+    end
+
+    test "end pill reads lands → <stage> in green" do
+      html = one_node(:agent)
+      assert html =~ "lands → Review"
+      assert html =~ "color-mix(in oklab, var(--color-success) 45%, var(--color-base-content))"
+    end
+
+    test "foreach guard edges render human wording appended to the outcome" do
+      nodes = [%{key: "q", type: :agent, run: "review"}, %{key: "impl", type: :agent, run: "do"}]
+
+      edges = [
+        %{from: "start", to: "q", on: nil},
+        %{from: "q", to: "impl", on: :succeeded, when: :foreach_remaining},
+        %{from: "q", to: "done", on: :succeeded, when: :foreach_exhausted}
+      ]
+
+      html = graph(nodes, edges, [])
+      assert html =~ "succeeded · while tasks remain"
+      assert html =~ "succeeded · all tasks done"
+      # the raw guard atom never reaches the pill
+      refute html =~ "foreach_remaining"
+      refute html =~ "foreach_exhausted"
+    end
+
+    # RLY-186 regression: the pill used to be pinned at a hardcoded top:150px/left:2px, which the
+    # new vertical layout drew a spine node right on top of. It must instead be anchored to the
+    # layout's done_point so it lands below the last spine node, clear of every node.
+    test "end pill is anchored below done_point, not a fixed coordinate" do
+      nodes = [
+        %{key: "a", type: :agent, run: "one", llm: nil, effort: nil},
+        %{key: "b", type: :agent, run: "two", llm: nil, effort: nil}
+      ]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      layout = FlowLayout.layout(nodes, edges)
+      {_dx, done_y} = layout.done_point
+      html = graph(nodes, edges, [])
+
+      [_, top] = Regex.run(~r/top:(-?\d+)px[^>]*>\s*<span[^>]*>\s*<\/span>\s*lands →/, html)
+      assert String.to_integer(top) == done_y + 8
+      refute html =~ "top:150px"
+    end
+  end
+
+  describe "interactivity" do
+    test "interactive? false emits no phx-click; true emits node/edge click targets" do
+      nodes = [%{key: "n", type: :agent, run: "go"}]
+      edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+
+      refute graph(nodes, edges, interactive?: false) =~ "phx-click"
+
+      html = graph(nodes, edges, interactive?: true)
+      assert html =~ ~s(phx-click="select_node")
+      assert html =~ ~s(phx-value-key="n")
+    end
+  end
+
+  describe "several graphs on one page (RE444)" do
+    @nodes [%{key: "n", type: :agent, run: "go", llm: nil, effort: nil}]
+    @edges [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+
+    test "id and flow_key name the root and tag every node click with its flow" do
+      doc =
+        @nodes |> graph(@edges, id: "flow-graph-plan", flow_key: "plan", interactive?: true) |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("#flow-graph-plan") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#flow-graph") |> Enum.count() == 0
+
+      node = LazyHTML.query(doc, ~s([data-node="n"]))
+      assert LazyHTML.attribute(node, "phx-value-key") == ["n"]
+      assert LazyHTML.attribute(node, "phx-value-flow") == ["plan"]
+    end
+
+    test "a control pill carries phx-value-flow too" do
+      nodes = [%{key: "split", type: :fan_out, run: nil, max_parallel: nil}, %{key: "join", type: :fan_in, run: nil}]
+
+      edges = [
+        %{from: "start", to: "split", on: nil},
+        %{from: "split", to: "join", on: nil},
+        %{from: "join", to: "done", on: :succeeded}
+      ]
+
+      doc = nodes |> graph(edges, id: "flow-graph-plan", flow_key: "plan", interactive?: true) |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query(~s([data-node="split"])) |> LazyHTML.attribute("phx-value-flow") == ["plan"]
+    end
+
+    test "a named graph scopes its arrowhead marker ids so two graphs never share an id" do
+      html = graph(@nodes, @edges, id: "flow-graph-plan", flow_key: "plan")
+
+      assert html =~ ~s(id="flow-graph-plan-arw-start")
+      assert html =~ ~s|marker-end="url(#flow-graph-plan-arw-start)"|
+      refute html =~ ~s(id="arw-start")
+    end
+
+    test "the defaults keep the editor's #flow-graph root and add no phx-value-flow" do
+      html = graph(@nodes, @edges, interactive?: true)
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query("#flow-graph") |> Enum.count() == 1
+      refute html =~ "phx-value-flow"
+      assert html =~ ~s(id="arw-start")
+    end
+  end
+
+  describe "edge routing (RE333)" do
+    test "a straight forward edge is drawn as a vertical line" do
+      nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "b", type: :agent, run: "y"}]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      html = graph(nodes, edges, [])
+      # edge index 1 is a -> b
+      assert vertical?(edge_d(html, 1))
+    end
+
+    test "one <path> per routed edge, drawn from the route's first point to its last" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      html = graph(nodes, edges, [])
+
+      assert length(edge_ds(html)) == map_size(layout.routes)
+
+      for {i, %{points: points}} <- layout.routes do
+        d = edge_d(html, Enum.count(layout.routes, fn {j, _} -> j < i end))
+        {x0, y0} = hd(points)
+        {xn, yn} = List.last(points)
+        assert String.starts_with?(d, "M #{x0} #{y0} ")
+        assert d |> String.trim_trailing() |> String.ends_with?("#{xn} #{yn}")
+      end
+    end
+
+    test "each edge label is positioned at its route's label point" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      html = graph(nodes, edges, [])
+
+      for {i, %{label: {x, y}}} <- layout.routes do
+        assert html =~ ~r/data-edge="#{i}"[^>]*?style="position:absolute;left:#{x}px;top:#{y}px;/
+      end
+    end
+
+    test "node_size/1 is the single source of node box dimensions" do
+      assert FlowLayout.node_size(:gate) == {118, 76}
+      assert FlowLayout.node_size(:agent) == {150, 56}
+      assert FlowLayout.node_size(:human) == {150, 56}
+    end
+  end
+
+  describe "zero-node (scratch) flow" do
+    test "renders a bare start → done edge as a single straight connector without raising" do
+      html = graph([], [%{from: "start", to: "done", on: nil}], [])
+
+      ds = edge_ds(html)
+      assert length(ds) == 1
+      assert vertical?(hd(ds))
+    end
+  end
+
+  describe "needs_input edges are not drawn (RE330)" do
+    test "the Code flow emits no path or label for any needs_input edge" do
+      {nodes, edges} = code_flow()
+      html = graph(nodes, edges, [])
+
+      park_idx = for {%{to: "needs_input"}, i} <- Enum.with_index(edges), do: i
+      assert length(park_idx) == 8
+
+      assert length(edge_ds(html)) == length(edges) - length(park_idx)
+
+      labelled =
+        ~r/data-edge="(\d+)"/ |> Regex.scan(html) |> Enum.map(fn [_, i] -> String.to_integer(i) end)
+
+      assert labelled != []
+      for i <- park_idx, do: refute(i in labelled)
+    end
+  end
+
+  describe "park badge (RE330)" do
+    test "every Code flow node with a needs_input edge carries exactly one badge" do
+      {nodes, edges} = code_flow()
+      html = graph(nodes, edges, [])
+
+      badged = ~r/data-park="([^"]+)"/ |> Regex.scan(html) |> Enum.map(fn [_, k] -> k end)
+      expected = for %{from: from, to: "needs_input"} <- edges, do: from
+
+      assert length(badged) == 8
+      assert Enum.sort(badged) == Enum.sort(expected)
+    end
+
+    test "a flow with no needs_input edge renders no badge" do
+      refute one_node(:agent) =~ "data-park"
+    end
+
+    test "the badge is a warning-coloured pause glyph with hover and screen-reader text" do
+      {nodes, edges} = parked_flow()
+      html = graph(nodes, edges, [])
+      tag = badge_tag(html, "a")
+
+      assert tag =~ ~s(title="Can park for human input")
+      assert tag =~ ~s(aria-label="Can park for human input")
+      assert tag =~ "border:1.5px solid var(--color-warning)"
+      assert html =~ "hero-pause-circle"
+      refute html =~ ~s(data-park="g")
+    end
+
+    test "the badge is not interactive, even in the interactive editor" do
+      {nodes, edges} = parked_flow()
+      tag = nodes |> graph(edges, interactive?: true) |> badge_tag("a")
+
+      refute tag =~ "phx-click"
+      refute tag =~ "phx-value"
+    end
+
+    test "the badge straddles the node box's top-right corner" do
+      {nodes, edges} = parked_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      {x, y} = layout.positions["a"]
+      {w, _h} = FlowLayout.node_size(:agent)
+      tag = nodes |> graph(edges, []) |> badge_tag("a")
+
+      assert tag =~ "left:#{x + w - 12}px;top:#{y - 9}px;"
+    end
+  end
+
+  describe "hover and selection emphasis (RE333)" do
+    test "#flow-graph maps every node key to the indices of its drawn edges" do
+      nodes = [%{key: "a", type: :agent, run: "x"}, %{key: "b", type: :agent, run: "y"}]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "a", on: :failed, max_loops: 2},
+        %{from: "b", to: "needs_input", on: :failed},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      assert adjacency(graph(nodes, edges, [])) ==
+               %{"start" => [0], "a" => [0, 1, 2], "b" => [1, 2, 4], "done" => [4]}
+    end
+
+    test "every edge path carries data-edge-path with its edge index" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      html = graph(nodes, edges, [])
+
+      paths = ~r/data-edge-path="(\d+)"/ |> Regex.scan(html) |> Enum.map(fn [_, i] -> String.to_integer(i) end)
+      assert Enum.sort(paths) == layout.routes |> Map.keys() |> Enum.sort()
+    end
+
+    test "the graph mounts the FlowFocus hook and renders no emphasis when nothing is selected" do
+      html = one_node(:agent)
+      assert html =~ ~s(phx-hook="FlowFocus")
+      refute html =~ "data-dim"
+      refute html =~ "data-hot"
+      refute html =~ "data-selected"
+    end
+
+    test "a selected node gets the hover emphasis server-side: its edges and neighbours are hot" do
+      {nodes, edges} = code_flow()
+      layout = FlowLayout.layout(nodes, edges)
+      html = graph(nodes, edges, selected: {:node, "quality_review"})
+
+      incident =
+        for {edge, i} <- Enum.with_index(edges),
+            Map.has_key?(layout.routes, i),
+            "quality_review" in [edge.from, edge.to],
+            do: i
+
+      assert html =~ ~s(data-dim="select")
+      assert html =~ ~s(data-selected="quality_review")
+      assert hot_indices(html, "data-edge-path") == incident
+      assert hot_indices(html, "data-edge") == incident
+
+      hot_nodes =
+        ~r/data-node="([^"]+)" data-type="[^"]+" data-hot/ |> Regex.scan(html) |> Enum.map(fn [_, k] -> k end)
+
+      assert Enum.sort(hot_nodes) == ~w(fix_findings implement quality_review spec_review sync)
+    end
+
+    test "an edge selection renders no node emphasis" do
+      {nodes, edges} = code_flow()
+      html = graph(nodes, edges, selected: {:edge, 1})
+      refute html =~ "data-dim"
+      refute html =~ "data-hot"
+    end
+  end
+
+  describe "LLM subtitles (RE433)" do
+    defp llm_nodes do
+      nodes = [
+        %{key: "a", type: :agent, run: "x", llm: nil, effort: "high"},
+        %{key: "b", type: :agent, run: "y", llm: "Claude Haiku", effort: "low"}
+      ]
+
+      edges = [
+        %{from: "start", to: "a", on: nil},
+        %{from: "a", to: "b", on: :succeeded},
+        %{from: "b", to: "done", on: :succeeded}
+      ]
+
+      {nodes, edges}
+    end
+
+    defp subtitle(html, key) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s([data-node="#{key}"] [data-llm]))
+    end
+
+    defp text(el), do: el |> LazyHTML.text() |> String.trim()
+    defp attr(el, name), do: el |> LazyHTML.attribute(name) |> List.first()
+
+    test "7. inheriting reads `default · <name>`; an override reads `◆ <name>` in violet" do
+      {nodes, edges} = llm_nodes()
+      html = graph(nodes, edges, llm: %{default: "Claude Opus", red: MapSet.new()})
+
+      a = subtitle(html, "a")
+      assert text(a) == "default · Claude Opus"
+      assert attr(a, "data-llm") == "default"
+
+      b = subtitle(html, "b")
+      assert text(b) == "◆ Claude Haiku"
+      assert attr(b, "data-llm") == "override"
+      assert attr(b, "style") =~ "var(--color-secondary) 60%"
+    end
+
+    test "7. a red agent reads `◆ <name> · model removed` in the error colour" do
+      {nodes, edges} = llm_nodes()
+      html = graph(nodes, edges, llm: %{default: "Claude Opus", red: MapSet.new(["Claude Haiku"])})
+
+      b = subtitle(html, "b")
+      assert text(b) == "◆ Claude Haiku · model removed"
+      assert attr(b, "data-llm") == "red"
+      assert attr(b, "style") =~ "color:var(--color-error)"
+    end
+
+    test "7. without the llm attr an agent node keeps `subagent · effort`" do
+      nodes = [%{key: "n", type: :agent, run: "go", agent: "plan-implementer", llm: nil, effort: "high"}]
+      edges = [%{from: "start", to: "n", on: nil}, %{from: "n", to: "done", on: :succeeded}]
+      html = graph(nodes, edges, [])
+
+      assert html =~ "plan-implementer · high"
+      refute html =~ "data-llm"
+    end
+  end
+
+  describe "control-node pills (RE439)" do
+    alias Hamaca.FanOutFixtures
+
+    defp panel(nodes \\ FanOutFixtures.panel_nodes(), opts \\ []) do
+      nodes |> graph(FanOutFixtures.panel_edges(), opts) |> LazyHTML.from_fragment()
+    end
+
+    defp q(doc, selector), do: LazyHTML.query(doc, selector)
+    defp style_of(doc, selector), do: doc |> q(selector) |> LazyHTML.attribute("style") |> List.first()
+    defp count(doc, selector), do: doc |> q(selector) |> Enum.count()
+
+    # Scenario 7
+    test "a fan-out draws as the accent pill with the fork glyph, FAN OUT and its max" do
+      doc = panel(FanOutFixtures.put_node(FanOutFixtures.panel_nodes(), "fo", %{max_parallel: 2}), interactive?: false)
+      style = style_of(doc, ~s([data-node="fo"]))
+
+      assert style =~ "height:36px"
+      assert style =~ "border-radius:18px"
+      assert style =~ "color-mix(in oklab, var(--color-accent) 7%, var(--color-base-100))"
+      assert style =~ "1.5px solid color-mix(in oklab, var(--color-accent) 45%, var(--color-base-100))"
+
+      assert count(doc, ~s([data-node="fo"] svg[data-glyph="fan_out"] path[d="M7 1v5M7 6L2.5 12M7 6v6M7 6l4.5 6"])) == 1
+      assert doc |> q(~s([data-node="fo"])) |> LazyHTML.text() =~ "FAN OUT"
+      assert doc |> q(~s([data-node="fo"] [data-pill-sub])) |> LazyHTML.text() |> String.trim() == "max 2"
+      assert count(doc, ~s([data-node="fo"][phx-click])) == 0
+    end
+
+    # Scenario 8
+    test "a fan-in draws the join glyph, FAN IN and `all must succeed`" do
+      doc = panel(FanOutFixtures.put_node(FanOutFixtures.panel_nodes(), "fo", %{max_parallel: 2}), interactive?: false)
+
+      assert count(doc, ~s([data-node="fi"] svg[data-glyph="fan_in"] path[d="M2.5 2L7 8M7 2v6M11.5 2L7 8M7 8v5"])) == 1
+      assert doc |> q(~s([data-node="fi"])) |> LazyHTML.text() =~ "FAN IN"
+      assert doc |> q(~s([data-node="fi"] [data-pill-sub])) |> LazyHTML.text() |> String.trim() == "all must succeed"
+    end
+
+    # Scenario 9
+    test "a fan-out with no max_parallel has no sub-line" do
+      doc = panel()
+      assert count(doc, ~s([data-node="fo"] [data-pill-sub])) == 0
+    end
+
+    # Scenario 10
+    test "an interactive, selected fan-out is clickable and carries the accent selection ring" do
+      doc = panel(FanOutFixtures.panel_nodes(), interactive?: true, selected: {:node, "fo"})
+      fo = q(doc, ~s([data-node="fo"]))
+
+      assert LazyHTML.attribute(fo, "phx-click") == ["select_node"]
+      assert LazyHTML.attribute(fo, "phx-value-key") == ["fo"]
+
+      assert style_of(doc, ~s([data-node="fo"])) =~
+               "box-shadow:0 0 0 3px color-mix(in oklab, var(--color-accent) 30%, transparent)"
+    end
+
+    # Scenario 11
+    test "branch-start edges draw the neutral start stroke and no label pill" do
+      doc = panel(FanOutFixtures.panel_nodes(), interactive?: true)
+
+      for i <- [2, 3, 4], do: assert(count(doc, ~s([data-edge="#{i}"])) == 0, "edge #{i} has a pill")
+      assert count(doc, ~s([data-edge="5"])) == 1
+
+      path = q(doc, ~s(path[data-edge-path="2"]))
+      assert LazyHTML.attribute(path, "stroke") == ["color-mix(in oklab, var(--color-base-content) 45%, transparent)"]
+      assert LazyHTML.attribute(path, "marker-end") == ["url(#arw-start)"]
+    end
+
+    # Scenario 12
+    test "a branch's agent node is still the work card" do
+      style = style_of(panel(), ~s([data-node="b1"]))
+
+      assert style =~ "border-left:4px solid var(--color-secondary)"
+      assert style =~ "height:56px"
+    end
+  end
+end

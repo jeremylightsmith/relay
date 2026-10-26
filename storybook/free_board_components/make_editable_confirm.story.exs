@@ -2,7 +2,7 @@ defmodule Storybook.FreeBoardComponents.MakeEditableConfirm do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FreeBoardComponents.make_editable_confirm/1
+  def function, do: &HamacaWeb.FreeBoardComponents.make_editable_confirm/1
   def render_source, do: :function
 
   # A daisyUI `modal-open` (a fixed overlay), so the variation renders in its own iframe.
@@ -14,7 +14,7 @@ defmodule Storybook.FreeBoardComponents.MakeEditableConfirm do
       %Variation{
         id: :default,
         description: "Make a read-only board the editable one",
-        attributes: %{board_id: 3, board_name: "Acme Checkout", editable_name: "Relay Engineering"}
+        attributes: %{board_id: 3, board_name: "Acme Checkout", editable_name: "Hamaca Engineering"}
       }
     ]
   end

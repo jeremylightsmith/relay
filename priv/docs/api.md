@@ -448,7 +448,7 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
 
 **Why isn't this card moving?** — one call, one plain-language verdict, plus the evidence
 behind it. Read-only and safe to hit while a run is live. The verdict is produced by
-replaying the real dispatch decision (`Relay.Runs.Scheduler.explain/2`, which shares its
+replaying the real dispatch decision (`Hamaca.Runs.Scheduler.explain/2`, which shares its
 predicates with `plan/1`), not by a separate reimplementation, so it cannot drift from what
 actually dispatches.
 
@@ -550,11 +550,11 @@ CLI: `./relay version`.
 ### GET /api/scaffold
 
 The manifest of the five Hamaca-owned files this board serves: `./relay`, the three
-`relay-*` skills, and `relay.md` (`Relay.Scaffold.items/0`). **Unauthenticated**, on purpose and on the same
+`relay-*` skills, and `relay.md` (`Hamaca.Scaffold.items/0`). **Unauthenticated**, on purpose and on the same
 pipeline as `GET /api/version` — the board's install script (`/b/<slug>/install`) fetches them
 before anything has authenticated, so this has to be reachable with no `Authorization` header at
 all. `503 scaffold_unavailable` if the
-board has not built its scaffold (`mix relay.build_scaffold`, which `mix setup` runs
+board has not built its scaffold (`mix hamaca.build_scaffold`, which `mix setup` runs
 automatically); a deployed board never returns it.
 
 ```

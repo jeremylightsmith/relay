@@ -1,6 +1,6 @@
 // RE356 — the task body's code-block header strip (docs/designs/Relay Card Detail v5.dc.html,
 // "Running fine · DE4"): the fence's language label, its line count, and a `copy` button that
-// briefly reads `copied`. Relay.Markdown stays untouched for its other callers, so the strip is
+// briefly reads `copied`. Hamaca.Markdown stays untouched for its other callers, so the strip is
 // added on the client: each `pre > code` in the hooked body gets a `.code-block-strip` inserted
 // right before its `pre`. A LiveView patch that re-renders the body drops the strips along with
 // the old markup, and updated() puts them back; the sibling check keeps a surviving `pre` from

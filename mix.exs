@@ -1,9 +1,9 @@
-defmodule Relay.MixProject do
+defmodule Hamaca.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :relay,
+      app: :hamaca,
       version: "0.1.0",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -20,7 +20,7 @@ defmodule Relay.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {Relay.Application, []},
+      mod: {Hamaca.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
@@ -79,7 +79,7 @@ defmodule Relay.MixProject do
       {:ueberauth, "~> 0.10"},
       {:ueberauth_google, "~> 0.12"},
 
-      # --- Architecture: enforced context/web boundaries (see lib/relay.ex) ---
+      # --- Architecture: enforced context/web boundaries (see lib/hamaca.ex) ---
       {:boundary, "~> 0.10"},
 
       # --- Layered graph layout for the flow diagram (RE332). Vendored, dependency-free and
@@ -107,7 +107,7 @@ defmodule Relay.MixProject do
       {:phoenix_test, "~> 0.11", only: :test, runtime: false},
       {:phoenix_test_playwright, "~> 0.15", only: :test, runtime: false},
 
-      # Per-test config overrides through the process tree (`Relay.Config`, ADR 0009).
+      # Per-test config overrides through the process tree (`Hamaca.Config`, ADR 0009).
       {:process_tree, "~> 0.3"}
     ]
   end
@@ -120,13 +120,13 @@ defmodule Relay.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build", "relay.build_scaffold"],
+      setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build", "hamaca.build_scaffold"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: [
         "ecto.create --quiet",
         "ecto.migrate --quiet",
-        "relay.build_scaffold",
+        "hamaca.build_scaffold",
         "test --warnings-as-errors"
       ],
       # Browser journeys need a current JS/CSS bundle, so rebuild assets first —
@@ -135,16 +135,16 @@ defmodule Relay.MixProject do
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": [
         "compile",
-        "tailwind relay",
+        "tailwind hamaca",
         "tailwind storybook",
-        "esbuild relay",
+        "esbuild hamaca",
         "esbuild storybook",
         "esbuild docs"
       ],
       "assets.deploy": [
-        "tailwind relay --minify",
+        "tailwind hamaca --minify",
         "tailwind storybook --minify",
-        "esbuild relay --minify",
+        "esbuild hamaca --minify",
         "esbuild storybook --minify",
         "esbuild docs --minify",
         "phx.digest"
@@ -156,9 +156,9 @@ defmodule Relay.MixProject do
         "credo --strict",
         "sobelow --config --quiet",
         "deps.audit",
-        "relay.gen_state --check",
-        "relay.gen_vocab --check",
-        "relay.deps_graph --check",
+        "hamaca.gen_state --check",
+        "hamaca.gen_vocab --check",
+        "hamaca.deps_graph --check",
         "cmd --cd vendor/dagre_ex env MIX_ENV=test mix do deps.get + precommit",
         "test",
         "cmd python3 bin/test_relay.py",

@@ -5,10 +5,10 @@ defmodule Storybook.Components.CoreComponents.ImageAttachBox do
   alias Phoenix.LiveView.UploadConfig
   alias Phoenix.LiveView.UploadEntry
 
-  def function, do: &RelayWeb.CoreComponents.image_attach_box/1
+  def function, do: &HamacaWeb.CoreComponents.image_attach_box/1
 
   def imports,
-    do: [{RelayWeb.CoreComponents, icon: 1, image_attach_button: 1, image_attach_hint: 1}, {__MODULE__, upload: 0}]
+    do: [{HamacaWeb.CoreComponents, icon: 1, image_attach_button: 1, image_attach_hint: 1}, {__MODULE__, upload: 0}]
 
   def render_source, do: :function
 

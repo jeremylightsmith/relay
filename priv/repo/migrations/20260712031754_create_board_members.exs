@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateBoardMembers do
+defmodule Hamaca.Repo.Migrations.CreateBoardMembers do
   use Ecto.Migration
 
   def up do

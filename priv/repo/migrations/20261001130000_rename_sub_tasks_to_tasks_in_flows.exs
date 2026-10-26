@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.RenameSubTasksToTasksInFlows do
+defmodule Hamaca.Repo.Migrations.RenameSubTasksToTasksInFlows do
   use Ecto.Migration
 
   # RE367 — the flow contract's `sub_tasks` spellings became `tasks`. `Schemas.Card.contract_fields/0`

@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateStoryMapTables do
+defmodule Hamaca.Repo.Migrations.CreateStoryMapTables do
   use Ecto.Migration
 
   # RE265: the story map's three board-scoped tables plus the three nilable card FKs.

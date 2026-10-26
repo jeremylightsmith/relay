@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.RepairSublaneNames do
+defmodule Hamaca.Repo.Migrations.RepairSublaneNames do
   use Ecto.Migration
 
   # RE385 — a substage's stored `name` is its API identifier and must equal

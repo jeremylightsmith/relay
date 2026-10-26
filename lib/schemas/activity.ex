@@ -3,9 +3,9 @@ defmodule Schemas.Activity do
   One entry in a card's activity log: what happened (`type`), free-form
   details (`meta`, a jsonb map with STRING keys — e.g.
   `%{"from_stage" => "Spec", "to_stage" => "Code"}`), and who did it —
-  a user (`actor_type: :user` + `user_id`) or the Relay AI agent
+  a user (`actor_type: :user` + `user_id`) or the Hamaca AI agent
   (`actor_type: :agent`, no `user_id`). All fields are set
-  programmatically by `Relay.Activity.log/2`, never cast from input.
+  programmatically by `Hamaca.Activity.log/2`, never cast from input.
   `:commented` is reserved for future feeds/API use (MMF 09/16) —
   nothing emits it in MMF 07. `:needs_input` (MMF 14) carries
   `meta: %{"question" => ...}` — the AI blocked the card on a human
@@ -15,9 +15,9 @@ defmodule Schemas.Activity do
 
   `:moved`, `:approved` and `:rejected` (RE146) also carry `"from_stage_id"` /
   `"to_stage_id"` (integers) beside the `"from_stage"` / `"to_stage"` display-name snapshots:
-  the names are what the timeline renders, the ids are what `Relay.ValueStream` folds, so a
+  the names are what the timeline renders, the ids are what `Hamaca.ValueStream` folds, so a
   renamed stage no longer cuts a card off from its history. For `:rejected`, `from_stage_id`
-  is the gate's **main** stage (`Relay.Cards.reject/3` logs `current_main_stage`); an in-place
+  is the gate's **main** stage (`Hamaca.Cards.reject/3` logs `current_main_stage`); an in-place
   approve at the terminal stage has `from_stage_id == to_stage_id`. Rows written before RE146
   were backfilled by `BackfillActivityStageIds`, which deleted any whose names no longer
   resolved.
@@ -27,7 +27,7 @@ defmodule Schemas.Activity do
 
   `:action` (RLY-112) is one runner log line, with the line in `text` and the AI
   session that emitted it in `run_id`; `:failure` (RLY-112) is the agent erroring.
-  Both are written in bulk by `Relay.Activity.LogSink` via `insert_all`, which
+  Both are written in bulk by `Hamaca.Activity.LogSink` via `insert_all`, which
   bypasses `changeset/1` by design — they are best-effort chatter, not audit rows.
   `text`/`run_id` are null on every audit row; a human-triggered Retry (RLY-148)
   writes an `:action` row with `text` set and `run_id` null. `node_job_id` (RLY-134)

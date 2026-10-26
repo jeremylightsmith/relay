@@ -1,7 +1,7 @@
-defmodule Relay.Repo.Migrations.CreateTalkTables do
+defmodule Hamaca.Repo.Migrations.CreateTalkTables do
   use Ecto.Migration
 
-  # RE268 / ADR 0009: the transcript. Deliberately NOT the `LogForwarder` -> `Relay.AgentLog`
+  # RE268 / ADR 0009: the transcript. Deliberately NOT the `LogForwarder` -> `Hamaca.AgentLog`
   # path, which drops on a full queue by construction — right for a live feed, wrong for a
   # record this feature promises to keep.
   def change do

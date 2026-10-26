@@ -2,7 +2,7 @@ defmodule Storybook.ValueStream.LeadBar do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.ValueStreamComponents.lead_bar/1
+  def function, do: &HamacaWeb.ValueStreamComponents.lead_bar/1
   def render_source, do: :function
 
   def variations do

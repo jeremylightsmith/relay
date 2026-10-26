@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddRejectToStageIdToStages do
+defmodule Hamaca.Repo.Migrations.AddRejectToStageIdToStages do
   use Ecto.Migration
 
   def change do

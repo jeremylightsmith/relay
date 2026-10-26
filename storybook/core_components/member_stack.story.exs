@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.MemberStack do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.member_stack/1
+  def function, do: &HamacaWeb.CoreComponents.member_stack/1
   def render_source, do: :function
 
   # The boards-home overlapping member avatar stack (RLY-32): up to `limit`

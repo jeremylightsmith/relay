@@ -1,6 +1,6 @@
-# Relay glossary
+# Hamaca glossary
 
-The canonical vocabulary for Relay's board model. When code, docs, or UI copy disagree, this
+The canonical vocabulary for Hamaca's board model. When code, docs, or UI copy disagree, this
 file wins. RLY-76 standardized the **stage / substage** terminology and the Approve advance rule
 below; this glossary is the routing authority (superseding earlier "next main stage" phrasing in
 the MMF design specs).
@@ -40,28 +40,28 @@ the MMF design specs).
   stage**, so a card has both a stage and (optionally) a release. Every board is seeded with
   MVP / Fast follow / Later (`Schemas.Release.seed_names/0`), all editable. A card's release is
   genuinely optional — it can be mapped to a cell with its release still undecided. Not to be
-  confused with `Relay.Release`, the Phoenix release-task module.
+  confused with `Hamaca.Release`, the Phoenix release-task module.
 - **Story map** — the second lens on a board: Activities and their Steps across the top,
   Releases as swimlanes down the left, and real board cards filling the cells. Story-map cards
   **are** board cards; a card is assigned to at most one Activity+Step and one Release, and
   starts **unmapped**.
 - **Value stream (stream state · lead time · flow efficiency)** — the level-1 view of a card's
-  life from the **stream start** to Done (`Relay.ValueStream`, RE146). The stream start is
+  life from the **stream start** to Done (`Hamaca.ValueStream`, RE146). The stream start is
   derived, never configured: the last queue-type main stage before the board's first
   planning/work main stage (`Next up` on RE); a card that skips it starts on its first entry
   into any later state. States come from the flows' triggers: an AI-enabled work stage (one some flow works in,
-  `Relay.Flows.ai_stage_ids/1` — not a stage setting) that no enabled flow works in (RE's `Deploy`) is off-stream. A **stream state** is one stage or substage on that path, kinded queue,
+  `Hamaca.Flows.ai_stage_ids/1` — not a stage setting) that no enabled flow works in (RE's `Deploy`) is off-stream. A **stream state** is one stage or substage on that path, kinded queue,
   flow, gate or done, and each stay is split by who holds the baton — agent, human or nobody.
   **Lead time** is stream start → Done. **Flow efficiency** is agent time on `:do` nodes (node
   roles, RE346) divided by lead time.
 - **Work / rework · rewind** — the level-2 split of a flow node's agent time (RE348,
-  `Relay.Runs.execution_spans_for_flow/2`). **Work** is the first visit of a node for one foreach
+  `Hamaca.Runs.execution_spans_for_flow/2`). **Work** is the first visit of a node for one foreach
   task, up to its first failed attempt; **rework** is everything after — a revisit, a retry after
   a failure, and every run of a Fix node. **Rewind** is the rework a fix forces: the checks
   re-run after `final_fix` are charged to `final_fix`, until the next piece of new work.
 - **Send-back** — a hop in a run where a node's execution failed and the next execution is a
   different node: a check sending work to its fix (`precommit → final_fix`), or a failure routed to
-  a do node (`merge → resync`). `Relay.ValueStream.flow_stream/2` (RE348) groups them by
+  a do node (`merge → resync`). `Hamaca.ValueStream.flow_stream/2` (RE348) groups them by
   `from → to → returns_to` and sizes each by the minutes it cost — the target's own time plus the
   rework it forced before new work resumed. These are the arcs of the Code flow map.
 - **Status** — a card's lifecycle state. A stage type's default status is applied on arrival when
@@ -80,7 +80,7 @@ the MMF design specs).
 - **Agent (board LLM)** — a board's named LLM (`Schemas.Agent`, RE433): a harness plus one of its
   models, e.g. "Claude Opus" = Claude Code + `opus`. An agent flow node names one in `llm`, or
   inherits the board's **default agent**. An agent is **red** when its model has left its
-  harness's list (`Relay.Agents.red?/1`); a red agent refuses to run.
+  harness's list (`Hamaca.Agents.red?/1`); a red agent refuses to run.
 - **Subagent** — a `.claude/agents/<name>.md` definition an agent node dispatches to (the node's
   `agent` field, e.g. `plan-implementer`). Not the same thing as an *Agent (board LLM)*: the
   subagent supplies the system prompt, the board LLM picks the CLI and model.
@@ -93,14 +93,14 @@ the MMF design specs).
   Check, otherwise Do. Display-only: the engine and the runner never branch on it.
 - **Control node** — a flow node the server resolves itself, with no runner job (RE437): the
   set is `Schemas.Flow.Node.control_types/0`, today the `fan_out` and `fan_in` that bound a
-  fan-out region. `Relay.Runs.RunServer` records one as a `node_executions` row with an
+  fan-out region. `Hamaca.Runs.RunServer` records one as a `node_executions` row with an
   immediate outcome, and it carries none of the work fields (`Schemas.Flow.Node.work_fields/0`).
 - **Fan-out region** — a `fan_out` node, the branches its outgoing edges start, and the one
   paired `fan_in` they all reach (`Schemas.Flow.regions/1`, RE437). The `fan_out` fires every
   outgoing edge at once; the `fan_in` waits for every branch and resolves `succeeded` when all
   succeeded, `failed` when any failed, with each branch's result labelled
-  (`Relay.Runs.Engine.join/1`). Branches run concurrently — at most the `fan_out`'s
-  `max_parallel` at a time — in the run's one checkout on its one runner; Relay does no git work
+  (`Hamaca.Runs.Engine.join/1`). Branches run concurrently — at most the `fan_out`'s
+  `max_parallel` at a time — in the run's one checkout on its one runner; Hamaca does no git work
   for them and doesn't guard their edits. A region can't nest inside another (one inside a
   `foreach` iteration is fine). Git fork-and-join isolation is deferred to RE161.
 - **Branch** — one fan-out edge's path from its head node to the region's `fan_in`, run as part
@@ -113,7 +113,7 @@ the MMF design specs).
   `Schemas.Stage.work_types/0`, holding at most one flow — RE429). A flow document spells it
   `"trigger": {"stage": "<name>"}`. **The pull-from / land-on rule:** where the flow *pulls from*
   (pickup) and *lands on* (drop-off) are never stored — they are worked out from board order by
-  `Relay.Flows.neighbours/2`: it pulls from the stage immediately before its own, and lands on
+  `Hamaca.Flows.neighbours/2`: it pulls from the stage immediately before its own, and lands on
   the stage immediately after it (its own first substage when it has one, else the next main
   stage); either is none at the board's ends. Drop-off is resolved when the run lands, so
   reordering stages moves both. The API shows them read-only as `"derived": {"pulls_from",
@@ -124,7 +124,7 @@ the MMF design specs).
   after it to land on (RE430). A flow that breaks it has exactly one problem, the first that
   applies of: no column before (`:no_upstream`), a Review column before (`:upstream_review`), a
   still-working column before (`:upstream_working`), no column after (`:no_downstream`).
-  `Relay.Flows.Shape` owns the rule and every word of its *what* / *why* / *fix* explanation;
+  `Hamaca.Flows.Shape` owns the rule and every word of its *what* / *why* / *fix* explanation;
   it is worked out from the board on every read, never stored.
 - **Paused flow** — an **enabled** flow whose stage breaks the shape rule: no new runs start for
   it and the card face never calls it "queued", until the board is fixed; runs already going
@@ -145,12 +145,12 @@ the MMF design specs).
   false there). Done is derived, never a stored flag.
 - **Dependency** — a directed edge between two cards on the same board (`Schemas.CardDependency`,
   RE93): the *dependent* card is **blocked by** the *blocker* card. Written as a whole set
-  through `Relay.Cards.set_dependencies/4` (full replace; cycles and unknown refs refused).
+  through `Hamaca.Cards.set_dependencies/4` (full replace; cycles and unknown refs refused).
 - **Blocked (dependency)** — a card with at least one **unsatisfied** blocker. A blocker is
   *satisfied* when it sits in a top-level `:complete`-category stage — its status is irrelevant.
   A dependency-blocked card is ineligible for **automatic flow dispatch** — no flow *pulls* it —
   and wears a quiet ghost `Blocked by N cards` chip. It gates fresh pulls only: a run already in
-  flight, and a send-back re-entering its flow, both continue (see `Relay.Runs.Policy.pullable?/1`). It is NOT the same as **needs you** (amber, a
+  flight, and a send-back re-entering its flow, both continue (see `Hamaca.Runs.Policy.pullable?/1`). It is NOT the same as **needs you** (amber, a
   card demanding a human right now) and NOT the same as the `:queued` status (which means
   *capacity*-blocked). Human moves of a blocked card stay legal.
 

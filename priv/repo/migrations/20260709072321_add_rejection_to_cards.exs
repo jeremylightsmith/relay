@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddRejectionToCards do
+defmodule Hamaca.Repo.Migrations.AddRejectionToCards do
   use Ecto.Migration
 
   def change do

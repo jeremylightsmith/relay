@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.BackfillActivityStageIds do
+defmodule Hamaca.Repo.Migrations.BackfillActivityStageIds do
   @moduledoc """
   RE146 — `:moved` / `:approved` / `:rejected` rows now carry `from_stage_id` / `to_stage_id`
   in `meta`. Rows written before that only snapshotted display names, so this resolves each
@@ -26,7 +26,7 @@ defmodule Relay.Repo.Migrations.BackfillActivityStageIds do
   end
 
   # The stage display-name rule, reproduced ONCE here in SQL — it mirrors
-  # Relay.Boards.stage_display_name/1 + lane_word/1: a main stage displays its `name`, a
+  # Hamaca.Boards.stage_display_name/1 + lane_word/1: a main stage displays its `name`, a
   # substage displays "<parent name> · Review" or "<parent name> · Done". Only a name that
   # matches exactly one stage on the card's board resolves.
   defp resolve_sql do

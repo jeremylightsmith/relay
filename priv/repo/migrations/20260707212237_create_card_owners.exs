@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateCardOwners do
+defmodule Hamaca.Repo.Migrations.CreateCardOwners do
   use Ecto.Migration
 
   def change do

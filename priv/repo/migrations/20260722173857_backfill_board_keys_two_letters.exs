@@ -1,11 +1,11 @@
-defmodule Relay.Repo.Migrations.BackfillBoardKeysTwoLetters do
+defmodule Hamaca.Repo.Migrations.BackfillBoardKeysTwoLetters do
   use Ecto.Migration
 
   import Ecto.Query
 
   # RLY-230: card keys become exactly-2-letter board prefixes. Backfill every existing board to
   # the first two A-Z letters of its name (uppercased), fallback "RL". The derivation is inlined
-  # here (`derive_key/1`, not a call into Relay.Boards) so this migration stays frozen against
+  # here (`derive_key/1`, not a call into Hamaca.Boards) so this migration stays frozen against
   # later code changes.
   def up do
     for {id, name} <- repo().all(from(b in "boards", select: {b.id, b.name})) do
@@ -21,7 +21,7 @@ defmodule Relay.Repo.Migrations.BackfillBoardKeysTwoLetters do
 
   # Public + pure so the backfill rule is unit-testable without the migrator's Runner context
   # (`Ecto.Migration.repo/0` -- which `up/0` uses -- requires it). Frozen: a self-contained copy of
-  # the RLY-230 derivation rule, deliberately NOT a call into `Relay.Boards.derive_key/1`.
+  # the RLY-230 derivation rule, deliberately NOT a call into `Hamaca.Boards.derive_key/1`.
   def derive_key(name) do
     case name
          |> to_string()

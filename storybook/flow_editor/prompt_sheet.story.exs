@@ -2,7 +2,7 @@ defmodule Storybook.FlowEditor.PromptSheet do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowEditorComponents.prompt_sheet/1
+  def function, do: &HamacaWeb.FlowEditorComponents.prompt_sheet/1
   def render_source, do: :function
 
   # The sheet is page-fixed (a full-height, right-edge drawer over a scrim), so each variation

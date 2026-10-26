@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddBranchAndPlanToCards do
+defmodule Hamaca.Repo.Migrations.AddBranchAndPlanToCards do
   use Ecto.Migration
 
   def change do

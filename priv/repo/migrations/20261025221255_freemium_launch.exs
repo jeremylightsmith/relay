@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.FreemiumLaunch do
+defmodule Hamaca.Repo.Migrations.FreemiumLaunch do
   use Ecto.Migration
 
   # RE469 — the one-time launch of the Free plan, which replaces the 30-day trial. Data-only; no
@@ -16,7 +16,7 @@ defmodule Relay.Repo.Migrations.FreemiumLaunch do
   #    `paid_through + grace + 1`, so that lapse's notice counts as already sent), and
   #    `trial_ending` rows are deleted.
   #
-  # Raw SQL only — a migration must not call app modules (`Relay.Billing`, `Schemas.*`), which
+  # Raw SQL only — a migration must not call app modules (`Hamaca.Billing`, `Schemas.*`), which
   # change after it is written. The literals below ('comp', 'paused', 'dropped_to_free',
   # 'trial_ending', the 1-day shift) are frozen copies of those closed sets and policy numbers as
   # they stood at launch; this is the one place the retired values may appear.

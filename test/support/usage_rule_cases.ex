@@ -1,7 +1,7 @@
-defmodule Relay.UsageRuleCases do
+defmodule Hamaca.UsageRuleCases do
   @moduledoc """
   RE436 — the hand-authored cases BOTH usage-rule evaluators must pass: `Schemas.HarnessUsage.Rule`
-  (`test/relay/usage_rule_cases_test.exs`) and its Python mirror in `./relay`
+  (`test/hamaca/usage_rule_cases_test.exs`) and its Python mirror in `./relay`
   (`bin/test_relay.py`'s `UsageRuleContractTest`). The runner contract test copies them into
   `test/fixtures/runner_contract.json` as `usage_rule_cases`, which is where Python reads them, so
   the two evaluators cannot drift without one side going red.
@@ -256,7 +256,7 @@ defmodule Relay.UsageRuleCases do
   end
 
   defp seed_wire(key) do
-    %{usage: usage} = Enum.find(Relay.Agents.seed_harnesses(), &(&1.key == key))
+    %{usage: usage} = Enum.find(Hamaca.Agents.seed_harnesses(), &(&1.key == key))
     HarnessUsage.wire(usage)
   end
 end

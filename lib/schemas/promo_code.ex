@@ -6,8 +6,8 @@ defmodule Schemas.PromoCode do
   last day it redeems. How many accounts hold a code is counted from
   `billing_accounts.promo_code_id`, never stored here.
 
-  `disabled_at` is set programmatically by `Relay.Billing.disable_promo_code/2`, never cast.
-  Every write goes through `Relay.Billing`.
+  `disabled_at` is set programmatically by `Hamaca.Billing.disable_promo_code/2`, never cast.
+  Every write goes through `Hamaca.Billing`.
   """
 
   use Ecto.Schema

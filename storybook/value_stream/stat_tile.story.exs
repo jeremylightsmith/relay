@@ -2,7 +2,7 @@ defmodule Storybook.ValueStream.StatTile do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.ValueStreamComponents.stat_tile/1
+  def function, do: &HamacaWeb.ValueStreamComponents.stat_tile/1
   def render_source, do: :function
 
   def variations do

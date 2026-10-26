@@ -1,10 +1,10 @@
-defmodule Relay.Runs.FakeDispatcher do
+defmodule Hamaca.Runs.FakeDispatcher do
   @moduledoc """
   Test dispatcher: forwards dispatch/revoke to the process registered via
   `register/1`, so a test plays runner — receive `{:dispatched, job}` /
   `{:revoked, job}`, then drive `claim_job/report_outcome`.
 
-  The dispatcher and its notification target ride on the calling process's `Relay.Runs.Instance`
+  The dispatcher and its notification target ride on the calling process's `Hamaca.Runs.Instance`
   (ADR 0009 rule 1) — this used to be two application-env writes plus an `on_exit` to undo
   them, which meant one test's dispatch notifications could be delivered to another test's pid.
   The instance registration is keyed by the test's pid and released when it exits, so there is
@@ -14,11 +14,11 @@ defmodule Relay.Runs.FakeDispatcher do
   it, so the resolution lands on the right test.
   """
 
-  @behaviour Relay.Runs.Dispatcher
+  @behaviour Hamaca.Runs.Dispatcher
 
   use Boundary, top_level?: true, check: [in: false, out: false]
 
-  alias Relay.Runs.Instance
+  alias Hamaca.Runs.Instance
 
   @doc "Route this run's dispatch/revoke notifications to `pid` for the test's duration."
   def register(pid) when is_pid(pid) do

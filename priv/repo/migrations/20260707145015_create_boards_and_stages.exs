@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateBoardsAndStages do
+defmodule Hamaca.Repo.Migrations.CreateBoardsAndStages do
   use Ecto.Migration
 
   def change do

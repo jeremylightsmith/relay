@@ -2,7 +2,7 @@ defmodule Storybook.AdminComponents.StackedBars do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.AdminComponents.stacked_bars/1
+  def function, do: &HamacaWeb.AdminComponents.stacked_bars/1
   def render_source, do: :function
 
   # RE475, card mockup "Usage tab — people (blue) + their agents (violet)": the daily people (blue)

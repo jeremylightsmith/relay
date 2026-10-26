@@ -2,8 +2,8 @@ defmodule Storybook.Components.CoreComponents.Flash do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.flash/1
-  def imports, do: [{RelayWeb.CoreComponents, show: 1, button: 1}]
+  def function, do: &HamacaWeb.CoreComponents.flash/1
+  def imports, do: [{HamacaWeb.CoreComponents, show: 1, button: 1}]
   def render_source, do: :function
 
   def template do

@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.stage_column/1
+  def function, do: &HamacaWeb.CoreComponents.stage_column/1
   def render_source, do: :function
 
   def variations do

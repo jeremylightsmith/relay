@@ -1,0 +1,631 @@
+defmodule HamacaWeb.BoardSettingsStagesTest do
+  use HamacaWeb.ConnCase, async: true
+
+  import Phoenix.LiveViewTest
+
+  alias Hamaca.Boards
+  alias Hamaca.Repo
+
+  setup :register_and_log_in_user
+
+  setup %{user: user} do
+    %{board: Boards.get_or_create_default_board(user)}
+  end
+
+  defp stage_named(board, name), do: Enum.find(board.stages, &(&1.name == name))
+
+  defp text_of(view, selector) do
+    view
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(selector)
+    |> LazyHTML.text()
+    |> String.split()
+    |> Enum.join(" ")
+  end
+
+  describe "two-pane shell" do
+    test "renders the rail with Stages active and stage cards grouped by category",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(view, "#settings-rail")
+      assert has_element?(view, "#settings-nav-stages", "Stages")
+      assert has_element?(view, "#settings-nav-keys", "API keys")
+      assert has_element?(view, "#stages-pane h1", "Stages")
+      refute has_element?(view, "#api-key-pane")
+
+      backlog = stage_named(board, "Backlog")
+      code = stage_named(board, "Code")
+      done = stage_named(board, "Done")
+      assert has_element?(view, "#settings-group-unstarted #stage-#{backlog.id}-row")
+      assert has_element?(view, "#settings-group-in_progress #stage-#{code.id}-row")
+      assert has_element?(view, "#settings-group-complete #stage-#{done.id}-row")
+      assert has_element?(view, "#add-stage-unstarted")
+      assert has_element?(view, "#add-stage-in_progress")
+      assert has_element?(view, "#add-stage-complete")
+      assert has_element?(view, "#stage-#{code.id}-name-display", "Code")
+      assert has_element?(view, "#stage-#{code.id}-description-display")
+      assert has_element?(view, "#stage-#{code.id}-row .stage-type-icon[data-type='work']")
+    end
+
+    test "the API-key pane renders under the keys nav with its ids intact", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#settings-nav-keys") |> render_click()
+
+      assert has_element?(view, "#api-key-pane")
+      assert has_element?(view, "#generate-key")
+      refute has_element?(view, "#stages-pane")
+
+      view |> element("#settings-nav-stages") |> render_click()
+      assert has_element?(view, "#stages-pane")
+      refute has_element?(view, "#api-key-pane")
+    end
+
+    test "the stages pane always shows all four category groups with add buttons", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      for category <- ["unstarted", "planning", "in_progress", "complete"] do
+        assert has_element?(view, "#settings-group-#{category}")
+        assert has_element?(view, "#add-stage-#{category}")
+      end
+
+      assert has_element?(view, "#settings-group-planning", "PLANNING")
+      assert has_element?(view, "#add-stage-planning", "+ Add stage to PLANNING")
+
+      [style] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#settings-group-planning .category-dot")
+        |> LazyHTML.attribute("style")
+
+      assert style =~ "--color-secondary"
+    end
+  end
+
+  describe "editing stages" do
+    test "the name and description render as click-to-edit read displays", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(view, "#stage-#{code.id}-name-display", "Code")
+      assert has_element?(view, "#stage-#{code.id}-description-display")
+      refute has_element?(view, "#stage-#{code.id}-name-form")
+    end
+
+    test "renaming a stage persists on explicit save and shows on the board", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-name-display") |> render_click()
+
+      view
+      |> form("#stage-#{code.id}-name-form", stage: %{name: "Build"})
+      |> render_submit()
+
+      refute has_element?(view, "#stage-#{code.id}-name-form")
+      assert has_element?(view, "#stage-#{code.id}-name-display", "Build")
+      assert Boards.get_stage(board, code.id).name == "Build"
+
+      {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(board_view, "#stage-strip-#{code.id} h3", "Build")
+    end
+
+    test "a blank rename is rejected inline and keeps the old name", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-name-display") |> render_click()
+
+      html =
+        view
+        |> form("#stage-#{code.id}-name-form", stage: %{name: ""})
+        |> render_submit()
+
+      assert html =~ "blank"
+      assert Boards.get_stage(board, code.id).name == "Code"
+    end
+
+    test "editing the description persists on explicit save", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-description-display") |> render_click()
+
+      view
+      |> form("#stage-#{code.id}-description-form", stage: %{description: "Agents write the code"})
+      |> render_submit()
+
+      assert Boards.get_stage(board, code.id).description == "Agents write the code"
+    end
+
+    test "cancel discards the edit", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-name-display") |> render_click()
+      view |> element("#stage-#{code.id}-name-cancel") |> render_click()
+
+      refute has_element?(view, "#stage-#{code.id}-name-form")
+      assert has_element?(view, "#stage-#{code.id}-name-display", "Code")
+    end
+
+    test "the arrows reorder stages and crossing a band adopts the category",
+         %{conn: conn, board: board} do
+      next_up = stage_named(board, "Next up")
+      spec = stage_named(board, "Spec")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{next_up.id}-down") |> render_click()
+
+      assert has_element?(view, "#settings-group-planning #stage-#{next_up.id}-row")
+      assert Boards.get_stage(board, next_up.id).category == :planning
+      # one-directional: the stage it crossed past keeps its own category
+      assert Boards.get_stage(board, spec.id).category == :planning
+
+      view |> element("#stage-#{next_up.id}-up") |> render_click()
+
+      assert has_element?(view, "#settings-group-unstarted #stage-#{next_up.id}-row")
+      assert Boards.get_stage(board, next_up.id).category == :unstarted
+    end
+
+    test "the TYPE dropdown changes a stage's type and re-snaps a resident card's status",
+         %{conn: conn, board: board} do
+      # Deploy holds no flow, so it may become a non-work type (RE429).
+      code = stage_named(board, "Deploy")
+      card = insert(:card, stage: code, status: :working)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(view, "#stage-#{code.id}-type-dropdown")
+
+      view |> element("#stage-#{code.id}-type-review") |> render_click()
+
+      assert Boards.get_stage(board, code.id).type == :review
+      assert has_element?(view, "#stage-#{code.id}-row .stage-type-icon[data-type='review']")
+
+      reloaded_card = Repo.get!(Schemas.Card, card.id)
+      assert reloaded_card.status == :in_review
+    end
+
+    test "the flow chip lives in the stage's FLOW band, never an AI row",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      for stage <- board.stages, is_nil(stage.parent_id) do
+        refute has_element?(view, "#stage-#{stage.id}-ai-toggle")
+        refute has_element?(view, "#stage-#{stage.id}-ai-none")
+      end
+
+      assert has_element?(view, "#stage-#{code.id}-flow-band #stage-#{code.id}-ai-flow")
+    end
+
+    test "the stage row's chip follows its band toggle", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      flow = Hamaca.Flows.get_flow!(board, "code")
+      refute flow.enabled
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      assert has_element?(view, "#stage-#{code.id}-ai-flow[data-flow-enabled='false']")
+
+      view |> element("#flow-#{flow.id}-toggle") |> render_click()
+      assert has_element?(view, "#stage-#{code.id}-ai-flow[data-flow-enabled='true']")
+    end
+  end
+
+  describe "adding and deleting stages" do
+    test "add stage creates a renamable default stage in that category",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#add-stage-unstarted") |> render_click()
+
+      new_stage = board |> Boards.list_stages() |> Enum.find(&(&1.name == "New stage"))
+      assert new_stage.category == :unstarted
+      assert new_stage.type == Schemas.Stage.default_type(:unstarted)
+      assert has_element?(view, "#settings-group-unstarted #stage-#{new_stage.id}-row")
+      assert has_element?(view, "#stage-#{new_stage.id}-name-display")
+    end
+
+    test "1. the × opens the delete panel inside the row and deletes nothing", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      refute has_element?(view, "[id^='stage-'][id$='-delete'][data-confirm]")
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+
+      assert has_element?(view, "#stage-#{deploy.id}-row #stage-#{deploy.id}-delete-panel")
+      assert Boards.get_stage(board, deploy.id)
+    end
+
+    test "2. a stage without a flow gets a plain panel and confirming deletes it", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+
+      assert text_of(view, "#stage-#{deploy.id}-delete-title") == "Delete the Deploy stage?"
+      refute has_element?(view, "#stage-#{deploy.id}-delete-flow")
+      assert text_of(view, "#stage-#{deploy.id}-delete-confirm") == "Delete stage"
+
+      view |> element("#stage-#{deploy.id}-delete-confirm") |> render_click()
+
+      refute has_element?(view, "#stage-#{deploy.id}-row")
+      assert Boards.get_stage(board, deploy.id) == nil
+    end
+
+    test "3. a flow-holding stage's panel names the flow, and confirming takes the flow with it",
+         %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+
+      {:ok, ship} =
+        Hamaca.Flows.create_flow(board, %{
+          key: "ship",
+          isolation: :shared_clean,
+          stage_id: deploy.id,
+          nodes: [],
+          edges: [%{from: "start", to: "done"}]
+        })
+
+      {:ok, ship} = Hamaca.Flows.save_definition(ship, %{isolation: :exclusive})
+      {:ok, ship} = Hamaca.Flows.save_definition(ship, %{isolation: :shared_clean})
+      assert ship.version == 3
+      {:ok, _} = Hamaca.Flows.enable_flow(ship)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+
+      flow_text = text_of(view, "#stage-#{deploy.id}-delete-flow")
+      assert flow_text =~ "This also deletes flow"
+      assert flow_text =~ "ship"
+      assert flow_text =~ "(v3 · 0 nodes)"
+      assert flow_text =~ "and its version history"
+
+      history = text_of(view, "#stage-#{deploy.id}-delete-history")
+      assert history =~ "Run history stays"
+      assert history =~ "Copy to another stage"
+
+      assert text_of(view, "#stage-#{deploy.id}-delete-confirm") == "Delete stage and flow"
+
+      view |> element("#stage-#{deploy.id}-delete-confirm") |> render_click()
+
+      refute has_element?(view, "#flash-error")
+      refute has_element?(view, "#stage-#{deploy.id}-row")
+      assert Boards.get_stage(board, deploy.id) == nil
+      assert Hamaca.Flows.get_flow(board, "ship") == nil
+    end
+
+    test "4. confirming a stage with cards shows the refusal in the panel, not a flash",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      insert(:card, stage: code)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+
+      assert text_of(view, "#stage-#{code.id}-delete-refusal") ==
+               "That stage still holds 1 card(s) — move them out first."
+
+      refute has_element?(view, "#flash-error")
+      assert has_element?(view, "#stage-#{code.id}-delete-panel")
+      assert Boards.get_stage(board, code.id)
+    end
+
+    test "5. confirming a stage whose sub-lane has cards shows the refusal in the panel",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, review} = Boards.enable_lane(code, :review)
+      insert(:card, stage: review)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+
+      assert text_of(view, "#stage-#{code.id}-delete-refusal") ==
+               "That stage still holds 1 card(s) — move them out first."
+
+      assert Boards.get_stage(board, code.id)
+    end
+
+    test "RE453-1. deleting a stage holding only an archived card re-homes it, attributed to the user",
+         %{conn: conn, board: board, user: user} do
+      code = stage_named(board, "Code")
+      plan = stage_named(board, "Plan")
+      card = insert(:card, stage: code, archived_at: DateTime.utc_now(:second))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+
+      refute has_element?(view, "#stage-#{code.id}-delete-refusal")
+      refute has_element?(view, "#stage-#{code.id}-row")
+      assert Boards.get_stage(board, code.id) == nil
+
+      card = Repo.reload!(card)
+      assert card.stage_id == plan.id
+      assert card.archived_at
+
+      assert [%{type: :moved, actor_type: :user, user_id: user_id} | _] = Hamaca.Activity.list_activity(card)
+      assert user_id == user.id
+    end
+
+    test "RE453-2. a live card still refuses the delete and leaves the archived card in place",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      insert(:card, stage: code)
+      archived = insert(:card, stage: code, archived_at: DateTime.utc_now(:second))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+
+      assert text_of(view, "#stage-#{code.id}-delete-refusal") ==
+               "That stage still holds 1 card(s) — move them out first."
+
+      assert Boards.get_stage(board, code.id)
+      assert Repo.reload!(archived).stage_id == code.id
+    end
+
+    test "RE453-3. turning off a lane holding an archived card re-homes it to the parent, attributed to the user",
+         %{conn: conn, board: board, user: user} do
+      code = stage_named(board, "Code")
+      {:ok, review} = Boards.enable_lane(code, :review)
+      card = insert(:card, stage: review, status: :in_review, archived_at: DateTime.utc_now(:second))
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      render_click(view, "toggle_lane", %{"stage-id" => "#{code.id}", "lane" => "review"})
+
+      refute has_element?(view, "#flash-error")
+      assert Boards.sublanes(code) == []
+
+      card = Repo.reload!(card)
+      assert card.stage_id == code.id
+
+      assert [%{type: :moved, actor_type: :user, user_id: user_id} | _] = Hamaca.Activity.list_activity(card)
+      assert user_id == user.id
+    end
+
+    test "6. confirming the only remaining stage shows the refusal in the panel", %{conn: conn, board: board} do
+      [keep | rest] = Enum.filter(board.stages, &is_nil(&1.parent_id))
+      Enum.each(rest, fn stage -> {:ok, _} = Boards.delete_stage(stage) end)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      view |> element("#stage-#{keep.id}-delete") |> render_click()
+      view |> element("#stage-#{keep.id}-delete-confirm") |> render_click()
+
+      assert text_of(view, "#stage-#{keep.id}-delete-refusal") =~ "at least one stage"
+      assert Boards.get_stage(board, keep.id)
+    end
+
+    test "8. cancel closes the panel, and reopening clears a shown refusal", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      code = stage_named(board, "Code")
+      insert(:card, stage: code)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      view |> element("#stage-#{deploy.id}-delete-cancel") |> render_click()
+
+      refute has_element?(view, "#stage-#{deploy.id}-delete-panel")
+      assert Boards.get_stage(board, deploy.id)
+
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+      view |> element("#stage-#{code.id}-delete-confirm") |> render_click()
+      assert has_element?(view, "#stage-#{code.id}-delete-refusal")
+
+      view |> element("#stage-#{code.id}-delete-cancel") |> render_click()
+      view |> element("#stage-#{code.id}-delete") |> render_click()
+
+      assert has_element?(view, "#stage-#{code.id}-delete-panel")
+      refute has_element?(view, "#stage-#{code.id}-delete-refusal")
+    end
+
+    test "9. an archived board refuses confirm_delete_stage", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, _} = Boards.archive_board(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      html = render_click(view, "confirm_delete_stage", %{"stage-id" => to_string(deploy.id)})
+
+      assert html =~ "This board is archived (read-only)."
+      assert Boards.get_stage(board, deploy.id)
+    end
+
+    test "a panel whose stage was deleted elsewhere closes on refresh", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      {:ok, _} = Boards.delete_stage(deploy)
+      send(view.pid, {:stages_changed, board.id})
+
+      refute has_element?(view, "#stage-#{deploy.id}-delete-panel")
+      refute has_element?(view, "#stage-#{deploy.id}-row")
+    end
+
+    test "confirming a stage deleted elsewhere closes the panel instead of crashing",
+         %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      {:ok, _} = Boards.delete_stage(deploy)
+
+      render_click(view, "confirm_delete_stage", %{"stage-id" => to_string(deploy.id)})
+
+      refute has_element?(view, "#stage-#{deploy.id}-delete-panel")
+      refute has_element?(view, "#stage-#{deploy.id}-row")
+    end
+
+    test "33. retyping a flow-holding stage to a non-work type flashes the refusal",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      html = render_click(view, "set_type", %{"stage-id" => "#{code.id}", "type" => "queue"})
+
+      assert html =~ "Stage Code holds flow `code` — delete the flow first."
+      assert Boards.get_stage(board, code.id).type == :work
+    end
+
+    test "7. confirming the public intake stage shows the refusal in the panel", %{conn: conn, board: board} do
+      deploy = stage_named(board, "Deploy")
+      {:ok, _} = Boards.update_public_settings(board, %{public_intake_stage_id: deploy.id})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      view |> element("#stage-#{deploy.id}-delete") |> render_click()
+      view |> element("#stage-#{deploy.id}-delete-confirm") |> render_click()
+
+      assert text_of(view, "#stage-#{deploy.id}-delete-refusal") =~ "public intake stage"
+      assert has_element?(view, "#stage-#{deploy.id}-row")
+    end
+
+    test "changing a stage's type re-snaps its cards", %{conn: conn, board: board} do
+      code = stage_named(board, "Deploy")
+      {:ok, card} = Hamaca.Cards.create_card(code, %{title: "WIP"})
+      {:ok, card} = Hamaca.Cards.set_status(card, %{status: :working})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      render_click(view, "set_type", %{"stage-id" => "#{code.id}", "type" => "queue"})
+
+      assert Repo.reload!(card).status == :ready
+    end
+
+    test "add stage to Planning creates a planning stage", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      view |> element("#add-stage-planning") |> render_click()
+
+      new_stage = board |> Boards.list_stages() |> Enum.find(&(&1.name == "New stage"))
+      assert new_stage.category == :planning
+      assert has_element?(view, "#settings-group-planning #stage-#{new_stage.id}-row")
+    end
+  end
+
+  describe "collapsed-by-default toggle (RLY-111)" do
+    test "renders on every main stage row regardless of type, and flips the flag",
+         %{conn: conn, board: board} do
+      backlog = stage_named(board, "Backlog")
+      review = stage_named(board, "Review")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      # Unlike AI-ENABLED there is no type guard: queue and review rows both carry it.
+      assert has_element?(view, "#stage-#{backlog.id}-collapsed-toggle")
+      assert has_element?(view, "#stage-#{review.id}-collapsed-toggle")
+      refute has_element?(view, "#stage-#{backlog.id}-collapsed-toggle[checked]")
+
+      view |> element("#stage-#{backlog.id}-collapsed-toggle") |> render_click()
+
+      assert Boards.get_stage(board, backlog.id).collapsed_by_default
+      assert has_element?(view, "#stage-#{backlog.id}-collapsed-toggle[checked]")
+
+      view |> element("#stage-#{backlog.id}-collapsed-toggle") |> render_click()
+
+      refute Boards.get_stage(board, backlog.id).collapsed_by_default
+      refute has_element?(view, "#stage-#{backlog.id}-collapsed-toggle[checked]")
+    end
+
+    test "an archived (read-only) board flashes the error and does not flip the flag",
+         %{conn: conn, user: user} do
+      {:ok, board} = Boards.create_board(user, %{name: "Frozen"})
+      {:ok, board} = Boards.archive_board(board)
+      stage = hd(board.stages)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      html = view |> element("#stage-#{stage.id}-collapsed-toggle") |> render_click()
+
+      assert html =~ "This board is archived (read-only)."
+      refute Boards.get_stage(board, stage.id).collapsed_by_default
+    end
+
+    @tag :capture_log
+    test "toggle_ai is no longer a handled event, even on an archived board", %{conn: conn, user: user} do
+      {:ok, board} = Boards.create_board(user, %{name: "No toggle"})
+      {:ok, board} = Boards.archive_board(board)
+      code = stage_named(board, "Code")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+      Process.flag(:trap_exit, true)
+
+      assert {{:function_clause, [{HamacaWeb.BoardSettingsLive, :handle_event, ["toggle_ai" | _args], _loc} | _]}, _call} =
+               catch_exit(render_click(view, "toggle_ai", %{"stage-id" => to_string(code.id)}))
+    end
+  end
+
+  describe "10b sub-lane toggles in the stage card" do
+    test "the Done and Review toggles live inside the card and still drive lanes",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(view, "#stage-#{code.id}-sublanes #stage-#{code.id}-done-toggle")
+      assert has_element?(view, "#stage-#{code.id}-sublanes #stage-#{code.id}-review-toggle")
+
+      view |> element("#stage-#{code.id}-review-toggle") |> render_click()
+
+      assert [%{type: :review}] = Boards.sublanes(code)
+      assert has_element?(view, "#stage-#{code.id}-row", "always rejects back into its own stage")
+    end
+
+    test "review and done sub-lane toggles both live in one dashed row, labeled SUB-LANE",
+         %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(view, "#stage-#{code.id}-sublanes", "REVIEW SUB-LANE")
+      assert has_element?(view, "#stage-#{code.id}-sublanes", "DONE SUB-LANE")
+      refute has_element?(view, "#settings-group-in_progress", "DONE COLUMN")
+
+      assert has_element?(view, "#stage-#{code.id}-sublanes [phx-value-lane='review']")
+      assert has_element?(view, "#stage-#{code.id}-sublanes [phx-value-lane='done']")
+    end
+  end
+
+  describe "reject route (ON REJECT, SEND TO)" do
+    test "a top-level review stage shows the dropdown and persists a pick", %{conn: conn, board: board} do
+      review = stage_named(board, "Review")
+      plan = stage_named(board, "Plan")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(view, "#stage-#{review.id}-row", "ON REJECT, SEND TO")
+      assert has_element?(view, "#stage-#{review.id}-reject-route")
+
+      view |> element("#stage-#{review.id}-reject-to-#{plan.id}") |> render_click()
+
+      assert Repo.get!(Schemas.Stage, review.id).reject_to_stage_id == plan.id
+      assert has_element?(view, "#stage-#{review.id}-reject-route", "Plan")
+    end
+
+    test "a non-review stage shows no reject-route control", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      refute has_element?(view, "#stage-#{code.id}-reject-route")
+      refute has_element?(view, "#stage-#{code.id}-row", "ON REJECT, SEND TO")
+    end
+
+    test "a stage with a review sub-lane shows the fixed own-stage hint", %{conn: conn, board: board} do
+      code = stage_named(board, "Code")
+      {:ok, _sublane} = Boards.enable_lane(code, :review)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=stages")
+
+      assert has_element?(
+               view,
+               "#stage-#{code.id}-row",
+               "always rejects back into its own stage — nothing to configure"
+             )
+    end
+  end
+end

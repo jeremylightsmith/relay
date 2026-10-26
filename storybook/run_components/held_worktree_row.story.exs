@@ -2,10 +2,10 @@ defmodule Storybook.RunComponents.HeldWorktreeRow do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.held_worktree_row/1
+  def function, do: &HamacaWeb.RunComponents.held_worktree_row/1
   def render_source, do: :function
 
-  # One variation per `Relay.Runs.release_action/1` outcome — the row renders precomputed
+  # One variation per `Hamaca.Runs.release_action/1` outcome — the row renders precomputed
   # decisions, so these maps mirror what `list_runner_status/2` emits.
   defp holding(overrides) do
     Map.merge(

@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddKindAndCardToNodeJobs do
+defmodule Hamaca.Repo.Migrations.AddKindAndCardToNodeJobs do
   use Ecto.Migration
 
   # RE268 / ADR 0009: `node_jobs` becomes the dispatch table for TWO dispatchers — the flow

@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.MockupPreview do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.mockup_preview/1
+  def function, do: &HamacaWeb.CoreComponents.mockup_preview/1
   def render_source, do: :function
 
   # A real mockup is an /attachments/<id> HTML page; any same-origin path shows the miniature here.

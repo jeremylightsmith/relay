@@ -2,7 +2,7 @@ defmodule Storybook.StoryMapComponents.InlineNameInput do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.StoryMapComponents.inline_name_input/1
+  def function, do: &HamacaWeb.StoryMapComponents.inline_name_input/1
   def render_source, do: :function
 
   # `hook: nil` renders the input inert: the InlineNameInput hook lives in the app bundle and

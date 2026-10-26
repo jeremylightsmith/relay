@@ -1,4 +1,4 @@
-defmodule Relay.FanOutFixtures do
+defmodule Hamaca.FanOutFixtures do
   @moduledoc """
   RE437 test fixtures: `panel`, the one valid `fan_out` / `fan_in` flow every region test edits.
 
@@ -8,7 +8,7 @@ defmodule Relay.FanOutFixtures do
 
   `fo` fans out to three branches (`a`, `b1`→`b2`, `c`), which join at `fi`. The fan-out edges
   carry no `on`. Plain data with atom keys, so a test can edit the lists before handing them to
-  `Relay.Flows.create_flow/2` or `Schemas.Flow.changeset/2`.
+  `Hamaca.Flows.create_flow/2` or `Schemas.Flow.changeset/2`.
 
   `three` (`three_nodes/0`, `three_edges/0`) is the engine tests' runnable variant: `b1` loops to
   `b2` on failure, `fi` goes to `done` on success and to `report` on failure.
@@ -123,7 +123,7 @@ defmodule Relay.FanOutFixtures do
   @doc "Creates the `region` flow on `board`, owned by `stage`."
   def region_flow(board, stage) do
     {:ok, flow} =
-      Relay.Flows.create_flow(board, %{
+      Hamaca.Flows.create_flow(board, %{
         key: "region",
         isolation: :shared_clean,
         stage_id: stage.id,
@@ -139,14 +139,14 @@ defmodule Relay.FanOutFixtures do
   `{branch, state, outcome}` in `specs`, at positions 0, 1, …. Returns `{run, branches}`.
   """
   def seed_region_run(card, specs) do
-    run = Relay.Factory.insert(:run, card: card, flow_key: "region", status: :running, current_node: "fo")
-    fan_out = Relay.Factory.insert(:node_execution, run: run, node: "fo")
+    run = Hamaca.Factory.insert(:run, card: card, flow_key: "region", status: :running, current_node: "fo")
+    fan_out = Hamaca.Factory.insert(:node_execution, run: run, node: "fo")
 
     branches =
       specs
       |> Enum.with_index()
       |> Enum.map(fn {{key, state, outcome}, position} ->
-        Relay.Factory.insert(:run_branch,
+        Hamaca.Factory.insert(:run_branch,
           run: run,
           fan_out_execution: fan_out,
           branch: key,

@@ -1,7 +1,7 @@
 defmodule Schemas.BoardSetupStep do
   @moduledoc """
   One step of a board's setup checklist (RE443): a row per `(board_id, step)`, where `step` is a
-  catalog id from `Relay.Setup.steps/0` (`"1"`…`"7"`, and `"5.1"`…`"5.8"` under step 5). A
+  catalog id from `Hamaca.Setup.steps/0` (`"1"`…`"7"`, and `"5.1"`…`"5.8"` under step 5). A
   connected machine's checklist (RE446) is a row per `(machine_id, step)` on the same board; the
   board's own rows have `machine_id` nil.
 

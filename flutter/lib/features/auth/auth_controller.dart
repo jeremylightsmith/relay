@@ -4,7 +4,7 @@
 // `/api/auth/native/google` (RelayWeb.NativeAuthController); on iOS, RE106's
 // sign_in_with_apple yields a nonce-bound Apple identity token → POST it with the
 // raw nonce to `/api/auth/native/apple`. Either response carries
-// `Set-Cookie: _relay_key=…`, which dio's cookie jar captures. We then inject that
+// `Set-Cookie: _hamaca_key=…`, which dio's cookie jar captures. We then inject that
 // cookie into flutter_inappwebview's store so embedded LiveView renders signed-in.
 //
 // RLY-86: that cookie is also persisted to the Keychain and, on launch, restored
@@ -29,7 +29,7 @@ import 'http_providers.dart';
 import 'session_store.dart';
 
 /// Phoenix's session cookie (see RelayWeb.Endpoint's `@session_options`).
-const relaySessionCookie = '_relay_key';
+const hamacaSessionCookie = '_hamaca_key';
 
 /// Where auth is in its lifecycle.
 ///
@@ -127,7 +127,7 @@ class AuthController extends Notifier<AuthState> {
 
       if (ok) {
         // /me slides the 7-day session window (RLY-127) and answers with a fresh
-        // `_relay_key`. The jar has it; write it back to the Keychain or the next
+        // `_hamaca_key`. The jar has it; write it back to the Keychain or the next
         // cold start restores the older cookie and the window never really slides.
         await persistSession();
         state = AuthState(
@@ -269,7 +269,7 @@ class AuthController extends Notifier<AuthState> {
   Future<void> persistSession() async {
     final cookies = await _jar.loadForRequest(Uri.parse(AppConfig.baseUrl));
     for (final c in cookies) {
-      if (c.name == relaySessionCookie) {
+      if (c.name == hamacaSessionCookie) {
         await _store.write(c.value);
         return;
       }
@@ -278,7 +278,7 @@ class AuthController extends Notifier<AuthState> {
 
   Cookie _sessionCookie(String value) {
     final uri = Uri.parse(AppConfig.baseUrl);
-    return Cookie(relaySessionCookie, value)
+    return Cookie(hamacaSessionCookie, value)
       ..domain = uri.host
       ..path = '/'
       ..httpOnly = true

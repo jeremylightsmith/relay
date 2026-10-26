@@ -4,8 +4,8 @@ defmodule Schemas.CardDependency do
   (blocked) card, `depends_on_card_id` is the **blocker**.
 
   There is deliberately no `changeset/2`: rows are insert/delete only and are written by exactly
-  one function, `Relay.Cards.set_dependencies/4`, the way `Schemas.SubTask` rows are written by
-  `Relay.Cards.set_sub_tasks/2`. Ref resolution, the all-or-nothing unknown-ref rule and the
+  one function, `Hamaca.Cards.set_dependencies/4`, the way `Schemas.SubTask` rows are written by
+  `Hamaca.Cards.set_sub_tasks/2`. Ref resolution, the all-or-nothing unknown-ref rule and the
   cycle check all live there, because they are properties of the *set*, not of a single row.
 
   No `updated_at` — an edge is never edited, only created or dropped.

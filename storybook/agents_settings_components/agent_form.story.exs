@@ -2,7 +2,7 @@ defmodule Storybook.AgentsSettingsComponents.AgentForm do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.AgentsSettingsComponents.agent_form/1
+  def function, do: &HamacaWeb.AgentsSettingsComponents.agent_form/1
   def render_source, do: :function
 
   # The Add / Edit agent panel (RE433, card mockup 01). Forms are built from the schema changeset

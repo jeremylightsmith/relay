@@ -2,11 +2,11 @@ defmodule Storybook.FlowEditor.FanOutInspector do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowEditorComponents.fan_out_inspector/1
+  def function, do: &HamacaWeb.FlowEditorComponents.fan_out_inspector/1
   def render_source, do: :function
 
   # RE439, card mockup "Editor — fan out / fan in as compact pills", section 1: the fan-out
-  # inspector. A region inlined (test/support's Relay.FanOutFixtures isn't compiled in dev):
+  # inspector. A region inlined (test/support's Hamaca.FanOutFixtures isn't compiled in dev):
   # review_panel ⇉ security / correctness ⇄ fix / conventions → review_join.
   @nodes [
     %{key: "prep", type: :shell},

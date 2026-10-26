@@ -2,13 +2,13 @@ defmodule Storybook.FlowShapeComponents.ShapeCallout do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  alias Relay.Flows.Shape
+  alias Hamaca.Flows.Shape
 
-  def function, do: &RelayWeb.FlowShapeComponents.shape_callout/1
+  def function, do: &HamacaWeb.FlowShapeComponents.shape_callout/1
   def render_source, do: :function
 
   # RE432, card mockup "B — broken-shape callouts on the paused stage rows (all four problems)".
-  # Every problem is built by the domain (`Relay.Flows.Shape.problems/2` over in-memory stages),
+  # Every problem is built by the domain (`Hamaca.Flows.Shape.problems/2` over in-memory stages),
   # so the WHAT / WHY / fix wording is the real sentence.
   defp problem(stages, stage_id, key, enabled \\ true) do
     [problem] = Shape.problems(stages, [%{key: key, stage_id: stage_id, enabled: enabled}])
@@ -78,7 +78,7 @@ defmodule Storybook.FlowShapeComponents.ShapeCallout do
         attributes: %{
           id: "callout-refusal",
           problem: upstream_review(),
-          error: Relay.Boards.stage_refusal_message(:invalid_anchor)
+          error: Hamaca.Boards.stage_refusal_message(:invalid_anchor)
         }
       }
     ]

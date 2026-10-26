@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddReleaseRequestsToRunners do
+defmodule Hamaca.Repo.Migrations.AddReleaseRequestsToRunners do
   use Ecto.Migration
 
   # RE337: card refs a human asked this runner to release (free the worktree, keep the run).

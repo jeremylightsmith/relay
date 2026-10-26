@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddKindToComments do
+defmodule Hamaca.Repo.Migrations.AddKindToComments do
   use Ecto.Migration
 
   def change do

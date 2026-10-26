@@ -18,12 +18,12 @@ defmodule Schemas.Card do
   boards. `ai_result` (RLY-18) carries the agent's structured result blob
   (summary/changes/screens), nullable, cast like `spec`;
   `sub_tasks` is the card's ordered checklist (RLY-18), written via
-  `Relay.Cards.set_sub_tasks/2`, never cast here. `public_description`
+  `Hamaca.Cards.set_sub_tasks/2`, never cast here. `public_description`
   (RLY-69) is the optional public-board copy, distinct from the internal
   `description`; nullable, cast like `description`. `posted_by_user_id`
   (RLY-225) records the public poster of an idea; nullable, never cast —
   set programmatically on the public-posting path only. `mockups` (RE370) is the card's HTML
-  mockup list — nullable, never cast here; written via `Relay.Cards.set_mockups/2`.
+  mockup list — nullable, never cast here; written via `Hamaca.Cards.set_mockups/2`.
 
   `story_activity_id` / `story_step_id` / `release_id` (RE265) place the card on the story
   map — all three nilable, all three cast **only** through `story_map_changeset/2`, kept
@@ -65,7 +65,7 @@ defmodule Schemas.Card do
     field :pr_url, :string
     field :ai_result, :map
     # RE370 — HTML mockups: [%{"url" => "/attachments/<id>", "caption" => String | nil}], nil when
-    # none. Never cast by changeset/2 — written only through Relay.Cards.set_mockups/2, which
+    # none. Never cast by changeset/2 — written only through Hamaca.Cards.set_mockups/2, which
     # validates every url is an HTML or image attachment on this card and REPLACES the whole list.
     field :mockups, {:array, :map}
     field :public_description, :string
@@ -79,7 +79,7 @@ defmodule Schemas.Card do
     has_many :owners, Schemas.CardOwner
     has_many :sub_tasks, Schemas.SubTask
     # RE93 — the cards this card is BLOCKED BY. Deliberately absent from changeset/2 and from
-    # Relay.Cards' @list_card_fields: the set is written through Relay.Cards.set_dependencies/4
+    # Hamaca.Cards' @list_card_fields: the set is written through Hamaca.Cards.set_dependencies/4
     # and read through unmet_dependencies/2, exactly the way sub_tasks is.
     has_many :dependencies, Schemas.CardDependency
     embeds_one :rejection, Schemas.CardRejection, on_replace: :delete
@@ -169,7 +169,7 @@ defmodule Schemas.Card do
   path for everything story-map on a card.
 
   Enforces the one invariant: **if `story_step_id` is set, `story_activity_id` is set**. The
-  matching *value* is derived — `Relay.StoryMap.assign_card/2` reads the activity off the step
+  matching *value* is derived — `Hamaca.StoryMap.assign_card/2` reads the activity off the step
   itself — so this guard exists to stop the direct-changeset path producing a half-state.
   `release_id` is deliberately independent: a card can be mapped to a cell with no release.
   """
@@ -209,7 +209,7 @@ defmodule Schemas.Card do
 
   @doc """
   True when the card is awaiting a human review decision: `:in_review` (RE388). The ONE definition
-  of "awaiting review" — `Relay.Cards.next_awaiting_review/4` gates the review drawer's advance on it.
+  of "awaiting review" — `Hamaca.Cards.next_awaiting_review/4` gates the review drawer's advance on it.
   """
   @spec awaiting_review?(t()) :: boolean()
   def awaiting_review?(%__MODULE__{status: status}), do: status == :in_review
@@ -220,26 +220,26 @@ defmodule Schemas.Card do
   @doc """
   The statuses where the card is explicitly waiting on a human: an answer (`awaiting_answer?/1`)
   or a review (`awaiting_review?/1`) (RE418). The ONE definition of this set — the needs-you
-  feed (`Relay.Cards.needs_you_feed/1`) and the push policy (`Relay.Push.notification_statuses/0`)
+  feed (`Hamaca.Cards.needs_you_feed/1`) and the push policy (`Hamaca.Push.notification_statuses/0`)
   call it, never retype it.
   """
   @spec awaiting_human_statuses() :: [atom()]
   def awaiting_human_statuses, do: @awaiting_human_statuses
 
   @doc """
-  The status half of `Relay.Cards.needs_you?/3` (RE418): a strict superset of
+  The status half of `Hamaca.Cards.needs_you?/3` (RE418): a strict superset of
   `awaiting_human_statuses/0` that adds `:failed`. A dead run also needs a human, but the card is
   not "waiting" — so it is neither pushed nor shown in the needs-you feed. Ready-awaiting-human
-  is a separate, stage-dependent predicate (`Relay.Cards.ready_awaiting_human?/3`), not a status.
+  is a separate, stage-dependent predicate (`Hamaca.Cards.ready_awaiting_human?/3`), not a status.
   """
   @spec needs_you_statuses() :: [atom()]
   def needs_you_statuses, do: awaiting_human_statuses() ++ [:failed]
 
   @doc """
   The dashless human-facing ref for a board `key` + `ref_number`, e.g. `"RL230"` — the one
-  definition of the ref format (RE417). Behind `ref/2`, `Relay.Cards.format_ref/2`, `Relay.Push`,
-  and the board-tile render (`RelayWeb.CoreComponents.stage_column/1`, which holds a key string
-  + a plain card map, not `%Card{}` structs). `Relay.Activity.LogSink` mirrors it in SQL.
+  definition of the ref format (RE417). Behind `ref/2`, `Hamaca.Cards.format_ref/2`, `Hamaca.Push`,
+  and the board-tile render (`HamacaWeb.CoreComponents.stage_column/1`, which holds a key string
+  + a plain card map, not `%Card{}` structs). `Hamaca.Activity.LogSink` mirrors it in SQL.
   """
   @spec format_ref(String.t(), integer()) :: String.t()
   def format_ref(key, ref_number), do: "#{key}#{ref_number}"
@@ -272,9 +272,9 @@ defmodule Schemas.Card do
 
   @doc """
   The card's HTML mockups as `[%{id, caption}]` (RE370, RE380) — the ONE reading of the `mockups`
-  jsonb column, shared by the drawer, the mockup viewer and `RelayWeb.BoardLive`.
+  jsonb column, shared by the drawer, the mockup viewer and `HamacaWeb.BoardLive`.
 
-  `mockups` is validated on write (`Relay.Cards.set_mockups/2`), but it is still a jsonb column a
+  `mockups` is validated on write (`Hamaca.Cards.set_mockups/2`), but it is still a jsonb column a
   render must never crash on: an entry not shaped like `%{"url" => "/attachments/<id>"}` is
   skipped, a non-binary caption reads as nil, and a non-list value has no mockups. Order is kept.
   """

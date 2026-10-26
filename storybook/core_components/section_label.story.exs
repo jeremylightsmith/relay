@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.SectionLabel do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.section_label/1
+  def function, do: &HamacaWeb.CoreComponents.section_label/1
   def render_source, do: :function
 
   def variations do

@@ -1,8 +1,8 @@
-defmodule Relay.AppleTokenFixtures do
+defmodule Hamaca.AppleTokenFixtures do
   @moduledoc """
   RE106 test fixtures for Sign in with Apple: an RSA signing key, a `Req.Test` stub
   that serves its public half as Apple's JWKS, and RS256 identity tokens signed with it.
-  Shared by the `Relay.Accounts.AppleTokenValidator` and `NativeAuthController` tests, so
+  Shared by the `Hamaca.Accounts.AppleTokenValidator` and `NativeAuthController` tests, so
   no real Apple contact happens in the suite. Boundary checks are off — test-only support.
   """
 
@@ -39,7 +39,7 @@ defmodule Relay.AppleTokenFixtures do
     {_meta, public} = JOSE.JWK.to_public_map(jwk)
     keys = %{"keys" => [Map.merge(public, %{"kid" => kid, "alg" => "RS256", "use" => "sig"})]}
 
-    Req.Test.stub(Relay.Accounts.AppleTokenValidator, fn conn -> Req.Test.json(conn, keys) end)
+    Req.Test.stub(Hamaca.Accounts.AppleTokenValidator, fn conn -> Req.Test.json(conn, keys) end)
     :ok
   end
 

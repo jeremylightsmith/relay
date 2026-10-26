@@ -1,0 +1,506 @@
+defmodule Hamaca.Runs.SchedulerExplainTest do
+  use ExUnit.Case, async: true
+
+  alias Hamaca.Flows.Shape
+  alias Hamaca.Runs
+  alias Hamaca.Runs.Scheduler
+  alias Hamaca.Runs.Scheduler.Snapshot
+
+  # Fixture builders mirror test/hamaca/runs/scheduler_test.exs:10-56 exactly, so a
+  # snapshot that exercises plan/1 there exercises explain/2 here unchanged.
+  defp snap(fields), do: struct(Snapshot, fields)
+
+  defp stage(id, opts) do
+    %{
+      id: id,
+      position: Keyword.get(opts, :position, id),
+      parent_id: Keyword.get(opts, :parent_id),
+      wip_limit: Keyword.get(opts, :wip_limit)
+    }
+  end
+
+  defp card(id, stage_id, opts \\ []) do
+    %{
+      id: id,
+      ref: "RLY-#{id}",
+      stage_id: stage_id,
+      status: Keyword.get(opts, :status, :ready),
+      active_owner: Keyword.get(opts, :active_owner),
+      position: Keyword.get(opts, :position, id),
+      blocked_by: Keyword.get(opts, :blocked_by, [])
+    }
+  end
+
+  defp flow(key, pulls_from, works_in, opts \\ []) do
+    %{
+      key: key,
+      pulls_from_stage_id: pulls_from,
+      stage_id: works_in,
+      isolation: Keyword.get(opts, :isolation, :shared_clean)
+    }
+  end
+
+  defp run(id, card_id, opts) do
+    %{
+      id: id,
+      card_id: card_id,
+      status: Keyword.get(opts, :status, :parked),
+      flow_key: Keyword.get(opts, :flow_key, "f"),
+      isolation: Keyword.get(opts, :isolation, :shared_clean),
+      pinned_runner_id: Keyword.get(opts, :pinned_runner_id),
+      pinned_runner_name: Keyword.get(opts, :pinned_runner_name),
+      parked_reason: Keyword.get(opts, :parked_reason)
+    }
+  end
+
+  defp slots(shared, excl), do: %{shared_clean: shared, exclusive: excl}
+
+  defp exec(id, opts \\ []) do
+    {id,
+     %{
+       name: Keyword.get(opts, :name, "e#{id}"),
+       version: Keyword.get(opts, :version, 1),
+       outdated: Keyword.get(opts, :outdated, false),
+       freshness: Keyword.get(opts, :freshness, :fresh),
+       rate_limit: Keyword.get(opts, :rate_limit)
+     }}
+  end
+
+  defp base(opts) do
+    snap(
+      stages: [stage(1, position: 1), stage(2, position: 2)],
+      cards: Keyword.fetch!(opts, :cards),
+      flows: Keyword.get(opts, :flows, []),
+      runs: Keyword.get(opts, :runs, []),
+      capacity: Keyword.get(opts, :capacity, %{})
+    )
+  end
+
+  test "a card a flow would pull with free capacity is dispatchable" do
+    s = base(cards: [card(10, 1)], flows: [flow("code", 1, 2)], capacity: %{"e1" => slots(1, 0)})
+
+    assert %{verdict: :dispatchable} = Scheduler.explain(s, 10)
+  end
+
+  test "no enabled flow pulling from the card's stage names that reason" do
+    s = base(cards: [card(10, 1)], capacity: %{"e1" => slots(1, 0)})
+
+    assert %{verdict: :no_enabled_flow, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
+    assert detail =~ "no enabled flow"
+    assert evidence.flow_key == nil
+  end
+
+  test "a flow that would pull but no runner at all is no_runner" do
+    s = base(cards: [card(10, 1)], flows: [flow("code", 1, 2)], capacity: %{})
+
+    assert %{verdict: :no_runner, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
+    assert detail =~ "no runner"
+    assert evidence.flow_key == "code"
+    assert evidence.capacity == %{}
+  end
+
+  test "a full works-in column is wip_full" do
+    s =
+      snap(
+        stages: [stage(1, position: 1), stage(2, position: 2, wip_limit: 1)],
+        cards: [card(10, 1), card(11, 2)],
+        flows: [flow("code", 1, 2)],
+        capacity: %{"e1" => slots(5, 0)}
+      )
+
+    assert %{verdict: :wip_full, evidence: %{wip_limit: 1, wip_used: 1}} = Scheduler.explain(s, 10)
+  end
+
+  test "a human-owned card is owned_by_human" do
+    s =
+      base(
+        cards: [card(10, 1, active_owner: :human)],
+        flows: [flow("code", 1, 2)],
+        capacity: %{"e1" => slots(1, 0)}
+      )
+
+    assert %{verdict: :owned_by_human} = Scheduler.explain(s, 10)
+  end
+
+  test "a needs_input card is blocked_on_input" do
+    s =
+      base(
+        cards: [card(10, 1, status: :needs_input)],
+        flows: [flow("code", 1, 2)],
+        capacity: %{"e1" => slots(1, 0)}
+      )
+
+    assert %{verdict: :blocked_on_input} = Scheduler.explain(s, 10)
+  end
+
+  test "a live run names its run id" do
+    s =
+      base(
+        cards: [card(10, 2)],
+        flows: [flow("code", 1, 2)],
+        runs: [run(5, 10, status: :running)],
+        capacity: %{"e1" => slots(1, 0)}
+      )
+
+    assert %{verdict: :run_active, evidence: %{run_id: 5}} = Scheduler.explain(s, 10)
+  end
+
+  test "a parked :runner_gone run the planner cannot place is :resume_refused" do
+    s =
+      base(
+        cards: [card(10, 2)],
+        flows: [flow("code", 1, 2)],
+        runs: [run(5, 10, status: :parked, parked_reason: :runner_gone)],
+        # zero capacity: with a free slot advertised the run would actually resume on plan/1's
+        # next pass, making explain/2 correctly answer :dispatchable instead.
+        capacity: %{}
+      )
+
+    assert %{verdict: :resume_refused, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
+    assert detail =~ "refusing to resume it on every tick"
+    assert detail =~ "no runner has a free slot"
+    assert evidence.run_id == 5
+    assert evidence.resume_refused_reason == :no_free_slot
+    assert evidence.isolation == :shared_clean
+    assert evidence.pinned_runner_id == nil
+  end
+
+  test "a refused exclusive run still names the machine holding its worktree" do
+    s =
+      base(
+        cards: [card(10, 2, status: :working)],
+        flows: [flow("f", 1, 2, isolation: :exclusive)],
+        runs: [
+          run(5, 10,
+            status: :parked,
+            parked_reason: :runner_gone,
+            isolation: :exclusive,
+            pinned_runner_id: 42,
+            pinned_runner_name: "exec-a"
+          )
+        ],
+        capacity: %{}
+      )
+
+    assert %{verdict: :resume_refused, detail: detail, evidence: evidence} = Scheduler.explain(s, 10)
+    assert detail =~ ~s(runner "exec-a")
+    assert detail =~ "exclusive affinity"
+    assert evidence.pinned_runner_name == "exec-a"
+    assert evidence.pinned_runner_id == 42
+    assert evidence.isolation == :exclusive
+    assert evidence.resume_refused_reason == :pinned_runner_absent
+  end
+
+  test "a parked :needs_input run (already answered) is awaiting_listener_resume, not awaiting_capacity" do
+    s =
+      base(
+        cards: [card(10, 2, status: :working)],
+        flows: [flow("code", 1, 2)],
+        runs: [run(5, 10, status: :parked, parked_reason: :needs_input)],
+        capacity: %{"e1" => slots(1, 0)}
+      )
+
+    assert %{verdict: :awaiting_listener_resume, detail: detail, evidence: %{run_id: 5}} =
+             Scheduler.explain(s, 10)
+
+    assert detail =~ "Listener"
+  end
+
+  test "a card in a trigger stage with a non-pullable status is not_eligible, not no_enabled_flow" do
+    s =
+      base(
+        cards: [card(10, 1, status: :in_review)],
+        flows: [flow("code", 1, 2)],
+        capacity: %{"e1" => slots(1, 0)}
+      )
+
+    assert %{verdict: :not_eligible, detail: detail} = Scheduler.explain(s, 10)
+    assert detail =~ "in_review"
+  end
+
+  test "an unknown card id is reported, not raised" do
+    assert %{verdict: :unknown_card} = Scheduler.explain(base(cards: []), 999)
+  end
+
+  describe "the terminal capacity branch (RLY-191)" do
+    # A card a flow would pull, but no free slot — the branch that used to be one
+    # undifferentiated :awaiting_capacity now splits on the roster.
+    defp blocked(runners) do
+      snap(
+        stages: [stage(1, position: 1), stage(2, position: 2)],
+        cards: [card(10, 1)],
+        flows: [flow("code", 1, 2)],
+        capacity: %{},
+        runners: runners
+      )
+    end
+
+    test "an empty roster is :no_runner, not :awaiting_capacity" do
+      assert %{verdict: :no_runner, detail: detail} = Scheduler.explain(blocked(%{}), 10)
+      assert detail =~ "no runner is connected"
+    end
+
+    test "every live runner outdated is :runner_outdated with the version pair" do
+      execs = Map.new([exec(1, outdated: true, version: nil), exec(2, outdated: true, version: 0)])
+
+      assert %{verdict: :runner_outdated, detail: detail, evidence: evidence} =
+               Scheduler.explain(blocked(execs), 10)
+
+      assert detail =~ "running old code"
+      assert detail =~ "requires v#{Runs.min_runner_version()}"
+      assert evidence.required_version == Runs.min_runner_version()
+      assert %{name: _, version: nil} = Enum.find(evidence.running_versions, &(&1.version == nil))
+      assert Enum.any?(evidence.running_versions, &(&1.version == 0))
+    end
+
+    test "a current-but-full roster stays :awaiting_capacity" do
+      execs = Map.new([exec(1, outdated: false, version: 1, freshness: :fresh)])
+
+      assert %{verdict: :awaiting_capacity, detail: detail} = Scheduler.explain(blocked(execs), 10)
+      assert detail =~ "busy"
+    end
+
+    test "a roster whose only runner has gone silent is :no_runner" do
+      execs = Map.new([exec(1, freshness: :gone)])
+
+      assert %{verdict: :no_runner} = Scheduler.explain(blocked(execs), 10)
+    end
+  end
+
+  describe "capacity_diagnosis/1" do
+    test "returns the reason atom and the version evidence" do
+      execs = Map.new([exec(1, outdated: true, version: 2)])
+      s = snap(cards: [], runners: execs)
+
+      assert {:runner_outdated, %{required_version: required, running_versions: [%{version: 2}]}} =
+               Scheduler.capacity_diagnosis(s)
+
+      assert required == Runs.min_runner_version()
+      assert {:no_runner, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: %{}))
+
+      assert {:runner_gone, _} =
+               Scheduler.capacity_diagnosis(snap(cards: [], runners: Map.new([exec(1, freshness: :gone)])))
+
+      assert {:awaiting_capacity, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: Map.new([exec(1)])))
+    end
+  end
+
+  describe "agreement with plan/1" do
+    # The anti-drift guard the spec requires: across a matrix of snapshots, every card
+    # plan/1 dispatches must explain as :dispatchable, and every card it does not must
+    # explain as something else.
+    defp matrix do
+      stages = [stage(1, position: 1), stage(2, position: 2, wip_limit: 2)]
+
+      for cap <- [%{}, %{"e1" => slots(1, 0)}, %{"e1" => slots(5, 0)}],
+          status <- [:ready, :queued, :working, :needs_input],
+          owner <- [nil, :human],
+          flows <- [[], [flow("code", 1, 2)]],
+          runs <- [
+            [],
+            [run(5, 11, status: :running)],
+            [run(5, 11, status: :parked, parked_reason: :runner_gone)],
+            [run(5, 11, status: :parked, parked_reason: :needs_input)]
+          ] do
+        snap(
+          stages: stages,
+          cards: [card(10, 1, status: status, active_owner: owner), card(11, 2)],
+          flows: flows,
+          runs: runs,
+          capacity: cap
+        )
+      end
+    end
+
+    test "explain/2 says dispatchable exactly when plan/1 dispatches" do
+      for s <- matrix(), card <- s.cards do
+        plan = Scheduler.plan(s)
+
+        dispatched? =
+          Enum.any?(plan.dispatches, fn
+            {:start, card_id, _flow_key, _runner_id} ->
+              card_id == card.id
+
+            {:resume, run_id, _runner_id} ->
+              Enum.any?(s.runs, &(&1.id == run_id and &1.card_id == card.id))
+          end)
+
+        %{verdict: verdict} = Scheduler.explain(s, card.id)
+
+        assert dispatched? == (verdict == :dispatchable),
+               "card #{card.id} dispatched?=#{dispatched?} but verdict=#{verdict}"
+      end
+    end
+  end
+
+  # RE93 — a dependency wait is a LEGITIMATE wait, so it is reported after the "no enabled flow"
+  # dead end (the worse news) and before :not_eligible.
+  describe "explain/2 — blocked by dependencies" do
+    test "names the count and the blocking refs" do
+      snapshot =
+        snap(
+          stages: [stage(1, []), stage(2, [])],
+          cards: [card(10, 1, blocked_by: [11, 12]), card(11, 1), card(12, 1)],
+          flows: [flow("code", 1, 2)],
+          capacity: %{"ex" => slots(1, 1)}
+        )
+
+      assert %{verdict: :blocked_by_dependencies, detail: detail, evidence: evidence} =
+               Scheduler.explain(snapshot, 10)
+
+      assert detail ==
+               "This card is waiting on 2 cards that have not reached a Done column: RLY-11, RLY-12."
+
+      assert evidence.blocked_by == ["RLY-11", "RLY-12"]
+    end
+
+    test "reads 1 card / has in the singular" do
+      snapshot =
+        snap(
+          stages: [stage(1, []), stage(2, [])],
+          cards: [card(10, 1, blocked_by: [11]), card(11, 1)],
+          flows: [flow("code", 1, 2)],
+          capacity: %{"ex" => slots(1, 1)}
+        )
+
+      assert %{detail: detail} = Scheduler.explain(snapshot, 10)
+      assert detail == "This card is waiting on 1 card that has not reached a Done column: RLY-11."
+    end
+
+    test "a missing flow is the worse news and still wins" do
+      snapshot = snap(stages: [stage(1, [])], cards: [card(10, 1, blocked_by: [11]), card(11, 1)], flows: [])
+
+      assert %{verdict: :no_enabled_flow} = Scheduler.explain(snapshot, 10)
+    end
+
+    test "evidence.blocked_by is [] for an unblocked card" do
+      snapshot =
+        snap(
+          stages: [stage(1, []), stage(2, [])],
+          cards: [card(10, 1)],
+          flows: [flow("code", 1, 2)],
+          capacity: %{"ex" => slots(1, 1)}
+        )
+
+      assert %{evidence: %{blocked_by: []}} = Scheduler.explain(snapshot, 10)
+    end
+  end
+
+  describe "capacity_diagnosis/1 — rate limits (RE320, per harness since RE436)" do
+    # `Hamaca.Runs.active_rate_limit/2`'s map: the runner's earliest-lifting harness pause.
+    defp paused_at(resets_at, overrides \\ %{}) do
+      Map.merge(
+        %{harness: "claude-code", window: "5h", used_pct: 95.0, pause_at: 90, resets_at: resets_at, reason: "limit"},
+        overrides
+      )
+    end
+
+    # Scenario 9
+    test "every live current runner paused is :runner_rate_limited, resuming at the earliest reset" do
+      early = ~U[2026-09-14 15:40:00Z]
+      late = ~U[2026-09-14 18:00:00Z]
+
+      execs =
+        Map.new([
+          exec(1, rate_limit: paused_at(late)),
+          exec(2,
+            rate_limit:
+              paused_at(early, %{harness: "codex", reason: "rejected", window: nil, used_pct: nil, pause_at: nil})
+          )
+        ])
+
+      assert {:runner_rate_limited, evidence} = Scheduler.capacity_diagnosis(snap(cards: [], runners: execs))
+      assert evidence.resumes_at == early
+
+      assert [
+               %{name: "e1", harness: "claude-code", window: "5h", reason: "limit"},
+               %{name: "e2", harness: "codex", reason: "rejected"}
+             ] = Enum.sort_by(evidence.rate_limited_runners, & &1.name)
+
+      assert %{verdict: :runner_rate_limited, detail: detail} = Scheduler.explain(blocked(execs), 10)
+      assert detail =~ "codex refused"
+      assert detail =~ "claude-code 5h 95% / 90%"
+    end
+
+    test "one live current runner that is not paused keeps it :awaiting_capacity" do
+      execs = Map.new([exec(1, rate_limit: paused_at(~U[2026-09-14 15:40:00Z])), exec(2)])
+
+      assert {:awaiting_capacity, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: execs))
+    end
+
+    test "outdated runners do not count: the current ones all being paused is enough" do
+      execs = Map.new([exec(1, outdated: true, version: 0), exec(2, rate_limit: paused_at(~U[2026-09-14 15:40:00Z]))])
+
+      assert {:runner_rate_limited, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: execs))
+    end
+
+    test "a gone runner's pause is irrelevant — the roster is :runner_gone" do
+      execs = Map.new([exec(1, freshness: :gone, rate_limit: paused_at(~U[2026-09-14 15:40:00Z]))])
+
+      assert {:runner_gone, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: execs))
+    end
+
+    test "roster_blocking_reasons/0 is every roster-blaming reason, never :awaiting_capacity" do
+      assert Scheduler.roster_blocking_reasons() == [:runner_outdated, :no_runner, :runner_gone, :runner_rate_limited]
+    end
+
+    test "no_live_runner_reasons/0 is the empty-or-silent roster pair, each one roster-blocking" do
+      assert Scheduler.no_live_runner_reasons() == [:no_runner, :runner_gone]
+      assert Enum.all?(Scheduler.no_live_runner_reasons(), &(&1 in Scheduler.roster_blocking_reasons()))
+    end
+
+    test "explain/2 names the pause for a card the flow would dispatch" do
+      execs = Map.new([exec(1, rate_limit: paused_at(~U[2026-09-14 15:40:00Z]))])
+
+      assert %{verdict: :runner_rate_limited, detail: detail} = Scheduler.explain(blocked(execs), 10)
+      assert detail =~ "every connected runner is paused at its usage limits (claude-code 5h 95% / 90%)"
+      assert detail =~ "resumes 3:40 PM UTC"
+    end
+  end
+
+  # RE430 — a broken board shape pauses the flow; the diagnosis names it and carries the problem.
+  describe "explain/2 — paused flows (RE430)" do
+    defp problem do
+      %{
+        flow_key: "f",
+        stage_id: 2,
+        enabled: true,
+        kind: :no_downstream,
+        what: "W is the last column on the board, so there is no column after it.",
+        why: "When a run finishes it moves the card to the next column.",
+        fixes: [%{action: :add_stage_after, stage_id: 2, label: "Add a stage after W"}],
+        columns: [%{stage_id: 2, name: "W", type: :work, mark: :self}]
+      }
+    end
+
+    defp paused(problems, card_opts \\ []) do
+      %{
+        base(cards: [card(10, 1, card_opts)], flows: [flow("f", 1, 2)], capacity: %{"e1" => slots(1, 0)})
+        | problems: problems
+      }
+    end
+
+    test "5. a card the paused flow would pull is :flow_paused with the problem as evidence" do
+      result = Scheduler.explain(paused([problem()]), 10)
+
+      assert result.verdict == :flow_paused
+      assert result.detail == Shape.paused_detail(problem())
+      assert result.evidence.problem == Shape.wire(problem())
+      assert result.evidence.problem["what"] == problem().what
+    end
+
+    test "6. a healthy board is :dispatchable with no problem in evidence" do
+      result = Scheduler.explain(paused([]), 10)
+
+      assert result.verdict == :dispatchable
+      assert result.evidence.problem == nil
+    end
+
+    test "7. a human-owned card is still :owned_by_human on a paused flow" do
+      result = Scheduler.explain(paused([problem()], active_owner: :human), 10)
+
+      assert result.verdict == :owned_by_human
+      assert result.evidence.problem == nil
+    end
+  end
+end

@@ -2,7 +2,7 @@ defmodule Storybook.RunComponents.RunMiniGraph do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.run_mini_graph/1
+  def function, do: &HamacaWeb.RunComponents.run_mini_graph/1
   def render_source, do: :function
 
   def variations do

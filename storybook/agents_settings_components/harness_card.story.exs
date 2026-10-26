@@ -2,7 +2,7 @@ defmodule Storybook.AgentsSettingsComponents.HarnessCard do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.AgentsSettingsComponents.harness_card/1
+  def function, do: &HamacaWeb.AgentsSettingsComponents.harness_card/1
   def render_source, do: :function
 
   # A harness card (RE433, card mockup 01): COMMAND, MODELS chips, the red line when an agent
@@ -22,7 +22,7 @@ defmodule Storybook.AgentsSettingsComponents.HarnessCard do
 
   # RE436 — each seed harness carries one USAGE source: output, command, none.
   defp seed(key, id) do
-    seed = Enum.find(Relay.Agents.seed_harnesses(), &(&1.key == key))
+    seed = Enum.find(Hamaca.Agents.seed_harnesses(), &(&1.key == key))
     struct(Schemas.Harness, Map.put(seed, :id, id))
   end
 

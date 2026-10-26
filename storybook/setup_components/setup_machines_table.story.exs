@@ -2,11 +2,11 @@ defmodule Storybook.SetupComponents.SetupMachinesTable do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.SetupComponents.setup_machines_table/1
+  def function, do: &HamacaWeb.SetupComponents.setup_machines_table/1
   def render_source, do: :function
 
   # RE446, card mockup "Payoff — first card turns violet, Settings → Setup, connect a machine",
-  # frame C: "Machines on this board". Rows are `Relay.Setup.machines/1` rows: the board's own
+  # frame C: "Machines on this board". Rows are `Hamaca.Setup.machines/1` rows: the board's own
   # setup first, then each connected machine.
   def variations do
     [

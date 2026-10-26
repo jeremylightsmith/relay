@@ -2,11 +2,11 @@ defmodule Storybook.FlowGraph do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowGraphComponents.flow_graph/1
+  def function, do: &HamacaWeb.FlowGraphComponents.flow_graph/1
   def render_source, do: :function
 
   defp code_flow do
-    Enum.find(Relay.Flows.DefaultLibrary.all(), &(&1.key == "code"))
+    Enum.find(Hamaca.Flows.DefaultLibrary.all(), &(&1.key == "code"))
   end
 
   def variations do
@@ -56,7 +56,7 @@ defmodule Storybook.FlowGraph do
       %{from: "write_docs", to: "done", on: :succeeded}
     ]
 
-    # RE439: a fan-out region, inlined (test/support's Relay.FanOutFixtures is not compiled in dev).
+    # RE439: a fan-out region, inlined (test/support's Hamaca.FanOutFixtures is not compiled in dev).
     region_nodes = [
       %{key: "prep", type: :shell, run: "mix deps.get"},
       %{key: "review_panel", type: :fan_out, max_parallel: 2},
@@ -99,7 +99,7 @@ defmodule Storybook.FlowGraph do
         attributes: %{
           nodes: code.nodes,
           edges: code.edges,
-          layout: RelayWeb.FlowLayout.layout(code.nodes, code.edges),
+          layout: HamacaWeb.FlowLayout.layout(code.nodes, code.edges),
           lands_on: "Review",
           interactive?: false
         }
@@ -113,7 +113,7 @@ defmodule Storybook.FlowGraph do
         attributes: %{
           nodes: park_nodes,
           edges: park_edges,
-          layout: RelayWeb.FlowLayout.layout(park_nodes, park_edges),
+          layout: HamacaWeb.FlowLayout.layout(park_nodes, park_edges),
           lands_on: "Review",
           interactive?: false
         }
@@ -130,7 +130,7 @@ defmodule Storybook.FlowGraph do
         attributes: %{
           nodes: branchy_nodes,
           edges: branchy_edges,
-          layout: RelayWeb.FlowLayout.layout(branchy_nodes, branchy_edges),
+          layout: HamacaWeb.FlowLayout.layout(branchy_nodes, branchy_edges),
           lands_on: "Review",
           interactive?: false
         }
@@ -146,7 +146,7 @@ defmodule Storybook.FlowGraph do
         attributes: %{
           nodes: llm_nodes,
           edges: llm_edges,
-          layout: RelayWeb.FlowLayout.layout(llm_nodes, llm_edges),
+          layout: HamacaWeb.FlowLayout.layout(llm_nodes, llm_edges),
           lands_on: "Review",
           interactive?: false,
           llm: %{default: "Claude Opus", red: MapSet.new(["Gemini Pro"])}
@@ -163,7 +163,7 @@ defmodule Storybook.FlowGraph do
         attributes: %{
           nodes: region_nodes,
           edges: region_edges,
-          layout: RelayWeb.FlowLayout.layout(region_nodes, region_edges),
+          layout: HamacaWeb.FlowLayout.layout(region_nodes, region_edges),
           lands_on: "Review",
           interactive?: false
         }
@@ -175,7 +175,7 @@ defmodule Storybook.FlowGraph do
           nodes: [%{key: "work", type: :agent, run: "go", llm: "Claude Sonnet", effort: "high"}],
           edges: [%{from: "start", to: "work", on: nil}, %{from: "work", to: "done", on: :succeeded}],
           layout:
-            RelayWeb.FlowLayout.layout(
+            HamacaWeb.FlowLayout.layout(
               [%{key: "work", type: :agent, run: "go"}],
               [%{from: "start", to: "work", on: nil}, %{from: "work", to: "done", on: :succeeded}]
             ),

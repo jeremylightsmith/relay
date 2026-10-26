@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddExampleTemplateToBoards do
+defmodule Hamaca.Repo.Migrations.AddExampleTemplateToBoards do
   use Ecto.Migration
 
   # RE444: marks a board as the public example for one template slug. Nullable; at most one

@@ -1,4 +1,4 @@
-# Seeds a healthy, realistic "Relay" board for the README screenshot (docs/images/board.png):
+# Seeds a healthy, realistic "Hamaca" board for the README screenshot (docs/images/board.png):
 #
 #     mix run priv/repo/readme_board_seeds.exs
 #
@@ -9,12 +9,12 @@
 import Ecto.Query
 
 alias Ecto.Changeset
-alias Relay.Accounts
-alias Relay.Boards
-alias Relay.Cards
-alias Relay.Flows
-alias Relay.Members
-alias Relay.Repo
+alias Hamaca.Accounts
+alias Hamaca.Boards
+alias Hamaca.Cards
+alias Hamaca.Flows
+alias Hamaca.Members
+alias Hamaca.Repo
 alias Schemas.Board
 alias Schemas.NodeExecution
 alias Schemas.Run
@@ -41,7 +41,7 @@ sam = seed_user.("sam@relay.example", "Sam Reyes")
 
 Repo.delete_all(from b in Board, where: b.owner_id == ^owner.id and b.slug == "readme")
 
-{:ok, board} = Boards.create_board(owner, %{name: "Relay", slug: "readme", key: "RE"})
+{:ok, board} = Boards.create_board(owner, %{name: "Hamaca", slug: "readme", key: "RE"})
 
 dev_user = Accounts.ensure_dev_user!()
 

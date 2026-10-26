@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.MetaLabel do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.meta_label/1
+  def function, do: &HamacaWeb.CoreComponents.meta_label/1
   def render_source, do: :function
 
   def variations do

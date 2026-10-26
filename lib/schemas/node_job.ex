@@ -32,7 +32,7 @@ defmodule Schemas.NodeJob do
     field :finished_at, :utc_datetime
     field :kind, Ecto.Enum, values: [:node, :talk], default: :node
     # RE433: the `Schemas.Harness` key an agent node runs on, derived from the payload by
-    # `Relay.Runs.insert_job!/3`. nil for shell/gate nodes and talk turns, which any runner takes.
+    # `Hamaca.Runs.insert_job!/3`. nil for shell/gate nodes and talk turns, which any runner takes.
     field :harness_key, :string
 
     belongs_to :run, Schemas.Run
@@ -49,7 +49,7 @@ defmodule Schemas.NodeJob do
   Job states held by a LIVE claim — excludes `:queued`, which nobody holds. Deliberately distinct
   from `active_states/0` even though only `:claimed` currently satisfies it: `active_states/0`
   means "not finished," while this means "a runner is holding and working it," which is what
-  `Relay.Runs.get_claimed_job/2` and the board's `working_run_ids/2` need. A future consumer must
+  `Hamaca.Runs.get_claimed_job/2` and the board's `working_run_ids/2` need. A future consumer must
   not reach for `active_states/0` when it means held — `:queued` is active but worked by nobody.
   """
   def claimed_states, do: [:claimed]

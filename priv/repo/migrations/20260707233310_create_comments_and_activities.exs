@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateCommentsAndActivities do
+defmodule Hamaca.Repo.Migrations.CreateCommentsAndActivities do
   use Ecto.Migration
 
   def change do

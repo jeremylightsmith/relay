@@ -9,7 +9,7 @@ defmodule Schemas.HarnessUsageTest do
   alias Schemas.HarnessUsage.Rule
 
   defp seed_wire(key) do
-    %{usage: usage} = Enum.find(Relay.Agents.seed_harnesses(), &(&1.key == key))
+    %{usage: usage} = Enum.find(Hamaca.Agents.seed_harnesses(), &(&1.key == key))
     HarnessUsage.wire(usage)
   end
 

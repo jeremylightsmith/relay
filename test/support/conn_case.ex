@@ -1,4 +1,4 @@
-defmodule RelayWeb.ConnCase do
+defmodule HamacaWeb.ConnCase do
   @moduledoc """
   This module defines the test case to be used by
   tests that require setting up a connection.
@@ -11,7 +11,7 @@ defmodule RelayWeb.ConnCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use RelayWeb.ConnCase, async: true`, although
+  by setting `use HamacaWeb.ConnCase, async: true`, although
   this option is not recommended for other databases.
   """
 
@@ -19,12 +19,9 @@ defmodule RelayWeb.ConnCase do
 
   using do
     quote do
-      use RelayWeb, :verified_routes
+      use HamacaWeb, :verified_routes
 
-      import Phoenix.ConnTest
-      import Plug.Conn
-
-      import Relay.DataCase,
+      import Hamaca.DataCase,
         only: [
           allow!: 1,
           start_capacity!: 0,
@@ -36,17 +33,20 @@ defmodule RelayWeb.ConnCase do
           unique_slug: 1
         ]
 
-      import Relay.Factory
-      import RelayWeb.ConnCase
+      import Hamaca.Factory
+      import HamacaWeb.ConnCase
+      import Phoenix.ConnTest
+      import Plug.Conn
+
       # The default endpoint for testing
-      @endpoint RelayWeb.Endpoint
+      @endpoint HamacaWeb.Endpoint
 
       # Import conveniences for testing with connections
     end
   end
 
   setup tags do
-    Relay.DataCase.setup_sandbox(tags)
+    Hamaca.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 
@@ -56,7 +56,7 @@ defmodule RelayWeb.ConnCase do
   without touching real Google.
   """
   def log_in_user(conn, user \\ nil) do
-    user = user || Relay.Factory.insert(:user)
+    user = user || Hamaca.Factory.insert(:user)
     Plug.Test.init_test_session(conn, user_id: user.id)
   end
 
@@ -66,7 +66,7 @@ defmodule RelayWeb.ConnCase do
       setup :register_and_log_in_user
   """
   def register_and_log_in_user(%{conn: conn}) do
-    user = Relay.Factory.insert(:user)
+    user = Hamaca.Factory.insert(:user)
     %{conn: log_in_user(conn, user), user: user}
   end
 end

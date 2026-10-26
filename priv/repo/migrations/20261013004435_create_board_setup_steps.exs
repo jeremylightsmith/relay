@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateBoardSetupSteps do
+defmodule Hamaca.Repo.Migrations.CreateBoardSetupSteps do
   use Ecto.Migration
 
   # RE443: the board-owned setup checklist, one row per (board, catalog step), and the per-user

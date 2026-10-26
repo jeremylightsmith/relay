@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.FlowChip do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.flow_chip/1
+  def function, do: &HamacaWeb.CoreComponents.flow_chip/1
   def render_source, do: :function
 
   def variations do

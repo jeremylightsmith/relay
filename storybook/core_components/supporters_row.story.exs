@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.SupportersRow do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.supporters_row/1
+  def function, do: &HamacaWeb.CoreComponents.supporters_row/1
   def render_source, do: :function
 
   def variations do

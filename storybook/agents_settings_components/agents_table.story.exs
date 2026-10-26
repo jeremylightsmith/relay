@@ -2,7 +2,7 @@ defmodule Storybook.AgentsSettingsComponents.AgentsTable do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.AgentsSettingsComponents.agents_table/1
+  def function, do: &HamacaWeb.AgentsSettingsComponents.agents_table/1
   def render_source, do: :function
 
   # Settings → Agents (RE433, card mockup 01): the default row, two counted rows and a red row

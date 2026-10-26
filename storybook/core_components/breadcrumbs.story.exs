@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.Breadcrumbs do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.breadcrumbs/1
+  def function, do: &HamacaWeb.CoreComponents.breadcrumbs/1
   def render_source, do: :function
 
   # The top bar renders the page's own title right after the trail; the template stands in for it.
@@ -15,7 +15,7 @@ defmodule Storybook.Components.CoreComponents.Breadcrumbs do
     """
   end
 
-  # Literal crumbs, not `RelayWeb.BoardCrumbs`: the storybook validator evaluates
+  # Literal crumbs, not `HamacaWeb.BoardCrumbs`: the storybook validator evaluates
   # `variations/0` at compile time, and BoardCrumbs' verified routes need a running endpoint.
   def variations do
     boards = %{

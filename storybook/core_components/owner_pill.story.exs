@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.OwnerPill do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.owner_pill/1
+  def function, do: &HamacaWeb.CoreComponents.owner_pill/1
   def render_source, do: :function
 
   def variations do

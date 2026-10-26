@@ -2,9 +2,9 @@ defmodule Storybook.ValueStream.Ladder do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  alias RelayWeb.ValueStreamLayout
+  alias HamacaWeb.ValueStreamLayout
 
-  def function, do: &RelayWeb.ValueStreamComponents.ladder/1
+  def function, do: &HamacaWeb.ValueStreamComponents.ladder/1
   def render_source, do: :function
 
   def template do

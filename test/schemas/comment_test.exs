@@ -1,5 +1,5 @@
 defmodule Schemas.CommentTest do
-  use Relay.DataCase, async: true
+  use Hamaca.DataCase, async: true
 
   alias Schemas.Comment
 

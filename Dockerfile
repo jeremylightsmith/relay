@@ -71,9 +71,9 @@ RUN mix compile
 # Relay.Runs.latest_runner_version/0 have anything to read at runtime.
 #
 # Every COPY feeding this is derived from Scaffold.items/0 by
-# test/relay/scaffold_build_wiring_test.exs — add an item there and that test tells you to add
+# test/hamaca/scaffold_build_wiring_test.exs — add an item there and that test tells you to add
 # the COPY here, rather than the deploy telling you.
-RUN mix relay.build_scaffold
+RUN mix hamaca.build_scaffold
 
 COPY assets assets
 
@@ -117,7 +117,7 @@ ENV GIT_SHA=${GIT_SHA}
 ENV BUILT_AT=${BUILT_AT}
 
 # Only copy the final release from the build stage
-COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/relay ./
+COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/hamaca ./
 
 USER nobody
 

@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddRateLimitToRunners do
+defmodule Hamaca.Repo.Migrations.AddRateLimitToRunners do
   use Ecto.Migration
 
   def change do

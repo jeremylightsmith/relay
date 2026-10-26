@@ -1,4 +1,4 @@
-defmodule RelayWeb.TokenHelpers do
+defmodule HamacaWeb.TokenHelpers do
   @moduledoc """
   Test helpers for signed tokens (`Phoenix.Token`). Boundary checks are disabled: test-only
   support code.

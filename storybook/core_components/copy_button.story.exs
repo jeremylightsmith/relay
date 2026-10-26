@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.CopyButton do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.copy_button/1
+  def function, do: &HamacaWeb.CoreComponents.copy_button/1
   def render_source, do: :function
 
   def variations do

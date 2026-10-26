@@ -1,16 +1,16 @@
-defmodule Relay.ValueStreamFixtures do
+defmodule Hamaca.ValueStreamFixtures do
   @moduledoc """
   RE146 test fixtures: a board mirroring RE's stages (three queues before `Next up`) and
-  helpers that write back-dated history exactly as `Relay.Cards` records it (names + ids).
-  `Relay.ValueStream` folds activity rows in **id order**, so call these in chronological
+  helpers that write back-dated history exactly as `Hamaca.Cards` records it (names + ids).
+  `Hamaca.ValueStream` folds activity rows in **id order**, so call these in chronological
   order. Boundary checks are off — test-only support that reaches into any context.
   """
 
   use Boundary, top_level?: true, check: [in: false, out: false]
 
-  import Relay.Factory
+  import Hamaca.Factory
 
-  alias Relay.Boards
+  alias Hamaca.Boards
   alias Schemas.Flow.Edge
 
   @t0 ~U[2026-09-01 00:00:00Z]
@@ -76,7 +76,7 @@ defmodule Relay.ValueStreamFixtures do
     )
   end
 
-  @doc "A `:moved` row from `from` to `to` at `at`, meta exactly as `Relay.Cards` writes it."
+  @doc "A `:moved` row from `from` to `to` at `at`, meta exactly as `Hamaca.Cards` writes it."
   def moved(card, from, to, at) do
     insert(:activity, card: card, type: :moved, meta: transition_meta(from, to), inserted_at: at, updated_at: at)
   end
@@ -88,7 +88,7 @@ defmodule Relay.ValueStreamFixtures do
     |> Enum.each(fn [{from, _}, {to, secs}] -> moved(card, from, to, at(secs, base)) end)
   end
 
-  @doc "An `:approved` / `:rejected` row with `Relay.Cards`' meta shape."
+  @doc "An `:approved` / `:rejected` row with `Hamaca.Cards`' meta shape."
   def decided(card, type, from, to, at) when type in [:approved, :rejected] do
     insert(:activity, card: card, type: type, meta: transition_meta(from, to), inserted_at: at, updated_at: at)
   end
@@ -123,7 +123,7 @@ defmodule Relay.ValueStreamFixtures do
   roles are implement → :do, spec_review → :check, fix → :fix.
   """
   def code_flow(board) do
-    (Relay.Repo.get_by(Schemas.Flow, board_id: board.id, key: "code") || insert(:flow, board: board, key: "code"))
+    (Hamaca.Repo.get_by(Schemas.Flow, board_id: board.id, key: "code") || insert(:flow, board: board, key: "code"))
     |> Ecto.Changeset.change(
       nodes: [
         %Schemas.Flow.Node{key: "implement", type: :agent, run: "/implement"},
@@ -138,7 +138,7 @@ defmodule Relay.ValueStreamFixtures do
         %Edge{from: "spec_review", to: "done", on: :succeeded}
       ]
     )
-    |> Relay.Repo.update!()
+    |> Hamaca.Repo.update!()
   end
 
   defp transition_meta(from, to) do

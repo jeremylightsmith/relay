@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateApiKeys do
+defmodule Hamaca.Repo.Migrations.CreateApiKeys do
   use Ecto.Migration
 
   def change do

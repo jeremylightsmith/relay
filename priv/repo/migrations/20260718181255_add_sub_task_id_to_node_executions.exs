@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddSubTaskIdToNodeExecutions do
+defmodule Hamaca.Repo.Migrations.AddSubTaskIdToNodeExecutions do
   use Ecto.Migration
 
   def change do

@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.NotificationSettings do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.notification_settings/1
+  def function, do: &HamacaWeb.CoreComponents.notification_settings/1
   def render_source, do: :function
 
   # The section is a fragment of `<li>`s for the avatar menu; the template stands in for

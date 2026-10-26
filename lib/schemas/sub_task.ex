@@ -1,9 +1,9 @@
 defmodule Schemas.SubTask do
   @moduledoc """
   A single task on a card (RLY-18; addressable since RE355). The Plan stage writes the list
-  (`Relay.Cards.set_sub_tasks/2`, the legacy full replace, or the per-task
-  `Relay.Cards.add_tasks/2` / `update_task/3` / `delete_task/2`) and the Code stage checks items
-  off (`Relay.Cards.set_sub_task_done/3`) as it works; the drawer's SUB-TASKS panel derives its
+  (`Hamaca.Cards.set_sub_tasks/2`, the legacy full replace, or the per-task
+  `Hamaca.Cards.add_tasks/2` / `update_task/3` / `delete_task/2`) and the Code stage checks items
+  off (`Hamaca.Cards.set_sub_task_done/3`) as it works; the drawer's SUB-TASKS panel derives its
   done/total progress from the list. `body` is the task's own markdown (nullable). `card_id` and
   `position` are set programmatically, never cast from input.
   """

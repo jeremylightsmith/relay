@@ -1,11 +1,11 @@
 defmodule Schemas.UsageVisit do
   @moduledoc """
   One visit (RE475): a run of a signed-in user's activity with no gap longer than
-  `Relay.Usage.idle_gap/0`, keyed by `(user_id, started_at)`. `seconds` is
-  `Relay.Usage.visit_seconds/2` of the visit's first and last touch; `board_id` is the last board
-  it touched and `card_refs` the last `Relay.Usage.max_card_refs/0` cards it opened.
+  `Hamaca.Usage.idle_gap/0`, keyed by `(user_id, started_at)`. `seconds` is
+  `Hamaca.Usage.visit_seconds/2` of the visit's first and last touch; `board_id` is the last board
+  it touched and `card_refs` the last `Hamaca.Usage.max_card_refs/0` cards it opened.
 
-  There is no changeset: `Relay.Usage.Tracker` is the only writer, through one `insert_all` upsert.
+  There is no changeset: `Hamaca.Usage.Tracker` is the only writer, through one `insert_all` upsert.
   """
 
   use Ecto.Schema

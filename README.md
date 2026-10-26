@@ -1,13 +1,13 @@
-# Relay
+# Hamaca
 
-**Relay is an AI-first kanban board.** Its organizing idea is *passing the baton*: work
+**Hamaca is an AI-first kanban board.** Its organizing idea is *passing the baton*: work
 moves back and forth between humans and AI agents, and the board makes each hand-off
 explicit — whose turn it is, what's waiting on a person, and what an agent is actively
 working. "Who holds the baton" is a first-class property of every card.
 
 **Try it:** <https://hamaca.app> (sign in with Google).
 
-![A Relay board: agents working cards through Spec, Plan and Code, two cards parked waiting on a human answer, cards ready for your review, and shipped work in Done](docs/images/board.png)
+![A Hamaca board: agents working cards through Spec, Plan and Code, two cards parked waiting on a human answer, cards ready for your review, and shipped work in Done](docs/images/board.png)
 
 ## What it does today
 
@@ -78,8 +78,8 @@ the Code flow → `/finish`. `AGENTS.md` documents how these are expected to be 
 ## Repository layout
 
 ```
-lib/relay/          Domain contexts (each a boundary sub-module; add to Relay's exports)
-lib/relay_web/      LiveViews, components, router, endpoint (the RelayWeb boundary)
+lib/hamaca/         Domain contexts (each a boundary sub-module; add to Hamaca's exports)
+lib/hamaca_web/     LiveViews, components, router, endpoint (the HamacaWeb boundary)
 storybook/          Component stories (surfaced at /storybook)
 docs/adr/           Architecture Decision Records
 docs/vision.md      Product vision
@@ -100,5 +100,5 @@ Contributions are welcome, but we review every change closely, so please:
 
 ## License
 
-Relay is released under the [MIT License](LICENSE). Vendored third-party code under
+Hamaca is released under the [MIT License](LICENSE). Vendored third-party code under
 `assets/vendor/` and `vendor/` keeps its own license, noted in each file or directory.

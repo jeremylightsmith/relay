@@ -4,22 +4,22 @@ defmodule Schemas.Runner do
   that pulls node-jobs. Keyed uniquely on `{board_id, name}` and refreshed on
   every claim / runner heartbeat. `capacity` is the last-advertised
   **configured** slot count per isolation class (not a live free count — see
-  `Relay.Runs.Capacity`), normalized to the closed set and stored STRING-keyed:
+  `Hamaca.Runs.Capacity`), normalized to the closed set and stored STRING-keyed:
   `%{"shared_clean" => 3, "exclusive" => 1}`. Unknown classes never reach the
   row (RLY-201). **That guarantee now has a single enforcement point (RE311):**
-  `RelayWeb.Api.NodeJobController` puts `capacity` on the upsert attrs from the
+  `HamacaWeb.Api.NodeJobController` puts `capacity` on the upsert attrs from the
   HEARTBEAT action only — the claim's `capacity` is the runner's live FREE
-  count and is passed to `Relay.Runs.claim_next_job/3` as an argument instead of
+  count and is passed to `Hamaca.Runs.claim_next_job/3` as an argument instead of
   being written here, so one column can no longer carry two meanings.
   `last_heartbeat` drives reclaim:
   a runner silent past `max(60s, 2 × interval)` is stale and its in-flight
   jobs are recovered. `capabilities` is the last-reported inventory of what this
   runner can resolve by name — `%{"agents" => [...], "skills" => [...]}` — or
   `nil` when it has never reported one (RLY-182). All fields are set
-  programmatically by `Relay.Runs`.
+  programmatically by `Hamaca.Runs`.
 
   `version` is the `RUNNER_VERSION` the running `./relay` declares (RLY-184); `nil` means
-  a runner predating that card, which `Relay.Runs.runner_outdated?/1` treats as behind.
+  a runner predating that card, which `Hamaca.Runs.runner_outdated?/1` treats as behind.
   """
   use Ecto.Schema
 
@@ -44,15 +44,15 @@ defmodule Schemas.Runner do
     field :held, {:array, :map}, default: []
 
     # RE337: card refs a human asked this runner to release — free the worktree and its slot while
-    # the run stays parked. Never cast: `Relay.Runs.request_worktree_release/4` appends and
-    # `Relay.Runs.upsert_runner/2` prunes, each with one atomic UPDATE, so a heartbeat and a click
+    # the run stays parked. Never cast: `Hamaca.Runs.request_worktree_release/4` appends and
+    # `Hamaca.Runs.upsert_runner/2` prunes, each with one atomic UPDATE, so a heartbeat and a click
     # can never overwrite each other.
     field :release_requests, {:array, :string}, default: []
     field :version, :integer
     # RE433: the harness inventory the runner last reported on a heartbeat — see
     # `normalize_harnesses/1`. No default: nil means "never reported", which claims read as
     # "only the legacy harness" (`installed_harness_keys/1`). RE436: each entry carries that
-    # harness's last usage reading; `Relay.Runs.runner_rate_limited?/2` reads the runner as rate
+    # harness's last usage reading; `Hamaca.Runs.runner_rate_limited?/2` reads the runner as rate
     # limited only when every installed harness is paused, and a pause whose `resets_at` has
     # passed reads as not paused before the next beat clears it.
     field :harnesses, {:array, :map}
@@ -289,7 +289,7 @@ defmodule Schemas.Runner do
   The one normalizer for the claim's `harnesses` field (RE436): the harness keys the runner will
   run right now — its installed ones minus those paused at a usage limit. A list of binaries
   (anything else dropped), capped at #{@claim_harness_limit}; a non-list is nil, meaning "not
-  narrowed". Request-scoped, like the claim's `held`: passed to `Relay.Runs.claim_next_job/4`,
+  narrowed". Request-scoped, like the claim's `held`: passed to `Hamaca.Runs.claim_next_job/4`,
   never written to the row.
   """
   @spec normalize_claim_harnesses(term()) :: [String.t()] | nil

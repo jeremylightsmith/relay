@@ -2,7 +2,7 @@ defmodule Storybook.StoryMapComponents.PresenceStack do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.StoryMapComponents.presence_stack/1
+  def function, do: &HamacaWeb.StoryMapComponents.presence_stack/1
   def render_source, do: :function
 
   @dana %{user_id: 1, name: "Dana Kim", email: "dana.kim@acme.co", avatar_url: nil}

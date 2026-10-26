@@ -1,7 +1,7 @@
 defmodule Schemas.Vote do
   @moduledoc """
   One user's upvote of one card (RLY-69). A vote is a unique `(card_id, user_id)`
-  row — `Relay.Votes.toggle_vote/2` inserts or deletes it. Both ids are set
+  row — `Hamaca.Votes.toggle_vote/2` inserts or deletes it. Both ids are set
   programmatically, never cast from input; the changeset only carries the
   `unique_constraint` so a double-vote surfaces as a changeset error rather than a
   raw DB crash.

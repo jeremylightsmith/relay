@@ -2,7 +2,7 @@ defmodule Storybook.FlowSettingsComponents.CopyFlowPanel do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowSettingsComponents.copy_flow_panel/1
+  def function, do: &HamacaWeb.FlowSettingsComponents.copy_flow_panel/1
   def render_source, do: :function
 
   # The Copy to another stage… picker under a stage's FLOW band (RE431, card mockup "A — stage

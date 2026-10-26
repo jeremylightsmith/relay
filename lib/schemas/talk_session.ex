@@ -7,7 +7,7 @@ defmodule Schemas.TalkSession do
   resuming a session that may not exist.
 
   `pinned_runner_name` is the machine holding that session; every later turn is offered only
-  to it (`Relay.Talk.post_message/3` copies it onto the job row, exactly as an exclusive run's
+  to it (`Hamaca.Talk.post_message/3` copies it onto the job row, exactly as an exclusive run's
   pin rides on `node_jobs.runner_name`).
 
   `last_event_seq` is the session's monotonic render-order counter; `cleared_through_seq` is

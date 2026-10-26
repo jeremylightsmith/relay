@@ -1,0 +1,314 @@
+defmodule HamacaWeb.Api.FallbackController do
+  @moduledoc "Maps context error tuples to JSON error responses."
+  use HamacaWeb, :controller
+
+  alias Hamaca.Boards
+  alias Hamaca.Cards
+  alias Hamaca.Flows
+  alias HamacaWeb.Api.ErrorJSON
+  alias HamacaWeb.ChangesetErrors
+
+  def call(conn, {:error, :not_found}) do
+    conn
+    |> put_status(:not_found)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "not_found", message: "Not found")
+  end
+
+  def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
+    conn
+    |> put_status(:bad_request)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid", message: changeset_message(changeset))
+  end
+
+  # RE460 — an /api/all write on a board whose owner's plan is paused: the same 402 body the
+  # board-key plug sends (HamacaWeb.PlanPaused owns it).
+  def call(conn, {:error, :plan_paused}), do: HamacaWeb.PlanPaused.send_refusal(conn)
+
+  def call(conn, {:error, :invalid_request}) do
+    conn
+    |> put_status(:bad_request)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid", message: "Invalid request")
+  end
+
+  # RE355 — a malformed task request names what is wrong. 422 like the flow routes' document
+  # errors; the shared bare `:invalid_request` above stays 400 for its existing callers.
+  def call(conn, {:error, {:invalid_request, message}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_request", message: message)
+  end
+
+  def call(conn, {:error, {:invalid_document, reason}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_document", message: reason)
+  end
+
+  def call(conn, {:error, :key_mismatch}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "key_mismatch",
+      message: "the document's key does not match the key in the URL"
+    )
+  end
+
+  def call(conn, {:error, {:unknown_stages, names}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "unknown_stages",
+      message: "this board has no stage named: #{Enum.join(names, ", ")}"
+    )
+  end
+
+  # RE429 — a stage holds one flow; the sentence is Hamaca.Flows' one copy.
+  def call(conn, {:error, {:stage_occupied, %{stage: stage, flow: flow} = details}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "stage_occupied",
+      message: Flows.stage_occupied_message(details),
+      details: %{stage: stage, flow: flow}
+    )
+  end
+
+  # RE93 — both refusals are 422, and both take their sentence from Hamaca.Cards, the ONE
+  # rendering, so the API and the card drawer cannot word the same refusal differently.
+  def call(conn, {:error, {:unknown_refs, refs}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "unknown_refs", message: Cards.dependency_error_message({:unknown_refs, refs}))
+  end
+
+  def call(conn, {:error, {:dependency_cycle, path}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "dependency_cycle",
+      message: Cards.dependency_error_message({:dependency_cycle, path})
+    )
+  end
+
+  # RE344 — a fixed sentence from Hamaca.Cards: the refusal never names the user, and an
+  # unknown id gets the byte-identical body a real non-member does.
+  def call(conn, {:error, :owner_not_member}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "owner_not_member", message: Cards.owner_error_message())
+  end
+
+  # RE384 — the stage guard rails. Every sentence comes from `Hamaca.Boards.stage_refusal_message/1`,
+  # the one rendering Board Settings shares. Losing cards or breaking the board is a 409 conflict
+  # with the board's current state; a request that names the wrong kind of stage is a 422.
+  def call(conn, {:error, {:not_empty, %{live: live}} = reason}),
+    do: stage_refusal(conn, :conflict, "not_empty", reason, %{live: live})
+
+  # RE429 — a stage holding a flow can't become a non-work type.
+  def call(conn, {:error, {:holds_flow, %{flow: key}} = reason}),
+    do: stage_refusal(conn, :conflict, "holds_flow", reason, %{flow: key})
+
+  def call(conn, {:error, reason}) when reason in [:last_stage, :not_empty, :public_intake],
+    do: stage_refusal(conn, :conflict, Atom.to_string(reason), reason, %{})
+
+  def call(conn, {:error, reason}) when reason in [:invalid_anchor, :not_a_main_stage],
+    do: stage_refusal(conn, :unprocessable_entity, Atom.to_string(reason), reason, %{})
+
+  def call(conn, {:error, :stale_version}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "stale_version",
+      message: "this flow changed since you pulled it — re-pull, re-apply your edit, and push again"
+    )
+  end
+
+  # The flow endpoints answer 422 for "your document is invalid", including graph errors. The
+  # shared bare-changeset clause above stays 400: a dozen existing API tests pin it, and two
+  # different answers for one question would be worse than one narrow clause (RLY-241).
+  def call(conn, {:error, {:invalid, %Ecto.Changeset{} = changeset}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid", message: changeset_message(changeset))
+  end
+
+  # The blob the drawer renders has one documented shape (relay.md § "The AI result blob"), and
+  # `Hamaca.Cards` owns both the vocabulary and this sentence — the caller is an agent that just
+  # wrote the file, so the refusal names the key it invented and the ones that exist.
+  def call(conn, {:error, {:invalid_ai_result, message}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_ai_result", message: "ai_result: #{message}")
+  end
+
+  # RE370 — like `invalid_ai_result`: the caller is an agent, so `Hamaca.Cards` names the entry
+  # and the rule it broke.
+  def call(conn, {:error, {:invalid_mockups, message}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_mockups", message: message)
+  end
+
+  def call(conn, {:error, :not_in_review}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "not_in_review", message: "This card is not in a review stage")
+  end
+
+  def call(conn, {:error, :not_needs_input}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "not_needs_input", message: "This card is not waiting on an answer")
+  end
+
+  def call(conn, {:error, :ambiguous_ref}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "ambiguous_ref",
+      message: "That ref matches cards on more than one of your boards — pass board: <slug>"
+    )
+  end
+
+  def call(conn, {:error, :missing_note}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "missing_note", message: "note is required")
+  end
+
+  def call(conn, {:error, :missing_title}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "missing_title", message: "title is required")
+  end
+
+  def call(conn, {:error, :invalid_stage}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_stage", message: "stage must be one of the board's top-level stages")
+  end
+
+  def call(conn, {:error, :invalid_target}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_target", message: "target must be a main-lane stage before this card")
+  end
+
+  def call(conn, {:error, :conflict}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "conflict", message: "This job is no longer held by your claim")
+  end
+
+  def call(conn, {:error, :run_server_unavailable}) do
+    conn
+    |> put_status(:service_unavailable)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "run_server_unavailable",
+      message: "The run's server could not start, so the outcome was not recorded. Retry the request."
+    )
+  end
+
+  def call(conn, {:error, :would_strand_run}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "would_strand_run",
+      message: "This card has a live run — cancel the run before moving it out of its work lane"
+    )
+  end
+
+  # RE318 — the API archive's refusal. Same shape as would_strand_run: a live run is a
+  # consequential thing to walk away from, so the caller cancels it first, explicitly.
+  def call(conn, {:error, :active_run}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "active_run",
+      message: "This card has a live run — cancel it (`relay cancel #{conn.path_params["ref"]}`) before archiving"
+    )
+  end
+
+  def call(conn, {:error, :unknown_outcome}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "unknown_outcome",
+      message: "outcome must be one of: succeeded, failed, partial, needs_input"
+    )
+  end
+
+  def call(conn, {:error, :invalid_runner}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_runner", message: "runner must be an object")
+  end
+
+  def call(conn, {:error, :unknown_status}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "unknown_status",
+      message: "status must be one of: #{reportable_status_names()}"
+    )
+  end
+
+  def call(conn, {:error, :invalid_outcome}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "invalid_outcome",
+      message: "session_id and detail must be strings when present"
+    )
+  end
+
+  def call(conn, {:error, :invalid_events}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "invalid_events", message: "events must be a list")
+  end
+
+  defp stage_refusal(conn, status, code, reason, details) do
+    conn
+    |> put_status(status)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: code, message: Boards.stage_refusal_message(reason), details: details)
+  end
+
+  # Embed errors nest, so this cannot join `traverse_errors/2`'s output directly — see
+  # HamacaWeb.ChangesetErrors, which owns that walk for both this and the flow editor.
+  defp changeset_message(changeset), do: changeset |> ChangesetErrors.messages() |> Enum.join("; ")
+
+  defp reportable_status_names, do: Enum.map_join(Schemas.TalkTurn.reportable_statuses(), ", ", &Atom.to_string/1)
+end

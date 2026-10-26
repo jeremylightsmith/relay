@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.BlockedStrip do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.blocked_strip/1
+  def function, do: &HamacaWeb.CoreComponents.blocked_strip/1
   def render_source, do: :function
 
   defp minutes_ago(n), do: DateTime.add(DateTime.utc_now(), -n * 60, :second)
@@ -23,7 +23,7 @@ defmodule Storybook.Components.CoreComponents.BlockedStrip do
         id: :escalation_park,
         attributes: %{
           eyebrow: "IMPLEMENT FAILED — YOUR CALL",
-          question: "✗ commit guard: the working tree is dirty after mix precommit M lib/relay/exports.ex",
+          question: "✗ commit guard: the working tree is dirty after mix precommit M lib/hamaca/exports.ex",
           blocked_since: minutes_ago(190)
         }
       },

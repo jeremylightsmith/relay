@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateSetupMachines do
+defmodule Hamaca.Repo.Migrations.CreateSetupMachines do
   use Ecto.Migration
 
   # RE446: per-machine setup ("connect a machine"). A machine's checklist rows live in

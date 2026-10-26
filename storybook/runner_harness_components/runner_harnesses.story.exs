@@ -2,11 +2,11 @@ defmodule Storybook.RunnerHarnessComponents.RunnerHarnesses do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunnerHarnessComponents.runner_harnesses/1
+  def function, do: &HamacaWeb.RunnerHarnessComponents.runner_harnesses/1
   def render_source, do: :function
 
   # The Runners page's per-runner HARNESSES section (RE436). Rows are
-  # `Relay.Runs.runner_harness_rows/4`'s: one bar per window each harness's USAGE setting defines.
+  # `Hamaca.Runs.runner_harness_rows/4`'s: one bar per window each harness's USAGE setting defines.
   @now ~U[2026-10-11 15:00:00Z]
 
   defp claude(overrides \\ %{}) do

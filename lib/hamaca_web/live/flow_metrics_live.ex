@@ -1,0 +1,527 @@
+defmodule HamacaWeb.FlowMetricsLive do
+  @moduledoc "Per-flow metrics tab — the read surface over node_executions (RLY-209)."
+  use HamacaWeb, :live_view
+
+  alias Hamaca.Boards
+  alias Hamaca.Cards
+  alias Hamaca.Flows
+  alias Hamaca.Runs
+  alias HamacaWeb.BoardCrumbs
+  alias HamacaWeb.FlowEditorComponents
+  alias HamacaWeb.FlowMetricsComponents
+
+  @impl true
+  def mount(%{"slug" => slug, "key" => key}, _session, socket) do
+    board = Boards.get_board!(socket.assigns.current_scope.user, slug)
+
+    case Flows.get_flow(board, key) do
+      nil ->
+        {:ok,
+         socket
+         |> put_flash(:error, "That flow doesn't exist.")
+         |> push_navigate(to: ~p"/board/#{slug}/settings?section=stages")}
+
+      flow ->
+        {:ok,
+         socket
+         |> assign(:page_title, "Flow metrics — #{humanize(flow.key)}")
+         |> assign(:board, board)
+         |> assign(:flow, flow)}
+    end
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    %{board: board, flow: flow} = socket.assigns
+    window = normalize_window(params["window"])
+    deep_ref = blank_to_nil(params["from"])
+    card_id = resolve_card_id(board, deep_ref)
+    scope = normalize_scope(params["scope"], card_id)
+    opts = [window: window, card_id: scoped_card_id(scope, card_id)]
+
+    summary = Runs.flow_metrics_summary(flow, opts)
+    rows = flow |> Runs.node_metrics_for_flow(opts) |> present_rows(flow)
+
+    {:noreply,
+     socket
+     |> assign(:window, window)
+     |> assign(:scope, scope)
+     |> assign(:card_id, card_id)
+     |> assign(:deep_node, blank_to_nil(params["node"]))
+     |> assign(:deep_ref, deep_ref)
+     |> assign(:summary, summary)
+     |> assign(:rows, rows)
+     |> assign(:enough?, summary.completed >= Runs.min_runs_for_percentiles())
+     |> assign(:cost_blank?, is_nil(summary.total_spend))}
+  end
+
+  @impl true
+  def handle_event("set-window", %{"window" => window}, socket) do
+    {:noreply, push_patch(socket, to: metrics_path(socket.assigns, window: normalize_window(window)))}
+  end
+
+  def handle_event("set-scope", %{"scope" => scope}, socket) do
+    scope = normalize_scope(scope, socket.assigns.card_id)
+    {:noreply, push_patch(socket, to: metrics_path(socket.assigns, scope: scope))}
+  end
+
+  # `@card_id` is what the toggle exists for; the *query* is only card-scoped while the user is
+  # actually on This card, so clicking All cards keeps the toggle but drops the filter.
+  defp scoped_card_id(:card, card_id), do: card_id
+  defp scoped_card_id(:flow, _card_id), do: nil
+
+  # nil for an absent, unparseable, or other-board ref: `card_ids_by_ref/2` is board-scoped, so a
+  # ref naming another board's card simply doesn't come back. Same spirit as blank_to_nil/1 —
+  # degrade, never crash, never leak.
+  defp resolve_card_id(_board, nil), do: nil
+  defp resolve_card_id(board, ref), do: board |> Cards.card_ids_by_ref([ref]) |> Map.get(ref)
+
+  # You cannot scope to a card that doesn't resolve, so no card id pins :flow whatever `?scope=`
+  # says. With a card, an explicit `?scope=` wins when it names a real scope; anything else falls
+  # back to This card, which is what arriving from a card should show (decision 2).
+  defp normalize_scope(_param, nil), do: Runs.metric_scope(nil)
+
+  defp normalize_scope(param, card_id),
+    do: Enum.find(Runs.metric_scopes(), Runs.metric_scope(card_id), &(to_string(&1) == param))
+
+  # One builder for both segmented controls: it takes `:window` / `:scope` overrides and
+  # preserves everything else, so a scope switch keeps the window the user had (and vice versa)
+  # and both are linkable / back-button-able.
+  defp metrics_path(assigns, overrides) do
+    %{board: board, flow: flow, deep_node: node, deep_ref: ref, card_id: card_id} = assigns
+    window = Keyword.get(overrides, :window, assigns.window)
+    scope = Keyword.get(overrides, :scope, assigns.scope)
+
+    ~p"/board/#{board.slug}/flows/#{flow.key}/metrics?#{metrics_params(window, scope, card_id, node, ref)}"
+  end
+
+  # `scope` only travels when a card actually resolved — a plain metrics URL has no toggle, so
+  # writing a scope into it would be noise.
+  defp metrics_params(window, scope, card_id, node, ref) do
+    [{"window", window}]
+    |> maybe_put("scope", card_id && to_string(scope))
+    |> maybe_put("node", node)
+    |> maybe_put("from", ref)
+  end
+
+  defp maybe_put(list, _k, nil), do: list
+  defp maybe_put(list, k, v), do: list ++ [{k, v}]
+
+  # A deep-link param that arrives as "" (e.g. `?node=` when a run has no last_node) is not a
+  # real value — treat it as absent so the banner clause and row highlight don't act on empty.
+  defp blank_to_nil(nil), do: nil
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(v), do: v
+
+  defp normalize_window(window) do
+    if window in Runs.metric_windows(), do: window, else: Runs.default_window()
+  end
+
+  defp present_rows(metrics, flow) do
+    defs = Map.new(flow.nodes, &{&1.key, &1})
+
+    Enum.map(metrics, fn m ->
+      node = Map.get(defs, m.node_key)
+
+      Map.merge(m, %{
+        name: humanize(m.node_key),
+        type: node && node.type,
+        verdict: collapse_verdict(m.verdict_split)
+      })
+    end)
+  end
+
+  # The bar has 3 buckets; :partial (progress handed back without clearing the node) collapses
+  # into failed — a visit that neither succeeded nor asked a question did not clear the node.
+  defp collapse_verdict(%{succeeded: ok, failed: fail, partial: partial, needs_input: needs}) do
+    fail_total = fail + partial
+    total = ok + needs + fail_total
+
+    %{
+      ok: ok,
+      needs: needs,
+      fail: fail_total,
+      total: total,
+      ok_pct: pct(ok, total),
+      needs_pct: pct(needs, total),
+      fail_pct: pct(fail_total, total)
+    }
+  end
+
+  defp pct(_n, 0), do: 0
+  defp pct(n, total), do: round(n * 100 / total)
+
+  defp humanize(key), do: String.replace(key, ["_", "-"], " ")
+
+  defp duration_cell(nil), do: "—"
+  defp duration_cell(seconds) when seconds < 60, do: "#{seconds}s"
+
+  defp duration_cell(seconds) do
+    case rem(seconds, 60) do
+      0 -> "#{div(seconds, 60)}m"
+      r -> "#{div(seconds, 60)}m #{r}s"
+    end
+  end
+
+  defp cost_cell(nil), do: "—"
+  defp cost_cell(%Decimal{} = d), do: "$" <> Decimal.to_string(d, :normal)
+
+  # Artboard type-tag palette (docs/designs/Relay Flow Metrics.dc.html lines 281-285), re-expressed
+  # as daisyUI tokens (RE237) so they flip with data-theme.
+  defp type_tag_style(:agent),
+    do:
+      "background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-secondary) 65%, var(--color-base-content));"
+
+  defp type_tag_style(:shell),
+    do: "background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
+
+  defp type_tag_style(:gate),
+    do:
+      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content));"
+
+  defp type_tag_style(_),
+    do: "background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 70%, transparent);"
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <Layouts.app
+      flash={@flash}
+      current_scope={@current_scope}
+      wide
+      crumbs={BoardCrumbs.flows(@board, @flow)}
+    >
+      <:title>
+        <span id="flow-title" class="truncate" title={humanize(@flow.key)}>
+          {humanize(@flow.key)}
+        </span>
+      </:title>
+      <div style="padding:22px 26px;max-width:1100px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+          <FlowEditorComponents.flow_tabs
+            board_slug={@board.slug}
+            flow_key={@flow.key}
+            active={:metrics}
+          />
+        </div>
+
+        <%!-- Deep-link banner (RLY-209 decision 5). Gated on @card_id, not @deep_ref: a ref that
+              names no card on this board gets neither banner nor toggle (RE235). --%>
+        <div
+          :if={@card_id}
+          id="deep-link-banner"
+          style="background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 30%, var(--color-base-100));border-left:3px solid var(--color-primary);border-radius:11px;padding:13px 16px;margin-bottom:16px;font-size:13px;"
+        >
+          Opened from <span style="font-family:var(--font-mono);font-weight:600;">{@deep_ref}</span>
+          <%= if @deep_node do %>
+            — jumped to <span style="font-family:var(--font-mono);font-weight:600;">{@deep_node}</span>,
+            the node this card's run is on.
+          <% end %>
+        </div>
+
+        <div style="margin-bottom:8px;">
+          <.page_heading id="flow-metrics-title">
+            Flow metrics
+          </.page_heading>
+          <p style="font-size:13.5px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);max-width:560px;">
+            Per-node rollup for the <strong>{humanize(@flow.key)}</strong>
+            flow. Every node execution records duration, attempts, verdict and cost — this is where
+            you read it in aggregate and decide what to tune.
+          </p>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0;">
+          <span
+            id="flow-metrics-version-chip"
+            style="font-family:var(--font-mono);font-size:14px;font-weight:600;padding:6px 12px;border-radius:8px;background:var(--color-field-hover);color:color-mix(in oklab, var(--color-base-content) 90%, transparent);"
+          >
+            v{@flow.version}
+          </span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div
+              :if={@card_id}
+              id="flow-metrics-scope"
+              style="display:inline-flex;background:var(--color-field-hover);border:1px solid var(--color-field-border);border-radius:9px;padding:3px;gap:2px;"
+            >
+              <button
+                :for={{key, label} <- scope_options()}
+                id={"flow-metrics-scope-#{key}"}
+                type="button"
+                phx-click="set-scope"
+                phx-value-scope={key}
+                style={segment_button_style(to_string(@scope) == key)}
+              >
+                {label}
+              </button>
+            </div>
+            <div
+              :if={@scope == :flow}
+              id="flow-metrics-window"
+              style="display:inline-flex;background:var(--color-field-hover);border:1px solid var(--color-field-border);border-radius:9px;padding:3px;gap:2px;"
+            >
+              <button
+                :for={{key, label} <- window_options()}
+                id={"flow-metrics-window-#{key}"}
+                type="button"
+                phx-click="set-window"
+                phx-value-window={key}
+                style={segment_button_style(@window == key)}
+              >
+                {label}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Stat band --%>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--color-base-300);border-radius:12px;background:var(--color-base-100);margin-bottom:18px;">
+          <.stat_cell id="stat-total-runs" label="TOTAL RUNS" value={"#{@summary.total_runs}"} />
+          <.stat_cell
+            id="stat-completed"
+            label="COMPLETED"
+            value={"#{@summary.completed} · #{@summary.completed_pct}%"}
+          />
+          <.stat_cell
+            id="stat-total-spend"
+            label="TOTAL SPEND"
+            value={cost_cell(@summary.total_spend)}
+            muted={is_nil(@summary.total_spend)}
+          />
+          <.stat_cell
+            id="stat-median"
+            label={end_to_end_label(@scope)}
+            value={duration_cell(end_to_end_value(@scope, @summary))}
+            last
+          />
+        </div>
+
+        <%!-- Cost-blank note (the only allowed insight text — decision 3) --%>
+        <p
+          :if={@cost_blank?}
+          id="cost-blank-note"
+          style="font-size:12px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin-bottom:12px;"
+        >
+          Cost lights up once runners report spend. Duration, attempts and verdicts are recording live right now.
+        </p>
+
+        <%= cond do %>
+          <% @scope == :card and @rows == [] -> %>
+            <div
+              id="flow-metrics-card-empty"
+              style="text-align:center;padding:54px 24px 58px 24px;border:1px solid var(--color-base-300);border-radius:12px;"
+            >
+              <div style="font-size:16px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">
+                No recorded executions for this card
+              </div>
+              <p style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);max-width:460px;margin:8px auto 16px;">
+                <strong>{@deep_ref}</strong>
+                hasn't run any node of the <strong>{humanize(@flow.key)}</strong>
+                flow yet, so there's nothing to roll up.
+              </p>
+              <button
+                id="show-all-cards"
+                type="button"
+                phx-click="set-scope"
+                phx-value-scope="flow"
+                style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;"
+              >
+                Show all cards
+              </button>
+            </div>
+          <% @scope == :flow and not @enough? -> %>
+            <div
+              id="flow-metrics-empty"
+              style="text-align:center;padding:54px 24px 58px 24px;border:1px solid var(--color-base-300);border-radius:12px;"
+            >
+              <div style="font-size:16px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 90%, transparent);">
+                Not enough runs in this window yet
+              </div>
+              <p style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);max-width:460px;margin:8px auto 16px;">
+                Only <strong>{@summary.completed} runs</strong>
+                completed in this window. Per-node percentiles need roughly
+                <strong>{Runs.min_runs_for_percentiles()}+</strong>
+                completed runs before they're worth trusting.
+              </p>
+              <button
+                id="widen-to-all"
+                type="button"
+                phx-click="set-window"
+                phx-value-window="all"
+                style="background:var(--color-primary);color:var(--color-primary-content);border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;"
+              >
+                Widen to all-time
+              </button>
+            </div>
+          <% true -> %>
+            <div
+              id="flow-metrics-table"
+              style="border:1px solid var(--color-base-300);border-radius:12px;overflow:hidden;"
+            >
+              <div style="display:grid;grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;column-gap:14px;padding:10px 16px;background:var(--color-field-hover);font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
+                <span>NODE</span>
+                <span style="text-align:right;">RUNS</span>
+                <span style="text-align:right;">{duration_header(@scope)}</span>
+                <span style="text-align:right;">{cost_header(@scope)}</span>
+                <span style="text-align:right;">ATTEMPTS</span>
+                <span>VERDICT SPLIT</span>
+                <span style="text-align:right;">LOOP-LAPS</span>
+              </div>
+              <div
+                :for={row <- @rows}
+                id={"node-row-#{row.node_key}"}
+                style={row_style(@deep_node == row.node_key)}
+              >
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
+                      {row.name}
+                    </span>
+                    <span
+                      :if={@card_id && @deep_node == row.node_key}
+                      id={"node-here-#{row.node_key}"}
+                      style="font-family:var(--font-mono);font-size:9px;font-weight:600;color:color-mix(in oklab, var(--color-primary) 55%, var(--color-base-content));background:color-mix(in oklab, var(--color-primary) 15%, var(--color-base-100));border-radius:5px;padding:2px 6px;"
+                    >
+                      {@deep_ref} is here
+                    </span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:3px;">
+                    <span
+                      id={"node-type-#{row.node_key}"}
+                      style={"font-family:var(--font-mono);font-size:8.5px;font-weight:700;letter-spacing:0.06em;padding:2px 6px;border-radius:4px;#{type_tag_style(row.type)}"}
+                    >
+                      {row.type}
+                    </span>
+                  </div>
+                </div>
+                <span style="text-align:right;font-family:var(--font-mono);font-size:13px;">
+                  {row.runs}
+                </span>
+                <span style="text-align:right;font-family:var(--font-mono);font-size:13px;">
+                  {duration_value(@scope, row)}
+                </span>
+                <span style="text-align:right;font-family:var(--font-mono);font-size:13px;">
+                  {cost_value(@scope, row)}
+                </span>
+                <span style="text-align:right;font-family:var(--font-mono);font-size:13px;">
+                  {:erlang.float_to_binary(row.attempts_mean, decimals: 1)}
+                </span>
+                <FlowMetricsComponents.verdict_bar
+                  id={"verdict-#{row.node_key}"}
+                  split={row.verdict}
+                  mode={verdict_mode(@scope)}
+                />
+                <span style="text-align:right;font-family:var(--font-mono);font-size:13px;">
+                  {row.loop_laps}
+                </span>
+              </div>
+            </div>
+        <% end %>
+
+        <p
+          id="flow-metrics-footnote"
+          style="font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin-top:14px;"
+        >
+          <span style="font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
+            RUNS
+          </span>
+          count node executions, not cards — a node visited twice by one card counts twice.
+          <%= if @scope == :card do %>
+            <.link
+              navigate={~p"/board/#{@board.slug}?#{[card: @deep_ref]}"}
+              style="color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));font-weight:600;"
+            >
+              Open {@deep_ref}'s Run panel
+            </.link>
+            for the chronological node-by-node timeline.
+          <% else %>
+            Per-card totals live in the card's Run panel.
+          <% end %>
+        </p>
+      </div>
+    </Layouts.app>
+    """
+  end
+
+  defp window_options do
+    Enum.map(Runs.metric_windows(), fn
+      "7d" -> {"7d", "7 days"}
+      "30d" -> {"30d", "30 days"}
+      "all" -> {"all", "All time"}
+    end)
+  end
+
+  defp scope_options do
+    Enum.map(Runs.metric_scopes(), fn
+      :flow -> {"flow", "All cards"}
+      :card -> {"card", "This card"}
+    end)
+  end
+
+  # One style function, two segmented controls (the artboard's window picker and the RE235 scope
+  # toggle) — hence the name. The values are unchanged from window_button_style/1.
+  defp segment_button_style(true),
+    do:
+      "font-size:12px;padding:5px 11px;border:none;border-radius:7px;font-weight:600;cursor:pointer;" <>
+        "background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 95%, transparent);box-shadow:0 1px 2px color-mix(in oklab, var(--color-neutral) 14%, transparent);"
+
+  defp segment_button_style(false),
+    do:
+      "font-size:12px;padding:5px 11px;border:none;border-radius:7px;font-weight:600;cursor:pointer;background:transparent;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+
+  # Card scope reports actuals, so the two percentile columns become one summed value and say so
+  # in the header — the second visual cue that you are not reading a distribution.
+  defp duration_header(:card), do: "DURATION TOTAL"
+  defp duration_header(:flow), do: "DURATION"
+
+  defp cost_header(:card), do: "COST TOTAL"
+  defp cost_header(:flow), do: "COST"
+
+  defp duration_value(:card, row), do: duration_cell(row.duration_total)
+  defp duration_value(:flow, row), do: "#{duration_cell(row.duration_p50)} / #{duration_cell(row.duration_p95)}"
+
+  defp cost_value(:card, row), do: cost_cell(row.cost_total)
+  defp cost_value(:flow, row), do: "#{cost_cell(row.cost_p50)} / #{cost_cell(row.cost_p95)}"
+
+  defp verdict_mode(:card), do: :actual
+  defp verdict_mode(:flow), do: :distribution
+
+  # A median over one card's one or two runs is the same percentile mistake RE235 fixes.
+  defp end_to_end_label(:card), do: "END-TO-END"
+  defp end_to_end_label(:flow), do: "MEDIAN END-TO-END"
+
+  defp end_to_end_value(:card, summary), do: summary.total_end_to_end
+  defp end_to_end_value(:flow, summary), do: summary.median_end_to_end
+
+  defp row_style(true),
+    do:
+      "display:grid;grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;" <>
+        "column-gap:14px;align-items:center;padding:12px 16px;border-top:1px solid color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));" <>
+        "background:color-mix(in oklab, var(--color-primary) 5%, var(--color-base-100));box-shadow:inset 3px 0 0 var(--color-primary);"
+
+  defp row_style(false),
+    do:
+      "display:grid;grid-template-columns:minmax(220px,1.3fr) 62px 130px 130px 92px 170px 84px;" <>
+        "column-gap:14px;align-items:center;padding:12px 16px;border-top:1px solid color-mix(in oklab, var(--color-base-content) 5%, var(--color-base-100));"
+
+  attr :id, :string, required: true
+  attr :label, :string, required: true
+  attr :value, :string, required: true
+  attr :muted, :boolean, default: false
+  attr :last, :boolean, default: false
+
+  defp stat_cell(assigns) do
+    ~H"""
+    <div style={"padding:14px 16px;#{unless @last, do: "border-right:1px solid var(--color-base-300);"}"}>
+      <div style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
+        {@label}
+      </div>
+      <div
+        id={@id}
+        style={"font-size:21px;font-weight:600;font-family:var(--font-mono);color:#{if @muted, do: "color-mix(in oklab, var(--color-base-content) 35%, transparent)", else: "color-mix(in oklab, var(--color-base-content) 95%, transparent)"};"}
+      >
+        {@value}
+      </div>
+    </div>
+    """
+  end
+end

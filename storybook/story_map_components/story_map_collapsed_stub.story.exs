@@ -2,7 +2,7 @@ defmodule Storybook.StoryMapComponents.StoryMapCollapsedStub do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.StoryMapComponents.story_map_collapsed_stub/1
+  def function, do: &HamacaWeb.StoryMapComponents.story_map_collapsed_stub/1
   def render_source, do: :function
 
   defp checkout, do: %Schemas.StoryActivity{id: 7, board_id: 1, name: "Checkout", position: 1}

@@ -1,0 +1,1835 @@
+defmodule Hamaca.CardsTest do
+  use Hamaca.DataCase, async: true
+
+  alias Hamaca.Cards
+  alias Schemas.Board
+  alias Schemas.Card
+
+  setup do
+    board = insert(:board, key: "RLY")
+    stage = insert(:stage, board: board, position: 1)
+    %{board: board, stage: stage}
+  end
+
+  describe "create_card/3" do
+    test "creates a card in the stage with the given title", %{board: board, stage: stage} do
+      assert {:ok, %Card{} = card} = Cards.create_card(stage, %{title: "Ship MMF 03"})
+
+      assert card.title == "Ship MMF 03"
+      assert card.stage_id == stage.id
+      assert card.board_id == board.id
+      assert card.tag == nil
+      assert card.ref_number == 1
+      assert card.position == 1
+    end
+
+    test "assigns sequential per-board refs and persists the bumped card_seq",
+         %{board: board, stage: stage} do
+      {:ok, card1} = Cards.create_card(stage, %{title: "First"})
+      {:ok, card2} = Cards.create_card(stage, %{title: "Second"})
+      {:ok, card3} = Cards.create_card(stage, %{title: "Third"})
+
+      assert Enum.map([card1, card2, card3], & &1.ref_number) == [1, 2, 3]
+      assert Cards.ref(board, card3) == "RLY3"
+      assert Repo.get!(Board, board.id).card_seq == 3
+    end
+
+    test "ref sequences are independent across boards", %{stage: stage} do
+      other_board = insert(:board, key: "OPS")
+      other_stage = insert(:stage, board: other_board, position: 1)
+
+      {:ok, _a1} = Cards.create_card(stage, %{title: "A1"})
+      {:ok, a2} = Cards.create_card(stage, %{title: "A2"})
+      {:ok, b1} = Cards.create_card(other_stage, %{title: "B1"})
+
+      assert a2.ref_number == 2
+      assert b1.ref_number == 1
+      assert Cards.ref(other_board, b1) == "OPS1"
+    end
+
+    test "inserts each new card at the top of its stage, shifting the rest down",
+         %{board: board, stage: stage} do
+      other_stage = insert(:stage, board: board, position: 2)
+
+      {:ok, c1} = Cards.create_card(stage, %{title: "A"})
+      {:ok, c2} = Cards.create_card(stage, %{title: "B"})
+      {:ok, c3} = Cards.create_card(other_stage, %{title: "C"})
+
+      # newest is first; each create re-indexes the stage to 1..n
+      assert c2.position == 1
+      assert Repo.get!(Card, c1.id).position == 2
+      assert c3.position == 1
+      assert c3.ref_number == 3
+
+      titles =
+        board
+        |> Cards.list_cards()
+        |> Enum.filter(&(&1.stage_id == stage.id))
+        |> Enum.map(& &1.title)
+
+      assert titles == ["B", "A"]
+    end
+
+    test "returns an error changeset and leaves no ref gap on a blank title",
+         %{board: board, stage: stage} do
+      assert {:error, changeset} = Cards.create_card(stage, %{title: ""})
+
+      assert "can't be blank" in errors_on(changeset).title
+      assert Repo.aggregate(Card, :count) == 0
+      assert Repo.get!(Board, board.id).card_seq == 0
+
+      {:ok, card} = Cards.create_card(stage, %{title: "After the failure"})
+      assert card.ref_number == 1
+    end
+
+    # Under the SQL sandbox all tasks funnel through the test's connection,
+    # so this exercises interleaved allocation; the FOR UPDATE board-row
+    # lock additionally serializes truly concurrent connections in prod.
+    test "near-simultaneous creates get distinct, gap-free refs", %{stage: stage} do
+      refs =
+        1..8
+        |> Task.async_stream(
+          fn i ->
+            {:ok, card} = Cards.create_card(stage, %{title: "Card #{i}"})
+            card.ref_number
+          end,
+          max_concurrency: 8,
+          timeout: :infinity
+        )
+        |> Enum.map(fn {:ok, ref_number} -> ref_number end)
+
+      assert Enum.sort(refs) == Enum.to_list(1..8)
+    end
+
+    test "a card created in a review stage is born :in_review (ADR 0003 arrival snap)", %{board: board} do
+      review = insert(:stage, board: board, type: :review, position: 20)
+
+      assert {:ok, card} = Cards.create_card(review, %{title: "Straight to review"})
+      assert card.status == :in_review
+      assert Repo.get!(Card, card.id).status == :in_review
+    end
+
+    test "a card created in a queue, work, planning or done stage is born :ready", %{board: board} do
+      for {type, pos} <- [queue: 21, work: 22, planning: 23, done: 24] do
+        stage = insert(:stage, board: board, type: type, position: pos)
+
+        assert {:ok, card} = Cards.create_card(stage, %{title: "In #{type}"})
+        assert card.status == :ready, "expected :ready when created in a #{type} stage"
+      end
+    end
+
+    test "creating into a review stage logs only :created — no :status_changed", %{board: board} do
+      review = insert(:stage, board: board, type: :review, position: 25)
+
+      {:ok, card} = Cards.create_card(review, %{title: "Born reviewed"})
+
+      assert [%Schemas.Activity{type: :created}] = activities(card)
+    end
+  end
+
+  describe "list_cards/1" do
+    test "returns the board's cards ordered by stage then position", %{board: board, stage: stage} do
+      stage2 = insert(:stage, board: board, position: 2)
+
+      {:ok, a1} = Cards.create_card(stage, %{title: "A1"})
+      {:ok, b1} = Cards.create_card(stage2, %{title: "B1"})
+      {:ok, a2} = Cards.create_card(stage, %{title: "A2"})
+
+      # top-insert: a2 lands above a1 within stage; stage still orders before stage2
+      assert Enum.map(Cards.list_cards(board), & &1.id) == [a2.id, a1.id, b1.id]
+    end
+
+    test "orders within a stage by position, not insertion order", %{board: board, stage: stage} do
+      second = insert(:card, stage: stage, title: "Second", position: 2, ref_number: 2)
+      first = insert(:card, stage: stage, title: "First", position: 1, ref_number: 1)
+
+      assert Enum.map(Cards.list_cards(board), & &1.id) == [first.id, second.id]
+    end
+
+    test "does not include another board's cards", %{board: board, stage: stage} do
+      other_stage = insert(:stage)
+      {:ok, _theirs} = Cards.create_card(other_stage, %{title: "Elsewhere"})
+      {:ok, mine} = Cards.create_card(stage, %{title: "Mine"})
+
+      assert Enum.map(Cards.list_cards(board), & &1.id) == [mine.id]
+    end
+
+    test "excludes archived cards", %{board: board, stage: stage} do
+      {:ok, keep} = Cards.create_card(stage, %{title: "Keep"})
+      {:ok, hide} = Cards.create_card(stage, %{title: "Hide"})
+      {:ok, _archived} = Cards.archive_card(hide)
+
+      assert Enum.map(Cards.list_cards(board), & &1.id) == [keep.id]
+    end
+
+    test "omits description/acceptance_criteria/spec/plan but keeps every other field and the preloads",
+         %{board: board, stage: stage} do
+      card =
+        insert(:card,
+          stage: stage,
+          description: "d",
+          acceptance_criteria: "ac",
+          spec: "s",
+          plan: "p",
+          status: :working
+        )
+
+      insert(:card_owner, card: card)
+      insert(:sub_task, card: card, title: "todo")
+
+      assert [loaded] = Cards.list_cards(board)
+
+      assert loaded.description == nil
+      assert loaded.acceptance_criteria == nil
+      assert loaded.spec == nil
+      assert loaded.plan == nil
+      assert loaded.title == card.title
+      assert loaded.status == :working
+      assert [%Schemas.CardOwner{}] = loaded.owners
+      assert [%Schemas.SubTask{title: "todo"}] = loaded.sub_tasks
+    end
+
+    test "loads the story-map placement columns (RE264 — the grid reads them off this list)",
+         %{board: board, stage: stage} do
+      activity = insert(:story_activity, board: board)
+      task = insert(:story_step, story_activity: activity)
+      release = insert(:release, board: board)
+
+      insert(:card,
+        stage: stage,
+        story_activity_id: activity.id,
+        story_step_id: task.id,
+        release_id: release.id
+      )
+
+      assert [loaded] = Cards.list_cards(board)
+      assert loaded.story_activity_id == activity.id
+      assert loaded.story_step_id == task.id
+      assert loaded.release_id == release.id
+    end
+
+    test "preserves the rejection embed through the trim", %{board: board, stage: stage} do
+      card = insert(:card, stage: stage)
+
+      {:ok, _} =
+        card
+        |> Ecto.Changeset.change()
+        |> Ecto.Changeset.put_embed(:rejection, %Schemas.CardRejection{
+          note: "fix it",
+          from_stage_id: stage.id,
+          from_stage_name: "Code",
+          to_stage_id: stage.id,
+          to_stage_name: "Plan",
+          rejected_by: Hamaca.Brand.agent_name(),
+          rejected_at: DateTime.truncate(DateTime.utc_now(), :second)
+        })
+        |> Repo.update()
+
+      assert [loaded] = Cards.list_cards(board)
+      assert %Schemas.CardRejection{note: "fix it"} = loaded.rejection
+    end
+  end
+
+  describe "count_cards/1" do
+    test "counts the board's non-archived cards, excluding archived and other boards",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage)
+      insert(:card, stage: stage)
+      archived = insert(:card, stage: stage)
+      {:ok, _} = Cards.archive_card(archived)
+
+      other = insert(:board)
+      insert(:card, stage: insert(:stage, board: other))
+
+      assert Cards.count_cards(board) == 2
+    end
+  end
+
+  describe "list_cards/2 with :exclude_stage_ids" do
+    test "omits cards in the excluded stages and keeps the rest", %{board: board, stage: stage} do
+      other = insert(:stage, board: board, position: 2)
+      keep = insert(:card, stage: stage)
+      _drop = insert(:card, stage: other)
+
+      ids = Enum.map(Cards.list_cards(board, exclude_stage_ids: [other.id]), & &1.id)
+      assert ids == [keep.id]
+    end
+
+    test "an empty exclude list keeps every card", %{board: board, stage: stage} do
+      insert(:card, stage: stage)
+      assert length(Cards.list_cards(board, exclude_stage_ids: [])) == 1
+    end
+  end
+
+  describe "update_card/2" do
+    test "updates title, description, and tag", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Before"})
+
+      assert {:ok, %Card{} = updated} =
+               Cards.update_card(card, %{
+                 title: "After",
+                 description: "Line one\n\nLine two",
+                 tag: "infra"
+               })
+
+      assert updated.title == "After"
+      assert updated.description == "Line one\n\nLine two"
+      assert updated.tag == "infra"
+      assert Repo.get!(Card, card.id).description == "Line one\n\nLine two"
+    end
+
+    test "rejects a blank title and persists nothing", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Keep me"})
+
+      assert {:error, changeset} = Cards.update_card(card, %{title: ""})
+      assert "can't be blank" in errors_on(changeset).title
+      assert Repo.get!(Card, card.id).title == "Keep me"
+    end
+
+    test "clearing the description stores nil", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, card} = Cards.update_card(card, %{description: "something"})
+
+      assert {:ok, updated} = Cards.update_card(card, %{description: ""})
+      assert updated.description == nil
+    end
+
+    test "never changes board_id, stage_id, position, or ref_number", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Pinned"})
+
+      assert {:ok, updated} =
+               Cards.update_card(card, %{
+                 title: "Still pinned",
+                 board_id: card.board_id + 1,
+                 stage_id: card.stage_id + 1,
+                 position: 99,
+                 ref_number: 99
+               })
+
+      assert updated.board_id == card.board_id
+      assert updated.stage_id == card.stage_id
+      assert updated.position == card.position
+      assert updated.ref_number == card.ref_number
+    end
+
+    test "persists branch and plan and they survive a reload", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Runner card"})
+
+      assert {:ok, %Card{} = updated} =
+               Cards.update_card(card, %{
+                 branch: "rly-21-card-branch-plan",
+                 plan: "## Task 1\n\n- [ ] add the fields"
+               })
+
+      assert updated.branch == "rly-21-card-branch-plan"
+      assert updated.plan == "## Task 1\n\n- [ ] add the fields"
+
+      reloaded = Repo.get!(Card, card.id)
+      assert reloaded.branch == "rly-21-card-branch-plan"
+      assert reloaded.plan == "## Task 1\n\n- [ ] add the fields"
+    end
+
+    test "setting branch and plan never touches the programmatic fields", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Pinned"})
+
+      assert {:ok, updated} =
+               Cards.update_card(card, %{
+                 branch: "rly-21-card-branch-plan",
+                 plan: "the plan",
+                 board_id: card.board_id + 1,
+                 stage_id: card.stage_id + 1,
+                 position: 99,
+                 ref_number: 99
+               })
+
+      assert updated.branch == "rly-21-card-branch-plan"
+      assert updated.plan == "the plan"
+      assert updated.board_id == card.board_id
+      assert updated.stage_id == card.stage_id
+      assert updated.position == card.position
+      assert updated.ref_number == card.ref_number
+    end
+
+    test "persists pr_url and it survives a reload", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Runner card"})
+
+      assert {:ok, %Card{} = updated} =
+               Cards.update_card(card, %{pr_url: "https://github.com/acme/relay/pull/42"})
+
+      assert updated.pr_url == "https://github.com/acme/relay/pull/42"
+
+      reloaded = Repo.get!(Card, card.id)
+      assert reloaded.pr_url == "https://github.com/acme/relay/pull/42"
+    end
+
+    test "setting pr_url never touches the programmatic fields", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Pinned"})
+
+      assert {:ok, updated} =
+               Cards.update_card(card, %{
+                 pr_url: "https://github.com/acme/relay/pull/42",
+                 board_id: card.board_id + 1,
+                 stage_id: card.stage_id + 1,
+                 position: 99,
+                 ref_number: 99
+               })
+
+      assert updated.pr_url == "https://github.com/acme/relay/pull/42"
+      assert updated.board_id == card.board_id
+      assert updated.stage_id == card.stage_id
+      assert updated.position == card.position
+      assert updated.ref_number == card.ref_number
+    end
+  end
+
+  describe "update_card/2 tag" do
+    setup %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Tagged"})
+      %{card: card}
+    end
+
+    test "sets, changes, and clears the tag", %{card: card} do
+      assert {:ok, card} = Cards.update_card(card, %{tag: "infra"})
+      assert card.tag == "infra"
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: "design"})
+      assert card.tag == "design"
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: ""})
+      assert card.tag == nil
+    end
+
+    test "nil clears the tag", %{card: card} do
+      {:ok, card} = Cards.update_card(card, %{tag: "infra"})
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: nil})
+      assert card.tag == nil
+    end
+
+    test "trims whitespace and strips a single leading #", %{card: card} do
+      assert {:ok, card} = Cards.update_card(card, %{tag: " #infra "})
+      assert card.tag == "infra"
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: "##meta"})
+      assert card.tag == "#meta"
+    end
+
+    test "whitespace-only and bare-# values clear the tag", %{card: card} do
+      {:ok, card} = Cards.update_card(card, %{tag: "infra"})
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: "#"})
+      assert card.tag == nil
+
+      {:ok, card} = Cards.update_card(card, %{tag: "infra"})
+
+      assert {:ok, card} = Cards.update_card(card, %{tag: "   "})
+      assert card.tag == nil
+    end
+  end
+
+  describe "list_board_tags/1" do
+    test "returns distinct non-nil tags sorted alphabetically", %{board: board, stage: stage} do
+      {:ok, _} = Cards.create_card(stage, %{title: "A", tag: "infra"})
+      {:ok, _} = Cards.create_card(stage, %{title: "B", tag: "design"})
+      {:ok, _} = Cards.create_card(stage, %{title: "C", tag: "infra"})
+      {:ok, _} = Cards.create_card(stage, %{title: "D"})
+
+      assert Cards.list_board_tags(board.id) == ["design", "infra"]
+    end
+
+    test "excludes archived cards' tags", %{board: board, stage: stage} do
+      {:ok, _keep} = Cards.create_card(stage, %{title: "Keep", tag: "design"})
+      {:ok, gone} = Cards.create_card(stage, %{title: "Gone", tag: "legacy"})
+      {:ok, _} = Cards.archive_card(gone)
+
+      assert Cards.list_board_tags(board.id) == ["design"]
+    end
+
+    test "is scoped to the given board", %{board: board, stage: stage} do
+      other_stage = insert(:stage)
+      {:ok, _} = Cards.create_card(other_stage, %{title: "Elsewhere", tag: "other"})
+      {:ok, _} = Cards.create_card(stage, %{title: "Here", tag: "mine"})
+
+      assert Cards.list_board_tags(board.id) == ["mine"]
+    end
+  end
+
+  describe "get_card_by_ref/2" do
+    test "returns the card the ref points at on the board", %{board: board, stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Find me"})
+
+      assert %Card{id: id} = Cards.get_card_by_ref(board, "RLY1")
+      assert id == card.id
+    end
+
+    test "returns nil for an unknown ref number", %{board: board} do
+      assert Cards.get_card_by_ref(board, "RLY99") == nil
+    end
+
+    test "returns nil for malformed or foreign-key refs", %{board: board, stage: stage} do
+      {:ok, _card} = Cards.create_card(stage, %{title: "Here"})
+
+      for ref <- ["", "RLY", "RLY-", "RLY-abc", "RLY-1extra", "RLY--1", "RLY-0", "OPS-1", "rly-1"] do
+        assert Cards.get_card_by_ref(board, ref) == nil, "expected nil for #{inspect(ref)}"
+      end
+    end
+
+    test "never returns another board's card", %{board: board} do
+      other_stage = insert(:stage)
+
+      {:ok, _theirs} = Cards.create_card(other_stage, %{title: "Theirs"})
+
+      assert Cards.get_card_by_ref(board, "RLY1") == nil
+    end
+
+    test "still returns an archived card (loadable by ref, like archived boards)", %{
+      board: board,
+      stage: stage
+    } do
+      {:ok, card} = Cards.create_card(stage, %{title: "Archived but linkable"})
+      {:ok, _archived} = Cards.archive_card(card)
+
+      assert %Card{id: id, archived_at: at} = Cards.get_card_by_ref(board, "RLY1")
+      assert id == card.id
+      assert at
+    end
+
+    test "resolves both the dashless and optional-dash forms; rejects a wrong prefix", %{board: board, stage: stage} do
+      card = insert(:card, stage: stage, board: board, ref_number: 7)
+
+      assert %Card{id: id} = Cards.get_card_by_ref(board, "RLY7")
+      assert %Card{id: ^id} = Cards.get_card_by_ref(board, "RLY-7")
+      assert Cards.get_card_by_ref(board, "ZZ7") == nil
+      assert id == card.id
+    end
+  end
+
+  describe "get_card_light_by_ref/2" do
+    test "loads light columns with heavy fields nil, owners and sub_tasks preloaded",
+         %{board: board, stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Light me", tag: "perf"})
+
+      {:ok, _} =
+        Cards.update_card(card, %{
+          description: "d",
+          acceptance_criteria: "ac",
+          spec: "s",
+          plan: "p",
+          ai_result: %{"summary" => "x"}
+        })
+
+      {:ok, _} = Cards.set_sub_tasks(card, [%{"title" => "One"}, %{"title" => "Two"}])
+
+      light = Cards.get_card_light_by_ref(board, "RLY1")
+
+      assert light.id == card.id
+      assert light.title == "Light me"
+      assert light.tag == "perf"
+      assert light.status == :ready
+      # heavy fields are not selected
+      assert light.description == nil
+      assert light.acceptance_criteria == nil
+      assert light.spec == nil
+      assert light.plan == nil
+      assert light.ai_result == nil
+      # associations still preloaded
+      assert is_list(light.owners)
+      assert Enum.map(light.sub_tasks, & &1.title) == ["One", "Two"]
+    end
+
+    test "returns nil for an unknown ref number", %{board: board} do
+      assert Cards.get_card_light_by_ref(board, "RLY99") == nil
+    end
+
+    test "returns nil for malformed or foreign-key refs", %{board: board, stage: stage} do
+      {:ok, _card} = Cards.create_card(stage, %{title: "Present"})
+
+      for ref <- ["", "RLY-", "nope", "OPS-1"] do
+        assert Cards.get_card_light_by_ref(board, ref) == nil, "expected nil for #{inspect(ref)}"
+      end
+    end
+
+    test "never returns another board's card", %{board: board} do
+      other_board = insert(:board, key: "OPS")
+      other_stage = insert(:stage, board: other_board, position: 1)
+      {:ok, _card} = Cards.create_card(other_stage, %{title: "Foreign"})
+
+      # the RLY board has no card #1 yet
+      assert Cards.get_card_light_by_ref(board, "RLY1") == nil
+    end
+  end
+
+  describe "move_card/4" do
+    setup %{board: board} do
+      %{target: insert(:stage, board: board, position: 2)}
+    end
+
+    test "moves a card to another stage at the index, reindexing the target gap-free",
+         %{board: board, stage: stage, target: target} do
+      # Gappy target positions prove the whole target stage is re-indexed.
+      a = insert(:card, stage: target, title: "A", position: 3, ref_number: 10)
+      b = insert(:card, stage: target, title: "B", position: 7, ref_number: 11)
+      {:ok, card} = Cards.create_card(stage, %{title: "Mover"})
+
+      assert {:ok, %Card{} = moved} = Cards.move_card(card, target, 1)
+
+      assert moved.stage_id == target.id
+      assert moved.position == 2
+      assert stage_card_ids(board, target) == [a.id, moved.id, b.id]
+      assert stage_positions(board, target) == [1, 2, 3]
+    end
+
+    test "index 0 inserts at the top of the target stage",
+         %{board: board, stage: stage, target: target} do
+      existing = insert(:card, stage: target, title: "Existing", position: 1, ref_number: 10)
+      {:ok, card} = Cards.create_card(stage, %{title: "Mover"})
+
+      assert {:ok, moved} = Cards.move_card(card, target, 0)
+
+      assert stage_card_ids(board, target) == [moved.id, existing.id]
+      assert stage_positions(board, target) == [1, 2]
+    end
+
+    test "an index past the end and a negative index clamp into range",
+         %{board: board, stage: stage, target: target} do
+      existing = insert(:card, stage: target, title: "Existing", position: 1, ref_number: 10)
+      {:ok, card_a} = Cards.create_card(stage, %{title: "Bottom"})
+      {:ok, card_b} = Cards.create_card(stage, %{title: "Top"})
+
+      {:ok, bottom} = Cards.move_card(card_a, target, 99)
+      {:ok, top} = Cards.move_card(card_b, target, -5)
+
+      assert stage_card_ids(board, target) == [top.id, existing.id, bottom.id]
+      assert stage_positions(board, target) == [1, 2, 3]
+    end
+
+    test "reorders within the same stage keeping positions contiguous",
+         %{board: board, stage: stage} do
+      {:ok, first} = Cards.create_card(stage, %{title: "First"})
+      {:ok, second} = Cards.create_card(stage, %{title: "Second"})
+      {:ok, third} = Cards.create_card(stage, %{title: "Third"})
+
+      # top-insert order is [third, second, first]; move the bottom card to the top
+      assert {:ok, moved} = Cards.move_card(first, stage, 0)
+
+      assert moved.stage_id == stage.id
+      assert stage_card_ids(board, stage) == [moved.id, third.id, second.id]
+      assert stage_positions(board, stage) == [1, 2, 3]
+    end
+
+    test "moving into an empty stage lands at position 1", %{stage: stage, target: target} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Loner"})
+
+      assert {:ok, moved} = Cards.move_card(card, target, 0)
+
+      assert moved.stage_id == target.id
+      assert moved.position == 1
+    end
+
+    test "refuses a target stage on another board", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Stay"})
+      foreign_stage = insert(:stage)
+
+      assert_raise FunctionClauseError, fn -> Cards.move_card(card, foreign_stage, 0) end
+      assert Repo.get!(Card, card.id).stage_id == stage.id
+    end
+  end
+
+  describe "cross-stage move snaps status to the destination type's default (ADR 0003)" do
+    setup %{board: board} do
+      %{
+        work_stage: insert(:stage, board: board, type: :work, position: 10),
+        backlog_stage: insert(:stage, board: board, type: :queue, position: 11)
+      }
+    end
+
+    test "an invalid status snaps to the destination type's default", %{work_stage: work, backlog_stage: backlog} do
+      {:ok, card} = Cards.create_card(work, %{title: "x"})
+      {:ok, card} = Cards.set_status(card, %{status: :working})
+
+      assert {:ok, moved} = Cards.move_card(card, backlog, 0)
+      assert moved.status == :ready
+    end
+
+    test "a status already valid for the destination survives the move", %{work_stage: work, backlog_stage: backlog} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, work, 0)
+      assert moved.status == :ready
+    end
+
+    test "a :ready card entering a review stage becomes :in_review so it can be reviewed",
+         %{board: board, backlog_stage: backlog} do
+      review = insert(:stage, board: board, type: :review, position: 12)
+      {:ok, card} = Cards.create_card(backlog, %{title: "x"})
+      assert card.status == :ready
+
+      assert {:ok, moved} = Cards.move_card(card, review, 0)
+      assert moved.status == :in_review
+    end
+
+    test "needs_input -> queue clears blocked_since", %{work_stage: work, backlog_stage: backlog} do
+      {:ok, card} = Cards.create_card(work, %{title: "blocked"})
+      {:ok, card} = Cards.set_status(card, %{status: :needs_input})
+      assert card.blocked_since
+
+      {:ok, moved} = Cards.move_card(card, backlog, 0)
+      assert moved.status == :ready
+      assert is_nil(moved.blocked_since)
+    end
+
+    test "a same-stage reorder does not change status", %{work_stage: work} do
+      {:ok, a} = Cards.create_card(work, %{title: "a"})
+      {:ok, a} = Cards.set_status(a, %{status: :needs_input})
+      {:ok, moved} = Cards.move_card(a, work, 0)
+      assert moved.status == :needs_input
+    end
+  end
+
+  describe "the claim rule on move (RLY-47)" do
+    setup %{board: board} do
+      %{
+        ai_stage: insert_ai_stage(board: board, type: :planning, category: :planning, position: 20),
+        human_work: insert(:stage, board: board, type: :work, position: 21),
+        queue_stage: insert(:stage, board: board, type: :queue, position: 22),
+        done_stage: insert(:stage, board: board, type: :done, position: 23),
+        review_stage: insert(:stage, board: board, type: :review, position: 24),
+        user: member!(board)
+      }
+    end
+
+    test "an unowned card a HUMAN moves into an AI-enabled stage is claimed by that human (rule 3, corrected)",
+         %{stage: stage, ai_stage: ai_stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, ai_stage, 0, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = moved.owners
+      assert uid == user.id
+    end
+
+    test "an unowned card an AGENT moves into an AI-enabled stage is claimed by Hamaca AI (rule 1)",
+         %{stage: stage, ai_stage: ai_stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, ai_stage, 0, :agent)
+      assert [%{actor_type: :agent}] = moved.owners
+    end
+
+    test "an unowned card + a human move into a human-only work stage claims that human (rule 3)",
+         %{stage: stage, human_work: human_work, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, human_work, 0, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = moved.owners
+      assert uid == user.id
+    end
+
+    test "an agent move into a human-only work stage leaves the card unowned",
+         %{stage: stage, human_work: human_work} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, human_work, 0, :agent)
+      assert moved.owners == []
+    end
+
+    test "moves into Queue, Done, or a Review gate never claim — not even a human into Review (rule 5)",
+         %{stage: stage, queue_stage: queue_stage, done_stage: done_stage, review_stage: review_stage, user: user} do
+      for target <- [queue_stage, done_stage, review_stage] do
+        {:ok, card} = Cards.create_card(stage, %{title: "x"})
+        assert {:ok, moved} = Cards.move_card(card, target, 0, {:user, user.id})
+        assert moved.owners == [], "expected no claim moving into a #{target.type} stage"
+      end
+    end
+
+    test "an agent move into a work stage a DISABLED flow works in is claimed by Hamaca AI (RE409)",
+         %{board: board, stage: stage} do
+      target = insert_ai_stage(board: board, position: 25)
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, target, 0, :agent)
+      assert [%{actor_type: :agent}] = moved.owners
+    end
+
+    test "an agent move into a work stage an ENABLED flow works in is claimed by Hamaca AI (RE409)",
+         %{board: board, stage: stage} do
+      target = insert_ai_stage([board: board, position: 25], enabled: true)
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, target, 0, :agent)
+      assert [%{actor_type: :agent}] = moved.owners
+    end
+
+    test "a work stage no flow works in: a human mover claims, an agent mover leaves it unowned (RE409)",
+         %{board: board, stage: stage, user: user} do
+      target = insert(:stage, board: board, type: :work, category: :in_progress, position: 25)
+
+      {:ok, by_human} = Cards.create_card(stage, %{title: "human"})
+      assert {:ok, moved} = Cards.move_card(by_human, target, 0, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = moved.owners
+      assert uid == user.id
+
+      {:ok, by_agent} = Cards.create_card(stage, %{title: "agent"})
+      assert {:ok, moved} = Cards.move_card(by_agent, target, 0, :agent)
+      assert moved.owners == []
+    end
+
+    test "an agent move into a Review main stage a flow works in never claims (RE409)",
+         %{board: board, stage: stage} do
+      review = insert_ai_stage(board: board, type: :review, position: 25)
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+
+      assert {:ok, moved} = Cards.move_card(card, review, 0, :agent)
+      assert moved.owners == []
+    end
+
+    test "an already-owned card keeps its owners across moves — no hand-back (rules 5 & 6)",
+         %{stage: stage, human_work: human_work, done_stage: done_stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "x"})
+      {:ok, card} = Cards.assign_ai(card)
+
+      # A human moving an AI-owned card does NOT claim it (already owned → untouched).
+      assert {:ok, at_work} = Cards.move_card(card, human_work, 0, {:user, user.id})
+      assert [%{actor_type: :agent}] = at_work.owners
+
+      # Reaching a Done stage keeps Hamaca AI as the owner (provenance).
+      assert {:ok, in_done} = Cards.move_card(at_work, done_stage, 0)
+      assert [%{actor_type: :agent}] = in_done.owners
+      assert in_done.status == :ready
+    end
+  end
+
+  describe "set_status/3" do
+    test "sets status and preloads owners", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert {:ok, %Card{} = updated} = Cards.set_status(card, %{"status" => "working"})
+
+      assert updated.status == :working
+      assert updated.owners == []
+      assert Repo.get!(Card, card.id).status == :working
+    end
+
+    test "returns an error changeset and persists nothing on invalid status", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert {:error, %Ecto.Changeset{}} = Cards.set_status(card, %{"status" => "banana"})
+
+      assert Repo.get!(Card, card.id).status == :ready
+    end
+  end
+
+  describe "set_status_snapped/3" do
+    test "a review-stage card set to :ready persists :in_review and logs the change", %{board: board} do
+      review = insert(:stage, board: board, type: :review, position: 30)
+      card = insert(:card, stage: review, status: :working)
+
+      assert {:ok, %Card{} = updated} = Cards.set_status_snapped(card, %{"status" => "ready"})
+      assert updated.status == :in_review
+      assert Repo.get!(Card, card.id).status == :in_review
+
+      assert %Schemas.Activity{type: :status_changed, meta: meta} =
+               updated |> activities() |> Enum.find(&(&1.type == :status_changed))
+
+      assert meta == %{"from_status" => "working", "to_status" => "in_review"}
+    end
+
+    test "a work-stage card set to :ready stays :ready (valid, not coerced)", %{board: board} do
+      work = insert(:stage, board: board, type: :work, position: 31)
+      card = insert(:card, stage: work, status: :working)
+
+      assert {:ok, %Card{} = updated} = Cards.set_status_snapped(card, %{"status" => "ready"})
+      assert updated.status == :ready
+    end
+
+    test "a queue-stage card set to :in_review coerces to :ready", %{board: board} do
+      queue = insert(:stage, board: board, type: :queue, position: 32)
+      card = insert(:card, stage: queue, status: :ready)
+
+      assert {:ok, %Card{} = updated} = Cards.set_status_snapped(card, %{"status" => "in_review"})
+      assert updated.status == :ready
+    end
+
+    test "a valid same-status re-set logs nothing (parity with set_status/3)", %{board: board} do
+      work = insert(:stage, board: board, type: :work, position: 33)
+      card = insert(:card, stage: work, status: :working)
+
+      {:ok, card} = Cards.set_status_snapped(card, %{"status" => "working"})
+
+      refute Enum.any?(activities(card), &(&1.type == :status_changed))
+    end
+
+    test "a non-enum status still returns an error changeset", %{board: board} do
+      work = insert(:stage, board: board, type: :work, position: 34)
+      card = insert(:card, stage: work, status: :working)
+
+      assert {:error, %Ecto.Changeset{}} = Cards.set_status_snapped(card, %{"status" => "nope"})
+    end
+  end
+
+  describe "mark_failed/3 (RLY-179)" do
+    setup do
+      board = insert(:board)
+      stage = insert(:stage, board: board, type: :work)
+      %{board: board, card: insert(:card, board: board, stage: stage)}
+    end
+
+    test "sets :failed, comments the detail, and logs a :failure activity carrying it", %{card: card} do
+      detail = "The flow has nowhere to go after `final_fix` reported `failed`."
+
+      assert {:ok, updated} = Cards.mark_failed(card, detail)
+      assert updated.status == :failed
+
+      timeline = Hamaca.Activity.list_timeline(updated)
+
+      assert Enum.any?(timeline, &match?(%Schemas.Comment{kind: :comment, body: ^detail}, &1))
+      refute Enum.any?(timeline, &match?(%Schemas.Comment{kind: :question}, &1))
+
+      assert Enum.any?(
+               timeline,
+               &match?(%Schemas.Activity{type: :failure, meta: %{"detail" => ^detail}}, &1)
+             )
+    end
+
+    # The board's log strip renders `entry.text` and falls back to the static phrase
+    # "the agent stopped" when it is blank, so a text-less :failure row would erase the
+    # failing node's output from the card face (RLY-179 review).
+    test "logs the detail as the entry's text, so the board strip shows it", %{card: card} do
+      detail = "The flow has nowhere to go after `final_fix` reported `failed`."
+
+      assert {:ok, updated} = Cards.mark_failed(card, detail)
+
+      assert %Schemas.Activity{text: ^detail} =
+               [updated.id] |> Hamaca.Activity.newest_per_card() |> Map.fetch!(updated.id)
+    end
+
+    test "does not stamp blocked_since — a failed card is not waiting on an answer", %{card: card} do
+      assert {:ok, updated} = Cards.mark_failed(card, "it died")
+      assert is_nil(updated.blocked_since)
+    end
+
+    test "entering :failed from :needs_input clears blocked_since", %{card: card} do
+      {:ok, blocked} = Cards.request_input(card, "which one?")
+      assert blocked.blocked_since
+
+      assert {:ok, updated} = Cards.mark_failed(blocked, "it died")
+      assert updated.status == :failed
+      assert is_nil(updated.blocked_since)
+    end
+
+    test "a failed card still counts as needing you", %{board: board, card: card} do
+      {:ok, updated} = Cards.mark_failed(card, "it died")
+      assert Cards.needs_you?(updated, Hamaca.Boards.list_stages(board), Hamaca.Flows.ai_stage_ids(board))
+    end
+  end
+
+  describe "needs_input?/1 (RE259)" do
+    test "is exactly the :needs_input status, and nothing else amber" do
+      # The ONE definition: HamacaWeb.StoryMapFilter and StoryMapComponents.card_face/4 both
+      # call it, so the toggle and the NEEDS YOU badge can never disagree. A stalled or
+      # failed card is human-blocked but is NOT needs-input.
+      assert Cards.needs_input?(%Card{status: :needs_input})
+      refute Cards.needs_input?(%Card{status: :in_review})
+      refute Cards.needs_input?(%Card{status: :failed})
+      refute Cards.needs_input?(%Card{status: :working})
+      refute Cards.needs_input?(%Card{status: :ready})
+    end
+  end
+
+  describe "owner management" do
+    setup %{board: board, stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Owned"})
+      %{card: card, user: member!(board)}
+    end
+
+    test "add_owner/3 with {:user, id} adds a human owner with the user preloaded",
+         %{card: card, user: user} do
+      assert {:ok, %Card{} = updated} = Cards.add_owner(card, {:user, user.id})
+
+      assert [owner] = updated.owners
+      assert owner.actor_type == :user
+      assert owner.user_id == user.id
+      assert owner.user.id == user.id
+    end
+
+    test "add_owner/3 with :agent adds the AI owner", %{card: card} do
+      assert {:ok, %Card{} = updated} = Cards.add_owner(card, :agent)
+
+      assert [owner] = updated.owners
+      assert owner.actor_type == :agent
+      assert owner.user_id == nil
+    end
+
+    test "add_owner/3 is idempotent per actor", %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, updated} = Cards.add_owner(card, {:user, user.id})
+      assert length(updated.owners) == 1
+
+      {:ok, _card} = Cards.add_owner(card, :agent)
+      {:ok, again} = Cards.add_owner(card, :agent)
+      # exclusivity: assigning AI cleared the human, so AI is the sole owner
+      assert [%{actor_type: :agent}] = again.owners
+    end
+
+    test "add_owner/3 refuses an unknown user id as :owner_not_member", %{card: card} do
+      assert {:error, :owner_not_member} = Cards.add_owner(card, {:user, -1})
+      assert {:ok, %Card{owners: []}} = Cards.set_owners(card, [])
+    end
+
+    test "remove_owner/3 removes only the matching actor and is idempotent",
+         %{board: board, card: card, user: user} do
+      other = member!(board)
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, _card} = Cards.add_owner(card, {:user, other.id})
+
+      assert {:ok, %Card{} = updated} = Cards.remove_owner(card, {:user, other.id})
+      assert [%{actor_type: :user, user_id: uid}] = updated.owners
+      assert uid == user.id
+
+      assert {:ok, %Card{} = again} = Cards.remove_owner(card, {:user, other.id})
+      assert [%{user_id: ^uid}] = again.owners
+
+      assert {:ok, %Card{owners: []}} = Cards.remove_owner(card, {:user, user.id})
+    end
+
+    test "add_owner/3 with :agent clears human owners (AI exclusivity, rule 2)",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      assert {:ok, updated} = Cards.add_owner(card, :agent)
+      assert [%{actor_type: :agent}] = updated.owners
+    end
+
+    test "add_owner/3 with a human on an AI-owned card removes the agent (take-over, rule 2)",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      assert {:ok, updated} = Cards.add_owner(card, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = updated.owners
+      assert uid == user.id
+    end
+
+    test "assign_ai/2 makes Hamaca AI the sole owner and logs :owners_changed",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      assert {:ok, updated} = Cards.assign_ai(card)
+      assert [%{actor_type: :agent}] = updated.owners
+      assert Enum.any?(activities(card), &(&1.type == :owners_changed))
+    end
+
+    test "take_over/2 makes the user the sole owner and logs :owners_changed",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      assert {:ok, updated} = Cards.take_over(card, {:user, user.id})
+      assert [%{actor_type: :user, user_id: uid}] = updated.owners
+      assert uid == user.id
+      assert Enum.any?(activities(card), &(&1.type == :owners_changed))
+    end
+
+    test "set_owners/3 replaces the owner list atomically", %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      assert {:ok, %Card{} = updated} = Cards.set_owners(card, [{:user, user.id}])
+
+      assert [owner] = updated.owners
+      assert owner.actor_type == :user
+      assert owner.user_id == user.id
+    end
+
+    test "set_owners/3 rolls back on an invalid actor, keeping existing owners",
+         %{card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      assert {:error, :owner_not_member} = Cards.set_owners(card, [:agent, {:user, -1}])
+
+      assert {:ok, %Card{} = reloaded} = Cards.remove_owner(card, :agent)
+      assert [%{actor_type: :user}] = reloaded.owners
+    end
+  end
+
+  describe "owner membership (RE344)" do
+    setup %{board: board, stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Guarded"})
+      %{card: card, member: member!(board), outsider: insert(:user)}
+    end
+
+    test "set_owners/3 refuses a non-member and leaves the existing owners unchanged",
+         %{card: card, member: member, outsider: outsider} do
+      {:ok, _card} = Cards.set_owners(card, [{:user, member.id}])
+
+      assert {:error, :owner_not_member} = Cards.set_owners(card, [{:user, outsider.id}])
+      assert owner_user_ids(card) == [member.id]
+    end
+
+    test "a non-existent user id gets the identical refusal", %{card: card, outsider: outsider} do
+      assert {:error, :owner_not_member} = Cards.set_owners(card, [{:user, outsider.id}])
+      assert {:error, :owner_not_member} = Cards.set_owners(card, [{:user, -1}])
+    end
+
+    test "a member id succeeds", %{card: card, member: member} do
+      assert {:ok, %Card{}} = Cards.set_owners(card, [{:user, member.id}])
+      assert owner_user_ids(card) == [member.id]
+    end
+
+    test "add_owner/3 refuses a non-member", %{card: card, outsider: outsider} do
+      assert {:error, :owner_not_member} = Cards.add_owner(card, {:user, outsider.id})
+      assert owner_user_ids(card) == []
+    end
+
+    test "take_over/2 by a non-member is refused and keeps the AI owner",
+         %{card: card, outsider: outsider} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      assert {:error, :owner_not_member} = Cards.take_over(card, {:user, outsider.id})
+      assert Repo.exists?(from o in Schemas.CardOwner, where: o.card_id == ^card.id and o.actor_type == :agent)
+    end
+
+    test "a non-member human's claim on move is refused and the move rolls back",
+         %{board: board, stage: stage, card: card, outsider: outsider} do
+      work = insert(:stage, board: board, type: :work, position: 40)
+
+      assert {:error, :owner_not_member} = Cards.move_card(card, work, 0, {:user, outsider.id})
+      assert Repo.get!(Card, card.id).stage_id == stage.id
+      assert owner_user_ids(card) == []
+    end
+
+    test "check_owners/2 is the same rule as a pre-flight", %{card: card, member: member, outsider: outsider} do
+      assert :ok = Cards.check_owners(card, [:agent, {:user, member.id}])
+      assert :ok = Cards.check_owners(card, [])
+      assert {:error, :owner_not_member} = Cards.check_owners(card, [{:user, member.id}, {:user, outsider.id}])
+      assert {:error, :owner_not_member} = Cards.check_owners(card, [{:user, -1}])
+    end
+
+    test "owner_error_message/0 names nobody" do
+      assert Cards.owner_error_message() == "owners must be members of this board"
+    end
+  end
+
+  describe "active_owner_type/1" do
+    setup %{board: board, stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Baton"})
+      %{card: card, user: member!(board)}
+    end
+
+    test "returns nil for an unowned card", %{card: card} do
+      assert Cards.active_owner_type(card) == nil
+    end
+
+    test "returns :human when only user owners", %{card: card, user: user} do
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+
+      assert Cards.active_owner_type(card) == :human
+    end
+
+    test "returns :ai for an AI-owned card", %{card: card} do
+      {:ok, card} = Cards.add_owner(card, :agent)
+
+      assert Cards.active_owner_type(card) == :ai
+    end
+  end
+
+  describe "activity logging" do
+    setup %{board: board} do
+      user = member!(board, name: "Ada Lovelace")
+      target = insert(:stage, board: board, name: "Code", position: 2)
+      %{user: user, target: target}
+    end
+
+    test "create_card/3 logs :created attributed to the actor", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"}, {:user, user.id})
+
+      assert [%Schemas.Activity{type: :created, actor_type: :user, user_id: user_id, meta: %{}}] =
+               activities(card)
+
+      assert user_id == user.id
+    end
+
+    test "create_card/3 defaults the actor to the agent", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert [%Schemas.Activity{type: :created, actor_type: :agent, user_id: nil}] = activities(card)
+    end
+
+    test "a failed create logs nothing", %{stage: stage} do
+      {:error, _changeset} = Cards.create_card(stage, %{title: ""})
+
+      assert Repo.aggregate(Schemas.Activity, :count) == 0
+    end
+
+    test "move_card/4 logs :moved with both stage names", %{stage: stage, target: target, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Mover"})
+
+      {:ok, moved} = Cards.move_card(card, target, 0, {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :moved, actor_type: :user, meta: meta}] =
+               activities(moved)
+
+      assert meta == %{
+               "from_stage" => stage.name,
+               "to_stage" => "Code",
+               "from_stage_id" => stage.id,
+               "to_stage_id" => target.id
+             }
+    end
+
+    test "move_card/4 into a sub-lane snapshots the human label, not the composite Stage.name",
+         %{stage: stage, target: target} do
+      {:ok, review} = Hamaca.Boards.enable_lane(target, :review)
+      {:ok, card} = Cards.create_card(stage, %{title: "Reviewable"})
+
+      {:ok, moved} = Cards.move_card(card, review, 0)
+
+      # A :ready card entering a review lane now snaps to :in_review (RLY-57 precondition), so a
+      # :status_changed is logged alongside the :moved entry.
+      assert moved.status == :in_review
+
+      assert [%Schemas.Activity{type: :moved, meta: meta}] =
+               Enum.filter(activities(moved), &(&1.type == :moved))
+
+      assert meta == %{
+               "from_stage" => stage.name,
+               "to_stage" => "Code · Review",
+               "from_stage_id" => stage.id,
+               "to_stage_id" => review.id
+             }
+    end
+
+    test "a same-stage reorder logs nothing", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "A"})
+      {:ok, _other} = Cards.create_card(stage, %{title: "B"})
+
+      {:ok, moved} = Cards.move_card(card, stage, 1)
+
+      assert [%Schemas.Activity{type: :created}] = activities(moved)
+    end
+
+    test "set_status/3 logs :status_changed with from/to", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:ok, updated} = Cards.set_status(card, %{"status" => "in_review"}, {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :status_changed, actor_type: :user, meta: meta}] =
+               activities(updated)
+
+      assert meta == %{"from_status" => "ready", "to_status" => "in_review"}
+    end
+
+    test "a same-status re-set does not log", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, card} = Cards.set_status(card, %{"status" => "working"})
+
+      {:ok, card} = Cards.set_status(card, %{"status" => "working"})
+
+      assert Enum.map(activities(card), & &1.type) == [:created, :status_changed]
+    end
+
+    test "a failed status change logs nothing", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:error, _changeset} = Cards.set_status(card, %{"status" => "banana"})
+
+      assert Enum.map(activities(card), & &1.type) == [:created]
+    end
+
+    test "add_owner/3 logs :owners_changed with the owner label", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:ok, card} = Cards.add_owner(card, :agent, {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :owners_changed, actor_type: :user, meta: meta}] =
+               activities(card)
+
+      assert meta == %{"action" => "added", "owner" => "AI"}
+    end
+
+    test "adding an existing owner logs nothing new", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+
+      assert Enum.map(activities(card), & &1.type) == [:created, :owners_changed]
+    end
+
+    test "remove_owner/3 logs the user's name; a no-op remove logs nothing", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+
+      {:ok, card} = Cards.remove_owner(card, {:user, user.id})
+      {:ok, card} = Cards.remove_owner(card, {:user, user.id})
+
+      assert [_created, _added, %Schemas.Activity{type: :owners_changed, meta: meta}] = activities(card)
+      assert meta == %{"action" => "removed", "owner" => "Ada Lovelace"}
+    end
+
+    test "set_owners/3 logs the new owner labels", %{stage: stage, user: user} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:ok, card} = Cards.set_owners(card, [:agent, {:user, user.id}], {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :owners_changed, meta: meta}] = activities(card)
+      assert meta == %{"action" => "set", "owners" => ["AI", "Ada Lovelace"]}
+    end
+  end
+
+  describe "owner preloading" do
+    test "every card-returning function preloads owners", %{board: board, stage: stage} do
+      {:ok, created} = Cards.create_card(stage, %{title: "Preloaded"})
+      assert created.owners == []
+
+      assert [%Card{owners: []}] = Cards.list_cards(board)
+      assert %Card{owners: []} = Cards.get_card_by_ref(board, "RLY1")
+
+      {:ok, updated} = Cards.update_card(created, %{title: "Still preloaded"})
+      assert updated.owners == []
+
+      target = insert(:stage, board: board, position: 2)
+      {:ok, moved} = Cards.move_card(created, target, 0)
+      assert moved.owners == []
+    end
+  end
+
+  describe "archive_card/2 and unarchive_card/2" do
+    test "archive stamps archived_at and preserves stage/position/owners", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Retire me"})
+      {:ok, _owner} = Cards.add_owner(card, :agent)
+      card = Cards.get_card_by_ref(Repo.get!(Board, stage.board_id), "RLY1")
+
+      assert {:ok, archived} = Cards.archive_card(card)
+
+      assert archived.archived_at
+      assert Card.archived?(archived)
+      assert archived.stage_id == card.stage_id
+      assert archived.position == card.position
+      assert Enum.map(archived.owners, & &1.actor_type) == [:agent]
+    end
+
+    test "archive logs :archived attributed to the actor", %{stage: stage} do
+      user = insert(:user, name: "Ada Lovelace")
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      {:ok, archived} = Cards.archive_card(card, {:user, user.id})
+
+      assert [_created, %Schemas.Activity{type: :archived, actor_type: :user, user_id: uid, meta: %{}}] =
+               activities(archived)
+
+      assert uid == user.id
+    end
+
+    test "archiving an already-archived card re-stamps but does not log twice", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, once} = Cards.archive_card(card)
+
+      {:ok, twice} = Cards.archive_card(once)
+
+      assert twice.archived_at
+      assert Enum.count(activities(twice), &(&1.type == :archived)) == 1
+    end
+
+    test "archive broadcasts {:card_archived, card}", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      Hamaca.Events.subscribe(card.board_id)
+
+      assert {:ok, _} = Cards.archive_card(card)
+      assert_receive {:card_archived, %Card{id: id, archived_at: at}}
+      assert id == card.id
+      assert at
+    end
+
+    test "unarchive clears archived_at and logs :unarchived", %{stage: stage} do
+      user = insert(:user, name: "Ada Lovelace")
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, archived} = Cards.archive_card(card)
+
+      assert {:ok, restored} = Cards.unarchive_card(archived, {:user, user.id})
+
+      assert restored.archived_at == nil
+      refute Card.archived?(restored)
+
+      assert [_created, _archived, %Schemas.Activity{type: :unarchived, actor_type: :user}] =
+               activities(restored)
+    end
+
+    test "unarchive broadcasts {:card_upserted, card} (reuses the upsert event)", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+      {:ok, archived} = Cards.archive_card(card)
+      Hamaca.Events.subscribe(card.board_id)
+
+      assert {:ok, _} = Cards.unarchive_card(archived)
+      assert_receive {:card_upserted, %Card{archived_at: nil}}
+    end
+
+    test "unarchiving an active card is a no-op that logs nothing", %{stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "T"})
+
+      assert {:ok, same} = Cards.unarchive_card(card)
+
+      assert same.archived_at == nil
+      assert Enum.map(activities(same), & &1.type) == [:created]
+    end
+  end
+
+  describe "list_archived_cards/1" do
+    test "returns only archived cards, most-recently-archived first, with stage + owners", %{
+      board: board,
+      stage: stage
+    } do
+      {:ok, active} = Cards.create_card(stage, %{title: "Active"})
+      {:ok, first} = Cards.create_card(stage, %{title: "First archived"})
+      {:ok, second} = Cards.create_card(stage, %{title: "Second archived"})
+      {:ok, _first} = Cards.archive_card(first)
+      {:ok, _second} = Cards.archive_card(second)
+
+      # archived_at is truncated to the second, so both archives tie; the
+      # `desc: id` tiebreak in list_archived_cards/1 puts the later-created
+      # (higher-id) "Second archived" first — deterministic without sleeping.
+      archived = Cards.list_archived_cards(board)
+
+      assert Enum.map(archived, & &1.title) == ["Second archived", "First archived"]
+      refute active.id in Enum.map(archived, & &1.id)
+      assert %Schemas.Stage{} = hd(archived).stage
+      assert is_list(hd(archived).owners)
+    end
+
+    test "returns [] when nothing is archived", %{board: board, stage: stage} do
+      {:ok, _active} = Cards.create_card(stage, %{title: "Active"})
+      assert Cards.list_archived_cards(board) == []
+    end
+  end
+
+  describe "count_archived_cards/1" do
+    test "counts only archived cards on the board", %{board: board, stage: stage} do
+      {:ok, _active} = Cards.create_card(stage, %{title: "Active"})
+      {:ok, a} = Cards.create_card(stage, %{title: "A"})
+      {:ok, b} = Cards.create_card(stage, %{title: "B"})
+      {:ok, _a} = Cards.archive_card(a)
+      {:ok, _b} = Cards.archive_card(b)
+
+      assert Cards.count_archived_cards(board) == 2
+    end
+  end
+
+  describe "stage_neighbors/2" do
+    setup do
+      user = insert(:user)
+      board = Hamaca.Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      %{board: board, backlog: backlog, done: done}
+    end
+
+    test "a middle card returns both neighbors, in position order", %{board: board, backlog: backlog} do
+      _c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+      _c3 = insert(:card, stage: backlog, title: "Three", position: 3, ref_number: 3)
+
+      assert Cards.stage_neighbors(board, c2) == %{prev: "MY1", next: "MY3"}
+    end
+
+    test "the first card of a column has no prev", %{board: board, backlog: backlog} do
+      c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      _c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+
+      assert Cards.stage_neighbors(board, c1) == %{prev: nil, next: "MY2"}
+    end
+
+    test "the last card of a column has no next", %{board: board, backlog: backlog} do
+      _c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+
+      assert Cards.stage_neighbors(board, c2) == %{prev: "MY1", next: nil}
+    end
+
+    test "a single-card column has neither neighbor", %{board: board, backlog: backlog} do
+      only = insert(:card, stage: backlog, title: "Only", position: 1, ref_number: 1)
+
+      assert Cards.stage_neighbors(board, only) == %{prev: nil, next: nil}
+    end
+
+    test "ordering follows list_cards position order, not insertion order", %{board: board, backlog: backlog} do
+      # Inserted out of order; column order is by position.
+      c_third = insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      c_first = insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      c_second = insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+
+      assert Cards.stage_neighbors(board, c_second) == %{prev: "MY1", next: "MY3"}
+      assert Cards.stage_neighbors(board, c_first).prev == nil
+      assert Cards.stage_neighbors(board, c_third).next == nil
+    end
+
+    test "the terminal Done column follows the recency window (desc updated_at, desc id)", %{
+      board: board,
+      done: done
+    } do
+      # Same-second inserts, so the window order is the desc-id tiebreak: c3, c2, c1.
+      _c1 = insert(:card, stage: done, title: "First done", position: 1, ref_number: 1)
+      c2 = insert(:card, stage: done, title: "Second done", position: 2, ref_number: 2)
+      _c3 = insert(:card, stage: done, title: "Third done", position: 3, ref_number: 3)
+
+      assert Cards.stage_neighbors(board, c2) == %{prev: "MY3", next: "MY1"}
+    end
+
+    test "the terminal Done column stops at the capped window's oldest shown card", %{
+      board: board,
+      done: done
+    } do
+      page = Cards.done_page_size()
+
+      cards =
+        for i <- 1..(page + 1) do
+          insert(:card, stage: done, title: "Done #{i}", position: i, ref_number: i)
+        end
+
+      # Window = the newest `page` cards by desc id. Its oldest shown card is the
+      # page-th newest; the (page + 1)-th newest is below the cap, so `next` is nil.
+      by_recency = Enum.sort_by(cards, & &1.id, :desc)
+      oldest_shown = Enum.at(by_recency, page - 1)
+      one_up = Enum.at(by_recency, page - 2)
+
+      neighbors = Cards.stage_neighbors(board, oldest_shown)
+      assert neighbors.next == nil
+      assert neighbors.prev == Cards.ref(board, one_up)
+    end
+  end
+
+  describe "next_awaiting_review/4" do
+    setup do
+      user = insert(:user)
+      board = Hamaca.Boards.get_or_create_default_board(user)
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      %{board: board, review: review, code: code}
+    end
+
+    defp in_review(stage, n, status \\ :in_review) do
+      insert(:card, stage: stage, title: "Card #{n}", position: n, ref_number: n, status: status)
+    end
+
+    test "approving the top card returns the card below it", %{board: board, review: review} do
+      [a, b, c] = for n <- 1..3, do: in_review(review, n)
+      ids = [a.id, b.id, c.id]
+
+      {:ok, _} = Cards.approve(a)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, a.id) == "MY2"
+    end
+
+    test "approving the bottom card wraps to the top", %{board: board, review: review} do
+      [a, b, c] = for n <- 1..3, do: in_review(review, n)
+      ids = [a.id, b.id, c.id]
+
+      {:ok, _} = Cards.approve(c)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, c.id) == "MY1"
+    end
+
+    test "skips a card in the lane that is not awaiting review", %{board: board, review: review} do
+      a = in_review(review, 1)
+      b = in_review(review, 2, :working)
+      c = in_review(review, 3)
+      ids = [a.id, b.id, c.id]
+
+      {:ok, _} = Cards.approve(a)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, a.id) == "MY3"
+    end
+
+    test "skips a card that has left the lane since the ids were captured", %{
+      board: board,
+      review: review,
+      code: code
+    } do
+      [a, b, c] = for n <- 1..3, do: in_review(review, n)
+      ids = [a.id, b.id, c.id]
+
+      {:ok, _} = Cards.move_card(b, code, 0)
+      {:ok, _} = Cards.approve(a)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, a.id) == "MY3"
+    end
+
+    test "ignores a card that arrived in the lane after the decision", %{board: board, review: review, code: code} do
+      [a, b] = for n <- 1..2, do: in_review(review, n)
+      ids = [a.id, b.id]
+
+      _d = in_review(review, 4)
+      {:ok, _} = Cards.approve(a)
+      {:ok, _} = Cards.move_card(b, code, 0)
+
+      assert Cards.next_awaiting_review(board, review.id, ids, a.id) == nil
+    end
+
+    test "the only card in the lane leaves nothing to advance to", %{board: board, review: review} do
+      a = in_review(review, 1)
+
+      {:ok, _} = Cards.approve(a)
+
+      assert Cards.next_awaiting_review(board, review.id, [a.id], a.id) == nil
+    end
+
+    test "an empty lane returns nil", %{board: board, review: review} do
+      assert Cards.next_awaiting_review(board, review.id, [], 999_999) == nil
+    end
+  end
+
+  describe "next_awaiting_review/4 on a terminal review stage" do
+    setup do
+      board = insert(:board, key: "RLY")
+
+      code =
+        insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 1)
+
+      done =
+        insert(:stage, board: board, name: "Done", type: :review, category: :complete, position: 2)
+
+      %{board: Hamaca.Repo.preload(board, :stages), code: code, done: done}
+    end
+
+    test "never returns the decided card, though approval completes it in place", %{board: board, done: done} do
+      x = insert(:card, stage: done, title: "X", position: 1, ref_number: 1, status: :in_review)
+
+      {:ok, approved} = Cards.approve(x)
+      assert approved.stage_id == done.id
+      assert approved.status == :ready
+
+      assert Cards.next_awaiting_review(board, done.id, [x.id], x.id) == nil
+    end
+
+    test "advances to the next card still awaiting review in the terminal lane", %{board: board, done: done} do
+      x = insert(:card, stage: done, title: "X", position: 1, ref_number: 1, status: :in_review)
+      y = insert(:card, stage: done, title: "Y", position: 2, ref_number: 2, status: :in_review)
+
+      {:ok, _} = Cards.approve(x)
+
+      assert Cards.next_awaiting_review(board, done.id, [x.id, y.id], x.id) == Cards.ref(board, y)
+    end
+  end
+
+  describe "stage_column/2" do
+    setup do
+      user = insert(:user)
+      board = Hamaca.Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+      %{board: board, backlog: backlog, done: done}
+    end
+
+    test "a non-terminal stage returns its cards in position order, not insertion order", %{
+      board: board,
+      backlog: backlog
+    } do
+      c3 = insert(:card, stage: backlog, title: "Three", position: 3, ref_number: 3)
+      c1 = insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      c2 = insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+
+      assert board |> Cards.stage_column(backlog.id) |> Enum.map(& &1.id) == [c1.id, c2.id, c3.id]
+    end
+
+    test "the terminal Done column follows the capped recency window (RLY-227's stage_neighbors/2 window)",
+         %{board: board, done: done} do
+      page = Cards.done_page_size()
+
+      cards =
+        for i <- 1..(page + 1) do
+          insert(:card, stage: done, title: "Done #{i}", position: i, ref_number: i)
+        end
+
+      by_recency = Enum.sort_by(cards, & &1.id, :desc)
+      expected_ids = by_recency |> Enum.take(page) |> Enum.map(& &1.id)
+
+      assert board |> Cards.stage_column(done.id) |> Enum.map(& &1.id) == expected_ids
+    end
+
+    test "an empty stage returns an empty list", %{board: board, backlog: backlog} do
+      assert Cards.stage_column(board, backlog.id) == []
+    end
+  end
+
+  describe "search/3" do
+    test "finds a card by a word in its title, case-insensitively", %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Story map filter focus")
+      insert(:card, stage: stage, title: "Unrelated work")
+
+      assert [%Card{title: "Story map filter focus"}] = Cards.search(board, "STORY")
+    end
+
+    test "every whitespace token must match, in any order", %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Story map filter focus")
+      insert(:card, stage: stage, title: "Story time")
+
+      assert [%Card{title: "Story map filter focus"}] = Cards.search(board, "story map")
+      assert [%Card{title: "Story map filter focus"}] = Cards.search(board, "map story")
+    end
+
+    test "a ref for this board is an exact hit", %{board: board, stage: stage} do
+      insert(:card, stage: stage, ref_number: 198, title: "Card search")
+
+      assert [%Card{ref_number: 198}] = Cards.search(board, "RLY198")
+      assert [%Card{ref_number: 198}] = Cards.search(board, "RLY-198")
+      assert [%Card{ref_number: 198}] = Cards.search(board, "rly198")
+    end
+
+    test "a bare number is an exact hit too", %{board: board, stage: stage} do
+      insert(:card, stage: stage, ref_number: 198, title: "Card search")
+
+      assert [%Card{ref_number: 198}] = Cards.search(board, "198")
+    end
+
+    test "the ref hit ranks first and is never duplicated by a title match",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage, ref_number: 198, title: "198 flavors", position: 9)
+      insert(:card, stage: stage, ref_number: 7, title: "198 bottles", position: 1)
+
+      assert [first, second] = Cards.search(board, "198")
+      assert first.ref_number == 198
+      assert second.ref_number == 7
+    end
+
+    test "title matches come back in board order", %{board: board, stage: stage} do
+      later = insert(:stage, board: board, position: 2)
+      insert(:card, stage: later, title: "alpha third", position: 1)
+      insert(:card, stage: stage, title: "alpha second", position: 2)
+      insert(:card, stage: stage, title: "alpha first", position: 1)
+
+      assert ["alpha first", "alpha second", "alpha third"] =
+               board |> Cards.search("alpha") |> Enum.map(& &1.title)
+    end
+
+    test "a blank or whitespace-only query returns nothing, not the whole board",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Anything")
+
+      assert Cards.search(board, "") == []
+      assert Cards.search(board, "   ") == []
+    end
+
+    test "ILIKE wildcards are escaped, not honored", %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Plain title")
+      insert(:card, stage: stage, title: "100% done")
+      insert(:card, stage: stage, title: "snake_case rules")
+      insert(:card, stage: stage, title: "snakeXcase rules")
+
+      assert [%Card{title: "100% done"}] = Cards.search(board, "%")
+      assert [%Card{title: "snake_case rules"}] = Cards.search(board, "snake_case")
+    end
+
+    test "archived cards are excluded by default and included on request",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Live widget")
+
+      insert(:card,
+        stage: stage,
+        title: "Archived widget",
+        archived_at: DateTime.truncate(DateTime.utc_now(), :second)
+      )
+
+      assert [%Card{title: "Live widget"}] = Cards.search(board, "widget")
+
+      assert ["Archived widget", "Live widget"] =
+               board |> Cards.search("widget", archived: true) |> Enum.map(& &1.title) |> Enum.sort()
+    end
+
+    test "Done cards are in scope — no stage is excluded", %{board: board} do
+      done = insert(:stage, board: board, name: "Done", category: :complete, position: 9)
+      insert(:card, stage: done, title: "Finished widget")
+
+      assert [%Card{title: "Finished widget"}] = Cards.search(board, "widget")
+    end
+
+    test ":limit caps the total, ref hit included", %{board: board, stage: stage} do
+      insert(:card, stage: stage, ref_number: 198, title: "widget one", position: 1)
+      insert(:card, stage: stage, title: "widget two", position: 2)
+      insert(:card, stage: stage, title: "widget three", position: 3)
+
+      assert [%Card{ref_number: 198}] = Cards.search(board, "198 widget", limit: 1)
+      assert length(Cards.search(board, "widget", limit: 2)) == 2
+    end
+
+    test "another board's cards and refs are never returned", %{board: board} do
+      other_board = insert(:board, key: "OPS")
+      other_stage = insert(:stage, board: other_board, position: 1)
+      insert(:card, stage: other_stage, ref_number: 5, title: "widget elsewhere")
+
+      assert Cards.search(board, "widget") == []
+      assert Cards.search(board, "OPS5") == []
+      assert Cards.search(board, "5") == []
+    end
+
+    test "results carry the board projection: owners preloaded, heavy bodies unloaded",
+         %{board: board, stage: stage} do
+      insert(:card, stage: stage, title: "Projected widget", spec: "s", plan: "p")
+
+      assert [card] = Cards.search(board, "widget")
+      assert card.owners == []
+      assert card.sub_tasks == []
+      assert is_nil(card.spec)
+      assert is_nil(card.plan)
+    end
+  end
+
+  describe "reject_to scoped to the stage's board (RE344)" do
+    setup %{board: board} do
+      code = insert(:stage, board: board, name: "Code", type: :work, category: :in_progress, position: 30)
+      foreign = insert(:stage, board: insert(:board), name: "Elsewhere Plan", type: :planning, position: 1)
+
+      # Inserted straight through the factory, bypassing update_stage/2's validation — a row
+      # written before the write-side check existed.
+      review =
+        insert(:stage,
+          board: board,
+          name: "Review",
+          type: :review,
+          category: :in_progress,
+          position: 31,
+          reject_to_stage_id: foreign.id
+        )
+
+      %{code: code, review: review}
+    end
+
+    test "reject_target/1 falls back to the previous main stage, not the foreign one",
+         %{code: code, review: review} do
+      card = insert(:card, stage: review, status: :in_review)
+
+      assert %Schemas.Stage{id: id, name: "Code"} = Cards.reject_target(card)
+      assert id == code.id
+    end
+
+    test "reject/3 moves the card to the previous main stage without crashing",
+         %{code: code, review: review} do
+      card = insert(:card, stage: review, status: :in_review)
+
+      assert {:ok, %Card{} = rejected} = Cards.reject(card, "rework", :agent)
+      assert rejected.stage_id == code.id
+      assert rejected.rejection.to_stage_id == code.id
+    end
+  end
+
+  defp stage_card_ids(board, stage) do
+    board |> Cards.list_cards() |> Enum.filter(&(&1.stage_id == stage.id)) |> Enum.map(& &1.id)
+  end
+
+  defp stage_positions(board, stage) do
+    board
+    |> Cards.list_cards()
+    |> Enum.filter(&(&1.stage_id == stage.id))
+    |> Enum.map(& &1.position)
+  end
+
+  # RE344 — an owner must hold a resolved membership on the card's board; the :board factory
+  # creates none, so owner fixtures are made members explicitly.
+  defp member!(board, attrs \\ []) do
+    user = insert(:user, attrs)
+    insert(:membership, board: board, user: user, email: user.email)
+    user
+  end
+
+  defp owner_user_ids(card) do
+    Repo.all(from o in Schemas.CardOwner, where: o.card_id == ^card.id and o.actor_type == :user, select: o.user_id)
+  end
+
+  defp activities(card) do
+    Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
+  end
+end

@@ -2,7 +2,7 @@ defmodule Storybook.CoreComponents.NeedsInputPanel do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.needs_input_panel/1
+  def function, do: &HamacaWeb.CoreComponents.needs_input_panel/1
   def render_source, do: :function
 
   defp card, do: %{blocked_since: DateTime.add(DateTime.utc_now(), -720, :second)}
@@ -37,8 +37,8 @@ defmodule Storybook.CoreComponents.NeedsInputPanel do
   @guard """
   ✗ commit guard: the working tree is dirty after `mix precommit`
 
-    M lib/relay/exports.ex
-    M test/relay/exports_test.exs
+    M lib/hamaca/exports.ex
+    M test/hamaca/exports_test.exs
 
   mix format rewrote two files the implementer already committed, so the node
   ends with uncommitted changes and cannot hand the branch on.

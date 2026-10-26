@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddPublicFields do
+defmodule Hamaca.Repo.Migrations.AddPublicFields do
   use Ecto.Migration
 
   def change do

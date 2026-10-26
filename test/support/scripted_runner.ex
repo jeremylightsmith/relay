@@ -1,16 +1,16 @@
-defmodule Relay.Runs.Scheduler.ScriptedRunner do
+defmodule Hamaca.Runs.Scheduler.ScriptedRunner do
   @moduledoc """
   A test-only runner that speaks ONLY board-key HTTP (Phoenix.ConnTest) — the
   exact surface a real `relay start` uses — so the E2E test drives the whole
-  system with no `Relay.Runs` context calls and no `claude`. Each function takes
+  system with no `Hamaca.Runs` context calls and no `claude`. Each function takes
   an authed `conn` (board-key bearer) and returns the decoded response.
   """
   import Phoenix.ConnTest
   import Plug.Conn
 
-  @endpoint RelayWeb.Endpoint
+  @endpoint HamacaWeb.Endpoint
 
-  @doc "Advertise capacity + liveness. Feeds Relay.Runs.Capacity via the heartbeat branch."
+  @doc "Advertise capacity + liveness. Feeds Hamaca.Runs.Capacity via the heartbeat branch."
   def heartbeat(conn, name, capacity) do
     conn
     |> post("/api/board/heartbeat", %{
@@ -30,7 +30,7 @@ defmodule Relay.Runs.Scheduler.ScriptedRunner do
           "name" => name,
           "host" => "scripted",
           "interval" => 30,
-          "version" => Relay.Runs.min_runner_version()
+          "version" => Hamaca.Runs.min_runner_version()
         },
         "capacity" => capacity
       })

@@ -2,7 +2,7 @@ defmodule Storybook.ExampleBoardComponents.NodePanel do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.ExampleBoardComponents.node_panel/1
+  def function, do: &HamacaWeb.ExampleBoardComponents.node_panel/1
   def render_source, do: :function
 
   # RE444: the example board's read-only node panel — an inline agent prompt on another

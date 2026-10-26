@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.StoryMapStepRename do
+defmodule Hamaca.Repo.Migrations.StoryMapStepRename do
   use Ecto.Migration
 
   # RE354 — the story-map concept "Task" is now "Step", freeing "task" for a card's own work

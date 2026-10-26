@@ -2,11 +2,11 @@ defmodule Storybook.SetupComponents.ProjectAnswers do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.SetupComponents.project_answers/1
+  def function, do: &HamacaWeb.SetupComponents.project_answers/1
   def render_source, do: :function
 
   # RE446, card mockup "Payoff — first card turns violet, Settings → Setup, connect a machine",
-  # frame C: "Project answers", the 5.3 interview answers (`Relay.Setup.project_answers/1`).
+  # frame C: "Project answers", the 5.3 interview answers (`Hamaca.Setup.project_answers/1`).
   def variations do
     [
       %Variation{

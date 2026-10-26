@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.CompactCardRow do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.compact_card_row/1
+  def function, do: &HamacaWeb.CoreComponents.compact_card_row/1
   def render_source, do: :function
 
   def template do

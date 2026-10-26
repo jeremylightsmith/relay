@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddCardActivityLogFields do
+defmodule Hamaca.Repo.Migrations.AddCardActivityLogFields do
   use Ecto.Migration
 
   def change do
@@ -11,7 +11,7 @@ defmodule Relay.Repo.Migrations.AddCardActivityLogFields do
       add :agent_heartbeat_at, :utc_datetime
     end
 
-    # Serves ONLY Relay.Activity.Pruner's `type = 'action' AND inserted_at < cutoff`
+    # Serves ONLY Hamaca.Activity.Pruner's `type = 'action' AND inserted_at < cutoff`
     # sweep. The existing index(:activities, [:card_id, :inserted_at]) already serves
     # the timeline and the newest-per-card query.
     create index(:activities, [:inserted_at],

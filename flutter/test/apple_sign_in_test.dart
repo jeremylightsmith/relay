@@ -95,7 +95,7 @@ void main() {
         'token': 'relayu_x',
       },
       headers: {
-        'set-cookie': ['_relay_key=apple-cookie; Path=/'],
+        'set-cookie': ['_hamaca_key=apple-cookie; Path=/'],
       },
     );
     final container = containerWith(
@@ -131,7 +131,7 @@ void main() {
         'feedback_url': 'https://example.com/ideas',
       },
       headers: {
-        'set-cookie': ['_relay_key=apple-cookie; Path=/'],
+        'set-cookie': ['_hamaca_key=apple-cookie; Path=/'],
       },
     );
     final container = containerWith(
@@ -157,7 +157,7 @@ void main() {
         'billing': {'enabled': true, 'standing': 'free', 'through': null},
       },
       headers: {
-        'set-cookie': ['_relay_key=apple-cookie; Path=/'],
+        'set-cookie': ['_hamaca_key=apple-cookie; Path=/'],
       },
     );
     final container = containerWith(

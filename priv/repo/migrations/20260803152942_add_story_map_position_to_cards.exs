@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddStoryMapPositionToCards do
+defmodule Hamaca.Repo.Migrations.AddStoryMapPositionToCards do
   use Ecto.Migration
 
   # RE262 — the card's order within its story-map CELL. Nullable and deliberately unbackfilled:

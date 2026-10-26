@@ -62,10 +62,13 @@ Two scope decisions (2026-10-25):
 | 2a | [RE476 Hamaca landing page: Hammock Driven Development] | none |
 | 2b | [RE477 Say Hamaca everywhere a person reads the name] | none |
 | 3 | [RE480 Make hamaca.app the main address] (done, see Phase 3) | RE476, RE477 |
-| 4 | [RE481 Rename the code to Hamaca (modules, app, docs, repo)] | RE476, RE477 |
+| 4 | [RE481 Rename the code to Hamaca (modules, app, docs, repo)], done 2026-10-26 | RE476, RE477 |
 | 5 | [RE478 Rename the runner to ./hamaca with a compatibility window] | RE481 |
 | 5 | [RE479 Mobile app as Hamaca: new bundle IDs, name, icons] | RE480 |
 | 6 | [RE482 End the relay → hamaca compatibility window] | RE478 |
+
+The GitHub repo rename was **dropped** from RE481: the repo stays `jeremylightsmith/relay`, so
+remotes, CI and the GitHub URLs in the docs keep that name.
 
 Why this order:
 - The landing page and UI strings change only what people read, so they go first.
@@ -74,3 +77,62 @@ Why this order:
   follows it, so it doesn't fight the module rename.
 - The mobile app follows the host flip, so the new app points at hamaca.app from its first build.
 - Cleanup waits until every active runner is on `./hamaca`.
+
+## RE481 residual names
+
+After [RE481 Rename the code to Hamaca], every line printed by
+`grep -rnE "\bRelay\b|RelayWeb|:relay\b|relay_web|_relay_key" lib test config mix.exs` is one of
+these, on purpose. Anything else it prints is a missed rename.
+
+**Bundle IDs, owned by [RE479 Mobile app as Hamaca: new bundle IDs, name, icons]:**
+- `config/config.exs` — `"com.jeremylightsmith.Relay"`, the Apple client id an iOS identity
+  token must carry as `aud`.
+- `test/hamaca/config_test.exs:7` and `test/support/apple_token_fixtures.ex:67` — the same id,
+  asserted and signed into the test tokens.
+
+**Runner wire text, owned by [RE478 Rename the runner to ./hamaca with a compatibility window]:**
+- `lib/hamaca/setup.ex` `pointer_line/0` — `"Working Relay cards from this repo: see [relay.md](relay.md)."`,
+  the line `./relay update` writes into a project's CLAUDE.md / AGENTS.md.
+- `test/fixtures/runner_contract.json` (`"pointer_line"`), `test/hamaca/setup_test.exs:165,832`
+  and `test/hamaca_web/controllers/api/runner_contract_test.exs:514` — the same line, pinned
+  for `./relay`.
+- **Known gap:** `./relay`'s `in_relay_app_repo()` recognises this repo by
+  `lib/relay/scaffold.ex`, which is now `lib/hamaca/scaffold.ex`. Until RE478 updates it,
+  `./relay update` (without `--check`) run *in this repo* no longer refuses to overwrite the
+  scaffold sources — don't run it here.
+
+**Design artboard file names** — `docs/designs/Relay *.dc.html` are real file names (the Claude
+Design project's), so a reference to one keeps the name until the artboards are renamed:
+- `lib/hamaca/story_map.ex`, `lib/hamaca/talk.ex`, `lib/hamaca_web/components/*.ex`
+  (`core_components`, `run_components`, `story_map_components`, `talk_components`,
+  `flow_editor_components`, `flow_graph_components`, `flow_metrics_components`),
+  `lib/hamaca_web/live/*.ex` (`board_live`, `board_runners_live`, `board_settings_live`,
+  `boards_live`, `flow_editor_live`, `flow_metrics_live`), `lib/hamaca_web/flow_layout.ex`,
+  `lib/hamaca_web/story_map_filter.ex`, `lib/hamaca_web/story_map_grid.ex` — comments of the
+  form `Relay <Artboard>.dc.html` and `Relay Card Detail v5 · …` (`core_components.ex:45`).
+- `test/hamaca/docs_designs_test.exs:6` (opens `Relay Docs.dc.html` / `Relay API Reference.dc.html`)
+  and the same artboard-name pattern in test names and comments under `test/hamaca_web/`
+  (`core_components_test`, `story_map_*_test`, `board_settings_*_test`, `board_live_*_test`,
+  `boards_live_*_test`, `board_runners_live_test`, `flow_*_test`, `talk_components_test`,
+  `code_block_copy_hook_test`), including `board_settings_live_test.exs:224` and
+  `board_live_tag_test.exs:25` ("the Relay Board artboard").
+
+**Guards that the old name is gone** — they must keep saying `Relay` to mean anything:
+- `test/hamaca_web/brand_copy_test.exs` (whole file) — the RE477 scanner for "Relay" in rendered
+  copy, its fixtures and its module-reference skip (`alias Relay.Cards`).
+- `test/hamaca_web/controllers/page_controller_test.exs` — `refute … "Relay"` on the landing,
+  pricing, terms and privacy pages, and the test names that say so.
+- `test/hamaca_web/endpoint_session_test.exs:15` — `refute` a `_relay_key` cookie is set.
+- `test/hamaca_web/components/layouts_test.exs:75` (`"Relay is updating"`) and
+  `test/hamaca_web/live/board_drawer_activity_test.exs:111` (`"Relay AI"`).
+
+**Docs the current-state rename leaves alone** (the current-state docs task of RE481 renamed
+`priv/docs/` and `docs/architecture/` and flipped their guards to `Hamaca`):
+- `test/hamaca_web/controllers/docs_controller_test.exs` — `"How Relay itself cut over"` and
+  the test name and comment around it: the closing history note of
+  `docs/runbooks/flow-cutover.md`, which tells how Relay cut over its own flows. Also the
+  `refute … Relay` prose guards.
+
+**Test data:** `test/hamaca_web/components/template_picker_components_test.exs` — the copy
+source board is named "Relay" (the RE board). Its search test types `"ac"` to match only "Acme";
+"Hamaca" contains "ac", so renaming the board would break the test, not the code.

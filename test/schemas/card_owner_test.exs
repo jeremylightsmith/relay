@@ -1,5 +1,5 @@
 defmodule Schemas.CardOwnerTest do
-  use Relay.DataCase, async: true
+  use Hamaca.DataCase, async: true
 
   alias Schemas.Card
   alias Schemas.CardOwner

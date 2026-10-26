@@ -2,7 +2,7 @@ defmodule Storybook.TalkComponents.TalkPane do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.TalkComponents.talk_pane/1
+  def function, do: &HamacaWeb.TalkComponents.talk_pane/1
   def render_source, do: :function
 
   defp event(attrs) do
@@ -25,7 +25,7 @@ defmodule Storybook.TalkComponents.TalkPane do
         busy?: false,
         events: [
           event(%{id: 1, seq: 1, kind: :user, text: "why is this stuck?"}),
-          event(%{id: 2, seq: 2, kind: :tool, text: "Read · lib/relay.ex", dim: true}),
+          event(%{id: 2, seq: 2, kind: :tool, text: "Read · lib/hamaca.ex", dim: true}),
           event(%{
             id: 3,
             seq: 3,

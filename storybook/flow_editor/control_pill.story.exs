@@ -2,7 +2,7 @@ defmodule Storybook.FlowEditor.ControlPill do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowGraphComponents.control_pill/1
+  def function, do: &HamacaWeb.FlowGraphComponents.control_pill/1
   def render_source, do: :function
 
   # RE439, card mockup "Editor — fan out / fan in as compact pills": a control node is a compact

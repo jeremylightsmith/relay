@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.MockupViewerHeader do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.mockup_viewer_header/1
+  def function, do: &HamacaWeb.CoreComponents.mockup_viewer_header/1
   def render_source, do: :function
 
   def variations do

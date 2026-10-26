@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.card_drawer/1
+  def function, do: &HamacaWeb.CoreComponents.card_drawer/1
   def render_source, do: :function
 
   # The drawer overlays its whole viewport (fixed-position daisyUI

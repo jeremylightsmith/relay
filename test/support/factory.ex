@@ -1,11 +1,11 @@
-defmodule Relay.Factory do
+defmodule Hamaca.Factory do
   @moduledoc """
   ExMachina factories for tests. Boundary checks are disabled because
   this is test-only support code that may reach into any context.
   """
 
   use Boundary, top_level?: true, check: [in: false, out: false]
-  use ExMachina.Ecto, repo: Relay.Repo
+  use ExMachina.Ecto, repo: Hamaca.Repo
 
   def user_factory do
     %Schemas.User{
@@ -42,7 +42,7 @@ defmodule Relay.Factory do
       status: :pending,
       kind: :renewal,
       source: :clock,
-      amount_cents: Relay.Billing.price_cents(),
+      amount_cents: Hamaca.Billing.price_cents(),
       period_start: today,
       period_end: today |> Date.shift(month: 1) |> Date.add(-1),
       billing_day: today.day,
@@ -94,7 +94,7 @@ defmodule Relay.Factory do
   end
 
   # A persisted key whose raw token is intentionally unknown — use
-  # Relay.ApiKeys.create_key/2 in tests that need the raw secret.
+  # Hamaca.ApiKeys.create_key/2 in tests that need the raw secret.
   def api_key_factory do
     secret = 32 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
 
@@ -109,7 +109,7 @@ defmodule Relay.Factory do
   end
 
   # A persisted user token whose raw token is intentionally unknown — use
-  # Relay.Accounts.create_user_api_token/2 in tests that need the raw secret.
+  # Hamaca.Accounts.create_user_api_token/2 in tests that need the raw secret.
   def user_api_token_factory do
     secret = 32 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
 
@@ -324,7 +324,7 @@ defmodule Relay.Factory do
       host: "mac.local",
       interval: 30,
       capacity: %{"shared_clean" => 3, "exclusive" => 1},
-      version: Relay.Runs.min_runner_version(),
+      version: Hamaca.Runs.min_runner_version(),
       last_heartbeat: DateTime.truncate(DateTime.utc_now(), :second)
     }
 
@@ -368,7 +368,7 @@ defmodule Relay.Factory do
     {node_execution, attrs} =
       Map.pop_lazy(attrs, :node_execution, fn -> insert(:node_execution) end)
 
-    run = Relay.Repo.get!(Schemas.Run, node_execution.run_id)
+    run = Hamaca.Repo.get!(Schemas.Run, node_execution.run_id)
 
     node_job = %Schemas.NodeJob{
       run_id: node_execution.run_id,

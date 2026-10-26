@@ -26,7 +26,7 @@ defmodule Schemas.Flow.Node do
 
   `tasks` is the canonical flow-contract name for a card's plan units. The pre-RE367 spellings
   are accepted as **deprecated aliases** and rewritten to canonical by `normalize_legacy/1`,
-  which runs wherever a flow enters the system (`changeset/2`, `Relay.Flows.Document.decode/1`),
+  which runs wherever a flow enters the system (`changeset/2`, `Hamaca.Flows.Document.decode/1`),
   so a stored or served flow is always canonical:
 
   | concept | canonical | legacy alias |
@@ -40,7 +40,7 @@ defmodule Schemas.Flow.Node do
 
   A legacy `model` **key** is renamed to `llm`, its value mapped through `legacy_models/0`
   (`"opus"` → `"Claude Opus"`); a value outside the table is carried through verbatim so
-  `Relay.Flows` refuses it loudly as an unknown agent. An explicit `llm` always wins.
+  `Hamaca.Flows` refuses it loudly as an unknown agent. An explicit `llm` always wins.
 
   `agent` (agent nodes only) names a `.claude/agents/<name>.md` definition: the
   runner appends `--agent <name>` to its `claude -p` call, so the file supplies
@@ -128,8 +128,8 @@ defmodule Schemas.Flow.Node do
 
   @doc """
   The closed set of node fields — the ONE list every consumer reads (this schema's `cast/3`,
-  `Relay.Flows`' normalize/snapshot/duplicate, the flow editor's working copy, and
-  `Relay.Flows.Document`). Copies of it disagreed before RLY-241 and silently dropped
+  `Hamaca.Flows`' normalize/snapshot/duplicate, the flow editor's working copy, and
+  `Hamaca.Flows.Document`). Copies of it disagreed before RLY-241 and silently dropped
   `expects_commits`.
   """
   def fields, do: @fields
@@ -139,7 +139,7 @@ defmodule Schemas.Flow.Node do
 
   @doc """
   The closed set of node `role` values (RE346) — Do changes the work, Check inspects it, Fix exists
-  only because a check failed. Read by the schema field, by `Relay.Flows.Document`'s decoder and by
+  only because a check failed. Read by the schema field, by `Hamaca.Flows.Document`'s decoder and by
   `Schemas.Flow.node_roles/1`'s callers; never re-typed elsewhere.
   """
   def roles, do: @roles
@@ -167,7 +167,7 @@ defmodule Schemas.Flow.Node do
 
   @doc """
   RE433 — the legacy node `model` value → the board agent name it became, the ONE copy (the data
-  migration carries a frozen duplicate). `Relay.Agents.ensure_seeded!/1` seeds one agent per entry.
+  migration carries a frozen duplicate). `Hamaca.Agents.ensure_seeded!/1` seeds one agent per entry.
   """
   @spec legacy_models() :: %{String.t() => String.t()}
   def legacy_models, do: @legacy_models

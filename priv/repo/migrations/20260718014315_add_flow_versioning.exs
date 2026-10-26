@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddFlowVersioning do
+defmodule Hamaca.Repo.Migrations.AddFlowVersioning do
   use Ecto.Migration
 
   def up do

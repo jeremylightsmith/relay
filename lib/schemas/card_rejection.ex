@@ -1,7 +1,7 @@
 defmodule Schemas.CardRejection do
   @moduledoc """
   The single open "changes requested" state on a card (RLY-30). Set/cleared
-  only programmatically by `Relay.Cards` (never via `Card.changeset/2`), same
+  only programmatically by `Hamaca.Cards` (never via `Card.changeset/2`), same
   discipline as `blocked_since`. Stage ids AND display names are snapshotted so
   the payload/CLI/drawer render self-contained and stable even if a stage is
   later renamed — matching how `:moved`/`:rejected` activity meta snapshots

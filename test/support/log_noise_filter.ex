@@ -1,4 +1,4 @@
-defmodule Relay.TestSupport.LogNoiseFilter do
+defmodule Hamaca.TestSupport.LogNoiseFilter do
   @moduledoc """
   A `:logger` primary filter that drops sandbox-teardown log noise which buries the test-suite
   output but which **no test asserts on** (verified by grep before adding any pattern here):
@@ -6,7 +6,7 @@ defmodule Relay.TestSupport.LogNoiseFilter do
     * `Postgrex.Protocol (...) disconnected: ** (DBConnection.ConnectionError) client ... exited`
       — emitted when an async test checks its sandbox connection back in while a background
       process still has a query in flight. A pure teardown race, never a real failure.
-    * `LogSink dropped N buffered log line(s): ...` — `Relay.Activity.LogSink` is best-effort by
+    * `LogSink dropped N buffered log line(s): ...` — `Hamaca.Activity.LogSink` is best-effort by
       construction, and `log_sink_resilience_test.exs` drives that exact path on purpose (a flush
       with no DB access must drop its batch rather than crash the sink). The same line can also
       appear when a debounced flush fires after its test's sandbox owner has already checked in.

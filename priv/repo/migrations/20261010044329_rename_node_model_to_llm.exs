@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.RenameNodeModelToLlm do
+defmodule Hamaca.Repo.Migrations.RenameNodeModelToLlm do
   use Ecto.Migration
 
   # RE433 — a flow node names a board agent (`llm`) instead of a bare Claude alias (`model`).

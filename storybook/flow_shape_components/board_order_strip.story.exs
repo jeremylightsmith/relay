@@ -2,7 +2,7 @@ defmodule Storybook.FlowShapeComponents.BoardOrderStrip do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowShapeComponents.board_order_strip/1
+  def function, do: &HamacaWeb.FlowShapeComponents.board_order_strip/1
   def render_source, do: :function
 
   # RE432 — a Shape problem's `columns`: the flow's stage (`:self`), the column that breaks the

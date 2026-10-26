@@ -6,7 +6,7 @@ defmodule Schemas.UserApiToken do
   `relayu_<token_prefix>_<secret>`: `token_prefix` is a public random id stored in
   the clear (lookup), the secret only as a SHA-256 hash in `token_hash`
   (`last_four` supports a masked display). `context` names the client that minted
-  it ("mobile"). All fields are set programmatically by `Relay.Accounts`, never
+  it ("mobile"). All fields are set programmatically by `Hamaca.Accounts`, never
   cast from input.
   """
 

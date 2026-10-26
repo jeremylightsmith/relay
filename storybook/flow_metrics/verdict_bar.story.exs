@@ -2,7 +2,7 @@ defmodule Storybook.FlowMetrics.VerdictBar do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.FlowMetricsComponents.verdict_bar/1
+  def function, do: &HamacaWeb.FlowMetricsComponents.verdict_bar/1
 
   def variations do
     [

@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddCollapsedByDefaultToStages do
+defmodule Hamaca.Repo.Migrations.AddCollapsedByDefaultToStages do
   use Ecto.Migration
 
   def change do

@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.CardSearch do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.card_search/1
+  def function, do: &HamacaWeb.CoreComponents.card_search/1
   def render_source, do: :function
 
   defp row(ref, title, stage, archived \\ false) do

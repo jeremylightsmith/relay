@@ -2,10 +2,10 @@ defmodule Storybook.RunComponents.StarvationBanner do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.starvation_banner/1
+  def function, do: &HamacaWeb.RunComponents.starvation_banner/1
   def render_source, do: :function
 
-  # The shape `Relay.Runs.starvation/2` returns.
+  # The shape `Hamaca.Runs.starvation/2` returns.
   def variations do
     [
       %Variation{

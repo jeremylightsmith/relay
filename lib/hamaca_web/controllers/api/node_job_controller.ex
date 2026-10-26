@@ -1,0 +1,482 @@
+defmodule HamacaWeb.Api.NodeJobController do
+  @moduledoc """
+  The server↔runner transport (ADR 0006 card 04): a remote runner claims
+  node-jobs (long-poll) and reports their outcomes. Board-key auth, same as the
+  rest of `/api`. Pure transport over `Hamaca.Runs` (W5) — no scheduling or
+  dispatch policy lives here.
+  """
+  use HamacaWeb, :controller
+
+  alias Hamaca.Agents
+  alias Hamaca.Runs
+  alias Hamaca.Runs.Capacity
+  alias Hamaca.Setup
+  alias Hamaca.Talk
+  alias Schemas.Runner
+
+  action_fallback HamacaWeb.Api.FallbackController
+
+  # ~25s sits safely under Fly's proxy idle timeout.
+  @long_poll_ms 25_000
+
+  # Every tag `Hamaca.Runs`/`RunServer` broadcast on `board:<id>:runs` — anything
+  # else landing in this request process's mailbox (e.g. a stray monitor `:DOWN`)
+  # must fall through rather than be silently swallowed by the long-poll.
+  @run_event_tags [:run_started, :node_started, :node_finished, :run_finished, :run_changed, :run_parked, :run_resumed]
+
+  @doc """
+  Claims the next node-job for the advertising runner. Upserts the runner
+  (claim doubles as a liveness touch), then atomically claims an eligible job.
+  Long-polls up to ~25s on `board:<id>:runs` when nothing is immediately
+  claimable; `?wait=0` degrades to short-poll (immediate 204).
+
+  RE311 — the claim's `capacity` is the runner's LIVE FREE count and its `held` is the set of
+  per-card worktrees it is holding right now. RE436 — its `harnesses` is the harness keys the
+  runner will run now (installed minus paused at a usage limit). All three are request-scoped:
+  they are normalized through the domain's one normalizer and passed to
+  `Hamaca.Runs.claim_next_job/4` as arguments, and NONE is written to the runner row. The
+  heartbeat owns the durable roster state.
+  """
+  def claim(conn, params) do
+    case pre_rename(params) do
+      {:pre_rename, version} -> refuse_pre_rename(conn, version)
+      :current -> claim_current(conn, params)
+    end
+  end
+
+  defp claim_current(conn, params) do
+    board = conn.assigns.current_board
+
+    with {:ok, exec_attrs} <- runner_attrs(params),
+         {:ok, runner} <- Runs.upsert_runner(board, exec_attrs) do
+      inputs = %{
+        free: Capacity.normalize(Map.get(params, "capacity")),
+        held: Runner.normalize_held(Map.get(params, "held")),
+        harnesses: Runner.normalize_claim_harnesses(Map.get(params, "harnesses"))
+      }
+
+      claim_for(conn, board, runner, params, inputs)
+    end
+  end
+
+  defp claim_for(conn, board, runner, params, inputs) do
+    if Runs.runner_outdated?(runner) do
+      refuse_outdated(conn, runner)
+    else
+      case claim_with(runner, inputs) do
+        {:ok, nil} -> maybe_wait(conn, board, runner, params, inputs)
+        {:ok, job} -> json(conn, granted(job))
+      end
+    end
+  end
+
+  # The request-scoped claim inputs, normalized once in `claim_current/2`.
+  defp claim_with(runner, %{free: free, held: held, harnesses: harnesses}),
+    do: Runs.claim_next_job(runner, free, held, harnesses)
+
+  # RE268 — a claim is where a talk turn becomes `:claimed`. It happens here rather than in
+  # `Hamaca.Runs.claim_next_job/1` so the run lifecycle keeps no Talk knowledge: it claims a job,
+  # and only `Hamaca.Talk` knows a job can carry a turn. A refusal (the turn was Stopped in the
+  # window before the runner noticed) is not an error the runner can act on — the revoke it
+  # collects on its next heartbeat is what ends the work.
+  defp granted(%Schemas.NodeJob{kind: :talk} = job) do
+    Talk.mark_claimed(job)
+    claim_payload(job)
+  end
+
+  defp granted(job), do: claim_payload(job)
+
+  @doc """
+  The runner's periodic beat (RLY-164): advertises capacity and collects revokes.
+
+  This is the single place a runner announces itself. It does two jobs the pull model
+  otherwise has no channel for:
+
+    * **Capacity.** `Hamaca.Runs.Capacity` is what the scheduler reads to decide whether to
+      dispatch at all, and it is deliberately lost on app restart. Before this route existed
+      it was fed only by `/api/board/heartbeat`, which `relay start` never calls — so
+      starting a runner and enabling a flow dispatched nothing, and the cutover needed a
+      hand-run `curl`. The `capacity` here is the runner's *configured* total, never a live
+      free count: `Scheduler.Server.build_snapshot/1` debits in-flight `:running` runs itself,
+      so a decremented count would double-debit every running run.
+
+      This route is also the SINGLE WRITER of `runners.capacity` (RE311): the claim's
+      `capacity` is a live free count with a different meaning, and one column carrying both is
+      what made the roster flip-flop between 2 and 0 while the board sat deadlocked.
+
+    * **Revokes.** Under the pull model `dispatcher().revoke/1` is a no-op, so taking the
+      baton (ADR 0004, via `park_claimed/1`) or cancelling from the run panel could not stop a
+      running agent — the runner only found out on its next outcome POST, 20+ minutes for a
+      Code `implement` node. The beat reports the jobs it believes it is running; the reply
+      names those the server no longer considers live, and the runner kills them.
+
+    * **Capabilities.** The beat may carry `capabilities` — what this runner can resolve
+      by name (`%{"agents" => [...], "skills" => [...]}`) — which `Hamaca.Runs.preflight_flow/1`
+      reads to answer "will this flow run here?" before a human enables it. It rides
+      send-on-change, not every beat; the reply's `want_capabilities` asks for a resend when
+      the server holds none.
+
+    * **Version.** The beat still succeeds for an outdated runner (RLY-184) — it is how that
+      process stays visible on the roster and how revokes still reach it. The reply carries
+      `runner_outdated` / `required_version` so a runner idling with nothing to claim
+      still learns why. The reply also carries `latest_runner_version` (RE185) — the
+      `RUNNER_VERSION` of the `./relay` this app itself serves at `/api/scaffold` (RE304) —
+      which a runner with `auto_update` on uses to update itself.
+
+    * **Liveness (RLY-226).** The same `running` list is a positive signal: each id maps to a
+      card, and `Hamaca.Runs.refresh_running_card_liveness/2` stamps `agent_heartbeat_at` fresh on
+      the cards whose job is still active server-side. That is what keeps a live-but-quiet agent —
+      one mid-`mix precommit`, a long test, a long thinking turn — from falsely reading `:stale` in
+      `Cards.health/1`. It is the exact positive complement of the revoke query above (revoked =
+      on-board but NOT active; refresh = on-board AND active), and never masks a real stall: a job
+      the server has finalized/revoked is not active, so it is not refreshed, and `health/1` decides
+      `:stopped` before staleness regardless.
+
+    * **Sessions (RE358).** The beat may carry `sessions` — `%{"<job-id>" => "<session-id>"}`,
+      the session each running agent job has captured from its stream — which
+      `Hamaca.Runs.record_job_sessions/2` writes onto that job's `NodeExecution.session_id`. That is
+      what a Steer now restart reads as `resume_session`: a revoked job reports nothing, so without
+      the beat the steered attempt's session would be lost. Only active flow jobs on this board
+      whose execution has no outcome are written; anything malformed is ignored, never refused.
+
+  Board-scoped throughout: an id belonging to another board is simply not live *here*, so one
+  board's runner can never be told to kill another's work.
+  """
+  def heartbeat(conn, params) do
+    case pre_rename(params) do
+      {:pre_rename, version} -> refuse_pre_rename(conn, version)
+      :current -> heartbeat_current(conn, params)
+    end
+  end
+
+  defp heartbeat_current(conn, params) do
+    board = conn.assigns.current_board
+
+    with {:ok, exec_attrs} <- runner_attrs(params),
+         {:ok, runner} <- Runs.upsert_runner(board, heartbeat_attrs(params, exec_attrs)) do
+      running = Map.get(params, "running", [])
+      advertise_capacity(runner, Map.get(params, "capacity"))
+      # Recover the other direction too (RLY-170): a job this runner still HOLDS but is no
+      # longer running — because it restarted and lost its in-process job state — is stranded
+      # forever otherwise, invisible to both claim_next_job (queued-only) and the stale-runner
+      # reaper (this runner is alive). The absence of a job from `running` is the signal.
+      :ok = Runs.requeue_orphaned_jobs(board, runner, running)
+
+      # RLY-226: the positive complement of `revoked_among/2` in the reply below — stamp
+      # `agent_heartbeat_at` fresh on the cards whose reported job is still active, so a
+      # quiet-but-running agent does not falsely age to `:stale` in `Cards.health/1`. Result
+      # ignored: liveness is best-effort.
+      _ = Runs.refresh_running_card_liveness(board, running)
+
+      # RE358: the agent session each running job has captured, written onto its execution so a
+      # Steer now restart can resume it — a revoked job reports nothing, so this is the only
+      # channel that carries the session past the kill. Best-effort: a malformed `sessions` is
+      # ignored inside Runs, never refused here.
+      :ok = Runs.record_job_sessions(board, Map.get(params, "sessions"))
+
+      # RE446: a runner's first heartbeat ticks the key's board setup step 6. A no-op (and always
+      # `:ok`) unless that step is the one the setup is waiting on.
+      :ok = Setup.observe_heartbeat(conn.assigns.current_api_key, runner)
+
+      json(conn, %{
+        revoked: Runs.revoked_among(board, running),
+        # RE311: the ref-keyed release channel, replacing RLY-218's run-id-keyed
+        # `bound_runs`/`release_runs`. The runner reports every per-card worktree it holds
+        # (`held`), and this names the ones whose card's runs have all ended server-side, with
+        # the status that chooses remove (done/cancelled) vs retain (failed). Run-id keying
+        # structurally could not see a worktree recovered after a restart — its `run_id` is
+        # unknown — which is precisely how a cancelled run's slot leaked forever.
+        # RE337: plus the human-requested releases (`runners.release_requests`) still reported
+        # bound on this beat, sent with a REMOVE disposition. `runner` is the post-upsert row, so
+        # its requests were already pruned against this same `held`.
+        release_held: Runs.release_held(board, runner, Runner.normalize_held(Map.get(params, "held"))),
+        # RLY-182: `capabilities` is send-on-change, so a runner that already sent one
+        # never sends it again — but the row can lose it (recreated row, or a runner
+        # predating this change), which would strand preflight on a permanent false
+        # "missing agents" alarm. `upsert_runner/2` returns the post-upsert row, so a
+        # beat that DID carry capabilities has already stored them and this reads false.
+        want_capabilities: is_nil(runner.capabilities),
+        runner_outdated: Runs.runner_outdated?(runner),
+        required_version: Runs.min_runner_version(),
+        # RE185: the floor above says what is REFUSED; this says what can be FETCHED — the
+        # `RUNNER_VERSION` of the `./relay` this app serves at /api/scaffold (RE304), so it
+        # cannot lie. `nil` when the scaffold has not been built, which the runner reads as
+        # "never auto-update".
+        latest_runner_version: Runs.latest_runner_version(),
+        # RE433: the runner refetches `GET /api/harnesses` when this moves, so a harness edit in
+        # Settings reaches the command templates it expands without a restart.
+        harnesses_digest: Agents.harnesses_digest(board)
+      })
+    end
+  end
+
+  # RLY-162: `Map.get/3` returns whatever the client sent, so a non-map `runner` made
+  # `Map.put/3` raise BadMapError → a 500 on the runner's front door. Reject the shape
+  # here (a request-shape concern) rather than in Runs, which normalizes permissively.
+  # RLY-182: `capabilities` rides the same way — optional, and absent on every claim.
+  # RE311: `capacity` is deliberately NOT here — it means different things on the two routes,
+  # so only `heartbeat_attrs/2` (the single writer) puts it on the attrs.
+  defp runner_attrs(params) do
+    case Map.get(params, "runner", %{}) do
+      runner when is_map(runner) ->
+        {:ok, Map.put(runner, "capabilities", Map.get(params, "capabilities"))}
+
+      _ ->
+        {:error, :invalid_runner}
+    end
+  end
+
+  # The heartbeat is the ONE writer of the durable roster state (RE311). RE436: each harness's
+  # usage reading — and its pause — rides its `harnesses` entry; the retired top-level
+  # `rate_limit` is ignored.
+  defp heartbeat_attrs(params, exec_attrs) do
+    exec_attrs
+    |> Map.put("capacity", Map.get(params, "capacity"))
+    |> Map.put("held", Map.get(params, "held"))
+    # RE433: the installed-harness inventory, absent-means-untouched like `held`.
+    |> Map.put("harnesses", Map.get(params, "harnesses"))
+  end
+
+  # The one code both refusals answer with — pinned by `test/fixtures/runner_contract.json`
+  # (`claim_refused.outdated`), because ./relay branches on it to tell a verdict from a job.
+  @outdated_code "runner_outdated"
+
+  # RE319 — the ONE deliberate mention of the retired wire name. The rename was a hard cut, so a
+  # body carrying no `runner` object but an `executor` object comes from a process started before
+  # it. It is never served: it gets the outdated refusal with a message that names the fix, so
+  # the reason shows up in that process's own log instead of as a bare 422. A body that carries
+  # `runner` is current whatever else it carries.
+  defp pre_rename(%{"runner" => _runner}), do: :current
+  defp pre_rename(%{"executor" => legacy}) when is_map(legacy), do: {:pre_rename, legacy["version"]}
+  defp pre_rename(_params), do: :current
+
+  defp refuse_pre_rename(conn, version) do
+    refuse(
+      conn,
+      version,
+      "this runner predates the executor→runner rename — install ./relay (relay update) and restart it with ./relay start"
+    )
+  end
+
+  # RLY-184. Rendered here rather than through FallbackController because the two version
+  # numbers are per-request data, not a static string — the runner logs both of them, and a
+  # message that cannot name the required version cannot tell anyone what to do about it.
+  defp refuse_outdated(conn, runner) do
+    required = Runs.min_runner_version()
+
+    refuse(
+      conn,
+      runner.version,
+      "runner version #{runner.version || "none"} is below the required minimum #{required} — " <>
+        "restart it to pick up current code"
+    )
+  end
+
+  # 409 (not 403): the request is well-formed, it conflicts with the server's current state.
+  defp refuse(conn, running, message) do
+    conn
+    |> put_status(:conflict)
+    |> json(%{error: %{code: @outdated_code, required: Runs.min_runner_version(), running: running, message: message}})
+  end
+
+  # RLY-201: hand the raw client map straight to the domain. Runs.Capacity.put/3
+  # normalizes (unknown classes dropped, bad values zeroed) — the controller must not
+  # shape capacity itself, and must never atomize request keys.
+  defp advertise_capacity(runner, capacity) when is_map(capacity) do
+    Capacity.put(runner.id, runner.board_id, capacity)
+  end
+
+  defp advertise_capacity(_runner, _capacity), do: :ok
+
+  @doc """
+  Reports a node-job outcome, completing the job and waking the engine to route
+  it. `outcome` must be in the closed set (else 422 `unknown_outcome`); the job
+  must still be held by a live claim (else 409 `conflict`). Replies with the
+  run's post-outcome `run_state` (running|parked|done|failed|cancelled) so the
+  runner knows whether to keep or free an exclusive worktree slot bound to
+  this run (RunnerPool.release, ./relay). `no_changes` (RE310) is the
+  node's assertion that its work was already committed; the engine honours it
+  only when this node's own history proves it (see `Hamaca.Runs.RunServer`).
+
+  `resume_at` (RE267, optional ISO-8601) is when a usage-limit `blocked` resets: with it the
+  engine requeues the node instead of parking it (see `Hamaca.Runs.Engine.decide/4`). It is read
+  only on `blocked`, and an unparseable value is ignored, never refused.
+  """
+  def outcome(conn, %{"id" => id} = params) do
+    board = conn.assigns.current_board
+
+    with {:ok, outcome} <- parse_outcome(params["outcome"]),
+         {:ok, run} <- resolve_and_report(board, id, outcome, params) do
+      json(conn, %{status: "ok", run_state: Atom.to_string(run.status)})
+    end
+  end
+
+  # RLY-202: a duplicate outcome POST for an already-finalized (:done) job is first-writer-wins —
+  # answer success with the run's recorded state, no re-finalize, no RunServer call. :queued
+  # (reassigned) / :revoked (zombie) still 409 via {:error, :conflict}.
+  defp resolve_and_report(board, id, outcome, params) do
+    case Runs.get_claimed_job(board, id) do
+      {:ok, job} -> report(job, outcome, params)
+      {:already_finalized, run} -> {:ok, run}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp report(job, outcome, params) do
+    attrs = %{
+      outcome: outcome,
+      detail: params["detail"],
+      git_sha: params["git_sha"],
+      session_id: params["session_id"],
+      # RE310: the agent's assertion that no changes were needed. A runner predating the flag
+      # omits the key, which reads false — byte-identical to today's behaviour, which is why
+      # `@min_runner_version` is deliberately NOT raised for this change.
+      no_changes: params["no_changes"] == true,
+      # RE267: when a usage-limit `blocked` resets. Optional — only a runner that knows the reset
+      # sends it, and an older runner never does (RE308's park, unchanged).
+      resume_at: parse_resume_at(outcome, params["resume_at"])
+    }
+
+    case Runs.report_outcome(job, attrs) do
+      {:ok, run} -> {:ok, run}
+      {:error, :job_not_active} -> {:error, :conflict}
+      {:error, other} -> {:error, other}
+    end
+  end
+
+  # RE267: accepted ONLY with outcome `blocked`; anything unparseable is dropped to nil rather than
+  # refused, so a bad value degrades to RE308's park — never to a 422 that would lose the outcome.
+  defp parse_resume_at(:blocked, value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, at, _offset} -> DateTime.truncate(at, :second)
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp parse_resume_at(_outcome, _value), do: nil
+
+  # RLY-203: the accepted outcome strings are derived from Schemas.NodeExecution.outcomes/0, so
+  # the transport can never name an outcome the domain lacks (or miss one). The set itself is
+  # pinned to the enum by the vocabulary exhaustiveness guard.
+  defp parse_outcome(value) when is_binary(value) do
+    case Enum.find(Schemas.NodeExecution.outcomes(), &(Atom.to_string(&1) == value)) do
+      nil -> {:error, :unknown_outcome}
+      outcome -> {:ok, outcome}
+    end
+  end
+
+  defp parse_outcome(_value), do: {:error, :unknown_outcome}
+
+  defp maybe_wait(conn, board, runner, params, %{free: free, held: held} = inputs) do
+    running = List.wrap(params["running"])
+
+    cond do
+      params["wait"] in ["0", 0] ->
+        no_work(conn, board, running)
+
+      # Nothing this request could ever be granted → a full 25s long-poll would be a wasted
+      # connection. RE311: read from the REQUEST, not the row (the row now carries the
+      # configured total, which would make this always false), and only when the runner also
+      # declares no held worktree — a job for a held ref is claimable at zero free capacity.
+      nothing_claimable?(free, held) ->
+        no_work(conn, board, running)
+
+      true ->
+        Runs.subscribe(board.id)
+        wait_loop(conn, board, runner, running, inputs, System.monotonic_time(:millisecond) + @long_poll_ms)
+    end
+  end
+
+  # RE268 — a revocation reaching the runner is what actually kills a running `claude -p`, and
+  # until now it only rode the 15s heartbeat: pressing Stop left output streaming for up to 15s
+  # (measured ~13). The claim long-poll is already open and already woken by run events, so it
+  # carries revocations too. `revoked` is the SAME key and the same `Runs.revoked_among/2` source
+  # the heartbeat reply uses — the runner applies both through one handler, so there is no
+  # second notion of "what is dead".
+  #
+  # Only the no-job reply carries it. A granted job's payload shape is pinned by the runner
+  # contract and left untouched; a runner being handed work is not the case Stop cares about.
+  defp no_work(conn, board, running) do
+    case Runs.revoked_among(board, running) do
+      [] -> send_resp(conn, 204, "")
+      revoked -> json(conn, %{revoked: revoked})
+    end
+  end
+
+  defp nothing_claimable?(free, held) do
+    Enum.all?(free, fn {_class, n} -> not (is_integer(n) and n > 0) end) and Runner.active_held_refs(held) == []
+  end
+
+  # Retry the atomic claim whenever a run event fires; anything else in the
+  # mailbox (e.g. a stray monitor message) falls through and keeps waiting.
+  defp wait_loop(conn, board, runner, running, inputs, deadline) do
+    timeout = deadline - System.monotonic_time(:millisecond)
+
+    if timeout <= 0 do
+      no_work(conn, board, running)
+    else
+      receive do
+        run_event when is_tuple(run_event) and elem(run_event, 0) in @run_event_tags ->
+          case claim_with(runner, inputs) do
+            # Woken with nothing to grant is the Stop case: `Talk.stop_turn/1` broadcasts a run
+            # event precisely so this loop re-checks. Return as soon as something is revoked,
+            # rather than sitting out the rest of the 25s with a kill order in hand.
+            {:ok, nil} ->
+              case Runs.revoked_among(board, running) do
+                [] -> wait_loop(conn, board, runner, running, inputs, deadline)
+                revoked -> json(conn, %{revoked: revoked})
+              end
+
+            {:ok, job} ->
+              json(conn, granted(job))
+          end
+      after
+        timeout -> no_work(conn, board, running)
+      end
+    end
+  end
+
+  # Never leaks worktree paths — those are runner-local. `kind` rides on BOTH shapes (RE268):
+  # the runner branches on it, and pinning it in the fixture is what makes a rename break CI
+  # rather than production.
+  defp claim_payload(%Schemas.NodeJob{kind: :talk} = job) do
+    payload = job.payload
+
+    %{
+      id: job.id,
+      kind: "talk",
+      ref: payload["ref"],
+      turn_id: payload["turn_id"],
+      prompt: payload["prompt"],
+      author: payload["author"],
+      branch: payload["branch"],
+      seed: payload["seed"] || %{},
+      resume_session: payload["resume_session"]
+    }
+  end
+
+  # Serialises the payload W5 stored (raw run + resolved vars); {ref}/{branch} expansion stays
+  # runner-side.
+  defp claim_payload(job) do
+    payload = job.payload
+
+    %{
+      id: job.id,
+      kind: "node",
+      run_id: job.run_id,
+      ref: get_in(payload, ["vars", "ref"]),
+      node_id: job.node_key,
+      node_type: payload["node_type"],
+      agent: payload["agent"],
+      run: payload["run"],
+      isolation: payload["isolation"],
+      resume_session: payload["resume_session"],
+      vars: payload["vars"] || %{},
+      # RE433: resolved at enqueue — the command template the runner expands, its model and the
+      # node's effort. nil on shell/gate nodes. `refusal` is never sent: such a job is never claimed.
+      harness: payload["harness"],
+      model: payload["model"],
+      effort: payload["effort"]
+    }
+  end
+end

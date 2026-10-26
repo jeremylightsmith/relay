@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.Input do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.input/1
+  def function, do: &HamacaWeb.CoreComponents.input/1
   def render_source, do: :function
   def layout, do: :one_column
 

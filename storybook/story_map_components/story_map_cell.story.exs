@@ -2,7 +2,7 @@ defmodule Storybook.StoryMapComponents.StoryMapCell do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.StoryMapComponents.story_map_cell/1
+  def function, do: &HamacaWeb.StoryMapComponents.story_map_cell/1
   def render_source, do: :function
 
   def variations do
@@ -48,7 +48,7 @@ defmodule Storybook.StoryMapComponents.StoryMapCell do
     )
   end
 
-  # Three stages so Relay.Cards.done?/2 sees a real terminal column — a card parked in the
+  # Three stages so Hamaca.Cards.done?/2 sees a real terminal column — a card parked in the
   # only stage would otherwise derive as Done and every variation would render green.
   defp stages do
     [

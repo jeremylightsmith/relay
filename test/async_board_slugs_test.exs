@@ -1,4 +1,4 @@
-defmodule Relay.AsyncBoardSlugsTest do
+defmodule Hamaca.AsyncBoardSlugsTest do
   @moduledoc """
   Guardrail: no two `async: true` test files insert a board with the same literal slug.
 
@@ -9,7 +9,7 @@ defmodule Relay.AsyncBoardSlugsTest do
   test failed in roughly one of six suite runs. `boards_live_test.exs` created `zeta` and then
   `alpha`, while `all_controller_test.exs` inserted `alpha` and then `zeta`.
 
-  Use `unique_slug/1` (from `Relay.DataCase`, also imported by `RelayWeb.ConnCase`) instead of a
+  Use `unique_slug/1` (from `Hamaca.DataCase`, also imported by `HamacaWeb.ConnCase`) instead of a
   literal, and assert against the returned `board.slug`.
 
   The scan is deliberately narrow. It reads the three ways tests put a literal slug in the
@@ -74,7 +74,7 @@ defmodule Relay.AsyncBoardSlugsTest do
     Enum.uniq(created ++ explicit_create ++ inserted ++ helper_args ++ helper_defaults)
   end
 
-  # Mirrors Relay.Boards' private slugify/1, which create_board/2 uses to derive a slug.
+  # Mirrors Hamaca.Boards' private slugify/1, which create_board/2 uses to derive a slug.
   defp slugify(name) do
     case name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-") do
       "" -> "board"

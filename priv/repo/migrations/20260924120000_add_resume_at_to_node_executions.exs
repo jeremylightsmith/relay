@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddResumeAtToNodeExecutions do
+defmodule Hamaca.Repo.Migrations.AddResumeAtToNodeExecutions do
   use Ecto.Migration
 
   # RE267: when a `:blocked` attempt's usage limit resets, as the runner reported it. Nullable —

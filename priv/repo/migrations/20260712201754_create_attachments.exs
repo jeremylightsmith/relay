@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateAttachments do
+defmodule Hamaca.Repo.Migrations.CreateAttachments do
   use Ecto.Migration
 
   def change do

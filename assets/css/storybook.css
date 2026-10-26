@@ -12,7 +12,7 @@
 @import "tailwindcss" source(none);
 @source "../css";
 @source "../js";
-@source "../../lib/relay_web";
+@source "../../lib/hamaca_web";
 @source "../../storybook";
 
 /* --- Mirrored from app.css (keep in sync) --- */
@@ -140,7 +140,7 @@
 /* RE394 — mirror of the pending-actions block in app.css (see that file for the rationale). */
 /* RE394 pending actions — begin */
 /* The client-side pressed face for <.button pending> and every other `pending-action`
-   (RelayWeb.CoreComponents.button/1, action_group/1). "Pressed" keys off the element's OWN
+   (HamacaWeb.CoreComponents.button/1, action_group/1). "Pressed" keys off the element's OWN
    LiveView loading class — never an ancestor's: the phx-click-loading: variant's
    `.phx-click-loading &` form would light up e.g. a Retry chip inside a clicked board card.
    Unlayered on purpose, so these beat daisyUI's layered .btn rules (including its grey
@@ -371,7 +371,7 @@
    width and blows out the card drawer column. `cursor: zoom-in` is the ONLY visual hint
    that the image opens the full-size viewer (assets/js/image_lightbox.js), so it is
    required, not decoration. `.docs` is the docs site's content class — see
-   lib/relay_web/controllers/docs_html/show.html.heex. */
+   lib/hamaca_web/controllers/docs_html/show.html.heex. */
 .md img, .docs img {
   max-width: 100%;
   height: auto;
@@ -526,7 +526,7 @@
   color: color-mix(in oklch, var(--color-secondary) 65%, var(--color-base-content) 35%);
   padding: 0.1em 0.4em; border-radius: 5px;
   /* Inline code is often a long unbreakable token (a module path like
-     `lib/relay_web/controllers/api/node_job_controller.ex`). Without this it overflows a
+     `lib/hamaca_web/controllers/api/node_job_controller.ex`). Without this it overflows a
      phone viewport and drags the whole page into horizontal scroll. Block code is
      unaffected: `pre`'s `white-space: pre` wins, so it keeps scrolling instead of wrapping. */
   overflow-wrap: break-word;

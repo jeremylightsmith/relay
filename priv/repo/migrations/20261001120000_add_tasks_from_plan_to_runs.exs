@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddTasksFromPlanToRuns do
+defmodule Hamaca.Repo.Migrations.AddTasksFromPlanToRuns do
   use Ecto.Migration
 
   # RE368 — true when this run's tasks were seeded by the legacy plan-parse fallback, so

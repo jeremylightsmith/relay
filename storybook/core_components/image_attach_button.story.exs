@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.ImageAttachButton do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.image_attach_button/1
+  def function, do: &HamacaWeb.CoreComponents.image_attach_button/1
   def render_source, do: :function
 
   def variations do

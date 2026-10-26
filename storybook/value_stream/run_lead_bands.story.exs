@@ -2,9 +2,9 @@ defmodule Storybook.ValueStream.RunLeadBands do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  alias RelayWeb.ValueStreamFlowLayout, as: FlowLayout
+  alias HamacaWeb.ValueStreamFlowLayout, as: FlowLayout
 
-  def function, do: &RelayWeb.ValueStreamComponents.run_lead_bands/1
+  def function, do: &HamacaWeb.ValueStreamComponents.run_lead_bands/1
   def render_source, do: :function
 
   def variations do

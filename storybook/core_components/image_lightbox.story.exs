@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.ImageLightbox do
   @moduledoc false
   use PhoenixStorybook.Story, :page
 
-  alias RelayWeb.CoreComponents
+  alias HamacaWeb.CoreComponents
 
   def doc,
     do:

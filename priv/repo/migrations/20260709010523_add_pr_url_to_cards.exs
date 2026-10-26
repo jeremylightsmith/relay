@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddPrUrlToCards do
+defmodule Hamaca.Repo.Migrations.AddPrUrlToCards do
   use Ecto.Migration
 
   def change do

@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.RenameParallelNodesToFanOut do
+defmodule Hamaca.Repo.Migrations.RenameParallelNodesToFanOut do
   use Ecto.Migration
 
   # RE437 — the never-run `parallel` node type became the `fan_out` control node. Once

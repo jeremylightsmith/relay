@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateRunBranches do
+defmodule Hamaca.Repo.Migrations.CreateRunBranches do
   use Ecto.Migration
 
   # RE437: one row per branch per region entry, keyed by the fan_out execution that opened it.

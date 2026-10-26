@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateDeviceTokens do
+defmodule Hamaca.Repo.Migrations.CreateDeviceTokens do
   use Ecto.Migration
 
   def change do

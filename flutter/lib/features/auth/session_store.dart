@@ -1,11 +1,11 @@
-// Where the native session credential lives. Persisting Phoenix's `_relay_key`
+// Where the native session credential lives. Persisting Phoenix's `_hamaca_key`
 // cookie is what makes a cold-start push tap land on the card instead of the
 // sign-in screen (RLY-86 §3).
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// The persisted `_relay_key` session cookie value.
+/// The persisted `_hamaca_key` session cookie value.
 abstract class SessionStore {
   /// The stored value, or null when nothing is stored — or the read failed.
   Future<String?> read();

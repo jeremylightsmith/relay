@@ -1,0 +1,3051 @@
+defmodule HamacaWeb.BoardLiveTest do
+  use HamacaWeb.ConnCase, async: true
+
+  import Ecto.Query
+  import Phoenix.LiveViewTest
+
+  alias Hamaca.Boards
+  alias Hamaca.Cards
+  alias Hamaca.Repo
+  alias Schemas.Board
+  alias Schemas.Card
+  alias Schemas.CardOwner
+  alias Schemas.Comment
+  alias Schemas.Stage
+
+  describe "when logged out" do
+    test "GET /board/:slug redirects to the sign-in page", %{conn: conn} do
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board/anything")
+    end
+  end
+
+  describe "when logged in" do
+    setup :register_and_log_in_user
+
+    test "provisions the default board with 11 stages on first visit", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert [%Board{} = board] = Repo.all(Board)
+      assert board.owner_id == user.id
+      assert Repo.aggregate(Stage, :count) == 11
+    end
+
+    test "titles the board tab with the board name and the · Hamaca suffix", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert html =~ "#{board.name} · Hamaca"
+      refute html =~ "Phoenix Framework"
+    end
+
+    # RE477 scenario 4
+    test "the top bar names Hamaca in the wordmark, both logos and the tab title", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      html = conn |> get(~p"/board/#{board.slug}") |> html_response(200)
+      document = LazyHTML.from_document(html)
+
+      assert document |> LazyHTML.query("#top-bar-logo span") |> LazyHTML.text() |> String.trim() == "Hamaca"
+
+      alts = document |> LazyHTML.query("img[src^='/images/logo_']") |> LazyHTML.attribute("alt")
+      assert length(alts) == 2
+      assert Enum.all?(alts, &(&1 == "Hamaca"))
+
+      assert document |> LazyHTML.query("title") |> LazyHTML.text() |> String.trim() |> String.ends_with?(" · Hamaca")
+    end
+
+    test "relaxes the board-name width cap on mobile, keeps the desktop cap", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      html = render(view)
+      assert html =~ ~s(id="board-name")
+      assert html =~ "max-w-[58vw]"
+      assert html =~ "sm:max-w-[280px]"
+      refute html =~ "max-w-[46vw]"
+    end
+
+    test "revisiting does not create a duplicate board", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
+      {:ok, _view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert Repo.aggregate(Board, :count) == 1
+      assert Repo.aggregate(Stage, :count) == 11
+    end
+
+    test "renders the stage columns in position order", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      names =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#board .stage-column h3")
+        |> Enum.map(&String.trim(LazyHTML.text(&1)))
+
+      assert names == ["Backlog", "Next up", "Spec", "Plan", "Code", "Review", "Deploy", "Done"]
+    end
+
+    test "groups the stages under their category bands in order", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      next_up = Enum.find(board.stages, &(&1.name == "Next up"))
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
+      done = Enum.find(board.stages, &(&1.name == "Done"))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#category-unstarted h2.category-band", "Unstarted")
+      assert has_element?(view, "#category-planning h2.category-band", "Planning")
+      assert has_element?(view, "#category-in_progress h2.category-band", "In progress")
+      assert has_element?(view, "#category-complete h2.category-band", "Complete")
+
+      # a fresh board is empty, so every stage renders as its collapsed strip
+      assert has_element?(view, "#category-unstarted #stage-strip-#{backlog.id}", "Backlog")
+      assert has_element?(view, "#category-unstarted #stage-strip-#{next_up.id}", "Next up")
+      assert has_element?(view, "#category-planning #stage-strip-#{spec.id}", "Spec")
+      assert has_element?(view, "#category-planning #stage-strip-#{plan.id}", "Plan")
+      assert has_element?(view, "#category-in_progress #stage-strip-#{code.id}", "Code")
+      assert has_element?(view, "#category-in_progress #stage-strip-#{review.id}", "Review")
+      assert has_element?(view, "#category-in_progress #stage-strip-#{deploy.id}", "Deploy")
+      assert has_element?(view, "#category-complete #stage-strip-#{done.id}", "Done")
+
+      bands =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#board .category-band")
+        |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+
+      assert bands == ["Unstarted", "Planning", "In progress", "Complete"]
+    end
+
+    test "renders the Planning band with its label and violet dot", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#category-planning h2.category-band", "Planning")
+      assert has_element?(view, "#category-planning #stage-strip-#{plan.id}", "Plan")
+
+      [style] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#category-planning .category-dot")
+        |> LazyHTML.attribute("style")
+
+      assert style =~ "--color-secondary"
+    end
+
+    test "shows the right stage-type icon on each stage", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      # Top-level (main) stages only — sub-lanes render inside their parent's
+      # expanded column, not as their own top-level strip on a fresh board.
+      for stage <- Enum.filter(board.stages, &is_nil(&1.parent_id)) do
+        assert has_element?(
+                 view,
+                 ~s(#stage-strip-#{stage.id} .stage-type-icon[data-type="#{stage.type}"])
+               )
+      end
+    end
+
+    test "a fresh board collapses every empty stage to a strip", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      document = view |> render() |> LazyHTML.from_fragment()
+
+      assert document |> LazyHTML.query("#board .stage-strip") |> Enum.count() == 8
+      assert document |> LazyHTML.query("#board .stage-empty") |> Enum.count() == 0
+    end
+
+    # RE395: starring lives on /boards only — never on the board page or its top bar.
+    test "the board page has no star button", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "[id^=board-star-]")
+      refute html =~ "hero-star"
+      refute render(view) =~ "hero-star"
+    end
+  end
+
+  describe "cards" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      %{board: board, backlog: backlog}
+    end
+
+    test "a stage's compose CTA reveals the composer for that stage only", %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+
+      refute has_element?(view, "#stage-col-1-compose-form")
+
+      view |> element("#stage-col-1-new-card") |> render_click()
+
+      assert has_element?(view, "#stage-col-1-compose-form")
+      refute has_element?(view, "#stage-col-2-compose-form")
+    end
+
+    test "submitting the composer creates a card in that stage and clears the input",
+         %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+
+      view
+      |> form("#stage-col-1-compose-form", card: %{title: "Ship MMF 03"})
+      |> render_submit()
+
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Ship MMF 03")
+
+      assert [card] = Repo.all(Card)
+      assert card.stage_id == backlog.id
+      assert card.title == "Ship MMF 03"
+      assert card.ref_number == 1
+
+      assert has_element?(view, "#stage-col-1-compose-form")
+
+      input_html =
+        view
+        |> element("#stage-col-1-compose-form textarea[name='card[title]']")
+        |> render()
+
+      refute input_html =~ "Ship MMF 03"
+    end
+
+    test "creating cards assigns per-board incrementing refs shown on the cards", %{
+      conn: conn,
+      backlog: backlog,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: "First"}) |> render_submit()
+      view |> form("#stage-col-1-compose-form", card: %{title: "Second"}) |> render_submit()
+
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-ref", "MY1")
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-ref", "MY2")
+    end
+
+    test "cards persist and re-render in position order on reload", %{conn: conn, backlog: backlog, user: user} do
+      insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      titles =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#stage-col-1-cards .board-card .card-title")
+        |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+
+      assert titles == ["First", "Second"]
+    end
+
+    test "cards render in their own stage; other stages keep the empty state",
+         %{conn: conn, backlog: backlog, board: board} do
+      [_backlog, spec | _rest] = board.stages
+      insert(:card, stage: backlog, title: "Only here", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Only here")
+      refute has_element?(view, "#stage-col-2-cards .board-card")
+      assert has_element?(view, "#stage-strip-#{spec.id} .stage-count", "0")
+    end
+
+    test "cancel closes the composer without creating a card", %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> element("#stage-col-1-composer button", "Cancel") |> render_click()
+
+      refute has_element?(view, "#stage-col-1-compose-form")
+      assert Repo.all(Card) == []
+    end
+
+    test "submitting a blank title keeps the composer open and creates nothing", %{
+      conn: conn,
+      backlog: backlog,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: ""}) |> render_submit()
+
+      assert has_element?(view, "#stage-col-1-compose-form")
+      assert Repo.all(Card) == []
+    end
+
+    test "creating a card inserts it at the top of the stream", %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: "First"}) |> render_submit()
+      view |> form("#stage-col-1-compose-form", card: %{title: "Second"}) |> render_submit()
+
+      assert stage_titles(view, 1) == ["Second", "First"]
+
+      {:ok, reloaded, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert stage_titles(reloaded, 1) == ["Second", "First"]
+    end
+
+    test "creating a card pushes a focus event carrying the new card's ref",
+         %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: "Focus me"}) |> render_submit()
+
+      assert_push_event(view, "focus_card", %{ref: "MY1"})
+    end
+
+    test "composing on an AI-enabled stage shows the handoff CTA and creates a card",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      # RE409: the seeded `code` flow works in Code, which is what makes it AI-enabled.
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      col = "stage-col-#{code.position}"
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#stage-strip-#{code.id}") |> render_click()
+      view |> element("##{col}-new-card") |> render_click()
+      assert has_element?(view, "##{col}-compose-form")
+      assert render(view) =~ "Hand to AI"
+      assert render(view) =~ "Describe work to hand to the AI"
+
+      view
+      |> form("##{col}-compose-form", card: %{title: "Ship the thing"})
+      |> render_submit()
+
+      assert has_element?(view, "##{col}-cards", "Ship the thing")
+    end
+  end
+
+  describe "lane counts" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      %{board: board, backlog: backlog}
+    end
+
+    test "every stage renders its card count", %{conn: conn, board: board, backlog: backlog} do
+      insert(:card, stage: backlog, title: "One", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Two", position: 2, ref_number: 2)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-1 .stage-count", "2")
+
+      # Top-level (main) stages only — sub-lanes render inside their parent's
+      # expanded column, not as their own top-level strip on a fresh board.
+      for stage <- board.stages |> Enum.filter(&is_nil(&1.parent_id)) |> tl() do
+        assert has_element?(view, "#stage-strip-#{stage.id} .stage-count", "0")
+      end
+    end
+
+    test "creating a card bumps its stage's count", %{conn: conn, board: board, backlog: backlog} do
+      [_backlog, spec | _rest] = board.stages
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+      view |> form("#stage-col-1-compose-form", card: %{title: "Count me"}) |> render_submit()
+
+      assert has_element?(view, "#stage-col-1 .stage-count", "1")
+      assert has_element?(view, "#stage-strip-#{spec.id} .stage-count", "0")
+    end
+  end
+
+  describe "moving cards" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, spec | _rest] = board.stages
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+      %{board: board, backlog: backlog, spec: spec, plan: plan}
+    end
+
+    test "a move_card event moves the card to the target stage and persists across reloads",
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Take the baton"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => spec.id, "index" => 0})
+
+      assert has_element?(view, "#stage-col-2-cards .board-card", "Take the baton")
+      refute has_element?(view, "#stage-col-1-cards .board-card")
+      assert Repo.get!(Card, card.id).stage_id == spec.id
+
+      {:ok, reloaded, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(reloaded, "#stage-col-2-cards .board-card", "Take the baton")
+    end
+
+    test "moving updates both lane counts", %{conn: conn, backlog: backlog, spec: spec, user: user} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Mover"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => spec.id, "index" => 0})
+
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      assert has_element?(view, "#stage-col-2 .stage-count", "1")
+    end
+
+    test "reordering within a stage persists the new order across reloads",
+         %{conn: conn, backlog: backlog, user: user} do
+      {:ok, _first} = Cards.create_card(backlog, %{title: "First"})
+      {:ok, _second} = Cards.create_card(backlog, %{title: "Second"})
+      {:ok, _third} = Cards.create_card(backlog, %{title: "Third"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => backlog.id, "index" => 0})
+
+      assert stage_titles(view, 1) == ["First", "Third", "Second"]
+
+      {:ok, reloaded, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert stage_titles(reloaded, 1) == ["First", "Third", "Second"]
+    end
+
+    test "accepts string stage_id and index (phx-value parity)",
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Stringly"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{
+        "ref" => "MY1",
+        "stage_id" => Integer.to_string(spec.id),
+        "index" => "0"
+      })
+
+      assert Repo.get!(Card, card.id).stage_id == spec.id
+    end
+
+    test "omitting index appends the card to the bottom of the target stage",
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Mover"})
+      {:ok, existing} = Cards.create_card(spec, %{title: "Already there"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => spec.id})
+
+      assert Repo.get!(Card, card.id).position == 2
+      assert Repo.get!(Card, existing.id).position == 1
+      assert stage_titles(view, 2) == ["Already there", "Mover"]
+    end
+
+    test "a ref that is not on this board is rejected", %{conn: conn, spec: spec, user: user} do
+      other_stage = insert(:stage)
+      theirs = insert(:card, stage: other_stage, title: "Theirs", position: 1, ref_number: 1)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => spec.id, "index" => 0})
+
+      assert Repo.get!(Card, theirs.id).stage_id == other_stage.id
+      refute has_element?(view, "#stage-col-2-cards .board-card")
+    end
+
+    test "a target stage that is not on this board is rejected",
+         %{conn: conn, backlog: backlog, user: user} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Stay home"})
+      other_stage = insert(:stage)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => other_stage.id, "index" => 0})
+
+      assert Repo.get!(Card, card.id).stage_id == backlog.id
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Stay home")
+    end
+
+    test "garbage stage_id or index is ignored", %{conn: conn, backlog: backlog, spec: spec, user: user} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Unmoved"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => "banana", "index" => 0})
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => spec.id, "index" => "banana"})
+
+      assert Repo.get!(Card, card.id).stage_id == backlog.id
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Unmoved")
+    end
+
+    test "moving the drawer-selected card refreshes the drawer's stage chip",
+         %{conn: conn, backlog: backlog, plan: plan, user: user} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Chip check"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => plan.id, "index" => 0})
+
+      assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-secondary", "Plan")
+    end
+  end
+
+  describe "drag-and-drop wiring" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Drag me"})
+      %{board: board, backlog: backlog}
+    end
+
+    test "the board mounts the BoardDnD hook", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#board[phx-hook='BoardDnD']")
+    end
+
+    test "cards are draggable and carry their ref", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-1-cards .board-card[draggable='true'][data-ref='MY1']")
+    end
+
+    test "every stage's lane has a .stage-drop zone carrying its stage id",
+         %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      # RLY-116: the .stage-drop wrapper owns the drop-zone contract; the
+      # .stage-cards stream list sits inside it and no longer carries the id
+      assert has_element?(view, "#stage-col-1-drop.stage-drop[data-stage-id='#{backlog.id}']")
+      assert has_element?(view, "#stage-col-1-drop #stage-col-1-cards.stage-cards")
+      refute has_element?(view, "#stage-col-1-cards[data-stage-id]")
+
+      zones =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#board .stage-drop[data-stage-id]")
+        |> Enum.count()
+
+      assert zones == 8
+    end
+  end
+
+  describe "baton rendering on the board" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog, _spec, plan | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Baton card"})
+      %{board: board, backlog: backlog, plan: plan, card: card}
+    end
+
+    test "an unowned card renders neutral: transparent accent, no owners, no mismatch", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-1-cards .board-card.border-l-base-300", "Baton card")
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-owners")
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-status")
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-mismatch")
+    end
+
+    test "an unowned card in an AI stage shows no mismatch", %{conn: conn, plan: plan, user: user} do
+      {:ok, _card} = Cards.create_card(plan, %{title: "Unowned in Plan"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
+    end
+
+    test "a human-owned card renders quiet with a human owner avatar (RLY-48: accent is status-keyed, not owner-keyed)",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card[data-active-owner='human'].border-l-base-300"
+             )
+
+      assert has_element?(
+               view,
+               ~s(#stage-col-1-cards .board-card .card-owners [data-actor-type="user"])
+             )
+    end
+
+    test "adding the agent as an owner renders quiet (RLY-48: accent is status-keyed, not owner-keyed)",
+         %{conn: conn, user: user, card: card, plan: plan} do
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, card} = Cards.add_owner(card, :agent)
+
+      # Move the card into Plan — an AI-enabled stage — so this test
+      # demonstrates the clean, quiet accent for an AI-active card.
+      {:ok, _moved} = Cards.move_card(card, plan, 0)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(
+               view,
+               "#stage-col-3-cards .board-card[data-active-owner='ai'].border-l-base-300"
+             )
+
+      assert has_element?(
+               view,
+               ~s(#stage-col-3-cards .board-card .card-owners [data-actor-type="agent"])
+             )
+    end
+
+    test "a needs_input card shows the amber needs-you box", %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "needs_input"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card.border-l-warning .card-needs-input",
+               "needs you"
+             )
+    end
+
+    test "a working card derives its progress from sub-tasks in the status line", %{conn: conn, card: card, user: user} do
+      insert(:sub_task, card: card, done: true)
+      insert(:sub_task, card: card, done: false)
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(
+               view,
+               "#stage-col-1-cards .board-card .card-status[data-status='working']",
+               "working · 50%"
+             )
+    end
+
+    test "a working card with no sub-tasks shows a plain working label", %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-status[data-status='working']", "working")
+      refute render(view) =~ "working · "
+    end
+
+    test "a human-owned card in an AI stage shows no mismatch warning (the mover owns it)",
+         %{conn: conn, user: user, card: card, plan: plan} do
+      {:ok, card} = Cards.add_owner(card, {:user, user.id})
+      {:ok, _moved} = Cards.move_card(card, plan, 0)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
+      refute has_element?(view, "#stage-col-3-cards .board-card.border-l-error")
+    end
+
+    test "an AI-owned card in a human stage shows no mismatch warning (no hand-back)",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-mismatch")
+      refute has_element?(view, "#stage-col-1-cards .board-card.border-l-error")
+      assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
+    end
+
+    test "moving a card changes neither its owners nor its status",
+         %{conn: conn, board: board, user: user, card: card, plan: plan} do
+      {:ok, _card} = Cards.add_owner(card, {:user, user.id})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => plan.id, "index" => 0})
+
+      moved = Cards.get_card_by_ref(board, "MY1")
+      assert moved.stage_id == plan.id
+      assert moved.status == :ready
+      assert [%{actor_type: :user}] = moved.owners
+
+      refute has_element?(view, "#stage-col-3-cards .board-card .card-mismatch")
+    end
+  end
+
+  describe "card drawer" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Draft the spec", tag: "spec"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "no drawer renders without a card param", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "clicking a board card patches to its ref and opens the drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#stage-col-1-cards .board-card") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+      assert has_element?(view, "#card-drawer")
+      assert has_element?(view, "#card-drawer-title-display", "Draft the spec")
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY1")
+    end
+
+    test "the drawer header shows the stage chip in the owner color", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-primary", "Backlog")
+    end
+
+    test "the properties rail shows tags and the updated time, and no created date", %{
+      conn: conn,
+      card: card,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-rail .rail-tags", "spec")
+
+      updated_at = Repo.reload!(card).updated_at
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-updated",
+               Calendar.strftime(updated_at, "%b %d · %H:%M")
+             )
+
+      refute has_element?(view, "#card-drawer-rail", "Created")
+    end
+
+    test "renders description, spec, plan, and comments as markdown-rendered HTML",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _updated} =
+        Cards.update_card(card, %{
+          description: "## Desc head\n\n**descbold**",
+          spec: "## Spec head\n\n**specbold**",
+          plan: "## Plan head\n\n**planbold**"
+        })
+
+      {:ok, _comment} =
+        Hamaca.Activity.add_comment(card, %{actor: {:user, user.id}, body: "**commentbold** note"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      # each long-form field is markdown turned into HTML, not literal text
+      assert has_element?(view, "#card-drawer-description-view h2", "Desc head")
+      assert has_element?(view, "#card-drawer-description-view strong", "descbold")
+      assert has_element?(view, "#card-drawer-spec-view strong", "specbold")
+      assert has_element?(view, "#card-plan-view strong", "planbold")
+      assert has_element?(view, ".timeline-comment-body strong", "commentbold")
+    end
+
+    test "spec and plan sit between Description and Conversation, editable at rest",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _updated} = Cards.update_card(card, %{spec: "The spec body", plan: "The plan body"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      html = render_async(view)
+
+      # both render as click-to-edit boxed fields, not <details> disclosures
+      assert has_element?(view, "#card-drawer-spec-view")
+      assert has_element?(view, "#card-plan-view")
+      refute has_element?(view, "details#card-drawer-spec")
+      refute has_element?(view, "details#card-plan")
+
+      # DOM order (mockup order): Description → Spec → Plan → Conversation → Activity
+      description = index_of(html, ~s(id="card-drawer-description"))
+      spec = index_of(html, ~s(id="card-drawer-spec"))
+      plan = index_of(html, ~s(id="card-plan"))
+      conv = index_of(html, ~s(id="card-drawer-conversation"))
+      activity = index_of(html, ~s(id="card-drawer-activity"))
+
+      assert description < spec
+      assert spec < plan
+      assert plan < conv
+      assert conv < activity
+    end
+
+    test "a long title wraps in the read display (no truncation)",
+         %{conn: conn, card: card, user: user} do
+      long = String.duplicate("word ", 40)
+      {:ok, _} = Cards.update_card(card, %{title: long})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-title-display.break-words")
+      assert has_element?(view, "#card-drawer-title-display .whitespace-pre-wrap")
+      refute has_element?(view, "#card-drawer-title-display.truncate")
+    end
+
+    test "the main column renders sections in mockup order", %{conn: conn, card: card, user: user} do
+      {:ok, _} =
+        Cards.update_card(card, %{
+          description: "A description",
+          spec: "# Spec body",
+          plan: "# Plan body",
+          ai_result: %{"summary" => "AI summary"}
+        })
+
+      insert(:sub_task, card: card, title: "st-1")
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      html = render_async(view)
+
+      order = ~w(
+        ai-result
+        card-drawer-description
+        card-drawer-spec
+        card-plan
+        card-plan-tasks
+        card-drawer-conversation
+        card-drawer-activity
+      )
+
+      positions =
+        Enum.map(order, fn id ->
+          {pos, _len} = :binary.match(html, ~s(id="#{id}"))
+          pos
+        end)
+
+      assert positions == Enum.sort(positions),
+             "main-column sections are out of mockup order: #{inspect(Enum.zip(order, positions))}"
+    end
+
+    test "with a spec but no plan, the spec shows content and the plan shows its placeholder",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _updated} = Cards.update_card(card, %{spec: "Spec only"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      html = render_async(view)
+
+      assert has_element?(view, "#card-drawer-spec-view")
+      assert has_element?(view, "#card-plan-display", "Add a plan")
+
+      spec = index_of(html, ~s(id="card-drawer-spec"))
+      activity = index_of(html, ~s(id="card-drawer-activity"))
+      assert spec < activity
+    end
+
+    test "with neither spec nor plan, both fields show their empty-state placeholders",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-spec-view")
+      refute has_element?(view, "#card-plan-view")
+      assert has_element?(view, "#card-drawer-spec-display", "Add a spec")
+      assert has_element?(view, "#card-plan-display", "Add a plan")
+    end
+
+    test "spec and plan default to a collapsed preview with Show more, and expand on toggle",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _} =
+        Cards.update_card(card, %{
+          spec: "## Spec head\n\nline1\nline2\nline3\nline4\nline5",
+          plan: "## Plan head\n\nstep1\nstep2\nstep3\nstep4\nstep5"
+        })
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      # collapsed by default: preview box + Show more, header toggle reads "Expand"
+      assert has_element?(view, "#card-drawer-spec .commit-field-preview #card-drawer-spec-view.md")
+      assert has_element?(view, "#card-drawer-spec-show-more", "Show more")
+      assert has_element?(view, "#card-drawer-spec-toggle", "Expand")
+      assert has_element?(view, "#card-plan .commit-field-preview")
+
+      # expand via the header toggle → full read, no preview clamp, toggle reads "Collapse"
+      view |> element("#card-drawer-spec-toggle") |> render_click()
+
+      refute has_element?(view, "#card-drawer-spec .commit-field-preview")
+      assert has_element?(view, "#card-drawer-spec-view.md", "line5")
+      assert has_element?(view, "#card-drawer-spec-toggle", "Collapse")
+      refute has_element?(view, "#card-drawer-spec-show-more")
+
+      # Show more also expands (plan), independently of spec
+      view |> element("#card-plan-show-more") |> render_click()
+      refute has_element?(view, "#card-plan .commit-field-preview")
+      assert has_element?(view, "#card-plan-toggle", "Collapse")
+    end
+
+    test "spec = primary accent, plan = secondary accent; both always shown",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _} = Cards.update_card(card, %{spec: "S", plan: "P"})
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-spec .commit-field-accent.bg-primary")
+      assert has_element?(view, "#card-plan .commit-field-accent.bg-secondary")
+    end
+
+    test "an empty spec/plan renders a dashed Add box with an Add toggle, no Show more",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-spec-display", "Add a spec")
+      assert has_element?(view, "#card-drawer-spec-toggle", "Add")
+      refute has_element?(view, "#card-drawer-spec-show-more")
+      refute has_element?(view, "#card-drawer-spec .commit-field-preview")
+    end
+
+    test "expanded state resets when switching to another card",
+         %{conn: conn, card: card, user: user, backlog: backlog} do
+      {:ok, _} = Cards.update_card(card, %{spec: "line1\nline2\nline3\nline4\nline5"})
+      {:ok, _other} = Cards.create_card(backlog, %{title: "Other", spec: "a\nb\nc\nd\ne"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+      view |> element("#card-drawer-spec-toggle") |> render_click()
+      assert has_element?(view, "#card-drawer-spec-toggle", "Collapse")
+
+      # patch to the other card in the SAME mount → assign_selected_card resets expanded
+      render_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      render_async(view)
+      assert has_element?(view, "#card-drawer-spec-toggle", "Expand")
+    end
+
+    test "description has no collapse chrome (reading/editing only)",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _} = Cards.update_card(card, %{description: "d1\nd2\nd3\nd4\nd5"})
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-description-toggle")
+      refute has_element?(view, "#card-drawer-description-show-more")
+      refute has_element?(view, "#card-drawer-description .commit-field-preview")
+    end
+
+    test "visiting the deep link opens the drawer directly", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer")
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY1")
+    end
+
+    test "the close button clears the param and closes the drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-close") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "clicking the scrim clears the param and closes the drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-scrim") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#card-drawer")
+    end
+
+    # RE393 — the embed nav bar and segmented tabs never reach the desktop drawer.
+    test "the desktop drawer keeps its header, ref, Talk tab and underline tabs", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, card} = Cards.create_card(hd(board.stages), %{title: "Desktop drawer"})
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, card)}")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-nav-bar")
+      assert has_element?(view, "#card-drawer .drawer-card-ref")
+      assert has_element?(view, "#card-drawer-tab-talk")
+      refute has_element?(view, "#card-drawer-tabs .bg-base-200")
+      refute has_element?(view, ~s(#card-drawer-tabs [role="group"]))
+    end
+
+    test "an unknown or malformed ref renders no drawer", %{conn: conn, user: user} do
+      for ref <- ["MY999", "banana", "RLY-abc"] do
+        board = Boards.get_or_create_default_board(user)
+        {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
+        render_async(view)
+
+        refute has_element?(view, "#card-drawer")
+        assert has_element?(view, "#board")
+      end
+    end
+
+    test "a ref for another user's card does not open the drawer", %{conn: conn, user: user} do
+      other_stage = insert(:stage)
+      insert(:card, stage: other_stage, title: "Theirs", ref_number: 2, position: 1)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer")
+      assert has_element?(view, "#board")
+    end
+
+    test "the title shows as read-only text until clicked", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-title-display", "Draft the spec")
+      refute has_element?(view, "#card-drawer-title-form")
+    end
+
+    test "clicking the title opens the inline editor", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-title-display") |> render_click()
+
+      assert has_element?(view, "#card-drawer-title-form input#card-drawer-title-input")
+      assert has_element?(view, "#card-drawer-title-save")
+      assert has_element?(view, "#card-drawer-title-cancel")
+    end
+
+    test "saving the title persists and reflects on drawer and board card",
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-title-display") |> render_click()
+      view |> form("#card-drawer-title-form", card: %{title: "Sharper title"}) |> render_submit()
+
+      assert Repo.get!(Card, card.id).title == "Sharper title"
+      assert has_element?(view, "#card-drawer-title-display", "Sharper title")
+      refute has_element?(view, "#card-drawer-title-form")
+      assert has_element?(view, "#stage-col-1-cards .board-card .card-title", "Sharper title")
+      refute has_element?(view, "#stage-col-1-cards .board-card .card-title", "Draft the spec")
+    end
+
+    test "a blank title is rejected with an error and nothing changes", %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-title-display") |> render_click()
+      view |> form("#card-drawer-title-form", card: %{title: ""}) |> render_submit()
+
+      assert has_element?(view, "#card-drawer-title-form", "can't be blank")
+      assert Repo.get!(Card, card.id).title == "Draft the spec"
+    end
+
+    test "a long title wraps in the header rather than scrolling one line",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _} = Cards.update_card(card, %{title: String.duplicate("verylongword ", 15)})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-title-display.break-words")
+      assert has_element?(view, "#card-drawer-title-display .whitespace-pre-wrap")
+    end
+
+    test "pressing Escape closes the open drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer")
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "no window-keydown close binding exists when no card is open", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#card-drawer")
+      refute has_element?(view, "[phx-window-keydown='close_drawer']")
+    end
+
+    test "clicking the description area opens the textarea editor", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-description-display", "Add a description")
+      refute has_element?(view, "#card-drawer-description-form")
+
+      view |> element("#card-drawer-description-display") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-description-form textarea#card-drawer-description-input"
+             )
+    end
+
+    test "saving the description persists and renders it as markdown",
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-description-display") |> render_click()
+
+      view
+      |> form("#card-drawer-description-form", card: %{description: "Line one\n\nLine two"})
+      |> render_submit()
+
+      refute has_element?(view, "#card-drawer-description-form")
+      # a blank line is markdown for two paragraphs, rendered as HTML
+      assert has_element?(view, "#card-drawer-description-view.md p", "Line one")
+      assert has_element?(view, "#card-drawer-description-view.md p", "Line two")
+      assert Repo.get!(Card, card.id).description == "Line one\n\nLine two"
+    end
+
+    test "cancel closes the editor without saving", %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-description-display") |> render_click()
+      view |> element("#card-drawer-description-cancel") |> render_click()
+
+      refute has_element?(view, "#card-drawer-description-form")
+      assert has_element?(view, "#card-drawer-description-display", "Add a description")
+      assert Repo.get!(Card, card.id).description == nil
+    end
+
+    test "editing a boxed long field shows Save/Cancel + hint, not the pill",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-description-display") |> render_click()
+
+      assert has_element?(view, "button#card-drawer-description-save[type='submit']", "Save")
+      assert has_element?(view, "button#card-drawer-description-cancel", "Cancel")
+      assert has_element?(view, "#card-drawer-description-form .commit-field-hint")
+      refute has_element?(view, "#card-drawer-description-pill")
+    end
+
+    test "a saved description survives a fresh deep-link visit", %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.update_card(card, %{description: "Persisted\ntext"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-description-view")
+      assert view |> element("#card-drawer-description-view") |> render() =~ "Persisted\ntext"
+    end
+
+    test "editing pre-fills the textarea with the current description", %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.update_card(card, %{description: "Current text"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+      view |> element("#card-drawer-description-display") |> render_click()
+
+      assert view |> element("#card-drawer-description-input") |> render() =~ "Current text"
+    end
+
+    test "the drawer aside is wide on desktop and full width on mobile", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer aside.drawer-panel.w-full")
+      assert render(view) =~ "drawer:w-[min(760px,94vw)]"
+    end
+
+    test "the drawer body has a main column beside a properties rail", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-main #card-drawer-conversation")
+      assert has_element?(view, "#card-drawer-main #card-drawer-activity")
+      assert has_element?(view, "#card-drawer-rail.drawer\\:border-l")
+    end
+
+    test "editing the description opens a tall textarea", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-description-display") |> render_click()
+
+      assert has_element?(view, "#card-drawer-description-input[rows='12']")
+    end
+
+    test "editing and saving the spec persists via update_card and renders markdown",
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-spec-display") |> render_click()
+      assert has_element?(view, "#card-drawer-spec-form textarea#card-drawer-spec-input")
+
+      view
+      |> form("#card-drawer-spec-form", card: %{spec: "## Spec\n\nDo the thing."})
+      |> render_submit()
+
+      refute has_element?(view, "#card-drawer-spec-form")
+      assert has_element?(view, "#card-drawer-spec-view.md", "Do the thing.")
+      assert Repo.get!(Card, card.id).spec == "## Spec\n\nDo the thing."
+    end
+
+    test "editing and saving the plan persists via update_card",
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-plan-display") |> render_click()
+
+      view
+      |> form("#card-plan-form", card: %{plan: "1. step one"})
+      |> render_submit()
+
+      assert has_element?(view, "#card-plan-view.md", "step one")
+      assert Repo.get!(Card, card.id).plan == "1. step one"
+    end
+
+    test "cancelling a spec edit returns to the rest state without saving",
+         %{conn: conn, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-spec-display") |> render_click()
+      view |> element("#card-drawer-spec-cancel") |> render_click()
+
+      refute has_element?(view, "#card-drawer-spec-form")
+      assert Repo.get!(Card, card.id).spec == card.spec
+    end
+
+    test "the title editor carries the CommitField hook wired to its cancel button", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-title-display") |> render_click()
+
+      # The hook consumes Escape (cancel + stopPropagation) so it never reaches
+      # the drawer's phx-window-keydown="close_drawer".
+      assert has_element?(view, ~s(#card-drawer-title-input[phx-hook="CommitField"]))
+      assert has_element?(view, ~s(#card-drawer-title-input[data-cancel-id="card-drawer-title-cancel"]))
+      assert has_element?(view, "#card-drawer-title-cancel")
+      # The window-level close binding is still present for a not-editing Escape.
+      assert has_element?(view, "[phx-window-keydown='close_drawer']")
+    end
+
+    test "the drawer has no pencil icons or legacy editable-text controls",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer .hero-pencil-square")
+      refute has_element?(view, "#card-drawer .editable-text")
+    end
+
+    test "the composer textareas submit on ⌘/Ctrl+Enter via the SubmitOnCmdEnter hook", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, ~s(#card-drawer-comment-input[phx-hook="SubmitOnCmdEnter"]))
+    end
+
+    test "Archive removes the card from the board, closes the drawer, and flashes", %{
+      conn: conn,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-overflow") |> render_click()
+      html = view |> element("#archive-card-button") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#card-drawer")
+      refute has_element?(view, "#stage-col-1-cards .board-card", "Draft the spec")
+      # the stage's only card was just archived, so it auto-collapses to its
+      # strip (MMF 12c) — the count still reads 0 there.
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      assert html =~ "Card archived."
+      assert board |> Cards.list_archived_cards() |> Enum.map(& &1.title) == ["Draft the spec"]
+    end
+
+    test "opening an archived card by URL shows the banner + Restore, hides edit actions, and logs the phrase",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _archived} = Cards.archive_card(card, {:user, user.id})
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-archived-banner")
+      assert has_element?(view, "#restore-card-button")
+      refute has_element?(view, "#archive-card-button")
+      refute has_element?(view, "#card-drawer-overflow")
+      refute has_element?(view, "#card-drawer-status-form")
+
+      assert has_element?(
+               view,
+               "#card-drawer-activity .timeline-activity-phrase",
+               "archived this card"
+             )
+    end
+
+    test "Restore from the drawer banner returns the card to the board", %{
+      conn: conn,
+      user: user,
+      card: card
+    } do
+      {:ok, _archived} = Cards.archive_card(card)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#restore-card-button") |> render_click()
+
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Draft the spec")
+      refute has_element?(view, "#card-archived-banner")
+      assert Cards.get_card_by_ref(board, "MY1").archived_at == nil
+    end
+
+    test "the drawer shows exactly the doctrine's buttons per state — nothing else",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+
+      # queued
+      {:ok, queued} = Cards.create_card(code, %{title: "Queued one"})
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, queued)}")
+      render_async(view)
+
+      for id <- ~w(needs-input-send review-approve review-mark-done review-pull send-back card-drawer-status-form) do
+        refute has_element?(view, "##{id}")
+      end
+
+      assert has_element?(view, "#card-drawer-stage-chip")
+      assert has_element?(view, "#card-drawer-overflow")
+
+      # working — still no primary button
+      {:ok, work} = Cards.create_card(code, %{title: "Working one"})
+      {:ok, work} = Cards.set_status(work, %{"status" => "working"})
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, work)}")
+      render_async(view)
+
+      for id <- ~w(needs-input-send review-approve review-mark-done review-pull send-back card-drawer-status-form) do
+        refute has_element?(view, "##{id}")
+      end
+
+      # needs_input — only Answer →
+      {:ok, ask} = Cards.create_card(code, %{title: "Ask one"})
+      {:ok, ask} = Cards.request_input(ask, "Which palette?")
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, ask)}")
+      render_async(view)
+      assert has_element?(view, "#needs-input-send")
+
+      for id <- ~w(review-approve review-mark-done review-pull send-back card-drawer-status-form) do
+        refute has_element?(view, "##{id}")
+      end
+
+      # in_review — only Approve / Request changes
+      {:ok, rev} = Cards.create_card(review, %{title: "Review one"})
+      {:ok, rev} = Cards.set_status(rev, %{"status" => "in_review"})
+      {:ok, view, _} = live(conn, ~p"/board/#{board.slug}?card=#{Cards.ref(board, rev)}")
+      render_async(view)
+      assert has_element?(view, "#review-approve")
+      assert has_element?(view, "#review-request-changes")
+
+      for id <- ~w(review-mark-done review-pull send-back card-drawer-status-form) do
+        refute has_element?(view, "##{id}")
+      end
+    end
+  end
+
+  describe "archived cards modal" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, keep} = Cards.create_card(backlog, %{title: "Stay on board"})
+      {:ok, gone} = Cards.create_card(backlog, %{title: "Archived one"})
+      {:ok, _gone} = Cards.archive_card(gone)
+      %{board: board, backlog: backlog, keep: keep}
+    end
+
+    test "the header button shows the archived count", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#archived-cards-menu-item", "1")
+    end
+
+    test "opening the modal lists the archived card with its stage and a Restore button",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#archived-cards-menu-item") |> render_click()
+
+      assert has_element?(view, "#archived-modal")
+      assert has_element?(view, "#archived-list", "Archived one")
+      assert has_element?(view, "#archived-list", "MY2")
+      assert has_element?(view, "#archived-list", "Backlog")
+      assert has_element?(view, "#archived-restore-#{archived_id(board)}")
+      refute has_element?(view, "#archived-list", "Stay on board")
+    end
+
+    test "an archived row's Restore presses to Restoring… (RE394)", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#archived-cards-menu-item") |> render_click()
+
+      restore = "#archived-restore-#{archived_id(board)}"
+      assert has_element?(view, "#archived-list li.action-group #{restore}.pending-action")
+      assert view |> element("#{restore} .pending-face") |> render() =~ "Restoring…"
+    end
+
+    test "Restore from the modal returns the card to the board and drops the count",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#archived-cards-menu-item") |> render_click()
+
+      view |> element("#archived-restore-#{archived_id(board)}") |> render_click()
+
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Archived one")
+      assert has_element?(view, "#archived-cards-menu-item", "0")
+      assert Cards.count_archived_cards(board) == 0
+    end
+
+    test "clicking a row opens that card's drawer and closes the modal",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#archived-cards-menu-item") |> render_click()
+
+      view |> element("#open-archived-card-#{archived_id(board)}") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      render_async(view)
+      assert has_element?(view, "#card-drawer")
+      assert has_element?(view, "#card-archived-banner")
+      refute has_element?(view, "#archived-modal")
+    end
+  end
+
+  describe "drawer plan and branch" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Wire the runner"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "a card with a plan renders it as markdown at rest",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.update_card(card, %{plan: "## Task 1\n\n- [ ] do the thing"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      # plan renders as markdown-turned-HTML (heading + list item), not raw text
+      assert has_element?(view, "#card-plan-view.md h2", "Task 1")
+      assert has_element?(view, "#card-plan-view li", "do the thing")
+    end
+
+    test "a card with a branch renders it on one truncated line with its full name as a tooltip",
+         %{conn: conn, card: card, user: user} do
+      branch = "re-324-fix-long-links-including-prs-and-this-is-a-very-long-branch-name"
+      {:ok, _card} = Cards.update_card(card, %{branch: branch})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-rail #card-branch-row #card-branch", branch)
+      assert has_element?(view, "#card-branch.font-mono.truncate[title='#{branch}']")
+      assert has_element?(view, "#card-branch-row #card-branch-copy[data-copy-text='#{branch}']")
+      assert has_element?(view, "#card-branch-copy[aria-label='Copy branch name']")
+    end
+
+    test "without a pr_url the branch is plain text, not a link",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.update_card(card, %{branch: "rly-21-card-branch-plan"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "span#card-branch", "rly-21-card-branch-plan")
+      refute has_element?(view, "a#card-branch")
+    end
+
+    test "with a GitHub PR url the branch links to its tree on GitHub in a new tab",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _card} =
+        Cards.update_card(card, %{
+          branch: "rly-21-card-branch-plan",
+          pr_url: "https://github.com/acme/relay/pull/42"
+        })
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(
+               view,
+               "a#card-branch[href='https://github.com/acme/relay/tree/rly-21-card-branch-plan'][target='_blank'][rel='noopener noreferrer']",
+               "rly-21-card-branch-plan"
+             )
+
+      assert has_element?(view, "#card-branch-copy[data-copy-text='rly-21-card-branch-plan']")
+      assert has_element?(view, "#card-drawer-rail #card-pr[href='https://github.com/acme/relay/pull/42']")
+    end
+
+    test "with a non-GitHub PR url the branch stays plain text",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _card} =
+        Cards.update_card(card, %{
+          branch: "rly-21-card-branch-plan",
+          pr_url: "https://gitlab.com/acme/relay/-/merge_requests/4"
+        })
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "span#card-branch", "rly-21-card-branch-plan")
+      refute has_element?(view, "a#card-branch")
+    end
+
+    test "a card with neither branch nor plan renders neither", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer")
+      refute has_element?(view, "#card-plan-view")
+      assert has_element?(view, "#card-plan-display", "Add a plan")
+      refute has_element?(view, "#card-branch")
+      refute has_element?(view, "#card-branch-copy")
+    end
+
+    test "a card with a pr_url renders the PR link in the rail",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.update_card(card, %{pr_url: "https://github.com/acme/relay/pull/42"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-rail #card-pr[href='https://github.com/acme/relay/pull/42']")
+    end
+
+    test "a card with no pr_url renders no PR link", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer")
+      refute has_element?(view, "#card-pr")
+    end
+  end
+
+  describe "drawer stage chip · Move-to popover" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+      {:ok, card} = Cards.create_card(backlog, %{title: "Pass the baton"})
+      %{board: board, backlog: backlog, spec: spec, plan: plan, card: card}
+    end
+
+    test "lists move targets with each substage directly under its parent, Review before Done",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      html = view |> element("#card-drawer-stage-chip") |> render_click()
+
+      names =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s{[id^="card-drawer-move-to-"]})
+        # RE394 — a movable row also carries its hidden "Moving…" pressed face after the name.
+        |> Enum.map(
+          &(&1
+            |> LazyHTML.text()
+            |> String.trim()
+            |> String.replace_suffix("current", "")
+            |> String.replace_suffix("Moving…", "")
+            |> String.trim())
+        )
+
+      assert names == [
+               "Backlog",
+               "Next up",
+               "Spec",
+               "Spec · Review",
+               "Spec · Done",
+               "Plan",
+               "Plan · Done",
+               "Code",
+               "Review",
+               "Deploy",
+               "Done"
+             ]
+    end
+
+    test "labels a sub-lane target with the parent's name, not the raw composite Stage.name",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+
+      assert has_element?(view, "#card-drawer-move-to-#{review.id}", "Code · Review")
+      refute has_element?(view, "#card-drawer-move-to-#{review.id}", "Code:Review")
+    end
+
+    test "a card sitting in a sub-lane shows the human label in the drawer chip, not the raw composite Stage.name",
+         %{conn: conn, board: board, card: card} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+      {:ok, _moved} = Cards.move_card(card, review, 0)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer .drawer-stage-chip", "Code · Review")
+      refute has_element?(view, "#card-drawer", "Code:Review")
+    end
+
+    test "moving from the drawer persists like a drag and appends to the bottom",
+         %{conn: conn, backlog: backlog, spec: spec, card: card, user: user} do
+      {:ok, existing} = Cards.create_card(spec, %{title: "Already in Spec"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
+
+      moved = Repo.get!(Card, card.id)
+      assert moved.stage_id == spec.id
+      assert moved.position == 2
+      assert Repo.get!(Card, existing.id).position == 1
+
+      assert has_element?(view, "#stage-col-#{spec.position}-cards .board-card", "Pass the baton")
+      refute has_element?(view, "#stage-col-1-cards .board-card")
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      assert has_element?(view, "#stage-col-#{spec.position} .stage-count", "2")
+    end
+
+    test "the drawer stage chip and menu update after the move", %{conn: conn, plan: plan, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
+
+      assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-secondary", "Plan")
+      refute has_element?(view, "#card-drawer-stage-menu")
+    end
+
+    test "the chip opens a popover listing every stage, the current one marked and inert",
+         %{conn: conn, backlog: backlog, spec: spec, plan: plan, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-stage-menu")
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+
+      assert has_element?(view, "#card-drawer-stage-menu", "Move to")
+      assert has_element?(view, "#card-drawer-stage-filter[placeholder='Filter stages…']")
+
+      # The current stage is LISTED and marked — not hidden…
+      assert has_element?(view, "span#card-drawer-move-to-#{backlog.id}", "Backlog")
+      assert has_element?(view, "span#card-drawer-move-to-#{backlog.id}", "current")
+      # …and it is not a button, so it cannot be clicked to move the card where it already is.
+      refute has_element?(view, "button#card-drawer-move-to-#{backlog.id}")
+
+      assert has_element?(view, "button#card-drawer-move-to-#{spec.id}", "Spec")
+      assert has_element?(view, "button#card-drawer-move-to-#{plan.id}", "Plan")
+    end
+
+    test "typing in the filter narrows the list case-insensitively, then shows a no-match row",
+         %{conn: conn, spec: spec, plan: plan, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> form("#card-drawer-stage-filter-form", %{"q" => "PL"}) |> render_change()
+
+      assert has_element?(view, "#card-drawer-move-to-#{plan.id}", "Plan")
+      refute has_element?(view, "#card-drawer-move-to-#{spec.id}")
+
+      view |> form("#card-drawer-stage-filter-form", %{"q" => "zzzz"}) |> render_change()
+
+      assert has_element?(view, "#card-drawer-stage-none", "No stages match")
+      refute has_element?(view, "#card-drawer-move-to-#{plan.id}")
+    end
+
+    test "reopening the popover clears the previous filter text",
+         %{conn: conn, spec: spec, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> form("#card-drawer-stage-filter-form", %{"q" => "plan"}) |> render_change()
+      refute has_element?(view, "#card-drawer-move-to-#{spec.id}")
+
+      # close, then reopen
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> element("#card-drawer-stage-chip") |> render_click()
+
+      assert has_element?(view, "#card-drawer-stage-filter[value='']")
+      assert has_element?(view, "#card-drawer-move-to-#{spec.id}", "Spec")
+    end
+
+    test "picking a stage moves the card and closes the popover",
+         %{conn: conn, spec: spec, card: card, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> form("#card-drawer-stage-filter-form", %{"q" => "spec"}) |> render_change()
+      view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
+
+      assert Repo.get!(Card, card.id).stage_id == spec.id
+      refute has_element?(view, "#card-drawer-stage-menu")
+      assert has_element?(view, "#card-drawer .drawer-stage-chip", "Spec")
+    end
+
+    test "the stage popover and the overflow menu close each other", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      assert has_element?(view, "#card-drawer-stage-menu")
+
+      view |> element("#card-drawer-overflow") |> render_click()
+      assert has_element?(view, "#card-drawer-overflow-menu")
+      refute has_element?(view, "#card-drawer-stage-menu")
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      assert has_element?(view, "#card-drawer-stage-menu")
+      refute has_element?(view, "#card-drawer-overflow-menu")
+    end
+
+    test "Esc closes an open popover before it closes the drawer", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      refute has_element?(view, "#card-drawer-stage-menu")
+      assert has_element?(view, "#card-drawer")
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      refute has_element?(view, "#card-drawer")
+    end
+
+    test "an archived card's chip is a plain badge with no chevron and no overflow button",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _archived} = Cards.archive_card(card)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "span#card-drawer-stage-chip", "Backlog")
+      refute has_element?(view, "button#card-drawer-stage-chip")
+      refute has_element?(view, "#card-drawer-stage-chip .hero-chevron-down")
+      refute has_element?(view, "#card-drawer-overflow")
+      assert has_element?(view, "#restore-card-button")
+    end
+
+    test "the rail no longer carries a Stage section", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-rail .rail-stage")
+      refute has_element?(view, "#card-drawer-move")
+      refute has_element?(view, "#card-drawer-move-button")
+      refute has_element?(view, "#card-drawer-rail #archive-card-button")
+    end
+  end
+
+  describe "drawer overflow menu" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      {:ok, card} = Cards.create_card(backlog, %{title: "Overflow me"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "the ⋯ button toggles a menu carrying only Archive", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-overflow-menu")
+
+      view |> element("#card-drawer-overflow") |> render_click()
+
+      assert has_element?(view, "#card-drawer-overflow-menu #archive-card-button", "Archive")
+      refute has_element?(view, "#card-drawer-overflow-menu", "Duplicate")
+      refute has_element?(view, "#card-drawer-overflow-menu", "Copy link")
+
+      view |> element("#card-drawer-overflow") |> render_click()
+
+      refute has_element?(view, "#card-drawer-overflow-menu")
+    end
+
+    test "opening a different card does not inherit an open menu",
+         %{conn: conn, board: board, backlog: backlog} do
+      {:ok, other} = Cards.create_card(backlog, %{title: "The next one"})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+      view |> element("#card-drawer-overflow") |> render_click()
+      assert has_element?(view, "#card-drawer-overflow-menu")
+
+      render_patch(view, ~p"/board/#{board.slug}?card=#{Cards.ref(board, other)}")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-overflow-menu")
+    end
+  end
+
+  describe "drawer baton rail" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      {:ok, card} = Cards.create_card(backlog, %{title: "Baton"})
+      %{board: board, backlog: backlog, card: card}
+    end
+
+    test "an unowned card shows None for active worker and owners, with the reassign toggle",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-active='true']")
+      assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
+      assert has_element?(view, "#card-drawer-reassign-toggle")
+
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      assert has_element?(view, "#card-drawer-assign-ai")
+      assert has_element?(view, "#card-drawer-assign-user-#{user.id}")
+    end
+
+    test "assigning yourself via the reassign picker makes you the active worker and reflects on the board card",
+         %{conn: conn, user: user, card: card} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']",
+               "Test User"
+             )
+
+      assert [owner] = Repo.all(CardOwner)
+      assert owner.card_id == card.id
+      assert owner.user_id == user.id
+
+      assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='human']")
+    end
+
+    test "Assign AI via the reassign picker makes Hamaca AI the sole owner: Take over shows",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
+      view |> element("#card-drawer-assign-ai") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-owner[data-actor-type='agent'][data-active='true']",
+               Hamaca.Brand.agent_name()
+             )
+
+      # exclusivity: the human owner is gone; no paused badge remains
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='user']")
+      refute has_element?(view, "#card-drawer-rail .rail-owner-paused")
+
+      # Take over is the affordance next to Hamaca AI
+      assert has_element?(view, "#card-drawer-take-over")
+
+      assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
+    end
+
+    test "Take over flips ownership to the current user and leaves status untouched",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working"})
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-take-over")
+      view |> element("#card-drawer-take-over") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']",
+               "Test User"
+             )
+
+      assert has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='user']", "Test User")
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='agent']")
+      refute has_element?(view, "#card-drawer-take-over")
+
+      reloaded = Cards.get_card_by_ref(board, "MY1")
+      assert [%{actor_type: :user, user_id: uid}] = reloaded.owners
+      assert uid == user.id
+      assert reloaded.status == :working
+    end
+
+    test "an AI-owned card renders the Hamaca AI owner label", %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='agent']", Hamaca.Brand.agent_name())
+    end
+
+    test "removing the human owner leaves the card unowned", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
+      view |> element("#card-drawer-remove-owner-user-#{user.id}") |> render_click()
+
+      assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
+      refute has_element?(view, "#card-drawer-rail .rail-owner[data-active='true']")
+      assert Repo.all(CardOwner) == []
+      refute has_element?(view, "#stage-col-1-cards .board-card[data-active-owner]")
+    end
+
+    test "the rail shows a read-only status badge — no status select or progress input",
+         %{conn: conn, card: card, user: user} do
+      {:ok, _card} = Cards.set_status(card, %{"status" => "working"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      # read-only badge in the rail
+      assert has_element?(view, "#card-drawer-rail .rail-status .status-badge", "working")
+
+      # no editable status surface anywhere in the drawer
+      refute has_element?(view, "#card-drawer-status-form")
+      refute has_element?(view, "#card-drawer select[name='card[status]']")
+      refute has_element?(view, "#card-drawer input[name='card[progress]']")
+    end
+
+    test "adding another user's id as owner is ignored and leaks nothing", %{conn: conn, user: user} do
+      other = insert(:user, name: "Zed Secretname", email: "zed.secret@example.com")
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      html = render_click(view, "add_owner", %{"actor_type" => "user", "user_id" => other.id})
+
+      assert Repo.all(CardOwner) == []
+      assert has_element?(view, "#card-drawer-rail .rail-owners", "None")
+      refute html =~ "Zed Secretname"
+      refute html =~ "zed.secret@example.com"
+    end
+
+    test "Take over keeps the drawer open (RLY-115 scope guard)",
+         %{conn: conn, user: user, card: card} do
+      {:ok, _card} = Cards.add_owner(card, :agent)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-take-over") |> render_click()
+
+      assert has_element?(view, "#card-drawer")
+
+      assert has_element?(
+               view,
+               "#card-drawer-rail .rail-owner[data-actor-type='user'][data-active='true']"
+             )
+    end
+  end
+
+  describe "board title" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      %{board: Boards.get_or_create_default_board(user)}
+    end
+
+    test "the header title is plain, non-editable text", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert view |> element("#top-bar-title #board-name") |> render() =~ board.name
+      refute has_element?(view, "#board-name-form")
+      refute has_element?(view, "#board-name-input")
+    end
+  end
+
+  describe "top bar" do
+    test "shows the avatar image and a sign out link", %{conn: conn} do
+      user = insert(:user, avatar_url: "https://example.com/me.png")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#user-avatar img")
+      assert has_element?(view, "#sign-out")
+    end
+
+    test "falls back to initials when the user has no avatar image", %{conn: conn} do
+      user = insert(:user, avatar_url: nil, name: "Ada Lovelace")
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#user-avatar img")
+      assert has_element?(view, "#user-avatar", "AL")
+    end
+
+    test "the logo and breadcrumb link to /boards; the settings button links to settings", %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      assert has_element?(view, ~s(#top-bar-logo[href="/boards"]))
+      assert has_element?(view, ~s(#top-bar-crumb-boards[href="/boards"]))
+      assert has_element?(view, "#board-settings-link[href='/board/#{board.slug}/settings']")
+    end
+
+    test "the avatar dropdown holds Archived cards, Theme, and Sign out", %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#account-menu #archived-cards-menu-item")
+      assert has_element?(view, "#account-menu #sign-out")
+      assert has_element?(view, "#account-menu [data-phx-theme='dark']")
+    end
+
+    test "clicking Archived cards in the dropdown opens the archived modal", %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#archived-modal")
+      view |> element("#archived-cards-menu-item") |> render_click()
+      assert has_element?(view, "#archived-modal")
+    end
+  end
+
+  describe "signing out" do
+    test "after sign out, the board route requires signing in again", %{conn: conn} do
+      user = insert(:user)
+      conn = conn |> log_in_user(user) |> delete(~p"/logout")
+
+      board = Boards.get_or_create_default_board(user)
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/board/#{board.slug}")
+    end
+  end
+
+  describe "activity attribution" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      %{board: board, backlog: backlog}
+    end
+
+    test "creating a card via the composer logs :created attributed to the signed-in user",
+         %{conn: conn, user: user, backlog: backlog} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+      view |> element("#stage-col-1-new-card") |> render_click()
+
+      view
+      |> form("#stage-col-1-compose-form", card: %{title: "Attributed"})
+      |> render_submit()
+
+      assert [%Schemas.Activity{type: :created, actor_type: :user, user_id: user_id}] =
+               Repo.all(Schemas.Activity)
+
+      assert user_id == user.id
+    end
+
+    test "drawer actions (owners, move) log user-attributed entries",
+         %{conn: conn, user: user, board: board, backlog: backlog} do
+      {:ok, card} = Cards.create_card(backlog, %{title: "Card"})
+      # Review is a review-type stage; moving the :ready card in snaps it to :in_review so it can
+      # be reviewed/rejected (RLY-57), logging a user-attributed :status_changed alongside :moved.
+      review = Enum.find(board.stages, &(&1.name == "Review"))
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> element("#card-drawer-move-to-#{review.id}") |> render_click()
+
+      entries = Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
+
+      assert Enum.map(entries, & &1.type) == [:created, :owners_changed, :moved, :status_changed]
+
+      [_created | user_entries] = entries
+      assert Enum.all?(user_entries, &(&1.actor_type == :user and &1.user_id == user.id))
+    end
+  end
+
+  describe "card timeline" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      plan = Enum.find(board.stages, &(&1.name == "Plan"))
+      {:ok, card} = Cards.create_card(backlog, %{title: "Draft the spec"})
+      %{board: board, backlog: backlog, plan: plan, card: card}
+    end
+
+    test "the drawer shows the agent-attributed created entry", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(
+               view,
+               "#card-drawer-activity .timeline-activity-phrase",
+               "created this card"
+             )
+    end
+
+    test "a card with no history shows the empty state", %{conn: conn, backlog: backlog, user: user} do
+      insert(:card, stage: backlog, title: "Bare", ref_number: 500, position: 5)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY500")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-activity", "No activity yet")
+    end
+
+    test "posting a comment persists it and appends it with author and timestamp",
+         %{conn: conn, user: user, card: card} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view
+      |> form("#card-drawer-comment-form", comment: %{body: "Looks good to me"})
+      |> render_submit()
+
+      assert [comment] = Repo.all(Comment)
+      assert comment.card_id == card.id
+      assert comment.actor_type == :user
+      assert comment.user_id == user.id
+      assert comment.body == "Looks good to me"
+
+      assert has_element?(
+               view,
+               "#timeline-comment-#{comment.id} .timeline-comment-body",
+               "Looks good to me"
+             )
+
+      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", user.name)
+
+      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-time", "just now")
+
+      assert has_element?(
+               view,
+               ~s(#timeline-comment-#{comment.id} .timeline-time[title="#{Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}"])
+             )
+    end
+
+    test "the Notes header count tracks the list as notes are added",
+         %{conn: conn, user: user, card: card} do
+      insert(:comment, card: card, user: user, body: "Kickoff")
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-note-count", "1 note")
+
+      view
+      |> form("#card-drawer-comment-form", comment: %{body: "Second note"})
+      |> render_submit()
+
+      assert has_element?(view, "#card-drawer-note-count", "2 notes")
+    end
+
+    test "a blank comment is rejected and persists nothing", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view
+      |> form("#card-drawer-comment-form", comment: %{body: ""})
+      |> render_submit()
+
+      assert has_element?(view, "#card-drawer-comment-form", "can't be blank")
+      assert Repo.aggregate(Comment, :count) == 0
+    end
+
+    test "an agent-authored comment renders with the Hamaca AI identity",
+         %{conn: conn, card: card, user: user} do
+      comment = insert(:comment, card: card, body: "Implemented — ready for review.")
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", Hamaca.Brand.agent_name())
+
+      assert has_element?(
+               view,
+               "#timeline-comment-#{comment.id} .timeline-comment-body",
+               "Implemented — ready for review."
+             )
+    end
+
+    test "adding an owner in the open drawer appends the activity entry live",
+         %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-reassign-toggle") |> render_click()
+      view |> element("#card-drawer-assign-user-#{user.id}") |> render_click()
+
+      assert has_element?(
+               view,
+               "#card-drawer-activity .timeline-activity-phrase",
+               "added #{user.name} as owner"
+             )
+    end
+
+    test "moving from the open drawer appends the moved entry live", %{conn: conn, plan: plan, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
+
+      # RLY-112: a move renders as an inline pill chip, not a dot phrase.
+      assert has_element?(
+               view,
+               "#card-drawer-activity .activity-move-chip",
+               "Backlog → Plan"
+             )
+    end
+
+    test "the conversation lists comments oldest first", %{conn: conn, user: user, backlog: backlog} do
+      card = insert(:card, stage: backlog, title: "History", ref_number: 501, position: 6)
+      c1 = insert(:comment, card: card, user: user, body: "Kickoff", inserted_at: ~U[2026-07-01 09:00:00Z])
+      c2 = insert(:comment, card: card, body: "Done", inserted_at: ~U[2026-07-03 09:00:00Z])
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY501")
+      render_async(view)
+
+      ids =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#card-drawer-conversation > li.timeline-entry[id]")
+        |> LazyHTML.attribute("id")
+
+      assert ids == ["timeline-comment-#{c1.id}", "timeline-comment-#{c2.id}"]
+    end
+
+    test "the drawer conversation tags question and changes-requested comments",
+         %{conn: conn, user: user, card: card} do
+      insert(:comment, card: card, body: "Plain one")
+      q = insert(:comment, card: card, body: "Which colour?", kind: :question)
+      cr = insert(:comment, card: card, body: "Fix the copy", kind: :changes_requested)
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      html = render(view)
+
+      assert has_element?(view, "#timeline-comment-#{q.id}", "QUESTION")
+      assert has_element?(view, "#timeline-comment-#{cr.id}", "CHANGES REQUESTED")
+      assert html =~ "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+      assert html =~ "color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content))"
+      # tinted bubble for tagged comments
+      assert html =~ "color-mix(in oklab, var(--color-warning) 40%, var(--color-base-100))"
+    end
+
+    test "the activity log lists entries newest first", %{conn: conn, backlog: backlog, user: user} do
+      card = insert(:card, stage: backlog, title: "Log", ref_number: 502, position: 7)
+      a1 = insert(:activity, card: card, type: :created, inserted_at: ~U[2026-07-01 09:00:00Z])
+      a2 = insert(:activity, card: card, type: :commented, inserted_at: ~U[2026-07-03 09:00:00Z])
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY502")
+      render_async(view)
+
+      ids =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#card-drawer-activity > li.activity-entry[id]")
+        |> LazyHTML.attribute("id")
+
+      assert ids == ["timeline-activity-#{a2.id}", "timeline-activity-#{a1.id}"]
+    end
+  end
+
+  describe "sub-lanes" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, _review} = Boards.enable_lane(code, :review)
+      %{conn: Plug.Test.init_test_session(conn, user_id: user.id), board: board, code: code}
+    end
+
+    test "renders a stage's review sub-lane stacked with its own count", %{conn: conn, code: code, board: board} do
+      insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
+
+      {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}")
+      review = code |> Boards.sublanes() |> hd()
+      assert html =~ "sublane-#{review.id}"
+      assert html =~ "Review"
+    end
+
+    test "a card moved into the review sub-lane renders there", %{conn: conn, code: code, board: board} do
+      review = code |> Boards.sublanes() |> hd()
+      card = insert(:card, stage: code)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => card_ref(card), "stage_id" => review.id})
+
+      # Assert by container + title (the card's DOM id is stream-generated, not #card-<id>).
+      assert has_element?(view, "#sublane-#{review.id}-cards", card.title)
+    end
+
+    # RE454 — the client keeps each lane's scrollTop across a card-move restream. The hook only
+    # reads and restores scroll position, so LiveView still owns the lanes' DOM: no
+    # phx-update="ignore", and the sub-lane body stays the stream container.
+    test "both lane scroll bodies mount the PreserveScroll hook", %{conn: conn, code: code, board: board} do
+      insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
+      review = code |> Boards.sublanes() |> hd()
+      # An empty sub-lane renders collapsed (no scroll body), so give it a card too.
+      insert(:card, stage: review, title: "In review", position: 1, ref_number: 2)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      main = ~s([id$="-scroll"][phx-hook="PreserveScroll"])
+      sub = ~s(#sublane-#{review.id}-cards[phx-hook="PreserveScroll"])
+
+      assert has_element?(view, main)
+      assert has_element?(view, sub)
+      assert has_element?(view, ~s(#{sub}[phx-update="stream"]))
+      refute has_element?(view, ~s(#{main}[phx-update="ignore"]))
+      refute has_element?(view, ~s(#{sub}[phx-update="ignore"]))
+    end
+
+    defp card_ref(card), do: "MY#{card.ref_number}"
+  end
+
+  describe "collapsed empty stages (MMF 12c)" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
+      spec = Enum.find(board.stages, &(&1.name == "Spec"))
+      %{board: board, backlog: backlog, spec: spec}
+    end
+
+    test "an empty stage renders the collapsed strip; a stage with a card renders the full column",
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Keep me open"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      # non-empty Backlog: full column, no strip
+      assert has_element?(view, "#stage-col-1-cards .board-card", "Keep me open")
+      refute has_element?(view, "#stage-strip-#{backlog.id}")
+
+      # empty Spec: strip with rotated name + count 0, no expanded column
+      assert has_element?(view, "#stage-strip-#{spec.id}.stage-strip", "Spec")
+      assert has_element?(view, "#stage-strip-#{spec.id} .stage-strip-name", "Spec")
+      assert has_element?(view, "#stage-strip-#{spec.id} .stage-count", "0")
+      refute has_element?(view, "#stage-col-#{spec.position}-cards")
+
+      strip_html = view |> element("#stage-strip-#{spec.id}") |> render()
+      assert strip_html =~ "width:44px"
+      assert strip_html =~ "writing-mode:vertical-rl"
+      assert strip_html =~ "border:1px dashed var(--color-field-border)"
+    end
+
+    test "the strip is a DnD drop zone carrying its stage id", %{conn: conn, spec: spec, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-strip-#{spec.id}.stage-drop[data-stage-id='#{spec.id}']")
+    end
+
+    test "clicking a strip force-opens the empty stage for the session",
+         %{conn: conn, backlog: backlog, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      expand_stage(view, backlog)
+
+      refute has_element?(view, "#stage-strip-#{backlog.id}")
+      assert has_element?(view, "#stage-col-1-cards .stage-empty", "No cards yet")
+
+      # it stays expanded on subsequent renders, even while still empty
+      assert render(view) =~ "stage-col-1-cards"
+    end
+
+    test "moving the last card out collapses the stage",
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Last one"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#stage-strip-#{backlog.id}")
+
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => spec.id, "index" => 0})
+
+      assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
+      refute has_element?(view, "#stage-col-1-cards")
+    end
+
+    test "moving a card onto a collapsed strip expands it and the card renders there",
+         %{conn: conn, backlog: backlog, spec: spec, user: user} do
+      {:ok, _card} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#stage-strip-#{spec.id}")
+
+      # exactly what board_dnd.js pushes on a drop over the strip (index 0 — empty zone)
+      render_hook(view, "move_card", %{"ref" => "MY1", "stage_id" => "#{spec.id}", "index" => 0})
+
+      refute has_element?(view, "#stage-strip-#{spec.id}")
+      assert has_element?(view, "#stage-col-#{spec.position}-cards .board-card", "Incoming")
+      assert has_element?(view, "#stage-col-#{spec.position} .stage-count", "1")
+    end
+
+    test "a stage whose only card sits in a sub-lane does not collapse",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+      insert(:card, stage: review, title: "In review", position: 1, ref_number: 9)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#stage-strip-#{code.id}")
+      assert has_element?(view, "#sublane-#{review.id}-cards .board-card", "In review")
+    end
+  end
+
+  describe "collapsed empty sub-lanes (MMF 12c)" do
+    setup %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+
+      %{
+        conn: Plug.Test.init_test_session(conn, user_id: user.id),
+        board: board,
+        code: code,
+        review: review
+      }
+    end
+
+    test "an empty review sub-lane renders its 34px strip inside the expanded stage",
+         %{conn: conn, code: code, review: review, board: board} do
+      insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(
+               view,
+               "#sublane-#{review.id}-strip.sublane-strip.stage-drop[data-stage-id='#{review.id}']"
+             )
+
+      assert has_element?(view, "#sublane-#{review.id}-strip .sublane-strip-name", "Review")
+      assert has_element?(view, "#sublane-#{review.id}-strip .sublane-strip-count", "0")
+      refute has_element?(view, "#sublane-#{review.id}-cards")
+
+      strip_html = view |> element("#sublane-#{review.id}-strip") |> render()
+      assert strip_html =~ "flex:0 0 34px"
+      assert strip_html =~ "writing-mode:vertical-rl"
+      assert strip_html =~ "color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))"
+    end
+
+    test "a sub-lane with a card renders expanded", %{conn: conn, review: review, board: board} do
+      insert(:card, stage: review, title: "Please review", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#sublane-#{review.id}-cards .board-card", "Please review")
+      refute has_element?(view, "#sublane-#{review.id}-strip")
+    end
+
+    test "moving a card onto the sub-lane strip expands it and the card renders there",
+         %{conn: conn, code: code, review: review, board: board} do
+      card = insert(:card, stage: code, title: "Ready for review", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#sublane-#{review.id}-strip")
+
+      render_hook(view, "move_card", %{
+        "ref" => "MY#{card.ref_number}",
+        "stage_id" => review.id,
+        "index" => 0
+      })
+
+      refute has_element?(view, "#sublane-#{review.id}-strip")
+      assert has_element?(view, "#sublane-#{review.id}-cards .board-card", "Ready for review")
+    end
+
+    test "clicking the sub-lane strip force-opens the empty lane",
+         %{conn: conn, code: code, review: review, board: board} do
+      insert(:card, stage: code, title: "Main work", position: 1, ref_number: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#sublane-#{review.id}-strip") |> render_click()
+
+      refute has_element?(view, "#sublane-#{review.id}-strip")
+      assert has_element?(view, "#sublane-#{review.id}-cards .stage-empty", "Empty")
+    end
+  end
+
+  describe "card drawer prev/next (RLY-227)" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      %{board: board}
+    end
+
+    test "the middle card shows enabled prev and next chevrons", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      assert has_element?(view, "#card-drawer-prev:not([disabled])")
+      assert has_element?(view, "#card-drawer-next:not([disabled])")
+      # RE400 — the web board's chevrons stay server-driven; native mode is the card host's only.
+      assert has_element?(view, ~s(#card-drawer-prev[phx-click="prev_card"]))
+      refute has_element?(view, ~s([phx-hook$="NativeCardNav"]))
+    end
+
+    test "clicking the next chevron advances to the next card in the column", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer-next") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY3")
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY3")
+    end
+
+    test "the next chevron is disabled on the last card of the column", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY3")
+
+      assert has_element?(view, "#card-drawer-next[disabled]")
+      assert has_element?(view, "#card-drawer-prev:not([disabled])")
+    end
+
+    test "the prev chevron is disabled on the first card of the column", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+
+      assert has_element?(view, "#card-drawer-prev[disabled]")
+      assert has_element?(view, "#card-drawer-next:not([disabled])")
+    end
+
+    test "keyboard ArrowRight advances and ArrowLeft returns", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer-next") |> render_keydown(%{"key" => "ArrowRight"})
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY3")
+
+      view |> element("#card-drawer-prev") |> render_keydown(%{"key" => "ArrowLeft"})
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY2")
+    end
+
+    test "the drawer panel carries the ArrowKeyGuard hook and no touch neighbor data on the web board",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      # data-guard-keys is asserted too: after the TypingKeyGuard consolidation the guarded keys
+      # are a server-rendered attribute, and the hook degrades to a SILENT no-op when it is
+      # missing — so without this, RLY-234 (Left/Right navigating cards while you edit the drawer
+      # title) could come back with a fully green suite.
+      assert has_element?(
+               view,
+               ~s(#card-drawer-panel[phx-hook="ArrowKeyGuard"][data-guard-keys="ArrowLeft,ArrowRight"])
+             )
+
+      refute has_element?(view, ~s(#card-drawer-panel[data-prev]))
+      refute has_element?(view, ~s(#card-drawer-panel[data-next]))
+    end
+  end
+
+  describe "RE326 — board focus follows the drawer's card" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      %{board: board}
+    end
+
+    test "the › chevron pushes focus_card for the card it switches to", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+
+      view |> element("#card-drawer-next") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+    end
+
+    test "ArrowLeft pushes focus_card for the previous card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer-prev") |> render_keydown(%{"key" => "ArrowLeft"})
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+      assert_push_event(view, "focus_card", %{ref: "MY1"})
+    end
+
+    test "Escape closes the drawer and hands focus back to the card it showed", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+    end
+
+    # The scrim link and browser back/forward reach handle_params/3 as a bare patch.
+    test "patching ?card= away hands focus back to the card it showed", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY3")
+
+      render_patch(view, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#card-drawer")
+      assert_push_event(view, "focus_card", %{ref: "MY3"})
+    end
+
+    test "a deep link opens the drawer without pushing focus", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY2")
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "opening a card with the drawer closed pushes no focus — the click already focused it",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "select_card", %{"ref" => "MY1"})
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "re-patching the card that is already open pushes nothing", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      render_patch(view, ~p"/board/#{board.slug}?card=MY2")
+
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "next_card at the end of the column neither switches nor pushes", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY3")
+
+      render_hook(view, "next_card", %{})
+
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY3")
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "card mode (/cards/:ref) never pushes focus, even across a patch", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/cards/MY1?board=#{board.slug}")
+
+      render_patch(view, ~p"/cards/MY2?board=#{board.slug}")
+
+      assert has_element?(view, "#card-drawer-nav-bar-title", "MY2")
+      refute_push_event(view, "focus_card", %{})
+    end
+  end
+
+  describe "RE389 — opening a card scrolls it into view without stealing focus" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      %{board: board}
+    end
+
+    test "a deep link pushes scroll_card for its card and no focus_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      assert_push_event(view, "scroll_card", %{ref: "MY2"})
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "opening a card with the drawer closed pushes scroll_card and no focus_card",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "select_card", %{"ref" => "MY1"})
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+      assert_push_event(view, "scroll_card", %{ref: "MY1"})
+      refute_push_event(view, "focus_card", %{})
+    end
+
+    test "a switch (A → B) pushes focus_card, not scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      assert_push_event(view, "scroll_card", %{ref: "MY1"})
+
+      view |> element("#card-drawer-next") |> render_click()
+
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "a close (A → nil) pushes focus_card, not scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "scroll_card", %{ref: "MY2"})
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      assert_push_event(view, "focus_card", %{ref: "MY2"})
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "re-patching the open card (A → A) pushes no scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+      assert_push_event(view, "scroll_card", %{ref: "MY2"})
+
+      render_patch(view, ~p"/board/#{board.slug}?card=MY2")
+
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "embed mode never pushes scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1&card=MY1")
+
+      refute_push_event(view, "scroll_card", %{})
+    end
+
+    test "card mode (/cards/:ref) never pushes scroll_card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/cards/MY1?board=#{board.slug}")
+
+      refute_push_event(view, "scroll_card", %{})
+    end
+  end
+
+  describe "RE389 — the open card is highlighted on the board" do
+    setup :register_and_log_in_user
+
+    setup %{user: user} do
+      board = Boards.get_or_create_default_board(user)
+      [backlog | _rest] = board.stages
+      first = insert(:card, stage: backlog, title: "First", position: 1, ref_number: 1)
+      second = insert(:card, stage: backlog, title: "Second", position: 2, ref_number: 2)
+      insert(:card, stage: backlog, title: "Third", position: 3, ref_number: 3)
+      %{board: board, first: first, second: second}
+    end
+
+    test "selecting a card from a closed drawer marks exactly that card open", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "select_card", %{"ref" => "MY2"})
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY2"][data-open]))
+      assert open_card_count(view) == 1
+    end
+
+    test "a deep link marks the linked card open and no other", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY1"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY2"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY3"][data-open]))
+    end
+
+    test "the › chevron moves the highlight with the drawer", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+
+      view |> element("#card-drawer-next") |> render_click()
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY2")
+      view |> element("#card-drawer-next") |> render_click()
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY3")
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY3"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY1"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY2"][data-open]))
+      assert open_card_count(view) == 1
+    end
+
+    test "ArrowLeft moves the highlight to the previous card", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer-prev") |> render_keydown(%{"key" => "ArrowLeft"})
+      assert_patch(view, ~p"/board/#{board.slug}?card=MY1")
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY1"][data-open]))
+      refute has_element?(view, ~s(.board-card[data-ref="MY2"][data-open]))
+    end
+
+    test "Escape clears the highlight but keeps the card on the board", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      view |> element("#card-drawer") |> render_keydown(%{"key" => "Escape"})
+      assert_patch(view, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, ".board-card[data-open]")
+      assert has_element?(view, ~s(.board-card[data-ref="MY2"]))
+    end
+
+    test "patching ?card= away clears the highlight", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY3")
+
+      render_patch(view, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, ".board-card[data-open]")
+    end
+
+    test "a card_upserted for the open card keeps its highlight", %{conn: conn, board: board, second: second} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      {:ok, _card} = Cards.update_card(second, %{title: "Renamed"})
+
+      assert has_element?(view, ~s(.board-card[data-ref="MY2"][data-open] .card-title), "Renamed")
+    end
+
+    test "archiving the open card elsewhere doesn't resurrect it on close", %{conn: conn, board: board, second: second} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY2")
+
+      {:ok, _card} = Cards.archive_card(second)
+      _ = render(view)
+
+      refute has_element?(view, ~s(.board-card[data-ref="MY2"]))
+    end
+
+    test "opening an archived card by URL doesn't put it on the board", %{conn: conn, board: board, first: first} do
+      {:ok, _card} = Cards.archive_card(first)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+
+      assert has_element?(view, "#card-drawer .drawer-card-ref", "MY1")
+      refute has_element?(view, ~s(.board-card[data-ref="MY1"]))
+    end
+
+    test "embed mode never marks a card open", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?embed=1&card=MY1")
+
+      refute has_element?(view, ".board-card[data-open]")
+    end
+
+    test "card mode never marks anything open, even across a patch", %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, ~p"/cards/MY1?board=#{board.slug}")
+
+      render_patch(view, ~p"/cards/MY2?board=#{board.slug}")
+
+      assert has_element?(view, "#card-drawer-nav-bar-title", "MY2")
+      refute has_element?(view, "[data-open]")
+    end
+
+    defp open_card_count(view) do
+      view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query(".board-card[data-open]") |> Enum.count()
+    end
+  end
+
+  defp expand_stage(view, stage) do
+    view |> element("#stage-strip-#{stage.id}") |> render_click()
+  end
+
+  defp stage_titles(view, position) do
+    view
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("#stage-col-#{position}-cards .board-card .card-title")
+    |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+  end
+
+  # Byte offset of `needle` in `html`, for asserting DOM element ordering.
+  defp index_of(html, needle) do
+    {pos, _len} = :binary.match(html, needle)
+    pos
+  end
+
+  defp archived_id(board), do: board |> Cards.list_archived_cards() |> hd() |> Map.fetch!(:id)
+end

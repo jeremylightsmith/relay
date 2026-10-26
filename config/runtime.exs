@@ -12,35 +12,35 @@ import Config
 # If you use `mix release`, you need to explicitly enable the server
 # by passing the PHX_SERVER=true when you start it:
 #
-#     PHX_SERVER=true bin/relay start
+#     PHX_SERVER=true bin/hamaca start
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
 if System.get_env("PHX_SERVER") do
-  config :relay, RelayWeb.Endpoint, server: true
+  config :hamaca, HamacaWeb.Endpoint, server: true
 end
 
 # The web server binds PORT (default 4003) in dev and prod. In :test the
 # endpoint port stays as config/test.exs sets it (4002), so the suite can run
 # alongside a running dev server (on 4003) without a port clash.
 if config_env() != :test do
-  config :relay, RelayWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4003"))]
+  config :hamaca, HamacaWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4003"))]
 end
 
 # Billing emails (RE464): dev mail links point at the port the dev server actually binds. Prod
 # overrides this with the public origin below.
 if config_env() == :dev do
-  config :relay, app_url: "http://localhost:#{System.get_env("PORT", "4003")}"
+  config :hamaca, app_url: "http://localhost:#{System.get_env("PORT", "4003")}"
 end
 
 # Google OAuth credentials. Dev reads these from .envrc.local (direnv);
 # prod from `fly secrets set`. Test uses static dummies from
 # config/test.exs, which this must not override with nils.
 if config_env() != :test do
-  # "Suggest an idea" URL (RE397); unset/blank hides it. Read only via RelayWeb.Feedback.
-  config :relay, feedback_url: System.get_env("RELAY_FEEDBACK_URL")
+  # "Suggest an idea" URL (RE397); unset/blank hides it. Read only via HamacaWeb.Feedback.
+  config :hamaca, feedback_url: System.get_env("RELAY_FEEDBACK_URL")
 
-  config :relay,
+  config :hamaca,
     google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
     google_ios_client_id: System.get_env("GOOGLE_IOS_CLIENT_ID")
 
@@ -51,14 +51,14 @@ if config_env() != :test do
   # Sign in with Apple audiences (RE106). The default lives in config/config.exs;
   # only an explicitly set APPLE_CLIENT_IDS (comma-separated) replaces it.
   if apple_client_ids = System.get_env("APPLE_CLIENT_IDS") do
-    config :relay,
+    config :hamaca,
            :apple_client_ids,
            apple_client_ids |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
   end
 end
 
 # Billing (RE460, ADR 0012). BILLING_ENABLED=true turns it on only with both Stripe keys set,
-# charging through Stripe at STRIPE_PRICE_CENTS (default: `Relay.Billing.price_cents/0`). Dev alone may switch it on with
+# charging through Stripe at STRIPE_PRICE_CENTS (default: `Hamaca.Billing.price_cents/0`). Dev alone may switch it on with
 # no Stripe keys, charging through the in-process Local adapter. Unset → off (self-host).
 # Test configures billing in config/test.exs and turns it on per test; never here.
 if config_env() != :test do
@@ -72,19 +72,19 @@ if config_env() != :test do
 
     not blank?.(stripe_secret_key) and not blank?.(stripe_webhook_secret) ->
       # Only an explicit STRIPE_PRICE_CENTS is written; unset falls through to the one default
-      # in `Relay.Billing.price_cents/0`.
+      # in `Hamaca.Billing.price_cents/0`.
       price_cents = System.get_env("STRIPE_PRICE_CENTS")
 
-      config :relay,
+      config :hamaca,
         billing_enabled: true,
-        billing_payments: Relay.Billing.Payments.Stripe,
+        billing_payments: Hamaca.Billing.Payments.Stripe,
         stripe_secret_key: stripe_secret_key,
         stripe_webhook_secret: stripe_webhook_secret
 
-      if not blank?.(price_cents), do: config(:relay, billing_price_cents: String.to_integer(price_cents))
+      if not blank?.(price_cents), do: config(:hamaca, billing_price_cents: String.to_integer(price_cents))
 
     config_env() == :dev ->
-      config :relay, billing_enabled: true, billing_payments: Relay.Billing.Payments.Local
+      config :hamaca, billing_enabled: true, billing_payments: Hamaca.Billing.Payments.Local
 
     true ->
       :ok
@@ -92,9 +92,9 @@ if config_env() != :test do
 end
 
 # PHX_EXTRA_HOSTS (comma-separated, RE480): other hostnames that serve this app, e.g. the old
-# domain. Their browser pages 301 to PHX_HOST (`RelayWeb.Plugs.CanonicalHost`), and everything
+# domain. Their browser pages 301 to PHX_HOST (`HamacaWeb.Plugs.CanonicalHost`), and everything
 # else (the API, install scripts, webhooks, OAuth, attachments, the LiveView socket) keeps
-# answering. Parsed here, once, into `:relay, :extra_hosts`; the prod `check_origin` below uses
+# answering. Parsed here, once, into `:hamaca, :extra_hosts`; the prod `check_origin` below uses
 # the same list. Never in :test — a shell exporting it must not redirect the suite, which sets
 # the list per test (default `[]` in config/config.exs). Every absolute URL the app generates
 # still uses PHX_HOST.
@@ -110,7 +110,7 @@ extra_hosts =
   end
 
 if config_env() != :test do
-  config :relay, extra_hosts: extra_hosts
+  config :hamaca, extra_hosts: extra_hosts
 end
 
 if config_env() == :prod do
@@ -143,12 +143,12 @@ if config_env() == :prod do
 
   # Billing emails (RE464). Links in mail point at the public origin. Mail is sent through Resend
   # only when both RESEND_API_KEY and MAIL_FROM are set; otherwise it stays disabled and
-  # `Relay.Billing.Notifier` just logs what it would have sent.
-  config :relay, app_url: "https://#{host}"
+  # `Hamaca.Billing.Notifier` just logs what it would have sent.
+  config :hamaca, app_url: "https://#{host}"
 
   if not mail_blank?.(resend_api_key) and not mail_blank?.(mail_from) do
-    config :relay, Relay.Mailer, adapter: Swoosh.Adapters.Resend, api_key: resend_api_key
-    config :relay, mail_enabled: true, mail_from: mail_from
+    config :hamaca, Hamaca.Mailer, adapter: Swoosh.Adapters.Resend, api_key: resend_api_key
+    config :hamaca, mail_enabled: true, mail_from: mail_from
   end
 
   tigris_endpoint =
@@ -173,8 +173,8 @@ if config_env() == :prod do
     region: "auto"
 
   if apns_key && apns_key_id && apns_team_id && apns_topic do
-    config :relay, Relay.Push,
-      adapter: Relay.Push.Delivery.APNS,
+    config :hamaca, Hamaca.Push,
+      adapter: Hamaca.Push.Delivery.APNS,
       async: true,
       apns: [
         key: apns_key,
@@ -191,9 +191,9 @@ if config_env() == :prod do
 
   # RLY-13: attachments go to Tigris (S3-compatible) in prod. `fly storage create`
   # provisions the bucket and sets AWS_* / BUCKET_NAME / AWS_ENDPOINT_URL_S3.
-  config :relay, Relay.Attachments, storage: Relay.Attachments.Storage.S3
+  config :hamaca, Hamaca.Attachments, storage: Hamaca.Attachments.Storage.S3
 
-  config :relay, Relay.Repo,
+  config :hamaca, Hamaca.Repo,
     # ssl: true,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
@@ -201,7 +201,7 @@ if config_env() == :prod do
     # pool_count: 4,
     socket_options: maybe_ipv6
 
-  config :relay, RelayWeb.Endpoint,
+  config :hamaca, HamacaWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     check_origin: Enum.map([host | extra_hosts], &"//#{&1}"),
     http: [
@@ -213,14 +213,14 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
-  config :relay, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+  config :hamaca, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key
   # to your endpoint configuration:
   #
-  #     config :relay, RelayWeb.Endpoint,
+  #     config :hamaca, HamacaWeb.Endpoint,
   #       https: [
   #         ...,
   #         port: 443,
@@ -242,7 +242,7 @@ if config_env() == :prod do
   # We also recommend setting `force_ssl` in your config/prod.exs,
   # ensuring no data is ever sent via http, always redirecting to https:
   #
-  #     config :relay, RelayWeb.Endpoint,
+  #     config :hamaca, HamacaWeb.Endpoint,
   #       force_ssl: [hsts: true]
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.

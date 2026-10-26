@@ -6,8 +6,8 @@ defmodule Schemas.StoryStep do
   `board_id` is denormalized here on purpose (it is already reachable through the activity) so
   every read is a single board-scoped `where` and a cross-board step cannot be smuggled into a
   query that only filters on `board_id`. It is set from the parent activity by
-  `Relay.StoryMap.create_step/2` and is never cast from input. `story_activity_id` *is* cast —
-  `Relay.StoryMap.update_step/2` may move a step to another activity on the **same** board and
+  `Hamaca.StoryMap.create_step/2` and is never cast from input. `story_activity_id` *is* cast —
+  `Hamaca.StoryMap.update_step/2` may move a step to another activity on the **same** board and
   rejects a cross-board move.
   """
 
@@ -28,7 +28,7 @@ defmodule Schemas.StoryStep do
   @doc """
   Changeset for a step's editable attributes, including a move to another activity.
   `board_id` must already be set on the struct; the same-board rule for
-  `story_activity_id` is enforced by `Relay.StoryMap.update_step/2`.
+  `story_activity_id` is enforced by `Hamaca.StoryMap.update_step/2`.
 
   `name` is trimmed and capped by `Schemas.StoryActivity.max_name_length/0` — the one
   definition of the story-map name cap; the column is `varchar(255)`, so an unvalidated paste

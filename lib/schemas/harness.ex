@@ -2,7 +2,7 @@ defmodule Schemas.Harness do
   @moduledoc """
   An agent CLI a board can run flow nodes on (RE433): a shell-style **command template** plus
   the CLI's closed list of `models`. `key` is the stable identifier a runner matches against its
-  installed CLIs; it is derived from the name once by `Relay.Agents.create_harness/2` and never
+  installed CLIs; it is derived from the name once by `Hamaca.Agents.create_harness/2` and never
   changes. `key` and `board_id` are set programmatically, never cast.
 
   A template is expanded by the runner: each `{placeholder}` (one of `placeholders/0`) is

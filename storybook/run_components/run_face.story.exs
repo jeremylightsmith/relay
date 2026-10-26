@@ -2,7 +2,7 @@ defmodule Storybook.RunComponents.RunFace do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.RunComponents.run_face/1
+  def function, do: &HamacaWeb.RunComponents.run_face/1
   def render_source, do: :function
 
   # The running face's three treatments: working, stalled (inferred from silence), and rate

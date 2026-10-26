@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.MediaPlaceholder do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.media_placeholder/1
+  def function, do: &HamacaWeb.CoreComponents.media_placeholder/1
   def render_source, do: :function
 
   def variations do

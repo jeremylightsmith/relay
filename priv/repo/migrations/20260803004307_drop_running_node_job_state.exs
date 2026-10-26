@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.DropRunningNodeJobState do
+defmodule Hamaca.Repo.Migrations.DropRunningNodeJobState do
   use Ecto.Migration
 
   @moduledoc """

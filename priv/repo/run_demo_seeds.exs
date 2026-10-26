@@ -8,19 +8,19 @@
 # Field-name note (RLY-137 vs the ADR 0006 contract this plan was written
 # against): `Schemas.NodeExecution` stores `node_key` (not `node`) and has no
 # stored `duration_s` column — only `started_at`/`finished_at`, which
-# `Relay.Runs.run_summaries_for_board/1` sums the gap of. `Schemas.Run` has no
+# `Hamaca.Runs.run_summaries_for_board/1` sums the gap of. `Schemas.Run` has no
 # `flow_version` column yet (RLY-152; it points at the live flow row
 # instead). This script's `add_ne` helper accepts the plan's `node:`/
 # `duration_s:` shorthand and derives the real columns.
 import Ecto.Query
 
 alias Ecto.Changeset
-alias Relay.Accounts
-alias Relay.Boards
-alias Relay.Cards
-alias Relay.Flows
-alias Relay.Members
-alias Relay.Repo
+alias Hamaca.Accounts
+alias Hamaca.Boards
+alias Hamaca.Cards
+alias Hamaca.Flows
+alias Hamaca.Members
+alias Hamaca.Repo
 alias Schemas.Board
 alias Schemas.CardRejection
 alias Schemas.NodeExecution
@@ -129,7 +129,7 @@ end
 cost = fn s -> Decimal.new(s) end
 
 qr_detail = """
-test/relay/export_test.exs:24
+test/hamaca/export_test.exs:24
   Asserts on %Board{} private struct internals
   (row.__meta__, column ordering). Brittle — assert
   on the CSV bytes the user downloads instead.
@@ -206,8 +206,8 @@ add_ne.(run, %{node: "brainstorm", outcome: :needs_input, duration_s: 190, cost:
 commit_guard_detail = """
 ✗ commit guard: the working tree is dirty after `mix precommit`
 
-  M lib/relay/exports.ex
-  M test/relay/exports_test.exs
+  M lib/hamaca/exports.ex
+  M test/hamaca/exports_test.exs
 
   mix format rewrote two files the implementer already committed, so the
   node ends with uncommitted changes and cannot hand the branch on.
@@ -341,7 +341,7 @@ add_ne.(run, %{
   outcome: :failed,
   duration_s: 44,
   cost: cost.("0.31"),
-  detail: "test/relay/export_test.exs:24 — 3rd identical failure\n  Same brittle assertion regenerated again."
+  detail: "test/hamaca/export_test.exs:24 — 3rd identical failure\n  Same brittle assertion regenerated again."
 })
 
 # 6 · Done with totals: run landed the card on Review's done sub-lane equivalent.

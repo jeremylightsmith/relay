@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.AddDeliveredExecutionToComments do
+defmodule Hamaca.Repo.Migrations.AddDeliveredExecutionToComments do
   use Ecto.Migration
 
   # RE358 — the Steer now receipt: the node execution a `:steer` comment was delivered to, set

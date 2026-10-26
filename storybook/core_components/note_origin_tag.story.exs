@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.NoteOriginTag do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.note_origin_tag/1
+  def function, do: &HamacaWeb.CoreComponents.note_origin_tag/1
   def render_source, do: :function
 
   # RE428 — where an image note came from, after the <time> in the Notes author row. An ordinary

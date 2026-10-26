@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.RunnerRename do
+defmodule Hamaca.Repo.Migrations.RunnerRename do
   use Ecto.Migration
 
   # RE319 — "runner" is the only name for the machine process that claims node-jobs. A hard cut:

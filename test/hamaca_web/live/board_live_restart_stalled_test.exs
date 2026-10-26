@@ -1,0 +1,280 @@
+defmodule HamacaWeb.BoardLiveRestartStalledTest do
+  use HamacaWeb.ConnCase, async: true
+
+  import Phoenix.LiveViewTest
+
+  alias Hamaca.Cards
+  alias Hamaca.Runs
+  alias Hamaca.Runs.FakeDispatcher
+  alias Schemas.NodeJob
+
+  setup :register_and_log_in_user
+
+  setup %{user: user} do
+    FakeDispatcher.register(self())
+    board = Hamaca.Boards.get_or_create_default_board(user)
+    flow = park_flow(board)
+    start_engine!()
+    %{board: board, flow: flow}
+  end
+
+  defp park_flow(board) do
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+    # The seeded (disabled) spec flow holds Spec; a stage holds one flow (RE429).
+    {:ok, _} = Hamaca.Flows.delete_flow(Hamaca.Flows.get_flow!(board, "spec"))
+
+    {:ok, flow} =
+      Hamaca.Flows.create_flow(board, %{
+        key: "park-flow",
+        isolation: :shared_clean,
+        stage_id: spec.id,
+        nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}"}],
+        edges: [
+          %{from: "start", to: "brainstorm"},
+          %{from: "brainstorm", to: "done", on: :succeeded},
+          %{from: "brainstorm", to: "needs_input", on: :failed}
+        ]
+      })
+
+    {:ok, flow} = Hamaca.Flows.enable_flow(flow)
+    flow
+  end
+
+  # Runs a card through the park flow and reports `outcome`, returning both the card (for
+  # refs and DOM ids) and the resulting run (for status assertions).
+  defp park(board, flow, title, outcome) do
+    stage = Enum.find(board.stages, &(&1.name == "Next up"))
+    {:ok, card} = Cards.create_card(stage, %{title: title})
+    {:ok, _run} = Runs.start_run(card, flow)
+    assert_receive {:dispatched, %NodeJob{} = job}
+    {:ok, run} = Runs.report_outcome(job, %{outcome: outcome, detail: "x", session_id: "s"})
+    %{card: card, run: run}
+  end
+
+  defp open_dialog(view) do
+    view |> element("#restart-stalled-button") |> render_click()
+    view
+  end
+
+  # A card whose run is pinned to a runner that never connected — `retry_run/2`
+  # refuses via `check_retry_runner/2` -> `check_runner_live/2` with
+  # `{:error, {:runner_unavailable, name}}` before it ever dispatches anything, so
+  # this needs no FakeDispatcher round trip (mirrors test/hamaca/runs/retry_test.exs's
+  # `exclusive_failed_run/2`, built straight from factories rather than through `park/4`).
+  #
+  # RE297: affinity is read off the run's OWN `pinned_runner_name` column now, not the last
+  # NodeJob's `runner_name` (a second copy of the same fact) — so the fixture pins the run
+  # directly, exactly as `maybe_pin_run/2` would on a real claim.
+  defp refused_restart_card(board, runner_name) do
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+
+    flow =
+      insert(:flow,
+        board: board,
+        isolation: :exclusive,
+        enabled: true,
+        nodes: [%{key: "brainstorm", type: :agent, run: "/brainstorm {ref}"}],
+        edges: [%{from: "start", to: "brainstorm"}]
+      )
+
+    card = insert(:card, stage: spec, title: "Pinned dead")
+
+    run =
+      insert(:run,
+        card: card,
+        status: :failed,
+        current_node: nil,
+        flow_key: flow.key,
+        flow_id: flow.id,
+        pinned_runner_name: runner_name
+      )
+
+    execution = insert(:node_execution, run: run, node_key: "brainstorm", outcome: :failed)
+
+    insert(:node_job,
+      node_execution: execution,
+      state: :done,
+      runner_name: runner_name,
+      payload: %{"isolation" => "exclusive"}
+    )
+
+    %{card: card, run: run}
+  end
+
+  # A run the reaper gave up on (`abandon_unresumable_runs/1`, RE297): terminally `:failed`,
+  # `flow_id` nil because the flow row it pointed at was deleted, and the engine's own sentence
+  # on `failure_detail` — the one state whose cause lives nowhere but that column.
+  defp abandoned_card(board, detail) do
+    spec = Enum.find(board.stages, &(&1.name == "Spec"))
+    card = insert(:card, stage: spec, title: "Unresumable")
+
+    run =
+      insert(:run,
+        card: card,
+        status: :failed,
+        current_node: nil,
+        flow_id: nil,
+        failure_detail: detail
+      )
+
+    insert(:node_execution, run: run, node_key: "brainstorm", outcome: :failed)
+    %{card: card, run: run}
+  end
+
+  test "a stalled row carries the run's failure detail under the reason", ctx do
+    escalated = park(ctx.board, ctx.flow, "Escalated A", :failed)
+
+    abandoned =
+      abandoned_card(
+        ctx.board,
+        "The scheduler could not resume this run for 31m (resume_refused_reason=no_isolation)."
+      )
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    assert has_element?(view, "#stalled-detail-#{abandoned.card.id}", "resume_refused_reason=no_isolation")
+    # The RE247 headline still owns the first line: the detail is added under it, not swapped in.
+    assert has_element?(view, "#stalled-row-#{abandoned.card.id}", "Failed at brainstorm")
+    # An escalation park has no `failure_detail`, and renders no empty element for one.
+    refute has_element?(view, "#stalled-detail-#{escalated.card.id}")
+    assert has_element?(view, "#stalled-row-#{escalated.card.id}", "brainstorm failed — your call")
+  end
+
+  test "the header control opens a dialog naming every stalled card", ctx do
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+    b = park(ctx.board, ctx.flow, "Escalated B", :failed)
+    ask = park(ctx.board, ctx.flow, "Real question", :needs_input)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+
+    assert has_element?(view, "#restart-stalled-button", "2")
+    refute has_element?(view, "#stalled-modal")
+
+    open_dialog(view)
+
+    assert has_element?(view, "#stalled-modal")
+    assert has_element?(view, "#stalled-row-#{a.card.id}", Cards.ref(ctx.board, a.card))
+    assert has_element?(view, "#stalled-row-#{a.card.id}", "Escalated A")
+    assert has_element?(view, "#stalled-row-#{a.card.id}", "brainstorm failed — your call")
+    assert has_element?(view, "#stalled-row-#{b.card.id}", "Escalated B")
+    refute has_element?(view, "#stalled-row-#{ask.card.id}")
+  end
+
+  test "opening the dialog restarts nothing", ctx do
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+    b = park(ctx.board, ctx.flow, "Escalated B", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    assert Runs.get_run!(a.run.id).status == :parked
+    assert Runs.get_run!(b.run.id).status == :parked
+    assert has_element?(view, "#restart-stalled-button", "2")
+
+    view |> element("#stalled-modal-close") |> render_click()
+
+    refute has_element?(view, "#stalled-modal")
+    assert Runs.get_run!(a.run.id).status == :parked
+    assert has_element?(view, "#restart-stalled-button", "2")
+  end
+
+  test "there is no browser confirm and no bulk Restart-all", ctx do
+    _a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+
+    refute view |> element("#restart-stalled-button") |> render() =~ "data-confirm"
+
+    open_dialog(view)
+
+    refute render(view) =~ ~s(phx-click="restart_stalled")
+  end
+
+  test "a row's Restart presses to Restarting… with its row as the action group (RE394)", ctx do
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    assert has_element?(view, "#stalled-row-#{a.card.id}.action-group #stalled-restart-#{a.card.id}.pending-action")
+    assert view |> element("#stalled-restart-#{a.card.id} .pending-idle") |> render() =~ "Restart"
+    assert view |> element("#stalled-restart-#{a.card.id} .pending-face") |> render() =~ "Restarting…"
+  end
+
+  test "a row's Restart revives only that card and drops it from the list", ctx do
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+    b = park(ctx.board, ctx.flow, "Escalated B", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    view |> element("#stalled-restart-#{a.card.id}") |> render_click()
+
+    assert Runs.get_run!(a.run.id).status == :running
+    assert Runs.get_run!(b.run.id).status == :parked
+    refute has_element?(view, "#stalled-row-#{a.card.id}")
+    assert has_element?(view, "#stalled-row-#{b.card.id}")
+    assert has_element?(view, "#stalled-modal")
+    assert has_element?(view, "#restart-stalled-button", "1")
+  end
+
+  test "restarting the last stalled card closes the dialog and hides the control", ctx do
+    only = park(ctx.board, ctx.flow, "Only one", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    view |> element("#stalled-restart-#{only.card.id}") |> render_click()
+
+    assert Runs.get_run!(only.run.id).status == :running
+    refute has_element?(view, "#stalled-modal")
+    refute has_element?(view, "#restart-stalled-button")
+  end
+
+  test "clicking a row closes the dialog and opens that card's drawer", ctx do
+    a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    view |> element("#open-stalled-card-#{a.card.id}") |> render_click()
+
+    assert_patch(view, ~p"/board/#{ctx.board.slug}?card=#{Cards.ref(ctx.board, a.card)}")
+    refute has_element?(view, "#stalled-modal")
+    assert has_element?(view, "#card-drawer")
+  end
+
+  test "a refused restart explains why inside the modal, not just as a toast", ctx do
+    refused = refused_restart_card(ctx.board, "mac-never-connected")
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    view |> element("#stalled-restart-#{refused.card.id}") |> render_click()
+
+    assert Runs.get_run!(refused.run.id).status == :failed
+    assert has_element?(view, "#stalled-modal")
+    assert has_element?(view, "#stalled-modal", "mac-never-connected")
+    assert has_element?(view, "#stalled-row-#{refused.card.id}")
+  end
+
+  test "the dialog reuses the archived-modal shell", ctx do
+    _a = park(ctx.board, ctx.flow, "Escalated A", :failed)
+
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    open_dialog(view)
+
+    assert has_element?(view, "#stalled-modal.modal.modal-open[role=dialog]")
+    assert has_element?(view, "#stalled-modal .modal-box.max-w-2xl")
+    assert has_element?(view, "#stalled-list.divide-y.divide-base-200")
+    assert has_element?(view, "#stalled-modal .font-mono.text-xs")
+    assert has_element?(view, "#stalled-modal label.modal-backdrop")
+  end
+
+  test "the control is hidden when nothing is stalled", ctx do
+    {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+    refute has_element?(view, "#restart-stalled-button")
+    refute has_element?(view, "#stalled-modal")
+  end
+end

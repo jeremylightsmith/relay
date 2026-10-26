@@ -12,9 +12,9 @@ defmodule Schemas.Run do
   construction. `retries` is the deliberate exception and is NOT an engine
   counter: it counts HUMAN retry interventions (RLY-189), which leave no
   trace in execution history and therefore cannot be derived from it. Only
-  `Relay.Runs.retry_run/2` ever increments it. `tasks_from_plan` is true when
+  `Hamaca.Runs.retry_run/2` ever increments it. `tasks_from_plan` is true when
   this run's tasks were seeded by the legacy plan-parse fallback (RE368). All
-  fields are written programmatically by `Relay.Runs`, never cast from input.
+  fields are written programmatically by `Hamaca.Runs`, never cast from input.
   """
 
   use Ecto.Schema
@@ -33,7 +33,7 @@ defmodule Schemas.Run do
     field :failure_detail, :string
     field :retries, :integer, default: 0
     # RE368: true when this run's tasks were seeded by the legacy plan-parse fallback — the
-    # fact `Relay.Runs.Audit`'s `:planner_not_migrated` check reads.
+    # fact `Hamaca.Runs.Audit`'s `:planner_not_migrated` check reads.
     field :tasks_from_plan, :boolean, default: false
 
     field :resume_refused_since, :utc_datetime
@@ -76,13 +76,13 @@ defmodule Schemas.Run do
       it never advertised).
     * `:no_free_slot` — everything resolved; the class simply has no free slot right now.
 
-  The `Ecto.Enum` above and `Relay.Runs.Scheduler`'s classification both read this one list.
+  The `Ecto.Enum` above and `Hamaca.Runs.Scheduler`'s classification both read this one list.
   """
   def resume_refusal_reasons, do: Ecto.Enum.values(__MODULE__, :resume_refused_reason)
 
   @doc """
   The partition of `resume_refusal_reasons/0` that PROVES a run's runner pin can never be
-  honoured, so `Relay.Runs.abandon_unresumable_runs/1` clears it when it gives up. The other
+  honoured, so `Hamaca.Runs.abandon_unresumable_runs/1` clears it when it gives up. The other
   reasons mean the machine is alive and the run's worktree really is still on it, so the pin
   is kept and a retry must land back there.
   """

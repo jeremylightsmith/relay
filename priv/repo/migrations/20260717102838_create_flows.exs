@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.CreateFlows do
+defmodule Hamaca.Repo.Migrations.CreateFlows do
   use Ecto.Migration
 
   def change do

@@ -1,0 +1,343 @@
+defmodule HamacaWeb.Browser.BoardCardFocusTest do
+  @moduledoc """
+  Real-browser (Playwright) tests for RE326. Switching the drawer's card with ←/→ or the ‹ ›
+  chevrons moves keyboard focus to that card on the board and scrolls it into view. Closing the
+  drawer leaves focus on the last card viewed. RE389: opening a card from a search result or a
+  `?card=` deep link scrolls it into view (`scroll_card`) without moving focus.
+
+  `HamacaWeb.BoardLiveTest` pins the server half (`BoardLive.handle_params/3` pushing
+  `focus_card`). `Phoenix.LiveViewTest` never runs the `BoardDnD` / `StoryMapDnD` hooks that act on
+  that push, so only a real browser can see where `document.activeElement` ends up. Same
+  reasoning as `HamacaWeb.Browser.TypingKeyGuardTest`.
+
+  Every key is pressed with focus INSIDE the drawer, never on a board card, because
+  `Frame.press/2` focuses its selector first. A board card can only end up focused if the pushed
+  `focus_card` moved it there, so the focus assertions can't pass by accident.
+  """
+  use PhoenixTest.Playwright.Case, async: false
+
+  alias Hamaca.Accounts
+  alias Hamaca.Boards
+  alias Hamaca.Cards
+  alias Hamaca.StoryMap
+  alias PlaywrightEx.Frame
+
+  @moduletag :playwright
+
+  setup do
+    user = Accounts.ensure_dev_user!()
+    board = Boards.get_or_create_default_board(user)
+    code = Enum.find(board.stages, &(&1.name == "Code"))
+
+    %{user: user, board: board, code: code}
+  end
+
+  test "arrowing moves focus to the drawer's card, and arrowing back moves it back", ctx do
+    [first, second, third] = column(ctx.board, ctx.code, 3)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> click(board_card(first))
+    |> assert_drawer_shows(first)
+    |> press_in_drawer("ArrowRight")
+    |> assert_drawer_shows(second)
+    |> assert_focused(second)
+    |> press_in_drawer("ArrowRight")
+    |> assert_drawer_shows(third)
+    |> assert_focused(third)
+    |> press_in_drawer("ArrowLeft")
+    |> assert_drawer_shows(second)
+    |> assert_focused(second)
+  end
+
+  test "Escape closes the drawer and leaves focus on the last card viewed", ctx do
+    [first, second, third] = column(ctx.board, ctx.code, 3)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> click(board_card(first))
+    |> assert_drawer_shows(first)
+    |> press_in_drawer("ArrowRight")
+    |> assert_drawer_shows(second)
+    |> press_in_drawer("ArrowRight")
+    |> assert_drawer_shows(third)
+    |> assert_focused(third)
+    # Escape is pressed on the drawer's Detail tab, so focus is inside the drawer as it goes away.
+    # The third card only has focus afterwards if the close pushed it there.
+    |> press_in_drawer("Escape")
+    |> refute_has("#card-drawer-panel")
+    |> assert_focused(third)
+  end
+
+  test "clicking the › chevron moves focus to the next card too", ctx do
+    [first, second] = column(ctx.board, ctx.code, 2)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> click(board_card(first))
+    |> assert_drawer_shows(first)
+    |> click("#card-drawer-next")
+    |> assert_drawer_shows(second)
+    |> assert_focused(second)
+  end
+
+  # RE389 — opening a card (nil → A) pushes the scroll-only `scroll_card`: the card is revealed,
+  # but keyboard focus stays where it was.
+  test "a deep link scrolls its card into view without focusing it", ctx do
+    refs = column(ctx.board, ctx.code, 20)
+    opened = Enum.at(refs, -2)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> unwrap(fn %{frame_id: frame_id} ->
+      # Precondition: the column must overflow the viewport, or "scrolls into view" proves nothing.
+      # If this fails, the column needs more cards, not a looser assertion.
+      refute card_in_viewport?(frame_id, opened),
+             "precondition: #{opened} must start below the fold — add cards to the column"
+    end)
+    |> visit("/board/#{ctx.board.slug}?card=#{opened}")
+    |> assert_has("body .phx-connected")
+    |> assert_drawer_shows(opened)
+    |> assert_has(open_card(opened))
+    |> assert_in_viewport(opened)
+    |> refute_focused(opened)
+  end
+
+  test "a switch from a deep-linked card scrolls the board to follow and focuses the new card", ctx do
+    refs = column(ctx.board, ctx.code, 20)
+    [opened, last] = Enum.take(refs, -2)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}?card=#{opened}")
+    |> assert_drawer_shows(opened)
+    |> click("#card-drawer-next")
+    |> assert_drawer_shows(last)
+    |> assert_focused(last)
+    |> assert_in_viewport(last)
+  end
+
+  test "picking an off-screen card from the board search scrolls it into view without focusing it", ctx do
+    refs = column(ctx.board, ctx.code, 20)
+    # The column renders newest first, so the second-to-last card ("Focus 2") is below the fold.
+    found = Enum.at(refs, -2)
+    title = title_of(ctx.board, ctx.code, found)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> unwrap(fn %{frame_id: frame_id} ->
+      refute card_in_viewport?(frame_id, found),
+             "precondition: #{found} must start below the fold — add cards to the column"
+
+      {:ok, _} = Frame.type(frame_id, selector: "#board-search-input", text: title, timeout: 2_000)
+    end)
+    |> click("#board-search-result-#{found}")
+    |> assert_drawer_shows(found)
+    |> assert_has(open_card(found))
+    |> assert_in_viewport(found)
+    |> refute_focused(found)
+  end
+
+  test "the story map drawer hands focus back to its card on close, with card nav still off", ctx do
+    {board, ref} = story_map_board(ctx.user)
+
+    ctx.conn
+    |> visit_board("/board/#{board.slug}/story-map")
+    |> assert_has("#story-map-grid")
+    |> click("#story-map-card-#{ref}")
+    |> assert_drawer_shows(ref)
+    # RE264 — card nav stays off on the story map. This card doesn't turn it on.
+    |> refute_has("#card-drawer-nav")
+    # Pressed on the drawer's Detail tab, so focus is inside the drawer as it goes away. The map
+    # card only has focus afterwards if StoryMapDnD acted on the close's focus_card push.
+    |> press_in_drawer("Escape")
+    |> refute_has("#card-drawer-panel")
+    |> assert_focused(ref)
+  end
+
+  test "RE389 — the open story-map card is marked open and keeps its ring while focus is in the drawer",
+       ctx do
+    {board, ref} = story_map_board(ctx.user)
+    card = "#story-map-card-#{ref}"
+
+    ctx.conn
+    |> visit_board("/board/#{board.slug}/story-map")
+    |> assert_has("#story-map-grid")
+    |> click(card)
+    |> assert_drawer_shows(ref)
+    |> focus_in_drawer()
+    |> assert_has("#{card}[data-open]")
+    |> assert_outline_style(card, "auto")
+  end
+
+  # RE389 — the drawer's card wears the focus-ring highlight from the moment it opens, wherever
+  # keyboard focus is. A mouse click doesn't match :focus-visible, so the ring comes only from
+  # the [data-open] rule.
+  test "a clicked card is marked open and wears the focus ring", ctx do
+    [first | _rest] = column(ctx.board, ctx.code, 3)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> click(board_card(first))
+    |> assert_drawer_shows(first)
+    |> assert_has(open_card(first))
+    |> assert_outline_style(board_card(first), "auto")
+  end
+
+  test "the open card keeps its ring while focus is inside the drawer", ctx do
+    [first | _rest] = column(ctx.board, ctx.code, 3)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> click(board_card(first))
+    |> assert_drawer_shows(first)
+    |> focus_in_drawer()
+    |> assert_has(open_card(first))
+    |> assert_outline_style(board_card(first), "auto")
+  end
+
+  test "Escape clears the open highlight", ctx do
+    [first | _rest] = column(ctx.board, ctx.code, 3)
+
+    ctx.conn
+    |> visit_board("/board/#{ctx.board.slug}")
+    |> click(board_card(first))
+    |> assert_drawer_shows(first)
+    |> focus_in_drawer()
+    |> press_in_drawer("Escape")
+    |> refute_has("#card-drawer-panel")
+    |> refute_has(".board-card[data-open]")
+  end
+
+  # Creates `count` cards in `stage` and returns their refs in the order the board renders the
+  # column. `Cards.stage_column/2` is the same read `stage_neighbors/2` (and so ←/→) walks.
+  defp column(board, stage, count) do
+    Enum.each(1..count, fn n -> {:ok, _card} = Cards.create_card(stage, %{title: "Focus #{n}"}) end)
+
+    board |> Cards.stage_column(stage.id) |> Enum.map(&Cards.ref(board, &1))
+  end
+
+  # A story-map board with one card placed in a step × release cell. Returns {board, card ref}.
+  defp story_map_board(user) do
+    {:ok, board} = Boards.create_board(user, %{name: "Focus map"})
+    {:ok, activity} = StoryMap.create_activity(board, %{name: "Onboard & access", position: 1})
+    {:ok, step} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
+    [mvp | _later] = StoryMap.list_releases(board)
+
+    board = Boards.get_board!(user, board.slug)
+    [backlog | _rest] = board.stages
+    {:ok, card} = Cards.create_card(backlog, %{title: "Add SSO"})
+    {:ok, _placed} = StoryMap.assign_card(card, %{story_step_id: step.id, release_id: mvp.id})
+    {board, Cards.ref(board, card)}
+  end
+
+  defp title_of(board, stage, ref) do
+    board |> Cards.stage_column(stage.id) |> Enum.find(&(Cards.ref(board, &1) == ref)) |> Map.fetch!(:title)
+  end
+
+  defp visit_board(conn, path) do
+    conn
+    |> visit("/dev/login")
+    |> assert_has("body .phx-connected")
+    |> visit(path)
+    # Keys pressed before LiveView binds its window listeners are lost (see TypingKeyGuardTest),
+    # and so is a push to a hook that hasn't mounted yet, so wait for THIS page's socket.
+    |> assert_has("body .phx-connected")
+  end
+
+  defp board_card(ref), do: ~s(.board-card[data-ref="#{ref}"])
+
+  defp assert_drawer_shows(session, ref) do
+    assert_has(session, "#card-drawer .drawer-card-ref", text: ref, exact: true)
+  end
+
+  defp open_card(ref), do: ~s(.board-card[data-ref="#{ref}"][data-open])
+
+  defp focus_in_drawer(session) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      {:ok, _} = Frame.focus(frame_id, selector: "#card-drawer-tab-detail", timeout: 2_000)
+
+      {:ok, inside?} =
+        Frame.evaluate(frame_id,
+          expression: ~s{(() => !!document.activeElement.closest("#card-drawer"))()},
+          timeout: 2_000
+        )
+
+      assert inside?, "precondition: focus must be inside #card-drawer"
+    end)
+  end
+
+  defp assert_outline_style(session, element, style) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      selector = Jason.encode!(element)
+
+      {:ok, actual} =
+        Frame.evaluate(frame_id,
+          expression: "(() => getComputedStyle(document.querySelector(#{selector})).outlineStyle)()",
+          timeout: 2_000
+        )
+
+      assert actual == style, "expected #{element}'s outlineStyle to be #{style}, got #{inspect(actual)}"
+    end)
+  end
+
+  defp press_in_drawer(session, key) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      {:ok, _} = Frame.press(frame_id, selector: "#card-drawer-tab-detail", key: key, timeout: 2_000)
+    end)
+  end
+
+  # `focus_card` is applied after the patch's DOM update, so wait for it to land. Then read
+  # activeElement back as the load-bearing assertion. On a timeout, wait_for_function returns an
+  # error we ignore, and the assert below reports what actually has focus.
+  defp assert_focused(session, ref) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      _ =
+        Frame.wait_for_function(frame_id,
+          expression: "document.activeElement && document.activeElement.dataset.ref === #{Jason.encode!(ref)}",
+          timeout: 5_000
+        )
+
+      focused = focused_ref(frame_id)
+
+      assert focused == ref,
+             "expected board focus on #{ref}, but document.activeElement's data-ref was #{inspect(focused)}"
+    end)
+  end
+
+  defp assert_in_viewport(session, ref) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      _ =
+        Frame.wait_for_function(frame_id, expression: in_viewport_expression(ref), timeout: 5_000)
+
+      assert card_in_viewport?(frame_id, ref), "#{ref} was never scrolled into view"
+    end)
+  end
+
+  defp refute_focused(session, ref) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      refute focused_ref(frame_id) == ref, "opening #{ref} moved keyboard focus to it"
+    end)
+  end
+
+  defp focused_ref(frame_id) do
+    {:ok, ref} =
+      Frame.evaluate(frame_id,
+        expression: "(() => document.activeElement && document.activeElement.dataset.ref)()",
+        timeout: 2_000
+      )
+
+    ref
+  end
+
+  defp card_in_viewport?(frame_id, ref) do
+    {:ok, visible?} = Frame.evaluate(frame_id, expression: "(() => #{in_viewport_expression(ref)})()", timeout: 2_000)
+    visible? == true
+  end
+
+  defp in_viewport_expression(ref) do
+    selector = Jason.encode!(board_card(ref))
+
+    "(r => r.top >= 0 && r.bottom <= window.innerHeight)" <>
+      "(document.querySelector(#{selector}).getBoundingClientRect())"
+  end
+end

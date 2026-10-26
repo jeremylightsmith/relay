@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.WidenUsersAvatarUrl do
+defmodule Hamaca.Repo.Migrations.WidenUsersAvatarUrl do
   use Ecto.Migration
 
   # Google profile photo URLs can exceed varchar(255); a first sign-in with one 500'd.

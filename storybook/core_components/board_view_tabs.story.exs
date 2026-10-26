@@ -2,7 +2,7 @@ defmodule Storybook.Components.CoreComponents.BoardViewTabs do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.CoreComponents.board_view_tabs/1
+  def function, do: &HamacaWeb.CoreComponents.board_view_tabs/1
   def render_source, do: :function
 
   def variations do

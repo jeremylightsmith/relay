@@ -2,7 +2,7 @@ defmodule Storybook.ExampleBoardComponents.ExampleCardDetail do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
-  def function, do: &RelayWeb.ExampleBoardComponents.example_card_detail/1
+  def function, do: &HamacaWeb.ExampleBoardComponents.example_card_detail/1
   def render_source, do: :function
 
   # The modal overlays its whole viewport, so each variation renders in its own iframe.

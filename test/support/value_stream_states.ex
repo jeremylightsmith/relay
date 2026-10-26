@@ -1,6 +1,6 @@
-defmodule RelayWeb.ValueStreamStates do
+defmodule HamacaWeb.ValueStreamStates do
   @moduledoc """
-  RE347 test data: the level-1 artboard's nine states as plain `Relay.ValueStream` per-state
+  RE347 test data: the level-1 artboard's nine states as plain `Hamaca.ValueStream` per-state
   maps (stage ids 1–9), so the layout and components are tested without a database. Boundary
   checks are off — test-only support.
   """

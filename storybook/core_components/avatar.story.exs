@@ -5,7 +5,7 @@ defmodule Storybook.Components.CoreComponents.Avatar do
   # A 1×1 blue PNG, inlined so the photo state renders without a network fetch.
   @photo "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
-  def function, do: &RelayWeb.CoreComponents.avatar/1
+  def function, do: &HamacaWeb.CoreComponents.avatar/1
   def render_source, do: :function
 
   # The one avatar (RLY-90): photo when we have one, initials otherwise,

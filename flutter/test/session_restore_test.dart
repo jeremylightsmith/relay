@@ -80,7 +80,7 @@ void main() {
       final cookies = await container
           .read(cookieJarProvider)
           .loadForRequest(Uri.parse(AppConfig.baseUrl));
-      expect(cookies.map((c) => c.name), contains('_relay_key'));
+      expect(cookies.map((c) => c.name), contains('_hamaca_key'));
     },
   );
 
@@ -89,7 +89,7 @@ void main() {
     final adapter = StubAdapter(
       body: {'success': true, 'user': _user},
       headers: {
-        'set-cookie': ['_relay_key=refreshed-cookie; Path=/; Max-Age=604800'],
+        'set-cookie': ['_hamaca_key=refreshed-cookie; Path=/; Max-Age=604800'],
       },
     );
     final container = containerWith(store: store, adapter: adapter);
@@ -164,7 +164,7 @@ void main() {
 
     final uri = Uri.parse(AppConfig.baseUrl);
     await container.read(cookieJarProvider).saveFromResponse(uri, [
-      Cookie('_relay_key', 'fresh-from-sign-in')
+      Cookie('_hamaca_key', 'fresh-from-sign-in')
         ..domain = uri.host
         ..path = '/',
     ]);

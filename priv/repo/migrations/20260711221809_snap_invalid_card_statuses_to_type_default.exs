@@ -1,4 +1,4 @@
-defmodule Relay.Repo.Migrations.SnapInvalidCardStatusesToTypeDefault do
+defmodule Hamaca.Repo.Migrations.SnapInvalidCardStatusesToTypeDefault do
   use Ecto.Migration
 
   # One-time data repair (RLY-57): the runner and older move paths left cards in states that are
