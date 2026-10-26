@@ -8,7 +8,7 @@ defmodule RelayWeb.Admin.PromoCodesLive do
   (`Relay.Billing.disable_promo_code/2`) while existing holders keep their months.
 
   The list is a plain assign re-read from `Relay.Billing.list_promo_codes/0` after each write —
-  a handful of rows, no stream, no PubSub. Shares the `Users | Promo codes` tab bar
+  a handful of rows, no stream, no PubSub. Shares the `Users | Usage | Promo codes | Renewals` tab bar
   (`RelayWeb.AdminComponents.user_tabs/1`) with `RelayWeb.Admin.UsersLive`. Gated by the
   `:admin` live_session.
   """

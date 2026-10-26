@@ -9,6 +9,7 @@ defmodule RelayWeb.Admin.AdminPagesTest do
     "/admin",
     "/admin/boards",
     "/admin/users",
+    "/admin/users/usage",
     "/admin/users/promo-codes",
     "/admin/users/renewals",
     "/admin/onboarding"

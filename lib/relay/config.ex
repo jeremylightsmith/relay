@@ -13,8 +13,9 @@ defmodule Relay.Config do
 
   Only the values tests actually vary are routed here: `:apple_client_ids`, `:runs_auto_start`,
   `:git_sha`, billing's `:billing_enabled`, `:billing_payments`, `:billing_price_cents`,
-  `:stripe_secret_key` and `:stripe_webhook_secret` (RE460), and billing email's
-  `:mail_enabled` (RE464). Boot-time reads stay plain
+  `:stripe_secret_key` and `:stripe_webhook_secret` (RE460), billing email's
+  `:mail_enabled` (RE464), and `:usage_tracker`, the `Relay.Usage.Tracker` server touches go to
+  (RE475). Boot-time reads stay plain
   `Application.get_env/3`.
 
   Two rules the lookup imposes:

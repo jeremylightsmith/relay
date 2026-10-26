@@ -156,5 +156,11 @@ defmodule RelayWeb.Admin.PromoCodesLiveTest do
              "Promo codes"
 
     assert doc |> LazyHTML.query(~s(a[role="tab"].tab#admin-tab-users)) |> LazyHTML.text() =~ "Users"
+
+    assert doc |> LazyHTML.query(~s(a[role="tab"])) |> Enum.map(&String.trim(LazyHTML.text(&1))) ==
+             ["Users", "Usage", "Promo codes", "Renewals"]
+
+    assert doc |> LazyHTML.query(~s(a[role="tab"].tab#admin-tab-usage)) |> LazyHTML.attribute("href") ==
+             ["/admin/users/usage"]
   end
 end

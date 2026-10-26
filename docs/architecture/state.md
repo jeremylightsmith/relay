@@ -393,6 +393,16 @@ flowchart LR
     b -- succeeded --> r([move to Spec:Review])
 ```
 
+## Usage visits (RE475)
+
+Not a card machine, but state that changes over time: a `usage_visits` row is one visit, keyed
+by `(user_id, started_at)` (a unique index). `Relay.Usage.Tracker` holds the open visit per user
+in memory and upserts it on that key — `last_at`, `seconds`, `board_id`, `card_refs` and
+`updated_at` are replaced in place; `started_at` never changes. A touch more than
+`Relay.Usage.idle_gap/0` after the last one closes the visit (written on the next flush) and
+opens a new row; an out-of-order earlier touch only extends the open visit. Nothing else writes
+or prunes the table.
+
 ## Where these meet
 
 - A node reporting `needs_input` moves **two** machines at once: the run parks and the card

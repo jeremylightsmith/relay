@@ -24,6 +24,18 @@ defmodule Schemas.User do
 
   @type t :: %__MODULE__{}
 
+  # RE475 — the dev sign-in (`GET /dev/login`) and the seed script's accounts. Not real people, so
+  # usage neither tracks nor counts them.
+  @synthetic_providers ["dev", "seed"]
+
+  @doc "The providers of synthetic (dev and seed) accounts — the ONE list usage skips and filters."
+  @spec synthetic_providers() :: [String.t()]
+  def synthetic_providers, do: @synthetic_providers
+
+  @doc "True for a dev or seed account (`synthetic_providers/0`)."
+  @spec synthetic?(t()) :: boolean()
+  def synthetic?(%__MODULE__{provider: provider}), do: provider in @synthetic_providers
+
   @doc """
   Changeset for profile fields coming from the OAuth provider. `:email` is
   normalized (trimmed/downcased) so every email in the system is canonical —

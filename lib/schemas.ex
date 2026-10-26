@@ -52,6 +52,7 @@ defmodule Schemas do
       TalkEvent,
       TalkSession,
       TalkTurn,
+      UsageVisit,
       User,
       UserApiToken,
       Vote

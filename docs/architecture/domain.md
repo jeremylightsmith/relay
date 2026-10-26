@@ -543,9 +543,10 @@ sharing behavior.
   `get_user_by_email/1` is a case-insensitive lookup (the example-board seeders, RE444).
   The superadmin-only `/admin/users` page (RE353) reads `Relay.Billing.list_admin_users/1`
   (RE463 moved its row query out of Accounts, which no longer has an admin user list).
-  That page's header carries the `Users | Promo codes | Renewals` tab bar
-  (`RelayWeb.AdminComponents.user_tabs/1`, RE462/RE463); the **Promo codes** tab is
-  `/admin/users/promo-codes` and the **Renewals** tab `/admin/users/renewals` (see Billing).
+  That page's header carries the `Users | Usage | Promo codes | Renewals` tab bar
+  (`RelayWeb.AdminComponents.user_tabs/1`, RE462/RE463/RE475); the **Usage** tab is
+  `/admin/users/usage` (see Usage), the **Promo codes** tab `/admin/users/promo-codes` and the
+  **Renewals** tab `/admin/users/renewals` (see Billing).
   When billing is on (`Relay.Billing.enabled?/0`), the insert branch of
   `upsert_user_from_provider/2` opens the new user's billing account on Free
   (`Relay.Billing.ensure_account/1`, RE460/RE469 — no date written) and then redeems the sign-up link's `opts[:promo_code]` (`Relay.Billing.redeem_code/3`,
@@ -1308,6 +1309,42 @@ sharing behavior.
   never mints on mount, and routes "Mint my key" to `connect_machine/2` (then `remint_key/2` on
   that machine). Depends
   on Agents, ApiKeys, Events and Repo, never on Boards, Flows or Cards (all three depend on it).
+- **Usage** (`Relay.Usage`, RE475) — who uses Relay and how much. It owns every usage
+  definition: a **visit** is a run of signed-in activity with no gap longer than `idle_gap/0`
+  (1800s); its duration is last touch − first touch floored at `min_visit_seconds/0` (60s,
+  `visit_seconds/2`); a visit keeps its last board and its `max_card_refs/0` (10) most recently
+  opened card refs; the tracker flushes every `flush_ms/0` (60s). Table `usage_visits`
+  (`Schemas.UsageVisit`), one row per visit keyed by the unique `(user_id, started_at)`. Its only
+  writer is the supervised `Relay.Usage.Tracker` ([runtime](runtime.md)), fed by the web capture:
+  the `RelayWeb.UsageTrack` `on_mount` hook (connected mount + `:handle_params` / `:handle_event`
+  hooks) in the `:require_authenticated` and `:admin` live_sessions, and the
+  `RelayWeb.Plugs.UsageTrack` plug in the `:browser` pipeline for signed-in `GET`s. Both reach the
+  tracker through `Relay.Config.get(:usage_tracker, Relay.Usage.Tracker)`. Superadmins are
+  tracked; dev and seed accounts (`Schemas.User.synthetic_providers/0`, `synthetic?/1`, the ONE
+  list) are skipped before the cast. **Per-node limit:** each node runs its own tracker and
+  visits are never merged across nodes; prod runs one machine, so this is accepted.
+  **Read model** (the superadmin Usage tab): `overview/2` (tiles + the people/agents chart over a
+  `ranges/0` window, default `default_range/0`), `user_rows/1` (one row per non-synthetic user,
+  superadmins listed with `counted?: false`, sorted by last seen) and `user_detail/2` (the panel;
+  `nil` for an unknown or synthetic user). Every overview figure counts **counted users only**
+  (not superadmins, not synthetic). Windows are UTC dates ending today, inclusive
+  (`window_start/2`): the `_7d` figures cover `window_days/0` (7), the per-user strip
+  `strip_days/0` (14) day states (`day_states/0`: `:human` visited, `:agent` had a run, `:both`,
+  `:none`). Sources: visits and seconds come from `usage_visits` (a visit is the day of its
+  `started_at`; the stored `seconds` are summed, never recomputed); last seen / last board / last
+  card from the visit with the greatest `last_at`; **runs** from `runs`, attributed to the owner
+  of the card's board (owned, non-archived boards only — members get none) on the day of
+  `coalesce(started_at, inserted_at)`; **shipped** is distinct cards with a `:moved` / `:approved`
+  activity that *entered* a top-level Done stage (`Relay.Boards.top_level_done_stage_ids/1`) from
+  outside it, so an in-place approve at Done never counts; **waiting** is unarchived cards on
+  their owned boards in `Schemas.Card.awaiting_human_statuses/0`. Each read is a fixed number of
+  grouped queries (no per-user N+1), merged in memory. Depends on Boards, Config, Repo and
+  Schemas; only `RelayWeb` and `Relay.Application` depend on it. **UI:** the superadmin-only
+  **Usage** tab at `/admin/users/usage` (`RelayWeb.Admin.UsageLive`, `:admin` live_session) reads
+  `user_rows/1` on mount, `overview/2` when `?range=` (one of `ranges/0`) changes — the range
+  drives the chart only — and `user_detail/2` when `?user=<id>` opens its side panel; search
+  filters the loaded rows in memory, and nothing updates live. Its day strips and chart are
+  `RelayWeb.AdminComponents.usage_strip/1` and `stacked_bars/1`.
 - **Mailer** (`Relay.Mailer`, RE464) — the Swoosh mailer, a leaf boundary: Local adapter in dev
   (`/dev/mailbox`), Test in test, Resend in prod once `RESEND_API_KEY` + `MAIL_FROM` are set.
   Called only through `Relay.Billing.Notifier.deliver/1`.
@@ -1315,7 +1352,7 @@ sharing behavior.
   `Relay.Config`: the `ProcessTree` seam (`cache: false`) through which the values tests vary
   (`:apple_client_ids`, `:runs_auto_start`, `GIT_SHA`, and billing's `:billing_enabled`,
   `:billing_payments`, `:billing_price_cents`, `:stripe_secret_key`, `:stripe_webhook_secret`, and
-  billing email's `:mail_enabled`) are
+  billing email's `:mail_enabled`, and usage's `:usage_tracker`) are
   read, so a test overrides them with
   `Process.put/2` instead of mutating app/OS env (RE419, ADR 0009 rule 1).
 
@@ -1366,6 +1403,8 @@ erDiagram
     SetupMachine ||--o{ BoardSetupStep : "machine checklist (RE446)"
     User ||--o{ UserApiToken : "mobile bearer"
     User ||--o{ DeviceToken : "push"
+    User ||--o{ UsageVisit : "visits (RE475)"
+    Board |o--o{ UsageVisit : "last board"
     User ||--o| BillingAccount : "pays (RE460)"
     BillingAccount ||--o{ BillingPaymentAttempt : "charges"
     BillingAccount ||--o{ BillingNotice : "emails (RE464)"

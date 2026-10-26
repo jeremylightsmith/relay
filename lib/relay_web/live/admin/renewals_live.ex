@@ -8,7 +8,7 @@ defmodule RelayWeb.Admin.RenewalsLive do
 
   Read-only on purpose: the billing clock is automatic, so there is no "run billing" button. The
   rows are a stream, re-streamed with `reset: true` on each filter patch. Shares the
-  `Users | Promo codes | Renewals` tab bar (`RelayWeb.AdminComponents.user_tabs/1`). Gated by the
+  `Users | Usage | Promo codes | Renewals` tab bar (`RelayWeb.AdminComponents.user_tabs/1`). Gated by the
   `:admin` live_session.
   """
   use RelayWeb, :live_view

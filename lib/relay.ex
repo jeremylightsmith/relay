@@ -50,6 +50,8 @@ defmodule Relay do
       Setup,
       StoryMap,
       Talk,
+      Usage,
+      Usage.Tracker,
       ValueStream,
       Votes
     ]

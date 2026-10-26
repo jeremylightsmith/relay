@@ -92,6 +92,9 @@ flowchart LR
     Talk --> Cards
     Talk --> Repo
     Talk --> Runs
+    Usage --> Boards
+    Usage --> Config
+    Usage --> Repo
     ValueStream --> Boards
     ValueStream --> Cards
     ValueStream --> Flows

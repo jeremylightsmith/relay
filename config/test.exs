@@ -82,6 +82,11 @@ config :relay, :google_tokeninfo_req_options, plug: {Req.Test, Relay.Accounts.Go
 # outside the test sandbox.
 config :relay, :start_runs_supervisor, false
 
+# Usage tracking (RE475): the app's tracker is not started; a test starts its own via
+# start_supervised!/1 and `Process.put(:usage_tracker, name)`. Every other touch casts to an
+# unregistered name — a silent no-op.
+config :relay, :usage_tracking, false
+
 # Billing (RE460): off by default — a test switches it on with `Process.put(:billing_enabled, true)`.
 # Fake Stripe keys and a Req.Test plug, so no test ever reaches real Stripe.
 config :relay,

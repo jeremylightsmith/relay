@@ -5,7 +5,7 @@ defmodule RelayWeb.Admin.UsersLive do
   under a summary line (`N users · N paying · $N/mo · N on Free`). Rows come from
   `Relay.Billing.list_admin_users/1` (one query) and the summary from
   `Relay.Billing.admin_summary/1`, as of today — a snapshot at mount (no PubSub), re-read after
-  each admin write. Gated by the `:admin` live_session. Its header carries the `Users | Promo codes` tab bar
+  each admin write. Gated by the `:admin` live_session. Its header carries the `Users | Usage | Promo codes | Renewals` tab bar
   (`RelayWeb.AdminComponents.user_tabs/1`, RE462) shared with `RelayWeb.Admin.PromoCodesLive`.
 
   **Row side panel** (RE463, modelled on Throughway's `/admin?org=<id>` org panel): clicking a row

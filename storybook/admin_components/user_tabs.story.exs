@@ -10,6 +10,7 @@ defmodule Storybook.AdminComponents.UserTabs do
   def variations do
     [
       %Variation{id: :users, description: "On /admin/users", attributes: %{active: :users}},
+      %Variation{id: :usage, description: "On /admin/users/usage (RE475)", attributes: %{active: :usage}},
       %Variation{
         id: :promo_codes,
         description: "On /admin/users/promo-codes",

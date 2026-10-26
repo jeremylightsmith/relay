@@ -6,6 +6,7 @@ defmodule RelayWeb.Router do
 
   alias RelayWeb.Plugs.ApiLogger
   alias RelayWeb.Plugs.Embed
+  alias RelayWeb.Plugs.UsageTrack
 
   @content_security_policy "default-src 'self'; " <>
                              "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; " <>
@@ -26,6 +27,7 @@ defmodule RelayWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers, %{"content-security-policy" => @content_security_policy}
     plug :fetch_current_scope
+    plug UsageTrack
   end
 
   pipeline :api do
@@ -96,6 +98,7 @@ defmodule RelayWeb.Router do
         ) ++
           [
             {RelayWeb.Auth, :require_authenticated},
+            RelayWeb.UsageTrack,
             {RelayWeb.Auth, :mount_embed},
             RelayWeb.BrowserNotify
           ] do
@@ -158,11 +161,12 @@ defmodule RelayWeb.Router do
         if(Application.compile_env(:relay, :sql_sandbox),
           do: [RelayWeb.LiveAcceptance],
           else: []
-        ) ++ [{RelayWeb.Auth, :require_superadmin}, RelayWeb.BrowserNotify] do
+        ) ++ [{RelayWeb.Auth, :require_superadmin}, RelayWeb.UsageTrack, RelayWeb.BrowserNotify] do
       live "/", IndexLive
       live "/boards", BoardsLive
       live "/onboarding", OnboardingLive
       live "/users", UsersLive
+      live "/users/usage", UsageLive
       live "/users/promo-codes", PromoCodesLive
       live "/users/renewals", RenewalsLive
       live "/api", ApiLive

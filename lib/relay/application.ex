@@ -53,6 +53,7 @@ defmodule Relay.Application do
         # push gets its own h2 pool (RLY-81).
         {Finch, name: Relay.Push.APNSFinch, pools: %{default: [protocols: [:http2], count: 1]}}
       ] ++
+        usage_children() ++
         runs_children() ++
         [
           # Start to serve requests, typically the last entry
@@ -63,6 +64,13 @@ defmodule Relay.Application do
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Relay.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # RE475: the usage tracker — the only writer of `usage_visits`; flushes once a minute when
+  # something changed, and on shutdown. Off in test: a test starts its own and points
+  # `:usage_tracker` at it, so no flush ever lands outside the sandbox.
+  defp usage_children do
+    if Application.get_env(:relay, :usage_tracking, true), do: [Relay.Usage.Tracker], else: []
   end
 
   # RLY-132: the runs engine — run-id Registry, one RunServer per :running
