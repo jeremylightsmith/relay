@@ -2,7 +2,8 @@
 # @describe Run a command against production (Fly app: relayboard).
 #
 # direnv puts bin/ on your PATH inside the project, so this is a bare `prod` command.
-# Its sibling is `dev`. `prod deploy` runs the same bin/deploy_fly.sh as the board's Deploy stage.
+# Its sibling is `dev`. `prod deploy_fly`, `prod deploy_ios` and `prod deploy_android` run the same
+# bin/deploy_*.sh scripts as the board's Deploy stage.
 
 set -euo pipefail
 
@@ -157,23 +158,13 @@ Next:
        mix test test/relay/boards_templates_test.exs test/relay/boards_template_export_test.exs test/relay/examples_test.exs
   3. Commit, push and merge to main.
   4. Deploy, so "New board" uses the new templates:
-       prod deploy
+       prod deploy_fly
 EOF
 }
 
-# @cmd Deploy HEAD to Fly and wait until the board serves it.
-#
-# Runs bin/deploy_fly.sh, the board's Deploy stage step: needs FLY_API_TOKEN (from
-# .envrc.local), skips when HEAD is already live, and polls the live version until it is HEAD.
-# Fly only; iOS and Android ship through bin/deploy_ios.sh / bin/deploy_android.sh.
-#
-# Fly builds from this working tree but stamps HEAD's SHA, so uncommitted changes to tracked
-# files would ship under a SHA that doesn't contain them: refused unless --dirty. A HEAD that
-# isn't on origin/main (as last fetched) gets a warning, since the board deploys main.
-# @flag --dirty Deploy even with uncommitted changes to tracked files.
-# @flag -y --yes Skip the confirmation prompt.
-deploy() {
-  need flyctl "Install it and run 'fly auth login'."
+# Refuse a dirty tree (unless --dirty) and warn when HEAD isn't on origin/main. Every deploy
+# ships HEAD: uncommitted changes would go out under a SHA that doesn't contain them.
+check_head() {
   if [[ "${argc_dirty:-0}" != 1 ]] && ! git diff --quiet HEAD; then
     git --no-pager diff --stat HEAD >&2
     echo "Uncommitted changes to tracked files (above) would ship under HEAD's SHA. Commit or stash them, or pass --dirty." >&2
@@ -182,8 +173,52 @@ deploy() {
   if ! git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
     echo "Warning: HEAD isn't on origin/main (as last fetched). Push and merge first unless you mean to deploy a branch."
   fi
+}
+
+# @cmd Deploy HEAD to Fly and wait until the board serves it.
+#
+# Runs bin/deploy_fly.sh, the board's Deploy stage step: needs FLY_API_TOKEN (from
+# .envrc.local), skips when HEAD is already live, and polls the live version until it is HEAD.
+#
+# Fly builds from this working tree but stamps HEAD's SHA, so uncommitted changes to tracked
+# files would ship under a SHA that doesn't contain them: refused unless --dirty. A HEAD that
+# isn't on origin/main (as last fetched) gets a warning, since the board deploys main.
+# @flag --dirty Deploy even with uncommitted changes to tracked files.
+# @flag -y --yes Skip the confirmation prompt.
+deploy_fly() {
+  need flyctl "Install it and run 'fly auth login'."
+  check_head
   confirm "deploy $(git log -1 --format='%h %s' HEAD) to $ENV_NAME (Fly app: $APP)."
   exec bin/deploy_fly.sh
+}
+
+# @cmd Build HEAD and upload it to TestFlight.
+#
+# Runs `bin/deploy_ios.sh --head`, the board's Deploy stage iOS step, minus its "did the card
+# touch flutter/?" check: validate, next build number, build + sign (read-only match), upload,
+# then external distribution unless TESTFLIGHT_EXTERNAL=false. Needs the App Store Connect and
+# match secrets from .envrc.local. Same --dirty / origin/main guards as deploy_fly.
+# @flag --dirty Deploy even with uncommitted changes to tracked files.
+# @flag -y --yes Skip the confirmation prompt.
+deploy_ios() {
+  need fastlane "Run 'mise install' in the repo."
+  check_head
+  confirm "upload $(git log -1 --format='%h %s' HEAD) to TestFlight."
+  exec bin/deploy_ios.sh --head
+}
+
+# @cmd Build HEAD and upload it to Google Play's internal track.
+#
+# Runs `bin/deploy_android.sh --head`, the board's Deploy stage Android step, minus its "did the
+# card touch flutter/?" check. Skips cleanly while the Android credentials aren't configured
+# (RLY-103). Same --dirty / origin/main guards as deploy_fly.
+# @flag --dirty Deploy even with uncommitted changes to tracked files.
+# @flag -y --yes Skip the confirmation prompt.
+deploy_android() {
+  need fastlane "Run 'mise install' in the repo."
+  check_head
+  confirm "upload $(git log -1 --format='%h %s' HEAD) to Google Play internal testing."
+  exec bin/deploy_android.sh --head
 }
 
 command -v argc >/dev/null || {

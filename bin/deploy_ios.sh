@@ -2,6 +2,7 @@
 # Ship a card's Flutter change to TestFlight. The Deploy flow's iOS step.
 #
 #   bin/deploy_ios.sh <REF>        (run from the repo root, on origin/main)
+#   bin/deploy_ios.sh --head       (by hand, via `prod deploy_ios`: ship the checkout as-is)
 #
 # 1. Skips (exit 0) when the card's commit on main didn't touch flutter/ — BEFORE looking at any
 #    secret, so a web-only card never fails on missing mobile credentials.
@@ -25,12 +26,16 @@ fail() {
 
 ref="${1:-}"
 if [ -z "$ref" ]; then
-  echo "usage: bin/deploy_ios.sh <REF>" >&2
+  echo "usage: bin/deploy_ios.sh <REF> | --head" >&2
   exit 2
 fi
 
 touched=0
-"$(dirname "$0")/card_touched_flutter.sh" "$ref" || touched=$?
+if [ "$ref" = --head ]; then
+  ref=HEAD
+else
+  "$(dirname "$0")/card_touched_flutter.sh" "$ref" || touched=$?
+fi
 case "$touched" in
   0) ;;
   1)

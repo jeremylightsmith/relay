@@ -2,6 +2,7 @@
 # Ship a card's Flutter change to Google Play's internal track. The Deploy flow's Android step.
 #
 #   bin/deploy_android.sh <REF>        (run from the repo root, on origin/main)
+#   bin/deploy_android.sh --head       (by hand, via `prod deploy_android`: ship the checkout as-is)
 #
 # 1. Skips (exit 0) when the card's commit on main didn't touch flutter/.
 # 2. Skips (exit 0) while the Android credentials don't exist yet (RLY-103): any one unset or
@@ -23,12 +24,16 @@ fail() {
 
 ref="${1:-}"
 if [ -z "$ref" ]; then
-  echo "usage: bin/deploy_android.sh <REF>" >&2
+  echo "usage: bin/deploy_android.sh <REF> | --head" >&2
   exit 2
 fi
 
 touched=0
-"$(dirname "$0")/card_touched_flutter.sh" "$ref" || touched=$?
+if [ "$ref" = --head ]; then
+  ref=HEAD
+else
+  "$(dirname "$0")/card_touched_flutter.sh" "$ref" || touched=$?
+fi
 case "$touched" in
   0) ;;
   1)

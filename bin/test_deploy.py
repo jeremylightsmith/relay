@@ -692,6 +692,14 @@ class DeployIosTest(DeployCase):
         self.assertIn(IOS_SKIP, result.stdout)
         self.assertEqual(self.commands(), [])
 
+    def test_head_ships_the_checkout_without_a_card_check(self):
+        self.ship_card(flutter=False)
+        result = self.run_deploy(DEPLOY_IOS, ["--head"], self.full_env())
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertNotIn("skipping iOS", result.stdout)
+        self.assertIn("fastlane deploy", self.commands())
+        self.assertIn("deploy_ios: shipped HEAD to TestFlight as 1.2.3 (42)", result.stdout)
+
     def test_missing_and_empty_variables_are_all_named(self):
         self.ship_card(flutter=True)
         env = dict(IOS_VARS, MATCH_PASSWORD="")
@@ -766,6 +774,14 @@ class DeployAndroidTest(DeployCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn(ANDROID_SKIP, result.stdout)
         self.assertEqual(self.commands(), [])
+
+    def test_head_ships_the_checkout_without_a_card_check(self):
+        self.ship_card(flutter=False)
+        result = self.run_deploy(DEPLOY_ANDROID, ["--head"], dict(ANDROID_VARS, STUB_BUILD_NUMBER="17"))
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertNotIn("skipping Android", result.stdout)
+        self.assertIn("fastlane deploy", self.commands())
+        self.assertIn("deploy_android: shipped HEAD to Google Play internal testing as build 17", result.stdout)
 
     def test_an_empty_credential_skips_the_play_deploy(self):
         self.ship_card(flutter=True)
