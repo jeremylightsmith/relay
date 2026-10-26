@@ -364,7 +364,7 @@ defmodule RelayWeb.BoardsLiveTest do
       assert has_element?(view, "#template-picker-upgrade", "Free includes one board.")
       assert has_element?(view, "#template-picker-upgrade", "Upgrade for unlimited boards, $20/mo.")
       assert has_element?(view, "#template-picker-cancel")
-      refute has_element?(view, "#template-picker-upgrade-link")
+      refute has_element?(view, "#template-picker-upgrade-create")
     end
 
     # RE471 — the one-time "Which board stays editable?" dialog.

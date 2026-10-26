@@ -38,6 +38,7 @@ defmodule RelayWeb.BillingLive do
 
   use RelayWeb, :live_view
 
+  alias Phoenix.LiveView.Socket
   alias Relay.Billing
   alias Relay.Billing.Standing
   alias RelayWeb.CoreComponents
@@ -406,7 +407,7 @@ defmodule RelayWeb.BillingLive do
   defp to_checkout(socket) do
     case Billing.setup_checkout_url(socket.assigns.current_scope.user, url(~p"/account/billing")) do
       {:ok, checkout_url} -> redirect(socket, external: checkout_url)
-      {:error, _reason} -> put_flash(socket, :error, "We couldn't open checkout. Try again.")
+      {:error, _reason} -> put_flash(socket, :error, checkout_failed_message())
     end
   end
 
@@ -477,16 +478,28 @@ defmodule RelayWeb.BillingLive do
   defp months(1), do: "1 month"
   defp months(n), do: "#{n} months"
 
-  defp put_setup_flash(socket, {:ok, %{charged: :paid}}),
-    do: put_flash(socket, :info, "Card saved and charged. Your boards are editable.")
+  @doc "Puts `setup_flash/1`'s flash for a setup Checkout's `outcome` on `socket`."
+  @spec put_setup_flash(Socket.t(), {:ok, map()} | {:error, term()}) :: Socket.t()
+  def put_setup_flash(socket, outcome) do
+    {kind, message} = setup_flash(outcome)
+    put_flash(socket, kind, message)
+  end
 
-  defp put_setup_flash(socket, {:ok, %{charged: :none}}), do: put_flash(socket, :info, "Card saved.")
-  defp put_setup_flash(socket, {:ok, %{charged: :declined}}), do: put_flash(socket, :error, "That card was declined.")
+  @doc """
+  The flash for a setup Checkout's outcome (`Relay.Billing.complete_setup/3`) — one copy, shown by
+  this page's return and by `RelayWeb.BoardsLive`'s Upgrade-and-create return (RE472).
+  """
+  @spec setup_flash({:ok, %{charged: :none | :paid | :declined | :unknown}} | {:error, term()}) ::
+          {:info | :error, String.t()}
+  def setup_flash({:ok, %{charged: :paid}}), do: {:info, "Card saved and charged. Your boards are editable."}
+  def setup_flash({:ok, %{charged: :none}}), do: {:info, "Card saved."}
+  def setup_flash({:ok, %{charged: :declined}}), do: {:error, "That card was declined."}
+  def setup_flash({:ok, %{charged: :unknown}}), do: {:info, "Card saved. We're confirming the charge with Stripe."}
+  def setup_flash({:error, _reason}), do: {:error, "We couldn't save that card."}
 
-  defp put_setup_flash(socket, {:ok, %{charged: :unknown}}),
-    do: put_flash(socket, :info, "Card saved. We're confirming the charge with Stripe.")
-
-  defp put_setup_flash(socket, {:error, _reason}), do: put_flash(socket, :error, "We couldn't save that card.")
+  @doc "The flash when the setup Checkout can't be opened — shared with `RelayWeb.BoardsLive` (RE472)."
+  @spec checkout_failed_message() :: String.t()
+  def checkout_failed_message, do: "We couldn't open checkout. Try again."
 
   defp badge_label(:free), do: "Free"
   defp badge_label(:active), do: "Active"

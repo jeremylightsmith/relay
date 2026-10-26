@@ -124,11 +124,10 @@ defmodule Storybook.TemplatePickerComponents.TemplatePicker do
             signed_in_as: "jeremy@example.com"
           }
         },
-        # RE469, card mockup "New board — picker opens, footer becomes Upgrade and create" (footer
-        # copy only — the button is a plain link to the Billing page).
+        # RE469 / RE472, card mockup "New board — picker opens, footer becomes Upgrade and create".
         %Variation{
           id: :at_free_limit,
-          description: "At the Free limit — the footer sells the upgrade instead of creating",
+          description: "At the Free limit — the footer names the board it will create and offers Upgrade and create",
           attributes: %{
             templates: templates,
             selected: "design-led",
@@ -136,7 +135,20 @@ defmodule Storybook.TemplatePickerComponents.TemplatePicker do
             key: "AC",
             upgrade_required: true,
             upgrade_price: "$20",
-            upgrade_href: "/account/billing"
+            upgrade_create: true
+          }
+        },
+        %Variation{
+          id: :at_free_limit_no_name,
+          description: "At the Free limit with no name typed — no We'll create sentence, Upgrade and create disabled",
+          attributes: %{
+            templates: templates,
+            selected: "design-led",
+            name: "",
+            key: "",
+            upgrade_required: true,
+            upgrade_price: "$20",
+            upgrade_create: true
           }
         }
       ]

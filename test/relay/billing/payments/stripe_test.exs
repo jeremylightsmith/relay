@@ -118,6 +118,21 @@ defmodule Relay.Billing.Payments.StripeTest do
              } = session
     end
 
+    test "keeps a return URL's query, appending setup= with &" do
+      stub(200, %{"id" => "cs_1", "url" => "https://checkout.stripe.com/c/cs_1"})
+      user = %Schemas.User{id: 5, name: "Ada", email: "ada@example.com"}
+
+      assert {:ok, %{url: "https://checkout.stripe.com/c/cs_1"}} =
+               Stripe.create_setup_checkout("cus_known", user, "https://relay.test/boards?pending=abc.def")
+
+      assert_received {:stripe_request, "POST", "/v1/checkout/sessions", _headers, session}
+
+      assert %{
+               "success_url" => "https://relay.test/boards?pending=abc.def&setup={CHECKOUT_SESSION_ID}",
+               "cancel_url" => "https://relay.test/boards?pending=abc.def"
+             } = session
+    end
+
     test "reuses a known customer" do
       stub(200, %{"id" => "cs_1", "url" => "https://checkout.stripe.com/c/cs_1"})
       user = %Schemas.User{id: 5, name: "Ada", email: "ada@example.com"}

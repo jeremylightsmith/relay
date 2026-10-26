@@ -452,10 +452,12 @@ defmodule RelayWeb.BoardsLiveTemplatePickerTest do
       fill_identity(view)
 
       assert has_element?(view, "#template-picker-upgrade", "Free includes one board.")
-      assert has_element?(view, "#template-picker-upgrade", "Upgrade for unlimited boards, $20/mo.")
+      assert view |> element("#template-picker-upgrade-name") |> render() =~ ">Second</b>"
+      assert view |> element("#template-picker-upgrade-source") |> render() =~ ">Bare minimum</b>"
       assert has_element?(view, "#template-picker-cancel")
-      assert has_element?(view, ~s(#template-picker-upgrade-link[href="/account/billing"]), "Upgrade →")
+      assert has_element?(view, "#template-picker-upgrade-create", "Upgrade and create →")
       refute has_element?(view, "#template-picker-create")
+      refute has_element?(view, "#template-picker-upgrade-link")
     end
 
     test "7. a create that bypasses the footer is refused and inserts nothing", %{conn: conn, user: user} do

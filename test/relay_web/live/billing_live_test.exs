@@ -671,4 +671,9 @@ defmodule RelayWeb.BillingLiveTest do
       assert has_element?(view, "#billing-upgrade-button", "Upgrade")
     end
   end
+
+  # RE472: the setup-outcome copy is one public function BoardsLive's Checkout return shares.
+  test "setup_flash/1 answers a declined card with its error copy" do
+    assert RelayWeb.BillingLive.setup_flash({:ok, %{charged: :declined}}) == {:error, "That card was declined."}
+  end
 end

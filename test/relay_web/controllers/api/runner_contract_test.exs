@@ -33,7 +33,7 @@ defmodule RelayWeb.Api.RunnerContractTest do
   end
 
   test "the committed fixture matches what /api/node-jobs/* actually sends and accepts" do
-    user = insert(:user)
+    user = insert(:user, name: "Test User")
 
     shared = board_with_flow(user, "Contract A", "CA", :shared_clean, agent_node())
     exclusive = board_with_flow(user, "Contract B", "CB", :exclusive, shell_node())

@@ -324,6 +324,49 @@ defmodule Relay.Boards do
     end
   end
 
+  @doc """
+  What `create_board/2` would answer for `attrs`, without inserting anything (RE472): the same
+  attrs (`:name`, `:key`, `:template`, `:copy_from`, atom or string keys), resolved in the same
+  order — copy source, then template, then `Schemas.Board.changeset/2`. `{:error, :not_found}`
+  for a `copy_from` `user` can't resolve, `{:error, :unknown_template}` for an unknown template
+  slug, `{:error, changeset}` (action `:insert`, so its errors render) for a name or key the
+  changeset rejects, else `:ok`.
+  """
+  @spec validate_new_board(User.t(), map()) :: :ok | {:error, Changeset.t() | :unknown_template | :not_found}
+  def validate_new_board(%User{} = user, attrs) do
+    with {:ok, _source} <- user |> fetch_copy_source(attrs) |> or_error(:not_found),
+         {:ok, _template} <- attrs |> fetch_template() |> or_error(:unknown_template),
+         %Changeset{valid?: true} <- new_board_changeset(user, attrs) do
+      :ok
+    else
+      %Changeset{} = changeset -> {:error, Map.put(changeset, :action, :insert)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp or_error(:error, reason), do: {:error, reason}
+  defp or_error(ok, _reason), do: ok
+
+  @doc """
+  The newest board `user` owns (archived or not) whose name and card key are the ones
+  `create_board/2` would have stored for `attrs` (`:name`/`:key` as typed — trimmed and
+  normalized by `Schemas.Board.changeset/2`, the one place that rule lives), inserted at or after
+  `since` — nil when there is none (RE472: a replayed Checkout return finds the board it already
+  created instead of creating it twice).
+  """
+  @spec get_created_board(User.t(), %{name: String.t(), key: String.t()}, DateTime.t()) :: Board.t() | nil
+  def get_created_board(%User{id: user_id} = user, attrs, %DateTime{} = since) do
+    %{name: name, key: key} = new_board_identity(user, attrs)
+
+    Repo.one(
+      from(b in Board,
+        where: b.owner_id == ^user_id and b.name == ^name and b.key == ^key and b.inserted_at >= ^since,
+        order_by: [desc: b.inserted_at, desc: b.id],
+        limit: 1
+      )
+    )
+  end
+
   # `{:ok, nil}` when no `copy_from` is given; `:error` when it names no board `user` is a member of.
   defp fetch_copy_source(user, attrs) do
     case Map.get(attrs, :copy_from) || Map.get(attrs, "copy_from") do
@@ -421,15 +464,26 @@ defmodule Relay.Boards do
     end
   end
 
-  defp insert_board(user, attrs, template) do
+  # The one new-board changeset — what `insert_board/3` inserts and `validate_new_board/2` checks.
+  defp new_board_changeset(user, attrs) do
     name = fetch_name(attrs)
 
-    changeset =
-      Board.changeset(%Board{owner_id: user.id}, %{
-        name: name,
-        slug: Map.get(attrs, :slug) || unique_slug(slugify(name)),
-        key: Map.get(attrs, :key) || derive_key(name)
-      })
+    Board.changeset(%Board{owner_id: user.id}, %{
+      name: name,
+      slug: Map.get(attrs, :slug) || unique_slug(slugify(name)),
+      key: Map.get(attrs, :key) || derive_key(name)
+    })
+  end
+
+  # The name and key `new_board_changeset/2` would store for `attrs` — the same changeset, given a
+  # placeholder slug so no uniqueness lookup runs.
+  defp new_board_identity(user, attrs) do
+    changeset = new_board_changeset(user, Map.put(attrs, :slug, "pending"))
+    %{name: Changeset.get_field(changeset, :name), key: Changeset.get_field(changeset, :key)}
+  end
+
+  defp insert_board(user, attrs, template) do
+    changeset = new_board_changeset(user, attrs)
 
     Repo.transaction(fn ->
       case Repo.insert(changeset) do

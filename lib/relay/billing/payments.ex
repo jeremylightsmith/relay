@@ -68,6 +68,17 @@ defmodule Relay.Billing.Payments do
               attempt :: %{id: pos_integer(), inserted_at: DateTime.t()}
             ) :: {:ok, found()} | {:ok, :none} | {:error, term()}
 
+  @doc """
+  `return_url` with `setup=<setup_id>` appended — `?setup=…` when it has no query, `&setup=…`
+  when it already carries one (RE472: `/boards?pending=<token>`). `setup_id` goes in verbatim,
+  never percent-encoded, so Stripe's literal `{CHECKOUT_SESSION_ID}` survives for it to fill in.
+  """
+  @spec with_setup_param(String.t(), String.t()) :: String.t()
+  def with_setup_param(return_url, setup_id) do
+    separator = if String.contains?(return_url, "?"), do: "&", else: "?"
+    return_url <> separator <> "setup=" <> setup_id
+  end
+
   @doc "The configured implementation: `:billing_payments`, `Payments.Stripe` by default."
   @spec impl() :: module()
   def impl, do: Relay.Config.get(:billing_payments, Relay.Billing.Payments.Stripe)

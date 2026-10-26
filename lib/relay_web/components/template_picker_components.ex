@@ -50,12 +50,18 @@ defmodule RelayWeb.TemplatePickerComponents do
   Story: `storybook/template_picker_components/template_picker.story.exs` — one variation per
   template selection, `:with_examples`, the copy variations `:copy_selected` and
   `:copy_no_boards`, the identity variations `:identity_empty`, `:identity_filled`,
-  `:identity_incomplete` and `:copy_identity_required`, `:first_run`, and `:at_free_limit`.
+  `:identity_incomplete` and `:copy_identity_required`, `:first_run`, `:at_free_limit` and `:at_free_limit_no_name`.
 
-  **At the Free limit** (RE469, `upgrade_required`): the footer becomes an upgrade panel — "Free
-  includes one board." and "Upgrade for unlimited boards, <upgrade_price>/mo." — with Cancel and,
-  when `upgrade_href` is set, an `Upgrade →` link in place of the Create button. The caller passes
-  the price; the component never reads `Relay.Billing` (it stays pure for Storybook).
+  **At the Free limit** (RE469, `upgrade_required`; RE472, card mockup "New board — picker opens,
+  footer becomes Upgrade and create"): the footer becomes an upgrade panel — "Free includes one
+  board." and "Upgrade for unlimited boards, <upgrade_price>/mo. We'll create **<name>** from
+  **<source>** as soon as you're back." (the sentence only once a name is typed; the source is the
+  selected template's name, or on the copy option the selected board's) — with Cancel and, when
+  `upgrade_create` is set, an **Upgrade and create →** button in place of Create. The button emits
+  `"upgrade_and_create"` (no params — `RelayWeb.BoardsLive` reads its own picker assigns) and is
+  disabled while the name is blank or the copy option has no source; an incomplete key leaves it
+  clickable so the server's validation reports it. The caller passes the price and `upgrade_create`;
+  the component never reads `Relay.Billing` (it stays pure for Storybook).
   """
 
   use RelayWeb, :html
@@ -112,9 +118,9 @@ defmodule RelayWeb.TemplatePickerComponents do
 
   attr :upgrade_price, :string, default: nil, doc: ~s(the monthly price the upgrade footer quotes, e.g. "$20")
 
-  attr :upgrade_href, :string,
-    default: nil,
-    doc: "where the footer's Upgrade → links; nil (embedded in the app, which sells nothing) drops the link"
+  attr :upgrade_create, :boolean,
+    default: false,
+    doc: "render the Upgrade and create → button; false when embedded in the app, which sells nothing"
 
   def template_picker(assigns) do
     copy? = assigns.selected == @copy_option
@@ -132,6 +138,10 @@ defmodule RelayWeb.TemplatePickerComponents do
         key_hint: key_hint(to_string(assigns.key), key_complete?, assigns.show_required, assigns.errors),
         create_label: create_label(copy?, source, name),
         create_disabled?: name == "" or not key_complete? or (copy? and is_nil(source)),
+        upgrade_name: name,
+        upgrade_source: upgrade_source(copy?, source, assigns.templates, assigns.selected),
+        # Unlike Create, an incomplete key stays clickable: the server validates it (RE472).
+        upgrade_disabled?: name == "" or (copy? and is_nil(source)),
         # nil drops the attribute, so first-run renders no way to close the picker.
         close_event: if(!assigns.first_run, do: "close_template_picker"),
         close_key: if(!assigns.first_run, do: "escape")
@@ -219,7 +229,10 @@ defmodule RelayWeb.TemplatePickerComponents do
               :if={@upgrade_required}
               id={@id}
               price={@upgrade_price}
-              href={@upgrade_href}
+              name={@upgrade_name}
+              source={@upgrade_source}
+              create?={@upgrade_create}
+              disabled?={@upgrade_disabled?}
             />
             <div
               :if={not @upgrade_required}
@@ -265,10 +278,12 @@ defmodule RelayWeb.TemplatePickerComponents do
 
   attr :id, :string, required: true
   attr :price, :string, required: true
-  attr :href, :string, default: nil
+  attr :name, :string, required: true, doc: "the trimmed board name; blank drops the We'll create sentence"
+  attr :source, :string, default: nil, doc: "the template's or copy source's name"
+  attr :create?, :boolean, required: true
+  attr :disabled?, :boolean, required: true
 
-  # RE469 — card mockup "New board — picker opens, footer becomes Upgrade and create" (footer copy
-  # only: Upgrade is a plain link to the Billing page; Upgrade-and-create is RE472).
+  # RE469 / RE472 — card mockup "New board — picker opens, footer becomes Upgrade and create".
   defp upgrade_footer(assigns) do
     ~H"""
     <div
@@ -281,7 +296,12 @@ defmodule RelayWeb.TemplatePickerComponents do
       </span>
       <div class="flex-1 text-sm">
         <div class="font-semibold">Free includes one board.</div>
-        <div class="text-base-content/65">Upgrade for unlimited boards, {@price}/mo.</div>
+        <div class="text-base-content/65">
+          Upgrade for unlimited boards, {@price}/mo.<span :if={@name != "" and @source}>
+            We'll create <b id={"#{@id}-upgrade-name"}>{@name}</b>
+            from <b id={"#{@id}-upgrade-source"}>{@source}</b>
+            as soon as you're back.</span>
+        </div>
       </div>
       <div class="flex gap-2">
         <button
@@ -292,14 +312,16 @@ defmodule RelayWeb.TemplatePickerComponents do
         >
           Cancel
         </button>
-        <.link
-          :if={@href}
-          navigate={@href}
-          id={"#{@id}-upgrade-link"}
+        <button
+          :if={@create?}
+          type="button"
+          id={"#{@id}-upgrade-create"}
+          phx-click="upgrade_and_create"
           class="btn btn-primary btn-sm flex-1 sm:flex-none"
+          disabled={@disabled?}
         >
-          Upgrade →
-        </.link>
+          Upgrade and create →
+        </button>
       </div>
     </div>
     """
@@ -644,6 +666,15 @@ defmodule RelayWeb.TemplatePickerComponents do
       </span>
     </label>
     """
+  end
+
+  defp upgrade_source(true = _copy?, source, _templates, _selected), do: source && source.name
+
+  defp upgrade_source(false, _source, templates, selected) do
+    case Enum.find(templates, &(&1.slug == selected)) do
+      nil -> nil
+      template -> template.name
+    end
   end
 
   defp create_label(true = _copy?, nil = _source, _name), do: "Copy a board"

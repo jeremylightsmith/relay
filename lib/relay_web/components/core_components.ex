@@ -72,12 +72,14 @@ defmodule RelayWeb.CoreComponents do
     assigns = assign_new(assigns, :id, fn -> "flash-#{assigns.kind}" end)
 
     ~H"""
+    <%!-- z-[52] sits above the template picker's z-[51] overlay (RE472): a declined
+    Checkout reopens the picker and flashes the reason, which must stay readable. --%>
     <div
       :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
       id={@id}
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
-      class="toast toast-top toast-end z-50"
+      class="toast toast-top toast-end z-[52]"
       {@rest}
     >
       <div class={[

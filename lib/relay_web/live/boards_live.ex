@@ -43,6 +43,17 @@ defmodule RelayWeb.BoardsLive do
   (`Relay.Billing.choose_free_board/2`; an id outside `@free_status.boards` flashes a refusal)
   and marks the prompt shown, `close_free_board_dialog` (✕, Escape, backdrop) only marks it
   shown. A `{:billing_changed, _}` that makes the prompt false (answered elsewhere) closes it.
+
+  RE472 — Upgrade and create: at the limit the footer's **Upgrade and create →**
+  (`upgrade_and_create`) validates the typed board exactly as Create does
+  (`Boards.validate_new_board/2`; errors show the same way), then upgrades in place on a $0 next
+  charge and creates, or sends the owner to the setup Checkout carrying the board in a signed
+  `RelayWeb.PendingBoard` token (`/boards?pending=<token>`). The return (`&setup=<id>`, connected
+  mount only) completes the setup, then opens a board the token already created (a replay), else
+  creates and opens it — "Upgraded. <name> is ready." — if the owner can now add one, else
+  reopens the picker prefilled under the Billing page's setup flash. A bad token creates nothing.
+  `?pending=` alone (a cancelled Checkout) reopens the picker prefilled. Embedded, the app sells
+  nothing: no button, and the event is refused.
   """
 
   use RelayWeb, :live_view
@@ -51,8 +62,10 @@ defmodule RelayWeb.BoardsLive do
   alias Relay.Boards
   alias Relay.Cards
   alias Relay.Members
+  alias RelayWeb.BillingLive
   alias RelayWeb.CoreComponents
   alias RelayWeb.FreeBoardComponents
+  alias RelayWeb.PendingBoard
   alias RelayWeb.TemplatePickerComponents
   alias RelayWeb.TimeAgo
   alias Schemas.Board
@@ -301,7 +314,7 @@ defmodule RelayWeb.BoardsLive do
           signed_in_as={@current_scope.user.email}
           upgrade_required={@picker_at_limit?}
           upgrade_price={Billing.format_dollars(Billing.price_cents())}
-          upgrade_href={if(@embed, do: nil, else: ~p"/account/billing")}
+          upgrade_create={not @embed}
         />
       </.first_run_picker>
 
@@ -359,7 +372,10 @@ defmodule RelayWeb.BoardsLive do
   end
 
   # RE442: `?template=<slug>` deep-links straight into the picker with that template selected;
-  # a slug that names no template leaves the picker as it was.
+  # a slug that names no template leaves the picker as it was. RE472: `?pending=<token>` (with
+  # `setup=<id>` after Checkout, without it when the owner backed out) is the Upgrade-and-create
+  # return — handled on the connected mount only (the dead render would complete the setup twice
+  # and race the connected mount's create), then patched away.
   @impl true
   def handle_params(params, _uri, socket) do
     socket = assign(socket, :from, params["from"])
@@ -369,7 +385,13 @@ defmodule RelayWeb.BoardsLive do
         do: assign(socket, picker_open?: true, picker_template: params["template"]),
         else: socket
 
-    {:noreply, socket}
+    case params do
+      %{"pending" => token} when is_binary(token) ->
+        if connected?(socket), do: pending_return(socket, token, params["setup"]), else: {:noreply, socket}
+
+      _no_pending ->
+        {:noreply, socket}
+    end
   end
 
   @impl true
@@ -410,16 +432,16 @@ defmodule RelayWeb.BoardsLive do
   # that doesn't exist, so both read the same flash.
   # RE455: the typed name and key travel as typed; `Schemas.Board.changeset/2` is the authority.
   def handle_event("create_from_template", params, socket) do
-    slug = params["template"] || socket.assigns.picker_template
-    name = params["name"] || socket.assigns.picker_name
-    key = params["key"] || socket.assigns.picker_key
+    {socket, attrs} = picker_submission(socket, params)
+    create_board(socket, attrs)
+  end
 
-    socket = assign(socket, picker_name: name, picker_key: key, picker_touched?: true)
-    identity = %{name: name, key: key}
-
-    if slug == TemplatePickerComponents.copy_option(),
-      do: create_board(socket, Map.put(identity, :copy_from, params["copy_from"] || socket.assigns.picker_copy_from)),
-      else: create_board(socket, Map.put(identity, :template, slug))
+  # RE472 — at the Free limit: validate exactly as Create does, then upgrade in place on a $0 next
+  # charge, or send the owner through the setup Checkout carrying the board in a signed token.
+  # Embedded, the app sells nothing: the footer has no button and a forged event is refused.
+  def handle_event("upgrade_and_create", params, socket) do
+    {socket, attrs} = picker_submission(socket, params)
+    upgrade_and_create(socket, attrs)
   end
 
   # RE395: sets the negation of the tile's current star (set_starred/3 sets, it doesn't
@@ -598,6 +620,22 @@ defmodule RelayWeb.BoardsLive do
     )
   end
 
+  # The picker's submission as `Boards.create_board/2` attrs: the submitted radio wins, else the
+  # selected assign — for the template and, when copying, for the source; the typed name and key
+  # travel as typed.
+  defp picker_submission(socket, params) do
+    slug = params["template"] || socket.assigns.picker_template
+    name = params["name"] || socket.assigns.picker_name
+    key = params["key"] || socket.assigns.picker_key
+
+    socket = assign(socket, picker_name: name, picker_key: key, picker_touched?: true)
+    identity = %{name: name, key: key}
+
+    if slug == TemplatePickerComponents.copy_option(),
+      do: {socket, Map.put(identity, :copy_from, params["copy_from"] || socket.assigns.picker_copy_from)},
+      else: {socket, Map.put(identity, :template, slug)}
+  end
+
   defp known_template?(socket, slug), do: Enum.any?(socket.assigns.templates, &(&1.slug == slug))
 
   defp copy_source_or(socket, slug) do
@@ -623,29 +661,153 @@ defmodule RelayWeb.BoardsLive do
   defp do_create_board(socket, user, attrs) do
     case Boards.create_board(user, attrs) do
       # RE443: a new board opens on the board itself, where its setup wizard lives.
+      {:ok, board} -> {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}")}
+      {:error, reason} -> {:noreply, put_create_error(socket, reason)}
+    end
+  end
+
+  # How the picker reports a board `Boards.create_board/2` (or its validate-only twin) refused:
+  # the template or copy source gone flashes; RE455's name/key messages show inline under their
+  # fields, anything else (in practice nothing — the slug always derives) flashes. The picker stays
+  # open either way.
+  defp put_create_error(socket, :unknown_template),
+    do: put_flash(socket, :error, "That template no longer exists. Pick another.")
+
+  defp put_create_error(socket, :not_found), do: put_flash(socket, :error, @copy_refused)
+
+  defp put_create_error(socket, %Ecto.Changeset{} = changeset) do
+    errors =
+      changeset
+      |> Ecto.Changeset.traverse_errors(&CoreComponents.translate_error/1)
+      |> Map.take([:name, :key])
+
+    socket = assign(socket, :picker_errors, errors)
+
+    if errors == %{},
+      do: put_flash(socket, :error, "Couldn't create that board. Check the name and key."),
+      else: socket
+  end
+
+  defp upgrade_and_create(%{assigns: %{embed: true}} = socket, _attrs),
+    do: {:noreply, put_flash(socket, :error, @create_refused)}
+
+  defp upgrade_and_create(socket, %{copy_from: nil}), do: {:noreply, put_flash(socket, :error, @copy_refused)}
+
+  defp upgrade_and_create(socket, attrs) do
+    user = socket.assigns.current_scope.user
+
+    case Boards.validate_new_board(user, attrs) do
+      {:error, reason} ->
+        {:noreply, put_create_error(socket, reason)}
+
+      # The standing changed under the page (paid elsewhere, a board archived): plain Create.
+      :ok ->
+        if Billing.can_add_board?(user),
+          do: do_create_board(socket, user, attrs),
+          else: upgrade_then_create(socket, user, attrs)
+    end
+  end
+
+  defp upgrade_then_create(socket, user, attrs) do
+    case Billing.upgrade_without_card(user, Date.utc_today()) do
+      {:ok, :paid} ->
+        create_upgraded(socket, user, attrs)
+
+      {:error, :checkout_required} ->
+        return_url = url(~p"/boards?pending=#{PendingBoard.sign(user, attrs)}")
+
+        case Billing.setup_checkout_url(user, return_url) do
+          {:ok, checkout_url} -> {:noreply, redirect(socket, external: checkout_url)}
+          {:error, _reason} -> {:noreply, put_flash(socket, :error, BillingLive.checkout_failed_message())}
+        end
+    end
+  end
+
+  defp create_upgraded(socket, user, attrs) do
+    {_created_or_refused, socket} = create_upgraded_board(socket, user, attrs)
+    {:noreply, socket}
+  end
+
+  # The owner just upgraded: create the board and open it with the one success flash. A refusal
+  # (template removed, copy source gone, a changeset) stays on the picker like Create's.
+  defp create_upgraded_board(socket, user, attrs) do
+    case Boards.create_board(user, attrs) do
       {:ok, board} ->
+        {:ok,
+         socket
+         |> put_flash(:info, "Upgraded. #{board.name} is ready.")
+         |> push_navigate(to: ~p"/board/#{board.slug}")}
+
+      {:error, reason} ->
+        {:error, put_create_error(socket, reason)}
+    end
+  end
+
+  # The owner backed out of Checkout (Stripe's cancel_url): reopen what they'd typed, no flash.
+  defp pending_return(socket, token, nil = _setup_id) do
+    socket =
+      case PendingBoard.verify(token, socket.assigns.current_scope.user) do
+        {:ok, pending} -> prefill_picker(socket, pending)
+        {:error, _reason} -> socket
+      end
+
+    {:noreply, push_patch(socket, to: ~p"/boards")}
+  end
+
+  # Back from Checkout: complete the setup, then create the board only if the owner can now add
+  # one — checked after the replay rule, since the first return already made them unlimited.
+  defp pending_return(socket, token, setup_id) do
+    user = socket.assigns.current_scope.user
+    outcome = Billing.complete_setup(setup_id, user.id, Date.utc_today())
+    socket = assign_free_limit(socket)
+
+    with {:ok, pending} <- PendingBoard.verify(token, user),
+         nil <- Boards.get_created_board(user, pending, DateTime.from_unix!(pending.issued_at)) do
+      if Billing.can_add_board?(user),
+        do: create_pending(socket, user, pending),
+        else:
+          {:noreply,
+           socket |> BillingLive.put_setup_flash(outcome) |> prefill_picker(pending) |> push_patch(to: ~p"/boards")}
+    else
+      %Board{} = board ->
         {:noreply, push_navigate(socket, to: ~p"/board/#{board.slug}")}
 
-      {:error, :unknown_template} ->
-        {:noreply, put_flash(socket, :error, "That template no longer exists. Pick another.")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, @copy_refused)}
-
-      # RE455: name/key messages show inline under their fields; anything else (in practice
-      # nothing — the slug always derives) flashes. The picker stays open either way.
-      {:error, %Ecto.Changeset{} = changeset} ->
-        errors =
-          changeset
-          |> Ecto.Changeset.traverse_errors(&CoreComponents.translate_error/1)
-          |> Map.take([:name, :key])
-
-        socket = assign(socket, :picker_errors, errors)
-
-        if errors == %{},
-          do: {:noreply, put_flash(socket, :error, "Couldn't create that board. Check the name and key.")},
-          else: {:noreply, socket}
+      {:error, _tampered_expired_or_wrong_user} ->
+        socket = socket |> BillingLive.put_setup_flash(outcome) |> assign(:picker_open?, true) |> reset_identity()
+        {:noreply, push_patch(socket, to: ~p"/boards")}
     end
+  end
+
+  # A refused create stays on the prefilled picker, with the Checkout query patched away.
+  defp create_pending(socket, user, pending) do
+    case socket |> prefill_picker(pending) |> create_upgraded_board(user, pending_attrs(pending)) do
+      {:ok, socket} -> {:noreply, socket}
+      {:error, socket} -> {:noreply, push_patch(socket, to: ~p"/boards")}
+    end
+  end
+
+  defp pending_attrs(%{template: nil} = pending), do: Map.take(pending, [:name, :key, :copy_from])
+  defp pending_attrs(pending), do: Map.take(pending, [:name, :key, :template])
+
+  # Reopens the picker on the pending board: its name, its (already typed) key, and its template
+  # — or the copy option on its source — wherever they still exist.
+  defp prefill_picker(socket, pending) do
+    template =
+      cond do
+        known_template?(socket, pending.template) -> pending.template
+        pending.copy_from -> TemplatePickerComponents.copy_option()
+        true -> socket.assigns.picker_template
+      end
+
+    socket
+    |> assign(:picker_open?, true)
+    |> reset_identity(pending.name)
+    |> assign(
+      picker_key: pending.key,
+      picker_key_touched?: true,
+      picker_template: template,
+      picker_copy_from: copy_source_or(socket, pending.copy_from)
+    )
   end
 
   # RE376: the summary facts come from the one domain definition the native switcher

@@ -12,6 +12,8 @@ defmodule Relay.Billing.Payments.Stripe do
 
   @behaviour Relay.Billing.Payments
 
+  alias Relay.Billing.Payments
+
   @api "https://api.stripe.com/v1"
 
   @impl true
@@ -24,7 +26,7 @@ defmodule Relay.Billing.Payments.Stripe do
         {"customer", customer_id},
         {"payment_method_types[0]", "card"},
         # Stripe fills in the literal `{CHECKOUT_SESSION_ID}` on the way back.
-        {"success_url", return_url <> "?setup={CHECKOUT_SESSION_ID}"},
+        {"success_url", Payments.with_setup_param(return_url, "{CHECKOUT_SESSION_ID}")},
         {"cancel_url", return_url},
         {"metadata[user_id]", to_string(user.id)},
         {"setup_intent_data[metadata][user_id]", to_string(user.id)}

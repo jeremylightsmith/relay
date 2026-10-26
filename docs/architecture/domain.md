@@ -63,6 +63,12 @@ sharing behavior.
   copy alike: the key follows the name (no fallback) until the user edits it, the
   `CardKeyInput` hook filters it while typing, both are passed through to `create_board/2`, and
   a changeset error keeps the picker open with the message under its field.
+  `validate_new_board/2` (RE472) answers what `create_board/2` would for the same attrs without
+  inserting — same resolution order (copy source → `:not_found`, template → `:unknown_template`,
+  then the one shared new-board changeset → `{:error, changeset}` with action `:insert`), else
+  `:ok`. `get_created_board/3` is the newest board a user owns (archived or not) with exactly
+  that name and key inserted at or after a given time, so a replayed Checkout return finds the
+  board it already created instead of creating a second.
   Stage structure (RE384): `create_stage/2` takes a category atom (Settings "+ Add") or an
   attrs map whose optional `before:` / `after:` anchor (a main stage on the board) places the
   new stage beside it and adopts its category; `place_stage/2` moves a main stage before/after
@@ -654,7 +660,10 @@ sharing behavior.
   `Charging.pending_overdue_minutes/0` (10) through `find_payment/3`, charges each due account in
   isolation, then notifies (`Notifier.notify_due/1`), answering `%{resolved:, charged:,
   notified:}` — there is no launch backfill; a no-op answering zeros while disabled.
-  `setup_checkout_url/2` starts Checkout (setup mode) and stores the new Stripe customer;
+  `setup_checkout_url/2` starts Checkout (setup mode) and stores the new Stripe customer; its
+  return URL may carry its own query (RE472: `/boards?pending=<token>`) — both `Payments` impls
+  append `setup=<id>` through `Payments.with_setup_param/2` (`&` after an existing query, the id
+  verbatim so Stripe's `{CHECKOUT_SESSION_ID}` survives), keeping that query intact;
   `handle_webhook_event/1` completes a setup from the verified Stripe webhook; `summary/2` is the
   Billing page's read (standing, `free` — `free_status/2` —, `upgrade_free?` — on Free with a $0
   next charge —, renewal, card, succeeded payments newest first — $0 ones included, with no
@@ -805,6 +814,20 @@ sharing behavior.
   stores the pick (`choose_free_board/2`) and `close_free_board_dialog` (✕, Escape, backdrop)
   keeps the computed default; both mark it prompted (`mark_free_board_prompted/1`), and a
   `{:billing_changed, _}` that turns the prompt false closes it. Members never see it.
+  re-derives on the viewer's `{:billing_changed, user_id}`. RE472: the footer's **Upgrade and
+  create →** (`"upgrade_and_create"`; absent and refused when embedded) validates the typed board
+  exactly as Create does (`Boards.validate_new_board/2`), then either upgrades in place on a $0
+  next charge (`upgrade_without_card/2` → create, open the board with "Upgraded. <name> is
+  ready.") or sends the owner through the setup Checkout with the board in a signed, one-day
+  `RelayWeb.PendingBoard` token (`Phoenix.Token` against the endpoint; nothing stored, never
+  trusted for another user) in the return URL, `/boards?pending=<token>`. On the connected mount
+  the return (`&setup=<id>`) runs `complete_setup/3` and then, in order: a board
+  `Boards.get_created_board/3` finds since the token's `issued_at` is opened (a replayed return
+  never creates twice — checked before `can_add_board?/1`, which the first return made true); an
+  owner who can now add a board gets it created and opened; one still limited (declined, unknown
+  charge, failed setup) gets the setup flash (`BillingLive.setup_flash/1`, the Billing page's own
+  copy) and the picker reopened prefilled; a bad token creates nothing and opens a blank picker.
+  `?pending=` without `setup` (Stripe's cancel URL) just reopens the picker prefilled.
 - **ApiKeys** — per-board agent credentials for the `/api` scope: any number of named keys
   per board (typically one per machine), each authenticating as Relay AI on its board.
   `list_keys/1` (oldest first), board-scoped `get_key!/2`, `create_key/3` (blank name →

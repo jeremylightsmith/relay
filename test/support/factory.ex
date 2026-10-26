@@ -10,7 +10,10 @@ defmodule Relay.Factory do
   def user_factory do
     %Schemas.User{
       email: sequence(:email, &"user#{&1}@example.com"),
-      name: "Test User",
+      # Unique per user: the default board's slug derives from the name, and `boards.slug` is a
+      # unique index — a shared name made concurrent async tests block on each other's
+      # uncommitted "test-user" board until the query timeout (Postgrex 57014) under load.
+      name: sequence(:user_name, &"Test User #{&1}"),
       avatar_url: "https://example.com/avatar.png",
       provider: "google",
       provider_uid: sequence(:provider_uid, &"google-uid-#{&1}")

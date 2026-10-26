@@ -425,4 +425,110 @@ defmodule RelayWeb.TemplatePickerComponentsTest do
 
     assert squish(doc, "#template-picker-title + p") =~ "start from a template or copy a board"
   end
+
+  describe "at the Free limit (RE472)" do
+    @limit_attrs [
+      templates: Relay.Boards.offered_templates(),
+      selected: "design-led",
+      name: "Acme Checkout",
+      key: "AC",
+      upgrade_required: true,
+      upgrade_price: "$20",
+      upgrade_create: true
+    ]
+
+    defp limit_picker(attrs \\ []), do: identity_picker(Keyword.merge(@limit_attrs, attrs))
+
+    defp copy_line(doc), do: squish(doc, "#template-picker-upgrade .text-base-content\\/65")
+
+    test "1. the footer names the board it will create and the template it starts from" do
+      doc = limit_picker()
+
+      assert text(doc, "#template-picker-upgrade .font-semibold") == "Free includes one board."
+
+      assert copy_line(doc) ==
+               "Upgrade for unlimited boards, $20/mo. We'll create Acme Checkout from Design-led as soon as you're back."
+
+      assert text(doc, "b#template-picker-upgrade-name") == "Acme Checkout"
+      assert text(doc, "b#template-picker-upgrade-source") == "Design-led"
+    end
+
+    test "2. Upgrade and create → is an enabled primary button beside Cancel, replacing Create" do
+      doc = limit_picker()
+
+      assert attr(doc, "#template-picker-upgrade-create", "type") == ["button"]
+      assert attr(doc, "#template-picker-upgrade-create", "phx-click") == ["upgrade_and_create"]
+
+      button = classes(doc, "#template-picker-upgrade-create")
+      for class <- ~w(btn btn-primary btn-sm flex-1 sm:flex-none), do: assert(class in button)
+
+      assert text(doc, "#template-picker-upgrade-create") == "Upgrade and create →"
+      assert present?(doc, "#template-picker-upgrade-create")
+      refute present?(doc, "#template-picker-upgrade-create[disabled]")
+      assert present?(doc, "#template-picker-cancel")
+      refute present?(doc, "#template-picker-create")
+      refute present?(doc, "#template-picker-upgrade-link")
+    end
+
+    test "3. with no name typed the copy drops the We'll create sentence and the button is disabled" do
+      doc = limit_picker(name: "   ")
+
+      assert copy_line(doc) == "Upgrade for unlimited boards, $20/mo."
+      refute present?(doc, "#template-picker-upgrade-name")
+      assert present?(doc, "#template-picker-upgrade-create[disabled]")
+    end
+
+    test "4. on the copy option the source is the selected board's name" do
+      doc =
+        limit_picker(
+          selected: "copy",
+          copy_sources: [%{slug: "src", name: "Payments", key: "PA", stages: 3, flows: 1, files: []}],
+          copy_from: "src"
+        )
+
+      assert text(doc, "#template-picker-upgrade-source") == "Payments"
+    end
+
+    test "5. on the copy option with no board to copy the button is disabled and nothing is promised" do
+      doc = limit_picker(selected: "copy", copy_sources: [])
+
+      assert present?(doc, "#template-picker-upgrade-create[disabled]")
+      refute copy_line(doc) =~ "We'll create"
+    end
+
+    test "6. an incomplete key leaves the button clickable for the server to validate" do
+      doc = limit_picker(name: "Acme", key: "A")
+
+      assert present?(doc, "#template-picker-upgrade-create")
+      refute present?(doc, "#template-picker-upgrade-create[disabled]")
+    end
+
+    test "7. embedded in the app the panel and Cancel render without Upgrade and create" do
+      doc = limit_picker(upgrade_create: false)
+
+      assert present?(doc, "#template-picker-upgrade")
+      assert present?(doc, "#template-picker-cancel")
+      refute present?(doc, "#template-picker-upgrade-create")
+    end
+  end
+
+  # RE472 smoke — a declined Checkout reopens the picker AND flashes "That card was
+  # declined."; the toast must stack above the picker overlay or it is unreadable.
+  test "the flash toast stacks above the picker overlay" do
+    z = fn doc, selector ->
+      [class] = doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class")
+      [_, n] = Regex.run(~r/(?:^|\s)z-\[?(\d+)\]?(?:\s|$)/, class)
+      String.to_integer(n)
+    end
+
+    overlay = z.(picker("bare-minimum"), "#template-picker > div.fixed")
+
+    flash =
+      (&RelayWeb.CoreComponents.flash/1)
+      |> render_component(kind: :error, flash: %{"error" => "That card was declined."})
+      |> LazyHTML.from_fragment()
+      |> z.("#flash-error")
+
+    assert flash > overlay
+  end
 end

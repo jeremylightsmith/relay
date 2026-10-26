@@ -732,6 +732,118 @@ defmodule Relay.BoardsTest do
     end
   end
 
+  describe "validate_new_board/2" do
+    test "answers :ok for attrs create_board/2 would accept, inserting nothing" do
+      user = insert(:user)
+      before = Repo.aggregate(Board, :count)
+
+      assert Boards.validate_new_board(user, %{name: "Acme Checkout", key: "AC", template: "design-led"}) == :ok
+      assert Repo.aggregate(Board, :count) == before
+    end
+
+    test "a bad key is the changeset create_board/2 rejects, inserting nothing" do
+      user = insert(:user)
+      attrs = %{name: "Acme", key: "A", template: "design-led"}
+      before = Repo.aggregate(Board, :count)
+
+      assert {:error, %Ecto.Changeset{} = changeset} = Boards.validate_new_board(user, attrs)
+      assert Repo.aggregate(Board, :count) == before
+      assert %{key: ["must be exactly 2 letters"]} = errors_on(changeset)
+      assert changeset.action == :insert
+
+      assert {:error, %Ecto.Changeset{} = created} = Boards.create_board(user, attrs)
+      assert errors_on(created).key == errors_on(changeset).key
+    end
+
+    test "a blank name is the :name error create_board/2 gives" do
+      user = insert(:user)
+      attrs = %{name: "", key: "AC", template: "design-led"}
+
+      assert {:error, %Ecto.Changeset{} = changeset} = Boards.validate_new_board(user, attrs)
+      assert {:error, %Ecto.Changeset{} = created} = Boards.create_board(user, attrs)
+      assert [_message | _rest] = errors_on(changeset).name
+      assert errors_on(changeset).name == errors_on(created).name
+    end
+
+    test "string-keyed attrs validate the same way" do
+      user = insert(:user)
+
+      assert Boards.validate_new_board(user, %{"name" => "Acme Checkout", "key" => "AC", "template" => "design-led"}) ==
+               :ok
+
+      assert {:error, %Ecto.Changeset{} = changeset} = Boards.validate_new_board(user, %{"name" => "", "key" => "AC"})
+      assert %{name: [_message | _rest]} = errors_on(changeset)
+    end
+
+    test "an unknown template is :unknown_template" do
+      user = insert(:user)
+
+      assert Boards.validate_new_board(user, %{name: "X", key: "XX", template: "no-such-template"}) ==
+               {:error, :unknown_template}
+    end
+
+    test "copy_from a board the user is not a member of is :not_found" do
+      user = insert(:user)
+      insert(:board, slug: "theirs")
+
+      assert Boards.validate_new_board(user, %{name: "X", key: "XX", copy_from: "theirs"}) == {:error, :not_found}
+    end
+
+    test "copy_from one of the user's own boards is :ok" do
+      user = insert(:user)
+      {:ok, own} = Boards.create_board(user, %{name: "Mine", key: "MI"})
+      before = Repo.aggregate(Board, :count)
+
+      assert Boards.validate_new_board(user, %{name: "X", key: "XX", copy_from: own.slug}) == :ok
+      assert Repo.aggregate(Board, :count) == before
+    end
+  end
+
+  describe "get_created_board/3" do
+    test "finds the board the user created since `since`" do
+      user = insert(:user)
+      since = DateTime.utc_now(:second)
+      {:ok, board} = Boards.create_board(user, %{name: "Acme Checkout", key: "AC"})
+
+      assert %Board{id: id} = Boards.get_created_board(user, %{name: "Acme Checkout", key: "AC"}, since)
+      assert id == board.id
+    end
+
+    test "matches the name and key as the changeset stored them, not as typed" do
+      user = insert(:user)
+      since = DateTime.utc_now(:second)
+      {:ok, board} = Boards.create_board(user, %{name: " Acme Checkout  ", key: "ac"})
+
+      assert %Board{id: id} = Boards.get_created_board(user, %{name: " Acme Checkout  ", key: "ac"}, since)
+      assert id == board.id
+    end
+
+    test "is nil for a matching board inserted before `since`" do
+      user = insert(:user)
+      since = DateTime.utc_now(:second)
+      earlier = DateTime.add(since, -3600, :second)
+      insert(:board, owner: user, name: "Acme Checkout", key: "AC", inserted_at: earlier, updated_at: earlier)
+
+      assert Boards.get_created_board(user, %{name: "Acme Checkout", key: "AC"}, since) == nil
+    end
+
+    test "is nil for a matching board another user owns" do
+      user = insert(:user)
+      since = DateTime.utc_now(:second)
+      {:ok, _theirs} = Boards.create_board(insert(:user), %{name: "Acme Checkout", key: "AC"})
+
+      assert Boards.get_created_board(user, %{name: "Acme Checkout", key: "AC"}, since) == nil
+    end
+
+    test "is nil for a board with the same name but another key" do
+      user = insert(:user)
+      since = DateTime.utc_now(:second)
+      {:ok, _board} = Boards.create_board(user, %{name: "Acme Checkout", key: "AK"})
+
+      assert Boards.get_created_board(user, %{name: "Acme Checkout", key: "AC"}, since) == nil
+    end
+  end
+
   describe "intake_stage/1" do
     test "is the first top-level stage by position, whatever it is named" do
       board = insert(:board)

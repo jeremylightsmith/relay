@@ -15,6 +15,8 @@ defmodule Relay.Billing.Payments.Local do
 
   @behaviour Relay.Billing.Payments
 
+  alias Relay.Billing.Payments
+
   @receipts "https://pay.stripe.com/receipts/local/"
 
   @cards %{
@@ -31,12 +33,17 @@ defmodule Relay.Billing.Payments.Local do
 
   @impl true
   def create_setup_checkout(_customer_id, user, return_url) do
-    path = URI.parse(return_url).path
+    # Path-only (the dev checkout only follows same-origin paths), keeping any query it carries.
+    path =
+      case URI.parse(return_url) do
+        %URI{path: path, query: nil} -> path
+        %URI{path: path, query: query} -> path <> "?" <> query
+      end
 
     query =
       URI.encode_query(%{
-        "succeed" => "#{path}?setup=local_4242_#{user.id}",
-        "decline" => "#{path}?setup=local_0341_#{user.id}"
+        "succeed" => Payments.with_setup_param(path, "local_4242_#{user.id}"),
+        "decline" => Payments.with_setup_param(path, "local_0341_#{user.id}")
       })
 
     url = return_url |> URI.merge("/dev/billing-checkout?" <> query) |> URI.to_string()
