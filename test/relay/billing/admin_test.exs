@@ -88,6 +88,13 @@ defmodule Relay.Billing.AdminTest do
       refute_received {:billing_changed, ^user_id}
     end
 
+    test "comping clears the Free prompt flag (RE471)", %{admin: admin, user: user} do
+      lapsed!(user, %{free_board_prompted_at: ~U[2026-06-01 12:00:00Z]})
+
+      assert {:ok, %BillingAccount{comped: true}} = Billing.admin_comp(user.id, admin, @today)
+      assert %BillingAccount{comped: true, free_board_prompted_at: nil} = reload(user)
+    end
+
     # Scenario 19
     test "creates a missing account, with no trial date, and comps it", %{admin: admin, user: user} do
       assert Billing.get_account(user) == nil

@@ -30,12 +30,12 @@ defmodule Relay.Billing.Admin do
   @spec extend_max_days() :: 365
   def extend_max_days, do: @extend_max_days
 
-  @doc "Comps the account (`comped: true`); refused when it already is."
+  @doc "Comps the account (`comped: true`, clearing the Free board prompt flag); refused when it already is."
   @spec comp(pos_integer(), User.t(), Date.t()) :: {:ok, BillingAccount.t()} | {:error, :already_comped}
   def comp(user_id, %User{} = actor, %Date{} = _today) do
     write(user_id, actor, fn
       %BillingAccount{comped: true} -> {:error, :already_comped}
-      _account -> {:ok, [comped: true], %{action: :comp}}
+      _account -> {:ok, [comped: true, free_board_prompted_at: nil], %{action: :comp}}
     end)
   end
 

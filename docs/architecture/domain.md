@@ -565,12 +565,24 @@ sharing behavior.
   cancelled, `:comped`); `paused?/1` only for the hold.
   **The Free limit:** `free_board_limit/0` (`1`) is THE definition. A **counted** board is owned,
   not archived (`archived_at IS NULL`) and not an example board (`example_template IS NULL`).
-  `editable_board_id/1` computes (never stores) the editable one — the counted board with the
-  greatest `coalesce(max(cards.updated_at), boards.updated_at)`, ties to the higher id, one
-  grouped query; with ≤ 1 counted board the only one is editable. A board is **read-only on
-  Free** when its owner's standing is `:free`, it is counted, and it is not the editable board.
-  `free_status/2` is the Free read model (`%{limit, boards: [%{id, slug, name, editable?}],
-  editable_board_id, over_limit?}`, editable first; nil unless enabled and `:free`).
+  `editable_board_id/1` is the editable one — **the owner's pick wins; otherwise most recently
+  active** (RE471): `billing_accounts.free_board_id` while that board is still counted, else the
+  counted board with the greatest `coalesce(max(cards.updated_at), boards.updated_at)`, ties to
+  the higher id, one grouped query (left-joined to the account); with ≤ 1 counted board the only
+  one is editable. A board is **read-only on Free** when its owner's standing is `:free`, it is
+  counted, and it is not the editable board.
+  `free_status/2` is the Free read model (`%{limit, boards: [%{id, slug, name, editable?,
+  active_at}], editable_board_id, over_limit?}` — `active_at` the same activity measure, a
+  `DateTime`; editable first, then by activity; nil unless enabled and `:free`).
+  **The pick** (RE471): `choose_free_board/2` sets `free_board_id` (creating the account if
+  missing) and broadcasts, in any standing and with no cooldown; it is refused `{:error,
+  :not_counted}` — nothing written or broadcast — unless the board is one of the owner's counted
+  boards. Nil (no backfill) means "most recently active"; an archived or transferred pick is
+  ignored, and deleting the board nilifies it (`on_delete: :nilify_all`). **The one-time prompt:**
+  `free_board_prompt?/2` is true only while enabled, exactly `:free`, over `free_board_limit/0`
+  counted boards, and `free_board_prompted_at` is nil; `mark_free_board_prompted/1` stamps it
+  (no broadcast). Leaving Free — a successful settle in `Charging` or a comp — clears the flag so
+  a later drop asks again; the pick survives.
   `can_add_board?/1` is the create / unarchive check — false only while enabled and the user is
   held, or on Free with `free_board_limit/0` counted boards already.
   **One gate:** `board_paused?/1` (a board or a board id) is THE check every write path honours —
@@ -584,7 +596,7 @@ sharing behavior.
   install never bills. `ensure_account/1` is get-or-create (`on_conflict: :nothing` on
   `user_id`) and writes no date — every new account stands on Free. `cancel/2` keeps unlimited
   boards through `paid_through`; `resume/2` clears the cancellation (billing date unchanged);
-  both broadcast `{:billing_changed, user_id}` on `billing:<user_id>`. Depends on Config, Mailer,
+  both broadcast `{:billing_changed, user_id}` on `billing:<user_id>`, as does a Free board pick. Depends on Config, Mailer,
   Repo and Schemas only — Accounts and Runs call in, so it never reaches Accounts, Boards, Cards
   or Runs; it counts a Free owner's boards by reading `Schemas.Board` and `Schemas.Card` directly.
   `Relay.Billing.Periods` (pure) is the billing-date arithmetic (`renews_on/3` clamps a day past
@@ -732,7 +744,13 @@ sharing behavior.
   `upgrade_without_card/2` instead) and completes the `?setup=<id>` return against the signed-in user.
   On Free it shows the board count against `free_board_limit/0` (`#billing-free-count`) and, over
   the limit, `#billing-free-over-limit-alert` with the counted boards and the editable one marked
-  (`#billing-free-boards`), then the **Upgrade** row (`#billing-upgrade`). It previews the next
+  (`#billing-free-boards`), then the **Upgrade** row (`#billing-upgrade`). Each read-only row
+  there has **Make editable…** (`#billing-free-board-<id>-make-editable`, RE471:
+  `"open_make_editable"` with `%{"board-id" => id}` opens
+  `RelayWeb.FreeBoardComponents.make_editable_confirm/1`; `"cancel_make_editable"` closes it;
+  `"confirm_make_editable"` → `choose_free_board/2`), with `#billing-free-boards-note` under the
+  list; an id not in `free_status/2`'s boards is refused with a flash
+  (`FreeBoardComponents.not_counted_message/0`). It previews the next
   charge (the upgrade's, or the active plan's `#billing-next-charge`) at `summary/2`'s discounted `amount_cents`, with the code's terms and
   the date the full price returns, and always shows a **Have a code?** form (`"apply_code"` →
   `redeem_code/3`; a refusal renders inline as the field error, its copy defined once in
@@ -761,9 +779,15 @@ sharing behavior.
   read-only on Free, get the archived board's read-only mode (`read_only?` guard,
   `#read-only-banner` with billing copy) plus no card opening and no Board settings link
   (`BoardSettingsLive` redirects back on `board_paused?/1`). On Free the banner names the
-  editable board to the owner (`#billing-free-read-only-owner`, with an **Upgrade** link
-  `#billing-free-upgrade`) and tells a member the owner is on Free
-  (`#billing-free-read-only-member`). **Restore** (unarchive) is refused by `can_add_board?/1`
+  editable board to the owner (`#billing-free-read-only-owner`, with **Make this the editable
+  one…** `#billing-free-make-editable` and an **Upgrade** link `#billing-free-upgrade`) and tells
+  a member the owner is on Free (`#billing-free-read-only-member`, no switch). RE471: the switch
+  sends `"open_make_editable"` (`@make_editable_confirm?`), the confirm's Cancel
+  `"cancel_make_editable"`, and its submit `"confirm_make_editable"` — acted on only for the
+  owner and only for the current board, via `choose_free_board/2`, whose
+  `{:billing_changed, _}` on the owner's topic flips every open session (the old editable board
+  goes read-only live; this one becomes writable). A member's forged confirm does nothing; a
+  mismatched or uncounted board id flashes `FreeBoardComponents.not_counted_message/0`. **Restore** (unarchive) is refused by `can_add_board?/1`
   at the limit; archiving (`BoardSettingsLive`) or restoring a board broadcasts on the owner's
   `billing:<user_id>` topic, since either moves them against the limit. Past due shows
   `#billing-past-due-banner` to the owner only, the board staying editable.
@@ -774,7 +798,13 @@ sharing behavior.
   line (`#boards-plan-line`, hidden when embedded), a READ-ONLY label on each of their boards
   read-only on Free, and — at the limit (`not can_add_board?/1`) — a picker footer that sells
   the upgrade instead of creating, with `create_from_template` refused server-side; it
-  re-derives on the viewer's `{:billing_changed, user_id}`.
+  re-derives on the viewer's `{:billing_changed, user_id}`. RE471: once per drop to Free, an
+  over-limit owner (`free_board_prompt?/2`, checked on mount) gets the "Which board stays
+  editable?" dialog (`#free-board-dialog`, `RelayWeb.FreeBoardComponents.free_board_dialog/1`)
+  with the editable board preselected. `select_free_board` moves the radio, `keep_free_board`
+  stores the pick (`choose_free_board/2`) and `close_free_board_dialog` (✕, Escape, backdrop)
+  keeps the computed default; both mark it prompted (`mark_free_board_prompted/1`), and a
+  `{:billing_changed, _}` that turns the prompt false closes it. Members never see it.
 - **ApiKeys** — per-board agent credentials for the `/api` scope: any number of named keys
   per board (typically one per machine), each authenticating as Relay AI on its board.
   `list_keys/1` (oldest first), board-scoped `get_key!/2`, `create_key/3` (blank name →

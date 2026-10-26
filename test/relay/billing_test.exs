@@ -71,8 +71,8 @@ defmodule Relay.BillingTest do
     a = board!(owner, "A", older: 30)
     b = board!(owner, "B", older: 20)
     c = board!(owner, "C", older: 10)
-    card_on!(b)
-    %{owner: owner, a: a, b: b, c: c}
+    b_card = card_on!(b)
+    %{owner: owner, a: a, b: b, c: c, b_card: b_card}
   end
 
   describe "the Free limit and the gate" do
@@ -231,7 +231,7 @@ defmodule Relay.BillingTest do
 
       assert b_id == b.id
 
-      assert boards == [
+      assert Enum.map(boards, &Map.delete(&1, :active_at)) == [
                %{id: b.id, slug: b.slug, name: "B", editable?: true},
                %{id: c.id, slug: c.slug, name: "C", editable?: false},
                %{id: a.id, slug: a.slug, name: "A", editable?: false}
@@ -248,11 +248,179 @@ defmodule Relay.BillingTest do
                limit: 1,
                editable_board_id: only.id,
                over_limit?: false,
-               boards: [%{id: only.id, slug: only.slug, name: "Only", editable?: true}]
+               boards: [%{id: only.id, slug: only.slug, name: "Only", editable?: true, active_at: only.updated_at}]
              }
 
       active = insert(:billing_account, paid_through: Date.add(Date.utc_today(), 10))
       assert Billing.free_status(active.user, Date.utc_today()) == nil
+    end
+  end
+
+  describe "choosing the editable board (RE471)" do
+    setup do
+      Process.put(:billing_enabled, true)
+      :ok
+    end
+
+    test "the owner's pick wins over the most active board, in every gate" do
+      %{owner: owner, a: a, b: b, c: c} = free_owner_of_three()
+      c_id = c.id
+
+      assert {:ok, %Schemas.BillingAccount{free_board_id: ^c_id}} = Billing.choose_free_board(owner, c.id)
+
+      assert Billing.editable_board_id(owner.id) == c.id
+      assert Billing.board_paused?(b)
+      assert Billing.board_paused?(a.id)
+      refute Billing.board_paused?(c)
+      assert Billing.board_notice(b) == {:free_read_only, "C"}
+    end
+
+    test "free_status/2 lists the pick first, then by activity, each with its active_at" do
+      %{owner: owner, a: a, b: b, c: c, b_card: b_card} = free_owner_of_three()
+      {:ok, _} = Billing.choose_free_board(owner, c.id)
+
+      assert %{editable_board_id: editable_id, boards: boards} = Billing.free_status(owner, Date.utc_today())
+      assert editable_id == c.id
+      assert Enum.map(boards, & &1.id) == [c.id, b.id, a.id]
+      assert boards |> Enum.filter(& &1.editable?) |> Enum.map(& &1.id) == [c.id]
+      assert Enum.all?(boards, &match?(%DateTime{}, &1.active_at))
+      assert Enum.find(boards, &(&1.id == b.id)).active_at == b_card.updated_at
+    end
+
+    test "an archived pick falls back to the most active board and keeps the column" do
+      %{owner: owner, b: b, c: c} = free_owner_of_three()
+      {:ok, _} = Billing.choose_free_board(owner, c.id)
+
+      {:ok, _} = Relay.Boards.archive_board(c)
+
+      assert Billing.editable_board_id(owner.id) == b.id
+      assert Billing.get_account(owner).free_board_id == c.id
+    end
+
+    test "deleting the picked board nilifies the pick" do
+      %{owner: owner, b: b, c: c} = free_owner_of_three()
+      {:ok, _} = Billing.choose_free_board(owner, c.id)
+
+      Repo.delete!(c)
+
+      assert Billing.get_account(owner).free_board_id == nil
+      assert Billing.editable_board_id(owner.id) == b.id
+    end
+
+    test "a pick that changed owner no longer counts for the old owner" do
+      %{owner: owner, b: b, c: c} = free_owner_of_three()
+      {:ok, _} = Billing.choose_free_board(owner, c.id)
+      new_owner = insert(:user)
+
+      c = Repo.update!(Ecto.Changeset.change(c, owner_id: new_owner.id))
+
+      assert Billing.editable_board_id(owner.id) == b.id
+      assert Billing.editable_board_id(new_owner.id) == c.id
+      refute Billing.board_paused?(c)
+    end
+
+    test "another user's board is refused, writing and broadcasting nothing" do
+      %{owner: owner} = free_owner_of_three()
+      x = board!(insert(:user), "X")
+      :ok = Billing.subscribe(owner.id)
+
+      assert Billing.choose_free_board(owner, x.id) == {:error, :not_counted}
+      assert Billing.get_account(owner) == nil
+      refute_receive {:billing_changed, _}
+    end
+
+    test "the owner's archived and example boards are refused" do
+      owner = insert(:user)
+      board!(owner, "Live")
+      d = board!(owner, "D", archived_at: DateTime.utc_now(:second))
+      e = board!(owner, "E", example_template: "bare")
+
+      assert Billing.choose_free_board(owner, d.id) == {:error, :not_counted}
+      assert Billing.choose_free_board(owner, e.id) == {:error, :not_counted}
+    end
+
+    test "a pick broadcasts billing_changed for the owner" do
+      %{owner: owner, a: a} = free_owner_of_three()
+      :ok = Billing.subscribe(owner.id)
+
+      assert {:ok, _} = Billing.choose_free_board(owner, a.id)
+
+      assert_receive {:billing_changed, owner_id}
+      assert owner_id == owner.id
+    end
+
+    test "an active owner may pick, and pick again straight after; nothing is paused" do
+      today = Date.utc_today()
+      owner = insert(:user)
+      insert(:billing_account, user: owner, paid_through: Date.add(today, 10), billing_day: today.day)
+      a = board!(owner, "A")
+      b = board!(owner, "B")
+      a_id = a.id
+      b_id = b.id
+
+      assert {:ok, %{free_board_id: ^a_id}} = Billing.choose_free_board(owner, a.id)
+      refute Billing.board_paused?(b)
+      assert {:ok, %{free_board_id: ^b_id}} = Billing.choose_free_board(owner, b.id)
+    end
+
+    test "a Free owner with no account gets exactly one, holding the pick" do
+      owner = insert(:user)
+      a = board!(owner, "A")
+      board!(owner, "B")
+
+      assert {:ok, _} = Billing.choose_free_board(owner, a.id)
+
+      assert [%Schemas.BillingAccount{free_board_id: free_board_id}] =
+               Repo.all(from ba in Schemas.BillingAccount, where: ba.user_id == ^owner.id)
+
+      assert free_board_id == a.id
+    end
+
+    test "a Free owner over the limit is prompted once" do
+      %{owner: owner} = free_owner_of_three()
+
+      assert Billing.free_board_prompt?(owner, Date.utc_today())
+      assert {:ok, %Schemas.BillingAccount{}} = Billing.mark_free_board_prompted(owner)
+      refute Billing.free_board_prompt?(owner, Date.utc_today())
+      assert %DateTime{microsecond: {0, 0}} = Billing.get_account(owner).free_board_prompted_at
+    end
+
+    test "marking the prompt does not broadcast" do
+      %{owner: owner} = free_owner_of_three()
+      :ok = Billing.subscribe(owner.id)
+
+      {:ok, _} = Billing.mark_free_board_prompted(owner)
+
+      refute_receive {:billing_changed, _}
+    end
+
+    test "no prompt within the limit, when paying or comped, or with billing disabled" do
+      today = Date.utc_today()
+
+      one = insert(:user)
+      board!(one, "Only")
+      refute Billing.free_board_prompt?(one, today)
+
+      %{owner: active} = free_owner_of_three()
+      insert(:billing_account, user: active, paid_through: Date.add(today, 10), billing_day: today.day)
+      refute Billing.free_board_prompt?(active, today)
+
+      %{owner: comped} = free_owner_of_three()
+      insert(:billing_account, user: comped, comped: true)
+      refute Billing.free_board_prompt?(comped, today)
+
+      %{owner: disabled} = free_owner_of_three()
+      Process.put(:billing_enabled, false)
+      refute Billing.free_board_prompt?(disabled, today)
+    end
+
+    test "a drop to Free after a paid period asks" do
+      today = Date.utc_today()
+      %{owner: owner} = free_owner_of_three()
+      insert(:billing_account, user: owner, paid_through: Date.add(today, -10), free_board_prompted_at: nil)
+      assert Billing.standing(owner, today) == :free
+
+      assert Billing.free_board_prompt?(owner, today)
     end
   end
 

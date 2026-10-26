@@ -264,7 +264,145 @@ defmodule RelayWeb.BoardBillingTest do
 
       refute has_element?(view, "#board-settings-link")
       refute has_element?(view, "#restore-board-button")
-      refute render(view) =~ "Make this the editable one"
+    end
+
+    # RE471 — the owner can switch the editable board from the banner, with a confirm.
+    test "the owner banner offers Make this the editable one… before Upgrade (RE471 scenario 1)", %{
+      conn: conn,
+      c: c
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{c.slug}")
+
+      assert has_element?(
+               view,
+               "#read-only-banner div.flex.gap-2 button#billing-free-make-editable.btn.btn-sm",
+               "Make this the editable one…"
+             )
+
+      refute has_element?(view, "#billing-free-make-editable.btn-warning")
+
+      ids =
+        view
+        |> element("#read-only-banner")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#billing-free-make-editable, #billing-free-upgrade")
+        |> Enum.map(&(&1 |> LazyHTML.attribute("id") |> hd()))
+
+      assert ids == ["billing-free-make-editable", "billing-free-upgrade"]
+    end
+
+    test "the switch confirm opens and cancels without changing the pick (RE471 scenario 2)", %{
+      conn: conn,
+      user: user,
+      a: a,
+      c: c
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{c.slug}")
+      refute has_element?(view, "#make-editable-confirm")
+
+      view |> element("#billing-free-make-editable") |> render_click()
+
+      assert has_element?(view, "#make-editable-confirm #make-editable-confirm-title", "Make Charlie editable?")
+      assert has_element?(view, "#make-editable-confirm", "Billed becomes read-only. Nothing is deleted.")
+
+      view |> element("#make-editable-confirm-cancel") |> render_click()
+
+      refute has_element?(view, "#make-editable-confirm")
+      assert has_element?(view, "#read-only-banner #billing-free-read-only-owner")
+      assert Billing.editable_board_id(user.id) == a.id
+    end
+
+    test "confirming makes this board editable and writable (RE471 scenario 3)", %{
+      conn: conn,
+      user: user,
+      c: c
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{c.slug}")
+      c_stage = hd(c.stages)
+      view |> element("#billing-free-make-editable") |> render_click()
+
+      view |> element("#make-editable-confirm-submit") |> render_click()
+
+      refute has_element?(view, "#read-only-banner")
+      refute has_element?(view, "#make-editable-confirm")
+      assert Billing.editable_board_id(user.id) == c.id
+      refute create_card(view, c_stage, "Now editable") =~ "This board is read-only on Free."
+      assert "Now editable" in titles(c)
+    end
+
+    test "the old editable board flips read-only live in another session (RE471 scenario 4)", %{
+      conn: conn,
+      a: a,
+      c: c
+    } do
+      {:ok, a_view, _html} = live(conn, ~p"/board/#{a.slug}")
+      refute has_element?(a_view, "#read-only-banner")
+      {:ok, view, _html} = live(conn, ~p"/board/#{c.slug}")
+
+      view |> element("#billing-free-make-editable") |> render_click()
+      view |> element("#make-editable-confirm-submit") |> render_click()
+
+      render(a_view)
+
+      assert has_element?(
+               a_view,
+               "#read-only-banner #billing-free-read-only-owner",
+               "Charlie is your editable board. Nothing's been deleted."
+             )
+    end
+
+    test "a member gets no switch and a forged confirm changes nothing (RE471 scenario 5)", %{
+      user: user,
+      a: a,
+      c: c
+    } do
+      {:ok, view, _html} = live(member_conn(c), ~p"/board/#{c.slug}")
+
+      assert has_element?(
+               view,
+               "#billing-free-read-only-member",
+               "This board is read-only. Its owner is on the Free plan."
+             )
+
+      refute has_element?(view, "#billing-free-make-editable")
+
+      render_click(view, "confirm_make_editable", %{"board-id" => to_string(c.id)})
+
+      assert Billing.editable_board_id(user.id) == a.id
+      assert has_element?(view, "#read-only-banner #billing-free-read-only-member")
+    end
+
+    test "a forged confirm on the editable board is harmless (RE471 scenario 6)", %{
+      conn: conn,
+      user: user,
+      a: a,
+      stage: stage
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{a.slug}")
+
+      render_click(view, "confirm_make_editable", %{"board-id" => to_string(a.id)})
+
+      refute has_element?(view, "#read-only-banner")
+      assert Billing.editable_board_id(user.id) == a.id
+      create_card(view, stage, "Still editable")
+      assert "Still editable" in titles(a)
+    end
+
+    test "a forged confirm with another user's board is refused (RE471 scenario 6)", %{
+      conn: conn,
+      user: user,
+      a: a,
+      c: c
+    } do
+      other = insert(:board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{c.slug}")
+
+      html = render_click(view, "confirm_make_editable", %{"board-id" => to_string(other.id)})
+
+      assert html =~ "That board can&#39;t be your editable board."
+      assert Billing.editable_board_id(user.id) == a.id
+      assert has_element?(view, "#read-only-banner #billing-free-read-only-owner")
     end
 
     test "a read-only board refuses writes with the Free flash (scenario 10)", %{

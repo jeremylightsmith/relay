@@ -25,6 +25,14 @@ defmodule RelayWeb.BillingLive do
   field's error (`refusal_message/1`, the one copy of each refusal), a success flashes and
   clears the form.
 
+  Switching the editable board (RE471): over the limit, each read-only row has **Make editable…**
+  (`"open_make_editable"`, `%{"board-id" => id}`), which opens
+  `RelayWeb.FreeBoardComponents.make_editable_confirm/1` for that board (`@make_editable`, the
+  chosen `free_status` board, or nil). Cancel sends `"cancel_make_editable"`; the confirm sends
+  `"confirm_make_editable"` → `Relay.Billing.choose_free_board/2`, whose `{:billing_changed, _}`
+  broadcast re-renders this page and flips the owner's open boards. A board id not in the list
+  (forged, or archived since the page loaded) is refused with a flash, never a crash.
+
   404 (`Ecto.NoResultsError`) while billing is disabled — a self-hosted install has no plan.
   """
 
@@ -33,6 +41,7 @@ defmodule RelayWeb.BillingLive do
   alias Relay.Billing
   alias Relay.Billing.Standing
   alias RelayWeb.CoreComponents
+  alias RelayWeb.FreeBoardComponents
 
   @impl true
   def render(assigns) do
@@ -129,8 +138,27 @@ defmodule RelayWeb.BillingLive do
                   Editable
                 </span>
                 <span :if={!board.editable?} class="font-mono text-[10.5px]">read-only</span>
+                <button
+                  :if={!board.editable?}
+                  type="button"
+                  id={"billing-free-board-#{board.id}-make-editable"}
+                  phx-click="open_make_editable"
+                  phx-value-board-id={board.id}
+                  class="btn btn-ghost btn-xs"
+                >
+                  Make editable…
+                </button>
               </li>
             </ul>
+            <div id="billing-free-boards-note" class="mt-1.5 text-xs text-base-content/55">
+              Switch any time. We'll confirm first, because it makes the current editable board read-only. Archiving a board also frees the slot.
+            </div>
+            <FreeBoardComponents.make_editable_confirm
+              :if={@make_editable}
+              board_id={@make_editable.id}
+              board_name={@make_editable.name}
+              editable_name={editable_name(@summary.free)}
+            />
           <% end %>
 
           <div
@@ -295,7 +323,12 @@ defmodule RelayWeb.BillingLive do
     {:ok, _account} = Billing.ensure_account(user)
     if connected?(socket), do: Billing.subscribe(user.id)
 
-    {:ok, socket |> assign(:page_title, "Billing") |> assign_summary() |> assign_code_form("")}
+    {:ok,
+     socket
+     |> assign(:page_title, "Billing")
+     |> assign(:make_editable, nil)
+     |> assign_summary()
+     |> assign_code_form("")}
   end
 
   # The return from Checkout. Completed once, on the connected mount (the disconnected render
@@ -348,6 +381,24 @@ defmodule RelayWeb.BillingLive do
     end
   end
 
+  def handle_event("open_make_editable", %{"board-id" => board_id}, socket) do
+    case free_board(socket, board_id) do
+      nil -> {:noreply, refuse_make_editable(socket)}
+      board -> {:noreply, assign(socket, :make_editable, board)}
+    end
+  end
+
+  def handle_event("cancel_make_editable", _params, socket), do: {:noreply, assign(socket, :make_editable, nil)}
+
+  def handle_event("confirm_make_editable", %{"board-id" => board_id}, socket) do
+    with %{id: id} <- free_board(socket, board_id),
+         {:ok, _account} <- Billing.choose_free_board(socket.assigns.current_scope.user, id) do
+      {:noreply, socket |> assign(:make_editable, nil) |> assign_summary()}
+    else
+      _refused -> {:noreply, refuse_make_editable(socket)}
+    end
+  end
+
   @impl true
   def handle_info({:billing_changed, _user_id}, socket), do: {:noreply, assign_summary(socket)}
 
@@ -358,6 +409,17 @@ defmodule RelayWeb.BillingLive do
       {:error, _reason} -> put_flash(socket, :error, "We couldn't open checkout. Try again.")
     end
   end
+
+  # RE471 — the over-limit list's board with this id, or nil (forged, or gone since the page loaded).
+  defp free_board(%{assigns: %{summary: %{free: %{boards: boards}}}}, board_id),
+    do: Enum.find(boards, &(to_string(&1.id) == board_id))
+
+  defp free_board(_socket, _board_id), do: nil
+
+  defp refuse_make_editable(socket),
+    do: socket |> assign(:make_editable, nil) |> put_flash(:error, FreeBoardComponents.not_counted_message())
+
+  defp editable_name(%{boards: boards, editable_board_id: id}), do: Enum.find_value(boards, &(&1.id == id && &1.name))
 
   defp assign_summary(socket) do
     summary = Billing.summary(socket.assigns.current_scope.user, Date.utc_today())

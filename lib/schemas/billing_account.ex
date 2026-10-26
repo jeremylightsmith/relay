@@ -8,10 +8,13 @@ defmodule Schemas.BillingAccount do
   `held_on` / `hold_reason` are admin facts; `cancelled_on` / `access_until` record a cancelled
   plan. The `card_*` fields describe the saved card (`card_payment_method_id` is Stripe's id).
   `promo_code_id` is the one promo code the account ever redeemed (RE462) and
-  `promo_months_left` how many discounted paid months it has left.
+  `promo_months_left` how many discounted paid months it has left. `free_board_id` is the board
+  the owner picked to stay editable on Free (RE471; nil = the most recently active one wins, and
+  `on_delete: :nilify_all` clears it when that board is deleted); `free_board_prompted_at` is
+  when the one-time "Which board stays editable?" prompt was shown (cleared on leaving Free).
 
-  `user_id`, `promo_code_id` and `promo_months_left` are set programmatically on the struct,
-  never cast from input. Every write goes through `Relay.Billing`.
+  `user_id`, `promo_code_id`, `promo_months_left`, `free_board_id` and `free_board_prompted_at`
+  are set programmatically on the struct, never cast from input. Every write goes through `Relay.Billing`.
   """
 
   use Ecto.Schema
@@ -32,9 +35,11 @@ defmodule Schemas.BillingAccount do
     field :card_exp_month, :integer
     field :card_exp_year, :integer
     field :promo_months_left, :integer, default: 0
+    field :free_board_prompted_at, :utc_datetime
 
     belongs_to :user, Schemas.User
     belongs_to :promo_code, Schemas.PromoCode
+    belongs_to :free_board, Schemas.Board
     has_many :payment_attempts, Schemas.BillingPaymentAttempt
 
     timestamps(type: :utc_datetime)

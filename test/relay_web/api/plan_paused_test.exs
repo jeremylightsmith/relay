@@ -98,6 +98,16 @@ defmodule RelayWeb.Api.PlanPausedTest do
       assert served["board"]["key"] == "BBB"
     end
 
+    test "the owner's pick moves the 402 to the other board (RE471)", %{conn: conn} do
+      %{owner: owner, a: a, b: b} = free_owner_of_two()
+
+      assert {:ok, _} = Billing.choose_free_board(owner, a.id)
+
+      served = conn |> auth(board_key(a)) |> get(~p"/api/board") |> json_response(200)
+      assert served["board"]["key"] == "AAA"
+      assert build_conn() |> auth(board_key(b)) |> get(~p"/api/board") |> json_response(402) == @refusal
+    end
+
     test "upgrading lifts the read-only refusal (scenario 7)", %{conn: conn, today: today} do
       %{owner: owner, a: a} = free_owner_of_two()
       token = board_key(a)

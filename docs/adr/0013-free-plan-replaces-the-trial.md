@@ -40,10 +40,13 @@ unlimited boards. A lapsed paid plan drops back to Free instead of pausing every
 4. **Read-only, never deleted.** A Free owner's counted boards beyond the limit are read-only for
    every member — the same read-only mode a paused board had — and nothing is deleted. Archived
    and example boards don't count, so archiving one frees the slot.
-5. **The editable board is computed, not stored.** It is the counted board with the newest
-   activity (`coalesce(max(cards.updated_at), boards.updated_at)`, ties to the higher board id) —
-   `Relay.Billing.editable_board_id/1`. Slice 2 ([RE471 Choose which board stays editable on
-   Free]) adds an explicit pick on top.
+5. **The owner's pick wins; otherwise most recently active.** The editable board
+   (`Relay.Billing.editable_board_id/1`) is the owner's stored pick
+   (`billing_accounts.free_board_id`, set by `Relay.Billing.choose_free_board/2` — [RE471 Choose
+   which board stays editable on Free]) while that board is still counted; otherwise it is the
+   counted board with the newest activity (`coalesce(max(cards.updated_at), boards.updated_at)`,
+   ties to the higher board id). *Amended by RE471* — this rule originally read "computed, not
+   stored".
 6. **`board_paused?/1` stays the one gate.** `Relay.Billing.board_paused?/1` answers true for a
    held owner's boards **or** a board that is read-only on Free, so every write path that already
    honoured a pause — the board LiveView, board settings, the `/api/all` writes, the board-key
@@ -79,9 +82,10 @@ unlimited boards. A lapsed paid plan drops back to Free instead of pausing every
 - One gate, unchanged in shape: every existing write path enforces Free for free, but the gate
   now costs one grouped query (the editable board) per check for a Free owner. A paying owner
   costs nothing extra.
-- The editable board can change under an owner as activity shifts between boards (slice 2's
-  explicit pick fixes this); until then the banner names the editable board so the read-only one
-  explains itself.
+- Without a pick, the editable board can change under an owner as activity shifts between
+  boards. The explicit pick shipped in RE471 (`choose_free_board/2`, plus a one-time "Which board
+  stays editable?" prompt) pins it; the banner still names the editable board so the read-only
+  one explains itself.
 - **An older mobile build** receiving `"standing": "free"` doesn't know the value, so it parses
   to null and hides the Settings Plan row. That is the intended degradation — no server shim;
   the app ships a `free` value and a "Free" label.
@@ -102,3 +106,7 @@ strands the owner's live work and is exactly the cliff this ADR removes.
 **Store the editable board.** A stored pick needs a migration, a backfill and a rule for when it
 goes stale (archived, deleted, transferred); computing it from activity needs none of that, and
 slice 2 can layer an explicit choice on top.
+*Later adopted by RE471:* the pick is stored (`billing_accounts.free_board_id`) with **no
+backfill** — a nil pick means "most recently active", so existing owners see no change. A stale
+pick needs no rule of its own: an archived or transferred board stops being counted and is
+ignored, and deleting the board nilifies the column (`on_delete: :nilify_all`).

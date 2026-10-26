@@ -366,6 +366,189 @@ defmodule RelayWeb.BoardsLiveTest do
       assert has_element?(view, "#template-picker-cancel")
       refute has_element?(view, "#template-picker-upgrade-link")
     end
+
+    # RE471 — the one-time "Which board stays editable?" dialog.
+    defp option_order(view, ids) do
+      html = render(view)
+
+      ids
+      |> Enum.map(&{&1, index_of(html, ~s(id="free-board-dialog-option-#{&1}"))})
+      |> Enum.sort_by(&elem(&1, 1))
+      |> Enum.map(&elem(&1, 0))
+    end
+
+    defp checked_radio(view) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s(#free-board-dialog input[name="board_id"][checked]))
+      |> LazyHTML.attribute("value")
+    end
+
+    defp assert_prompted_and_gone(conn, view, user) do
+      refute has_element?(view, "#free-board-dialog")
+      assert %DateTime{} = Relay.Billing.get_account(user).free_board_prompted_at
+
+      {:ok, again, _html} = live(conn, ~p"/boards")
+      refute has_element?(again, "#free-board-dialog")
+    end
+
+    test "an over-limit Free owner gets the dialog, the most active board preselected (scenario 7)", %{
+      conn: conn,
+      user: user
+    } do
+      %{a: a, b: b, c: c} = owner_f!(user)
+      # B and C tie on activity in `owner_f!/1` (ties go to the higher id); age C so the rows
+      # read in activity order A, B, C.
+      Repo.update!(Ecto.Changeset.change(c, updated_at: DateTime.add(c.updated_at, -3, :day)))
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      assert has_element?(view, "#free-board-dialog")
+      assert has_element?(view, "#free-board-dialog-title", "Which board stays editable?")
+      assert option_order(view, [c.id, a.id, b.id]) == [a.id, b.id, c.id]
+      assert checked_radio(view) == [to_string(a.id)]
+      assert squished_text(view, "#free-board-dialog-option-#{a.id}") =~ "Alpha most active · updated"
+      assert has_element?(view, ~s(#free-board-dialog-upgrade[href="/account/billing"]), "Upgrade instead · $20/mo")
+      assert squished_text(view, "#free-board-dialog-keep") == "Keep Alpha editable"
+    end
+
+    test "picking another board and keeping it stores the pick, once (scenario 8)", %{conn: conn, user: user} do
+      %{a: a, b: b, c: c} = owner_f!(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      view |> element("#free-board-dialog-form") |> render_change(%{"board_id" => to_string(b.id)})
+      assert squished_text(view, "#free-board-dialog-keep") == "Keep Bravo editable"
+      assert checked_radio(view) == [to_string(b.id)]
+
+      view |> element("#free-board-dialog-form") |> render_submit(%{"board_id" => to_string(b.id)})
+
+      refute has_element?(view, "#free-board-dialog")
+      assert Relay.Billing.editable_board_id(user.id) == b.id
+      refute has_element?(view, "#board-card-#{b.slug}-read-only")
+      assert has_element?(view, "#board-card-#{a.slug}-read-only")
+      assert has_element?(view, "#board-card-#{c.slug}-read-only")
+
+      assert_prompted_and_gone(conn, view, user)
+    end
+
+    test "closing with ✕ keeps the default and stores no pick (scenario 9)", %{conn: conn, user: user} do
+      %{a: a} = owner_f!(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      view |> element("#free-board-dialog-close") |> render_click()
+
+      assert Relay.Billing.editable_board_id(user.id) == a.id
+      assert Relay.Billing.get_account(user).free_board_id == nil
+      assert_prompted_and_gone(conn, view, user)
+    end
+
+    test "Escape closes it the same way (scenario 9)", %{conn: conn, user: user} do
+      %{a: a} = owner_f!(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      render_keydown(view, "close_free_board_dialog", %{"key" => "Escape"})
+
+      assert Relay.Billing.editable_board_id(user.id) == a.id
+      assert Relay.Billing.get_account(user).free_board_id == nil
+      assert_prompted_and_gone(conn, view, user)
+    end
+
+    test "a click on the backdrop closes it the same way (scenario 9)", %{conn: conn, user: user} do
+      %{a: a} = owner_f!(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      view |> element("#free-board-dialog .modal-backdrop") |> render_click()
+
+      assert Relay.Billing.editable_board_id(user.id) == a.id
+      assert Relay.Billing.get_account(user).free_board_id == nil
+      assert_prompted_and_gone(conn, view, user)
+    end
+
+    test "a forged keep naming another user's board is refused (scenario 10)", %{conn: conn, user: user} do
+      %{a: a} = owner_f!(user)
+      other = Relay.Factory.insert(:user)
+      {:ok, theirs} = Boards.create_board(other, %{name: "Theirs", key: "TH", slug: unique_slug("theirs")})
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      html = render_hook(view, "keep_free_board", %{"board_id" => to_string(theirs.id)})
+
+      assert html =~ "That board can&#39;t be your editable board."
+      assert (Relay.Billing.get_account(user) || %{free_board_id: nil}).free_board_id == nil
+      assert Relay.Billing.editable_board_id(user.id) == a.id
+    end
+
+    test "a member of an over-limit owner's boards gets no dialog (scenario 11)", %{conn: conn, user: user} do
+      owner = Relay.Factory.insert(:user)
+      %{a: a, b: b, c: c} = owner_f!(owner)
+
+      for board <- [a, b, c],
+          do: Relay.Factory.insert(:membership, board: board, user: user, email: user.email)
+
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      assert has_element?(view, "#board-card-#{a.slug}")
+      refute has_element?(view, "#free-board-dialog")
+    end
+
+    test "an active owner gets no dialog (scenario 12)", %{conn: conn, user: user, today: today} do
+      owner_f!(user)
+      insert(:billing_account, user: user, paid_through: Date.add(today, 10), billing_day: today.day)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      refute has_element?(view, "#free-board-dialog")
+    end
+
+    test "a comped owner gets no dialog (scenario 12)", %{conn: conn, user: user} do
+      owner_f!(user)
+      insert(:billing_account, user: user, comped: true)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      refute has_element?(view, "#free-board-dialog")
+    end
+
+    test "a Free owner of one board gets no dialog (scenario 12)", %{conn: conn, user: user} do
+      {:ok, _board} = Boards.create_board(user, %{name: "Only", key: "ON", slug: unique_slug("only")})
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      refute has_element?(view, "#free-board-dialog")
+    end
+
+    test "an owner who paid and lapsed back to Free is asked again (scenario 13)", %{
+      conn: conn,
+      user: user,
+      today: today
+    } do
+      owner_f!(user)
+
+      insert(:billing_account,
+        user: user,
+        paid_through: Date.add(today, -10),
+        billing_day: today.day,
+        free_board_prompted_at: nil
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/boards")
+
+      assert has_element?(view, "#free-board-dialog")
+    end
+
+    test "a pick made elsewhere re-renders the tiles and closes the dialog (scenario 14)", %{
+      conn: conn,
+      user: user
+    } do
+      %{a: a, b: b, c: c} = owner_f!(user)
+      {:ok, view, _html} = live(conn, ~p"/boards")
+      assert has_element?(view, "#free-board-dialog")
+
+      {:ok, _account} = Relay.Billing.mark_free_board_prompted(user)
+      {:ok, _account} = Relay.Billing.choose_free_board(user, c.id)
+      render(view)
+
+      refute has_element?(view, "#board-card-#{c.slug}-read-only")
+      assert has_element?(view, "#board-card-#{a.slug}-read-only")
+      assert has_element?(view, "#board-card-#{b.slug}-read-only")
+      refute has_element?(view, "#free-board-dialog")
+    end
   end
 
   defp tile_order(html, ctx) do

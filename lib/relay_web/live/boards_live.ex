@@ -35,6 +35,14 @@ defmodule RelayWeb.BoardsLive do
   read-only on Free. At the limit (`not Relay.Billing.can_add_board?/1`, `@picker_at_limit?`) the
   picker's footer sells the upgrade instead of creating, and `create_from_template` refuses
   server-side. Both re-derive on `{:billing_changed, user_id}` from the viewer's billing topic.
+
+  RE471 — once per drop to Free, an over-limit owner (`Relay.Billing.free_board_prompt?/2`,
+  computed on mount, never in first-run) gets `RelayWeb.FreeBoardComponents.free_board_dialog/1`
+  (`#free-board-dialog`, `@free_board_dialog`), the editable board preselected; it never stacks
+  over the picker. `select_free_board` moves the selection, `keep_free_board` stores the pick
+  (`Relay.Billing.choose_free_board/2`; an id outside `@free_status.boards` flashes a refusal)
+  and marks the prompt shown, `close_free_board_dialog` (✕, Escape, backdrop) only marks it
+  shown. A `{:billing_changed, _}` that makes the prompt false (answered elsewhere) closes it.
   """
 
   use RelayWeb, :live_view
@@ -44,12 +52,14 @@ defmodule RelayWeb.BoardsLive do
   alias Relay.Cards
   alias Relay.Members
   alias RelayWeb.CoreComponents
+  alias RelayWeb.FreeBoardComponents
   alias RelayWeb.TemplatePickerComponents
   alias RelayWeb.TimeAgo
   alias Schemas.Board
 
   @copy_refused "That board isn't available to copy. Pick another."
   @create_refused "Free includes one board. Upgrade for unlimited boards."
+  @free_board_refused "That board can't be your editable board."
 
   @impl true
   def render(assigns) do
@@ -294,6 +304,16 @@ defmodule RelayWeb.BoardsLive do
           upgrade_href={if(@embed, do: nil, else: ~p"/account/billing")}
         />
       </.first_run_picker>
+
+      <%!-- RE471: never stacked over the picker — `?template=` can open it while this is up. --%>
+      <FreeBoardComponents.free_board_dialog
+        :if={@free_board_dialog && not @picker_open?}
+        boards={@free_status.boards}
+        selected={@free_board_dialog.selected}
+        editable_id={@free_status.editable_board_id}
+        upgrade_price={Billing.format_dollars(Billing.price_cents())}
+        upgrade_href={if(@embed, do: nil, else: ~p"/account/billing")}
+      />
     </Layouts.app>
     """
   end
@@ -334,7 +354,8 @@ defmodule RelayWeb.BoardsLive do
      |> assign(:copy_sources, copy_sources)
      |> assign(:picker_copy_from, copy_sources |> List.first(%{}) |> Map.get(:slug))
      |> assign(:picker_copy_query, "")
-     |> open_first_run_or_reset()}
+     |> open_first_run_or_reset()
+     |> open_free_board_dialog()}
   end
 
   # RE442: `?template=<slug>` deep-links straight into the picker with that template selected;
@@ -415,15 +436,89 @@ defmodule RelayWeb.BoardsLive do
     {:noreply, assign_boards(socket, load_boards(user))}
   end
 
+  # RE471 — the one-time dialog. A change moves the selection to a board in the list (anything
+  # else is ignored); keep stores it as the pick and marks the prompt shown; close only marks it
+  # shown, so the computed default stays editable and no pick is written.
+  def handle_event("select_free_board", params, %{assigns: %{free_board_dialog: %{}}} = socket) do
+    case listed_free_board(socket, params["board_id"]) do
+      nil -> {:noreply, socket}
+      board_id -> {:noreply, assign(socket, :free_board_dialog, %{selected: board_id})}
+    end
+  end
+
+  def handle_event("select_free_board", _params, socket), do: {:noreply, socket}
+
+  def handle_event("keep_free_board", params, socket) do
+    user = socket.assigns.current_scope.user
+
+    with board_id when is_integer(board_id) <- listed_free_board(socket, params["board_id"]),
+         {:ok, _account} <- Billing.choose_free_board(user, board_id) do
+      {:ok, _account} = Billing.mark_free_board_prompted(user)
+      {:noreply, socket |> assign(:free_board_dialog, nil) |> reload_billing_view()}
+    else
+      _refused -> {:noreply, put_flash(socket, :error, @free_board_refused)}
+    end
+  end
+
+  def handle_event("close_free_board_dialog", _params, socket) do
+    {:ok, _account} = Billing.mark_free_board_prompted(socket.assigns.current_scope.user)
+    {:noreply, assign(socket, :free_board_dialog, nil)}
+  end
+
   # RE469 — the viewer's standing changed (upgraded, dropped to Free, archived or restored a
-  # board): re-derive the tiles, the plan line and the picker's footer in place.
+  # board): re-derive the tiles, the plan line and the picker's footer in place. RE471: an open
+  # dialog closes once `free_board_prompt?/2` turns false (answered elsewhere, or no longer Free).
   @impl true
   def handle_info({:billing_changed, _user_id}, socket) do
-    {:noreply,
-     socket
-     |> assign(:boards, load_boards(socket.assigns.current_scope.user))
-     |> assign_free_limit()}
+    {:noreply, socket |> reload_billing_view() |> recheck_free_board_dialog()}
   end
+
+  defp reload_billing_view(socket) do
+    socket
+    |> assign(:boards, load_boards(socket.assigns.current_scope.user))
+    |> assign_free_limit()
+  end
+
+  # Computed once, on mount: only for an owner `free_board_prompt?/2` says to ask (which already
+  # excludes members, paying and comped owners, and an owner within the limit), never in
+  # first-run, the editable board preselected.
+  defp open_free_board_dialog(%{assigns: %{first_run?: true}} = socket), do: assign(socket, :free_board_dialog, nil)
+
+  defp open_free_board_dialog(socket) do
+    dialog =
+      if Billing.free_board_prompt?(socket.assigns.current_scope.user, Date.utc_today()),
+        do: %{selected: socket.assigns.free_status.editable_board_id}
+
+    assign(socket, :free_board_dialog, dialog)
+  end
+
+  defp recheck_free_board_dialog(%{assigns: %{free_board_dialog: %{selected: selected}}} = socket) do
+    cond do
+      not Billing.free_board_prompt?(socket.assigns.current_scope.user, Date.utc_today()) ->
+        assign(socket, :free_board_dialog, nil)
+
+      listed_free_board(socket, to_string(selected)) ->
+        socket
+
+      true ->
+        assign(socket, :free_board_dialog, %{selected: socket.assigns.free_status.editable_board_id})
+    end
+  end
+
+  defp recheck_free_board_dialog(socket), do: socket
+
+  # The id when it parses and names one of the viewer's counted boards (`@free_status.boards`),
+  # else nil.
+  defp listed_free_board(%{assigns: %{free_status: %{boards: boards}}}, raw) when is_binary(raw) do
+    with {id, ""} <- Integer.parse(raw),
+         true <- Enum.any?(boards, &(&1.id == id)) do
+      id
+    else
+      _not_listed -> nil
+    end
+  end
+
+  defp listed_free_board(_socket, _raw), do: nil
 
   defp assign_free_limit(socket) do
     user = socket.assigns.current_scope.user

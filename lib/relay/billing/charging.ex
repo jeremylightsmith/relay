@@ -404,8 +404,12 @@ defmodule Relay.Billing.Charging do
 
     account
     |> Ecto.Changeset.change(
-      [paid_through: later(account.paid_through, attempt.period_end), billing_day: attempt.billing_day] ++
-        cancellation ++ promo_month
+      [
+        paid_through: later(account.paid_through, attempt.period_end),
+        billing_day: attempt.billing_day,
+        # Leaving Free re-arms the one-time board prompt for a later drop (RE471); the pick survives.
+        free_board_prompted_at: nil
+      ] ++ cancellation ++ promo_month
     )
     |> Repo.update!()
 

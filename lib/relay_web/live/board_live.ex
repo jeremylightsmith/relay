@@ -123,6 +123,14 @@ defmodule RelayWeb.BoardLive do
   `"setup_toggle_peek"`. Step 2's peek switches the default LLM (`"setup_switch_llm"`,
   `Relay.Setup.switch_llm/3`) and step 3's re-mints the key in place; the shown-once key then
   survives `{:setup_changed, _}` while step 3's peek is open, and closing that peek drops it.
+
+  RE471: the owner's read-only-on-Free banner offers **Make this the editable one…**
+  (`"open_make_editable"`), which opens `RelayWeb.FreeBoardComponents.make_editable_confirm/1`
+  (`@make_editable_confirm?`). Cancel sends `"cancel_make_editable"`; the confirm sends
+  `"confirm_make_editable"` (`%{"board-id" => id}`), which — for the owner only, and only for this
+  board — calls `Relay.Billing.choose_free_board/2`. Its `{:billing_changed, _}` broadcast flips
+  every open session of the owner's boards; a member never sees the switch and a forged confirm
+  from one does nothing.
   """
 
   use RelayWeb, :live_view
@@ -147,6 +155,7 @@ defmodule RelayWeb.BoardLive do
   alias RelayWeb.CardMedia
   alias RelayWeb.ChangesetErrors
   alias RelayWeb.FlowShapeComponents
+  alias RelayWeb.FreeBoardComponents
   alias RelayWeb.NativeCardNav
   alias RelayWeb.RunComponents
   alias RelayWeb.SetupComponents
@@ -390,14 +399,25 @@ defmodule RelayWeb.BoardLive do
                     <b>This board is read-only on Free.</b>
                     {elem(@billing_notice, 1)} is your editable board. Nothing's been deleted.
                   </span>
-                  <.link
-                    :if={not @embed}
-                    navigate={~p"/account/billing"}
-                    id="billing-free-upgrade"
-                    class="btn btn-warning btn-sm"
-                  >
-                    Upgrade
-                  </.link>
+                  <%!-- RE471 — the switch shows embedded too (it sells nothing); only Upgrade hides. --%>
+                  <div class="flex gap-2">
+                    <button
+                      type="button"
+                      id="billing-free-make-editable"
+                      phx-click="open_make_editable"
+                      class="btn btn-sm"
+                    >
+                      Make this the editable one…
+                    </button>
+                    <.link
+                      :if={not @embed}
+                      navigate={~p"/account/billing"}
+                      id="billing-free-upgrade"
+                      class="btn btn-warning btn-sm"
+                    >
+                      Upgrade
+                    </.link>
+                  </div>
                 <% match?({:free_read_only, _}, @billing_notice) -> %>
                   <.icon name="hero-lock-closed" class="size-4" />
                   <span id="billing-free-read-only-member" class="flex-1">
@@ -1041,6 +1061,14 @@ defmodule RelayWeb.BoardLive do
         </div>
         <label class="modal-backdrop" phx-click="cancel_move">Close</label>
       </div>
+      <FreeBoardComponents.make_editable_confirm
+        :if={
+          @make_editable_confirm? and @board_owner? and match?({:free_read_only, _}, @billing_notice)
+        }
+        board_id={@board.id}
+        board_name={@board.name}
+        editable_name={elem(@billing_notice, 1)}
+      />
     </Layouts.app>
     """
   end
@@ -1329,6 +1357,8 @@ defmodule RelayWeb.BoardLive do
       |> assign(:stalled_open, false)
       |> assign(:stalled_error, nil)
       |> assign_read_only(board)
+      # RE471 — whether the owner's "Make <board> editable?" confirm is open (this socket only).
+      |> assign(:make_editable_confirm?, false)
       # RE443 — the setup wizard: the board's checklist (nil when it has none), the shown-once
       # step-3 key (socket-only, never persisted or broadcast), whether this socket minimized
       # the panel, the step-2 picker's selection and the user's expert toggle.
@@ -2018,6 +2048,37 @@ defmodule RelayWeb.BoardLive do
       {:noreply, reload_board(socket)}
     else
       {:noreply, put_flash(socket, :error, "Free includes one board. Upgrade, or archive another board first.")}
+    end
+  end
+
+  # RE471 — switch the owner's editable Free board to this one. Only the owner, only this board
+  # (the component's `board-id` must name it); `choose_free_board/2` refuses anything uncounted.
+  # Its broadcast re-derives every other open session; this one re-derives in place.
+  def handle_event("open_make_editable", _params, socket),
+    do: {:noreply, assign(socket, :make_editable_confirm?, socket.assigns.board_owner?)}
+
+  def handle_event("cancel_make_editable", _params, socket),
+    do: {:noreply, assign(socket, :make_editable_confirm?, false)}
+
+  def handle_event("confirm_make_editable", %{"board-id" => board_id}, socket) do
+    %{board: board, board_owner?: owner?, current_scope: scope} = socket.assigns
+    socket = assign(socket, :make_editable_confirm?, false)
+
+    cond do
+      not owner? ->
+        {:noreply, socket}
+
+      board_id != to_string(board.id) ->
+        {:noreply, put_flash(socket, :error, FreeBoardComponents.not_counted_message())}
+
+      true ->
+        case Billing.choose_free_board(scope.user, board.id) do
+          {:ok, _account} ->
+            {:noreply, assign_read_only(socket, board)}
+
+          {:error, :not_counted} ->
+            {:noreply, put_flash(socket, :error, FreeBoardComponents.not_counted_message())}
+        end
     end
   end
 

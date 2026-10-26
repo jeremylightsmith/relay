@@ -92,6 +92,43 @@ defmodule Relay.Billing.ChargingTest do
       assert Billing.standing(user, @today) == :active
     end
 
+    test "a successful upgrade clears the Free prompt flag and keeps the pick (RE471)" do
+      user = insert(:user)
+      board = insert(:board, owner: user)
+      prompted_at = ~U[2026-06-01 12:00:00Z]
+
+      account =
+        account_for(user, %{
+          paid_through: Date.add(@today, -20),
+          billing_day: 3,
+          free_board_prompted_at: prompted_at,
+          free_board_id: board.id
+        })
+
+      assert {:ok, %{charged: :paid}} = Billing.complete_setup("local_4242_#{user.id}", user.id, @today)
+
+      board_id = board.id
+      assert %{free_board_prompted_at: nil, free_board_id: ^board_id} = reload(account)
+    end
+
+    test "a declined upgrade keeps the Free prompt flag (RE471)" do
+      user = insert(:user)
+      board = insert(:board, owner: user)
+      prompted_at = ~U[2026-06-01 12:00:00Z]
+
+      account =
+        account_for(user, %{
+          paid_through: Date.add(@today, -20),
+          billing_day: 3,
+          free_board_prompted_at: prompted_at,
+          free_board_id: board.id
+        })
+
+      assert {:ok, %{charged: :declined}} = Billing.complete_setup("local_0341_#{user.id}", user.id, @today)
+
+      assert reload(account).free_board_prompted_at == prompted_at
+    end
+
     test "a past-due account renews the period after paid_through, keeping its billing day" do
       user = insert(:user)
       account = account_for(user, %{paid_through: Date.add(@today, -1), billing_day: @today.day})
@@ -383,7 +420,7 @@ defmodule Relay.Billing.ChargingTest do
                limit: 1,
                editable_board_id: board.id,
                over_limit?: false,
-               boards: [%{id: board.id, slug: board.slug, name: "Only", editable?: true}]
+               boards: [%{id: board.id, slug: board.slug, name: "Only", editable?: true, active_at: board.updated_at}]
              }
 
       assert summary.upgrade_free? == false

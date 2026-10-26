@@ -188,7 +188,22 @@ defmodule RelayWeb.BillingLiveTest do
         refute has_element?(view, "#billing-free-board-#{read_only.id} .badge")
       end
 
-      refute render(view) =~ "Make editable"
+      # RE471 — read-only rows offer the switch; the editable row doesn't.
+      assert has_element?(
+               view,
+               "#billing-free-board-#{c.id} button#billing-free-board-#{c.id}-make-editable.btn.btn-ghost.btn-xs",
+               "Make editable…"
+             )
+
+      assert has_element?(view, "#billing-free-board-#{a.id}-make-editable.btn.btn-ghost.btn-xs", "Make editable…")
+      refute has_element?(view, "#billing-free-board-#{b.id} button")
+      refute has_element?(view, "#billing-free-board-#{b.id}-make-editable")
+
+      assert has_element?(
+               view,
+               "#billing-free-boards + div#billing-free-boards-note.mt-1\\.5.text-xs.text-base-content\\/55",
+               "Switch any time. We'll confirm first, because it makes the current editable board read-only. Archiving a board also frees the slot."
+             )
 
       assert has_element?(view, "#billing-upgrade .font-semibold", "Make all 3 editable · $20/month")
 
@@ -197,6 +212,133 @@ defmodule RelayWeb.BillingLiveTest do
                "#billing-upgrade .mt-1",
                "Charged today. Your billing date becomes the #{ordinal(today.day)}."
              )
+    end
+  end
+
+  # RE471 — switching the editable board from the Billing list, with a confirm.
+  describe "switching the editable board on Free" do
+    setup %{user: user}, do: free_owner_of_three!(user)
+
+    defp board_key(board) do
+      {:ok, %{token: token}} = Relay.ApiKeys.create_key(board, board.owner)
+      token
+    end
+
+    defp row_ids(view) do
+      view
+      |> element("#billing-free-boards")
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("li")
+      |> Enum.map(&(&1 |> LazyHTML.attribute("id") |> hd()))
+    end
+
+    test "Make editable… opens the confirm and confirming switches the pick (RE471 scenario 8)", %{
+      conn: conn,
+      user: user,
+      a: a,
+      b: b,
+      c: c
+    } do
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+      refute has_element?(view, "#make-editable-confirm")
+
+      view |> element("#billing-free-board-#{a.id}-make-editable") |> render_click()
+
+      assert has_element?(view, "#make-editable-confirm #make-editable-confirm-title", "Make A editable?")
+      assert has_element?(view, "#make-editable-confirm", "B becomes read-only. Nothing is deleted.")
+
+      view |> element("#make-editable-confirm-submit") |> render_click()
+
+      refute has_element?(view, "#make-editable-confirm")
+      assert has_element?(view, "#billing-free-board-#{a.id} .badge.badge-success.badge-soft.badge-sm", "Editable")
+      refute has_element?(view, "#billing-free-board-#{a.id}-make-editable")
+      assert has_element?(view, "#billing-free-board-#{b.id} .font-mono", "read-only")
+      assert has_element?(view, "#billing-free-board-#{b.id}-make-editable", "Make editable…")
+      assert row_ids(view) == ["billing-free-board-#{a.id}", "billing-free-board-#{b.id}", "billing-free-board-#{c.id}"]
+      assert Billing.editable_board_id(user.id) == a.id
+    end
+
+    test "after the switch the board-key API follows the pick (RE471 scenario 9)", %{conn: conn, a: a, c: c} do
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+      view |> element("#billing-free-board-#{a.id}-make-editable") |> render_click()
+      view |> element("#make-editable-confirm-submit") |> render_click()
+
+      refused =
+        build_conn()
+        |> put_req_header("authorization", "Bearer " <> board_key(c))
+        |> get(~p"/api/board")
+        |> json_response(402)
+
+      assert refused["error"]["code"] == "plan_paused"
+
+      served =
+        build_conn()
+        |> put_req_header("authorization", "Bearer " <> board_key(a))
+        |> get(~p"/api/board")
+        |> json_response(200)
+
+      assert served["board"]["key"] == a.key
+    end
+
+    test "cancelling the confirm changes nothing (RE471 scenario 10)", %{conn: conn, user: user, b: b, c: c} do
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      view |> element("#billing-free-board-#{c.id}-make-editable") |> render_click()
+      assert has_element?(view, "#make-editable-confirm-title", "Make C editable?")
+      view |> element("#make-editable-confirm-cancel") |> render_click()
+
+      refute has_element?(view, "#make-editable-confirm")
+      assert Billing.editable_board_id(user.id) == b.id
+      assert Billing.get_account(user).free_board_id == nil
+      assert has_element?(view, "#billing-free-board-#{b.id} .badge", "Editable")
+    end
+
+    test "a forged confirm with another user's board is refused (RE471 scenario 10)", %{
+      conn: conn,
+      user: user,
+      b: b
+    } do
+      other = insert(:board)
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      html = render_click(view, "confirm_make_editable", %{"board-id" => to_string(other.id)})
+
+      assert html =~ "That board can&#39;t be your editable board."
+      assert Billing.editable_board_id(user.id) == b.id
+      assert Billing.get_account(user).free_board_id == nil
+    end
+
+    test "a forged open with another user's board opens no confirm (RE471 scenario 10)", %{conn: conn} do
+      other = insert(:board)
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      html = render_click(view, "open_make_editable", %{"board-id" => to_string(other.id)})
+
+      refute has_element?(view, "#make-editable-confirm")
+      assert html =~ "That board can&#39;t be your editable board."
+    end
+  end
+
+  describe "no switch outside the over-limit list (RE471 scenario 11)" do
+    test "an owner within the limit gets no Make editable… and no note", %{conn: conn, user: user} do
+      insert(:board, owner: user, name: "Only")
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      assert has_element?(view, "#billing-standing-badge", "Free")
+      refute has_element?(view, "button", "Make editable…")
+      refute has_element?(view, "#billing-free-boards-note")
+    end
+
+    test "an active owner gets no Make editable… and no note", %{conn: conn, user: user, today: today} do
+      insert_active(user, today)
+      insert(:board, owner: user, name: "One")
+      insert(:board, owner: user, name: "Two")
+      {:ok, view, _html} = live(conn, ~p"/account/billing")
+
+      assert has_element?(view, "#billing-standing-badge", "Active")
+      refute has_element?(view, "button", "Make editable…")
+      refute has_element?(view, "#billing-free-boards-note")
     end
   end
 

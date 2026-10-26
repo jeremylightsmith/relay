@@ -6,8 +6,10 @@ defmodule Relay.Billing do
   is its owner's.
 
   **Free** (RE469): `free_board_limit/0` counted boards (owned, not archived, not an example
-  board) stay editable. The editable one is computed, never stored (`editable_board_id/1`: the
-  newest activity wins); the owner's other counted boards are read-only. `board_paused?/1` is
+  board) stay editable. The editable one (`editable_board_id/1`) is the owner's pick when it is
+  still counted (`choose_free_board/2`, RE471), otherwise the newest activity wins; the owner's
+  other counted boards are read-only. `free_board_prompt?/2` / `mark_free_board_prompted/1` drive
+  the one-time "Which board stays editable?" prompt (the flag is cleared on leaving Free). `board_paused?/1` is
   THE gate every write path honours — true for a held owner's boards and for a read-only-on-Free
   board; `board_notice/1` is the banner value; `can_add_board?/1` the create / unarchive check;
   `free_status/2` the Free read model; `upgrade_without_card/2` the $0 upgrade (a 100% code).
@@ -19,7 +21,7 @@ defmodule Relay.Billing do
   (`Relay.Billing.Charging`, through the `Relay.Billing.Payments` seam), the Stripe webhook
   verifier (`Relay.Billing.Webhook`), the hourly `Relay.Billing.Clock`, and the
   `billing:<user_id>` PubSub topic (`{:billing_changed, user_id}`, broadcast when a plan is
-  cancelled or resumed, a card is saved, a promo code is redeemed, a payment opens or settles, or the
+  cancelled or resumed, the Free board is picked, a card is saved, a promo code is redeemed, a payment opens or settles, or the
   superadmin comps, un-comps, holds, lifts a hold, extends or retries the charge).
 
   **Promo codes** (RE462): owns `Schemas.PromoCode`. An account redeems at most one code, ever
@@ -189,7 +191,8 @@ defmodule Relay.Billing do
 
   @doc """
   The id of `owner_id`'s editable board, whatever their standing: of their **counted** boards
-  (owned, not archived, not an example board), the one with the newest activity —
+  (owned, not archived, not an example board), the owner's pick (`choose_free_board/2`) when it
+  is still counted; otherwise the one with the newest activity —
   `coalesce(max(cards.updated_at), boards.updated_at)`, every card counted, archived or not —
   ties to the higher id. Nil when they have no counted board. One query.
   """
@@ -203,15 +206,28 @@ defmodule Relay.Billing do
 
   defp editable_board(owner_id), do: owner_id |> counted_boards() |> limit(1) |> Repo.one()
 
-  # The owner's counted boards, most active first (so the editable board leads). One grouped query.
+  # The owner's counted boards, the editable board first: the owner's pick (RE471) when it is one
+  # of them, then by activity, newest first. One grouped query. The pick test is coalesced to
+  # false — a NULL (no account, no pick) would otherwise sort ahead of true under DESC.
   defp counted_boards(owner_id) do
     from b in Board,
       left_join: c in Card,
       on: c.board_id == b.id,
+      left_join: a in BillingAccount,
+      on: a.user_id == b.owner_id,
       where: b.owner_id == ^owner_id and is_nil(b.archived_at) and is_nil(b.example_template),
-      group_by: b.id,
-      order_by: [desc: coalesce(max(c.updated_at), b.updated_at), desc: b.id],
-      select: %{id: b.id, slug: b.slug, name: b.name}
+      group_by: [b.id, a.free_board_id],
+      order_by: [
+        desc: coalesce(b.id == a.free_board_id, false),
+        desc: coalesce(max(c.updated_at), b.updated_at),
+        desc: b.id
+      ],
+      select: %{
+        id: b.id,
+        slug: b.slug,
+        name: b.name,
+        active_at: type(coalesce(max(c.updated_at), b.updated_at), :utc_datetime)
+      }
   end
 
   defp counted_board_count(owner_id) do
@@ -224,15 +240,18 @@ defmodule Relay.Billing do
   @typedoc "A Free owner's boards against the limit (`free_status/2`)."
   @type free_status :: %{
           limit: pos_integer(),
-          boards: [%{id: pos_integer(), slug: String.t(), name: String.t(), editable?: boolean()}],
+          boards: [
+            %{id: pos_integer(), slug: String.t(), name: String.t(), editable?: boolean(), active_at: DateTime.t()}
+          ],
           editable_board_id: pos_integer() | nil,
           over_limit?: boolean()
         }
 
   @doc """
-  A Free owner's counted boards on `today`, the editable one first and the rest by activity
-  (newest first), with whether they are over `free_board_limit/0`. Nil unless billing is enabled
-  and the owner's standing is `:free`.
+  A Free owner's counted boards on `today`, the editable one (the owner's pick, else the most
+  active) first and the rest by activity (newest first), each with its `active_at`, and whether
+  they are over `free_board_limit/0`. Nil unless billing is enabled and the owner's standing is
+  `:free`.
   """
   @spec free_status(User.t() | pos_integer(), Date.t()) :: nil | free_status()
   def free_status(user, %Date{} = today) do
@@ -247,6 +266,56 @@ defmodule Relay.Billing do
         over_limit?: length(boards) > @free_board_limit
       }
     end
+  end
+
+  @doc """
+  Picks which of the owner's counted boards stays editable on Free (RE471), creating the account
+  if missing, then broadcasts. Works in any standing (the pick only matters on Free) and has no
+  cooldown. Refused with `:not_counted` — writing and broadcasting nothing — unless `board_id` is
+  one of the owner's counted boards. A pick that later stops counting (archived, moved to another
+  owner) is ignored and the most active board leads again; deleting the board clears it.
+  """
+  @spec choose_free_board(User.t() | pos_integer(), pos_integer()) ::
+          {:ok, BillingAccount.t()} | {:error, :not_counted}
+  def choose_free_board(user, board_id) when is_integer(board_id) do
+    if counted_board?(user_id(user), board_id) do
+      {:ok, account} = ensure_account(user)
+
+      account
+      |> Ecto.Changeset.change(free_board_id: board_id)
+      |> update_and_broadcast()
+    else
+      {:error, :not_counted}
+    end
+  end
+
+  defp counted_board?(owner_id, board_id),
+    do: owner_id |> counted_boards() |> where([b], b.id == ^board_id) |> Repo.exists?()
+
+  @doc """
+  Whether to show the one-time "Which board stays editable?" prompt: billing is enabled, the
+  standing on `today` is exactly `:free`, the owner has more than `free_board_limit/0` counted
+  boards, and it hasn't been shown (`free_board_prompted_at` is nil — leaving Free clears it).
+  """
+  @spec free_board_prompt?(User.t() | pos_integer(), Date.t()) :: boolean()
+  def free_board_prompt?(user, %Date{} = today) do
+    account = get_account(user)
+
+    enabled?() and Standing.of(account, facts(account), today) == :free and
+      counted_board_count(user_id(user)) > @free_board_limit and not prompted?(account)
+  end
+
+  defp prompted?(%BillingAccount{free_board_prompted_at: %DateTime{}}), do: true
+  defp prompted?(_no_account_or_not_prompted), do: false
+
+  @doc "Records that the one-time Free board prompt was shown (now), creating the account if missing. No broadcast."
+  @spec mark_free_board_prompted(User.t() | pos_integer()) :: {:ok, BillingAccount.t()}
+  def mark_free_board_prompted(user) do
+    {:ok, account} = ensure_account(user)
+
+    account
+    |> Ecto.Changeset.change(free_board_prompted_at: now())
+    |> Repo.update()
   end
 
   @doc """
