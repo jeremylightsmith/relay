@@ -17,13 +17,13 @@ criteria are the contract. Nothing else is.
 
 The card ref is in your task message (and in the `needs-input` command of the outcome contract
 at the end of your prompt). Read the criteria from the card — the card is the single
-source of truth, and they are deliberately NOT copied into the plan (at `$RELAY_PLAN`):
+source of truth, and they are deliberately NOT copied into the plan (at `$HAMACA_PLAN`):
 
 ```bash
-./relay card <ref> --json | jq -r '.acceptance_criteria // ""'
+./hamaca card <ref> --json | jq -r '.acceptance_criteria // ""'
 ```
 
-`RELAY_URL` + `RELAY_API_KEY` are already set. If the field is empty, return `verdict: "pass"`
+`HAMACA_URL` + `HAMACA_API_KEY` (or their `RELAY_` twins) are already set. If the field is empty, return `verdict: "pass"`
 with an empty `criteria` list and say so in `summary` — an unspecced card is a no-op, never an
 error.
 

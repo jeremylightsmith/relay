@@ -9,7 +9,7 @@ Turn an idea into a fully-formed design through collaborative dialogue.
 
 This skill takes an **optional card ref** as its first argument (`$ARGUMENTS`), e.g.
 `/brainstorm RLY-42`. The **card is the home for this unit of work** — its `spec` field, read
-and written with `./relay`, is where the approved design lives, never a shared repo file.
+and written with `./hamaca`, is where the approved design lives, never a shared repo file.
 
 <HARD-GATE>
 Do NOT write code, scaffold, run a plan, or take any implementation action until a design is
@@ -23,14 +23,14 @@ cause the most wasted effort. The design can be a few sentences, but you MUST pr
 get approval before moving on.
 
 ## Which card?
-- **Ref given** (`/brainstorm RLY-42`) → read that card first (`./relay card <ref>`) for
-  context and brainstorm against it. If `./relay card <ref>` shows a **CHANGES REQUESTED**
+- **Ref given** (`/brainstorm RLY-42`) → read that card first (`./hamaca card <ref>`) for
+  context and brainstorm against it. If `./hamaca card <ref>` shows a **CHANGES REQUESTED**
   block, treat resolving that feedback as this pass's primary goal. On approval, write the
   spec back to that card.
 - **No ref given** → first confirm with the user that the goal is to **create a new card**. On
   confirmation, create it in **Backlog** and capture its ref:
 
-      ./relay create "<title>" --stage Backlog --json
+      ./hamaca create "<title>" --stage Backlog --json
 
   New cards are **intake**: they land in Backlog for a human to triage and prioritize later —
   never drop a fresh card straight into a planning column (Spec/Plan/Code). Brainstorm as
@@ -62,9 +62,9 @@ get approval before moving on.
      shouldn't track a mockup, the mockup is known-stale, or none fits): say so in the spec so
      nothing downstream tries to match one. Non-UI work skips this.
    - **Card mockups from the Design stage are a design source too — the same explicit
-     decision applies.** If `./relay card <ref> --json` shows a non-empty `mockups` list, the
-     card came through Design: pull them (`./relay mockups <ref> --pull "<dir>"` — outside the
-     repo when headless, e.g. beside `$RELAY_NODE_SCRATCH`; skip the inlined `<style>` when
+     decision applies.** If `./hamaca card <ref> --json` shows a non-empty `mockups` list, the
+     card came through Design: pull them (`./hamaca mockups <ref> --pull "<dir>"` — outside the
+     repo when headless, e.g. beside `$HAMACA_NODE_SCRATCH`; skip the inlined `<style>` when
      reading) and read the `## Design` section of the description, which records what the
      Design rounds decided. Approved mockups are usually the design of record, so the default
      is to match them — but say so: write **`Match card mockup "<caption>"`** (the caption
@@ -93,14 +93,14 @@ get approval before moving on.
 ## After approval
 - Write the approved spec to the **card**, not a shared repo file. Save it to a temp file and:
 
-      ./relay spec <ref> @<tmpfile>
+      ./hamaca spec <ref> @<tmpfile>
 
   Do **NOT** write or commit a spec file under a shared `docs/…` specs directory — that home is
   retired; work travels with the card.
 - Write the card's **acceptance criteria** in this same step — they are a required output of
   the Spec stage, not an optional extra. Save them to a temp file and:
 
-      ./relay criteria <ref> @<tmpfile>
+      ./hamaca criteria <ref> @<tmpfile>
 
   They are the human's Approve checklist first and the robot's script second: at the Code
   stage the `acceptance-tester` reads this field off the card and actually runs them.
@@ -160,12 +160,12 @@ headless; interactively it stays where the human put it).
 arrives. For each, in this order:
 
 ```bash
-ref="$(./relay create "<slice title>" --stage Backlog --description @"$d/desc.md" --field ref)"
-./relay spec "$ref" @"$d/spec.md"
-./relay criteria "$ref" @"$d/criteria.md"
-./relay mockups "$ref" "$d/mockups/02-empty-state.html" --caption "Empty state"   # only if it needs any
-./relay depends "$ref" <REF …>                                                    # only if it overlaps
-./relay move "$ref" "Spec:Review"
+ref="$(./hamaca create "<slice title>" --stage Backlog --description @"$d/desc.md" --field ref)"
+./hamaca spec "$ref" @"$d/spec.md"
+./hamaca criteria "$ref" @"$d/criteria.md"
+./hamaca mockups "$ref" "$d/mockups/02-empty-state.html" --caption "Empty state"   # only if it needs any
+./hamaca depends "$ref" <REF …>                                                    # only if it overlaps
+./hamaca move "$ref" "Spec:Review"
 ```
 
 - **Create in Backlog, move last.** Not `Ready for Spec` — the Spec flow would pull the card
@@ -181,14 +181,14 @@ ref="$(./relay create "<slice title>" --stage Backlog --description @"$d/desc.md
   the **same caption** — so its `Match card mockup "<caption>"` resolves on the new card.
 - **Dependencies only where files overlap.** A blocker clears only when it reaches the
   top-level Done column, so chaining slices in narrative order serializes work that could run
-  in parallel. Add `./relay depends` (on the original or another slice) only where two slices
+  in parallel. Add `./hamaca depends` (on the original or another slice) only where two slices
   edit the same files and would conflict.
 - **Never duplicate.** Splitting is not idempotent, and a retried or re-entered run repeats
   you. **Right after each `create`**, comment on the original `Split into [<new ref> <title>]`
-  (`./relay comment <ref> "…"`), so even a run that dies halfway leaves the trail. Before
-  creating anything, read the original's timeline (`./relay card <ref>`) for those comments;
+  (`./hamaca comment <ref> "…"`), so even a run that dies halfway leaves the trail. Before
+  creating anything, read the original's timeline (`./hamaca card <ref>`) for those comments;
   a slice already there is **updated** (`describe`, `spec`, `criteria`, `mockups`), never
-  re-created. (`./relay search` matches titles only, so it can't find them by "Split from".)
+  re-created. (`./hamaca search` matches titles only, so it can't find them by "Split from".)
 
 ## Headless / runner use (no human to dialogue with)
 **The work is pre-authorized.** A flow node invokes this skill on the board's behalf — proceed
@@ -211,7 +211,7 @@ changes only *how* you deliver them, not *whether* you ask.
 
   The **outcome contract appended to the end of your prompt** carries the exact command and the
   exact questions-JSON shape, already rendered for this run — including where to write the file
-  (beside `$RELAY_NODE_SCRATCH`, never an invented `/tmp` path). Follow it rather than
+  (beside `$HAMACA_NODE_SCRATCH`, never an invented `/tmp` path). Follow it rather than
   reconstructing a payload from memory.
 
   What that contract does *not* tell you is how to write a **good** question, which is this
@@ -233,10 +233,10 @@ changes only *how* you deliver them, not *whether* you ask.
   timeline; the runner stops working it until the human answers.
 
 - **On re-entry** (the card comes back after the human answers): the answers are in the card
-  timeline — `./relay card <ref>` shows your question comment and the human's answer
+  timeline — `./hamaca card <ref>` shows your question comment and the human's answer
   comment (also honor any CHANGES REQUESTED block). Read them, incorporate, then write **both**
-  the spec and the acceptance criteria to the card (`./relay spec <ref> @<tmpfile>` and
-  `./relay criteria <ref> @<tmpfile>`, exactly as **After approval** describes) and stop —
+  the spec and the acceptance criteria to the card (`./hamaca spec <ref> @<tmpfile>` and
+  `./hamaca criteria <ref> @<tmpfile>`, exactly as **After approval** describes) and stop —
   or send one more batched `needs-input` only if something is genuinely still ambiguous.
   Writing only the spec fails the node: the Spec flow declares
   `"writes": ["spec", "acceptance_criteria"]`, and a declared field left blank rewrites this

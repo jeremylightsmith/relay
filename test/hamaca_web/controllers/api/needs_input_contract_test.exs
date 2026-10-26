@@ -35,7 +35,7 @@ defmodule HamacaWeb.Api.NeedsInputContractTest do
   end
 
   defp documented_example do
-    %{"json" => json} = Regex.named_captures(@example_re, File.read!("relay"))
+    %{"json" => json} = Regex.named_captures(@example_re, File.read!("hamaca"))
     Jason.decode!(json)
   end
 

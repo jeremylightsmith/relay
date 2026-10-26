@@ -151,7 +151,7 @@ defmodule HamacaWeb.BoardLiveConnectTest do
     {:ok, view, _html} = live(conn, connect_url(board))
     mint!(view)
 
-    assert text(view, "#setup-key-box") =~ "export RELAY_API_KEY=relay_"
+    assert text(view, "#setup-key-box") =~ "export HAMACA_API_KEY=relay_"
     machine = sam_machine(sam)
     assert machine.user_id == sam.id
     assert %ApiKey{created_by_id: created_by_id} = Repo.get!(ApiKey, machine.api_key_id)
@@ -167,7 +167,7 @@ defmodule HamacaWeb.BoardLiveConnectTest do
     refute has_element?(reloaded, "#setup-key-box")
     mint!(reloaded)
 
-    assert text(reloaded, "#setup-key-box") =~ "export RELAY_API_KEY=relay_"
+    assert text(reloaded, "#setup-key-box") =~ "export HAMACA_API_KEY=relay_"
     assert Repo.aggregate(from(m in SetupMachine, where: m.user_id == ^sam.id), :count) == 1
     assert sam_machine(sam).api_key_id != first_key_id
   end
@@ -256,7 +256,7 @@ defmodule HamacaWeb.BoardLiveConnectTest do
 
     view |> element("#setup-key-lost") |> render_click()
 
-    assert text(view, "#setup-key-box") =~ "export RELAY_API_KEY=relay_"
+    assert text(view, "#setup-key-box") =~ "export HAMACA_API_KEY=relay_"
     assert sam_machine(sam).api_key_id != first_key_id
   end
 

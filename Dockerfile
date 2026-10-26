@@ -59,18 +59,19 @@ COPY lib lib
 # embedding (@external_resource) means the runtime image needs none of it.
 COPY docs docs
 COPY .claude .claude
+COPY hamaca hamaca
+COPY hamaca.md hamaca.md
 COPY relay relay
-COPY relay.md relay.md
 
 # Compile the release
 RUN mix compile
 
-# RE304: build priv/scaffold/ from the .claude, relay and relay.md sources copied above. It must
-# exist before `mix release` bundles priv/ into the image — the release ships priv/ but ships
-# neither relay nor .claude/, so this is the only way /api/scaffold and
-# Relay.Runs.latest_runner_version/0 have anything to read at runtime.
+# RE304, RE478: build priv/scaffold/<layout>/ from the .claude, hamaca, hamaca.md and relay (the
+# shim) sources copied above. It must exist before `mix release` bundles priv/ into the image —
+# the release ships priv/ but ships neither the runner nor .claude/, so this is the only way
+# /api/scaffold and Hamaca.Runs.latest_runner_version/0 have anything to read at runtime.
 #
-# Every COPY feeding this is derived from Scaffold.items/0 by
+# Every COPY feeding this is derived from Scaffold.sources/0 by
 # test/hamaca/scaffold_build_wiring_test.exs — add an item there and that test tells you to add
 # the COPY here, rather than the deploy telling you.
 RUN mix hamaca.build_scaffold

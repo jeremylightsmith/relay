@@ -30,7 +30,7 @@ defmodule HamacaWeb.SetupComponents do
   (`Hamaca.Setup.connect_skips/0`) and, unsaved (`machine_id: nil`), offers "Mint my key" on step
   3. `setup_panel/1` titles it "Connect a machine to <board>" with the member note (`user_name`).
 
-  Step 5 (RE445, frames D, F1, F2 and E of the wizard mockup) is the `/relay-onboard` loop: in
+  Step 5 (RE445, frames D, F1, F2 and E of the wizard mockup) is the `/hamaca-onboard` loop: in
   both modes its sub-steps 5.1–5.8 render as rows with a status glyph (`✓ ▸ ◌ ! ○ –`) and their
   evidence. While it is current in `:interactive` mode it also shows the minutes since it was
   reached (`<id>-onboard-elapsed`, read off the `now` attr, default `DateTime.utc_now/0`; it
@@ -83,8 +83,8 @@ defmodule HamacaWeb.SetupComponents do
   @peek_roles [:llm, :key, :install, :onboard, :runner]
 
   # What step 5 and step 6 have you run.
-  @onboard_command "/relay-onboard"
-  @runner_command "./relay start"
+  @onboard_command "/hamaca-onboard"
+  @runner_command "./hamaca start"
 
   # ---------------------------------------------------------------- checklist
 
@@ -457,7 +457,7 @@ defmodule HamacaWeb.SetupComponents do
         <.icon name="hero-arrow-path" class="size-3.5 mt-0.5 shrink-0" />
       </span>
       <span>
-        Safe to run again: rewrites <code class="font-mono">./relay</code>
+        Safe to run again: rewrites <code class="font-mono">./hamaca</code>
         and the skill, keeps <code class="font-mono">runner.json</code>
         and <code class="font-mono">prepare-worktree.sh</code>
       </span>
@@ -475,7 +475,7 @@ defmodule HamacaWeb.SetupComponents do
     ~H"""
     <.code_row id={"#{@prefix}-runner-command"} text={runner_command()} label="Copy command" />
     <div id={"#{@prefix}-runner-restart"} style={"font-size:11.5px;" <> muted()}>
-      Restart it after changing env vars or updating ./relay.
+      Restart it after changing env vars or updating ./hamaca.
     </div>
     """
   end
@@ -485,10 +485,13 @@ defmodule HamacaWeb.SetupComponents do
 
   # Step 3's key as the board knows it: the prefix and the last four, never the token.
   defp masked_key(%{token_prefix: prefix, last_four: last_four}),
-    do: "export RELAY_API_KEY=relay_#{prefix}_••••#{last_four}"
+    do: "export HAMACA_API_KEY=relay_#{prefix}_••••#{last_four}"
 
   defp onboard_command, do: @onboard_command
-  defp runner_command, do: @runner_command
+
+  @doc "The command that starts a runner: step 6's code row and the Runners page's empty state."
+  @spec runner_command() :: String.t()
+  def runner_command, do: @runner_command
 
   # ---------------------------------------------------------------- step 5: the onboard loop
 
@@ -650,7 +653,7 @@ defmodule HamacaWeb.SetupComponents do
           question {@count + 1} of {@total} in your terminal…
         </div>
         <div id={"#{@prefix}-project-md"} class="font-mono" style={"font-size:10.5px;" <> faint()}>
-          → .relay/project.md (committed in 5.6) · copy kept on the board
+          → .hamaca/project.md (committed in 5.6) · copy kept on the board
         </div>
       </div>
     </details>
@@ -931,7 +934,7 @@ defmodule HamacaWeb.SetupComponents do
       <div style="font-size:12px;font-weight:600;color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content))">
         Shown once. Copy it now.
       </div>
-      <.code_row id={"#{@prefix}-key-line"} text={"export RELAY_API_KEY=#{@token}"} label="Copy key" />
+      <.code_row id={"#{@prefix}-key-line"} text={"export HAMACA_API_KEY=#{@token}"} label="Copy key" />
       <div style={"font-size:11.5px;" <> muted()}>
         Put it wherever you keep secrets: <code class="font-mono">.envrc</code>, your shell profile,
         1Password. Hamaca never writes it to disk.
@@ -1267,7 +1270,7 @@ defmodule HamacaWeb.SetupComponents do
       <div class="flex items-baseline gap-2">
         <span style="font-size:13.5px;font-weight:600">Project answers</span>
         <span class="font-mono" style={"font-size:10.5px;" <> muted()}>
-          from onboarding · also in .relay/project.md
+          from onboarding · also in .hamaca/project.md
         </span>
       </div>
       <div
@@ -1293,7 +1296,7 @@ defmodule HamacaWeb.SetupComponents do
         No answers yet. Onboarding records them in step {@interview}.
       </p>
       <p id={"#{@id}-footnote"} style={"font-size:11.5px;" <> muted()}>
-        A copy for reference. To change one, edit .relay/project.md in the repo; the next onboard run reports it here.
+        A copy for reference. To change one, edit .hamaca/project.md in the repo; the next onboard run reports it here.
       </p>
     </div>
     """
@@ -1545,7 +1548,7 @@ defmodule HamacaWeb.SetupComponents do
         <.diagram_box
           glyph="💻"
           name="Runner"
-          caption="./relay · your machine"
+          caption="./hamaca · your machine"
           tone="base-content"
         />
         <span class="flex-none font-mono" style={"font-size:12px;" <> faint()}>→</span>

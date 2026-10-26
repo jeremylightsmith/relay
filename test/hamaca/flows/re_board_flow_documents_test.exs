@@ -1,7 +1,7 @@
 defmodule Hamaca.Flows.ReBoardFlowDocumentsTest do
   @moduledoc """
-  RE408. The RE board's checked-in flow documents (`.relay/flows/code.json`, `.relay/flows/deploy.json`)
-  run through `Flows.upsert_from_document/3` — the exact path `PUT /api/flows/:key` (`./relay
+  RE408. The RE board's checked-in flow documents (`.hamaca/flows/code.json`, `.hamaca/flows/deploy.json`)
+  run through `Flows.upsert_from_document/3` — the exact path `PUT /api/flows/:key` (`./hamaca
   flow-push`) takes — so a document that the board would refuse fails here, not on the live board.
   """
   use Hamaca.DataCase, async: true
@@ -10,11 +10,18 @@ defmodule Hamaca.Flows.ReBoardFlowDocumentsTest do
   alias Hamaca.Flows
   alias Hamaca.Flows.DefaultLibrary
 
-  @code_path Path.expand("../../../.relay/flows/code.json", __DIR__)
-  @deploy_path Path.expand("../../../.relay/flows/deploy.json", __DIR__)
+  @code_path Path.expand("../../../.hamaca/flows/code.json", __DIR__)
+  @deploy_path Path.expand("../../../.hamaca/flows/deploy.json", __DIR__)
   @repo_root Path.expand("../../..", __DIR__)
 
   defp doc(path), do: path |> File.read!() |> Jason.decode!()
+
+  # RE478: the repo state moved to `.hamaca/` with `git mv`; no `.relay/` is left behind.
+  test "the repo keeps its state under .hamaca/, with no .relay/ left" do
+    assert File.regular?(@code_path)
+    assert File.regular?(@deploy_path)
+    refute File.exists?(Path.join(@repo_root, ".relay"))
+  end
 
   # A board shaped like RE after RE408: Code has its done sublane, and Deploy sits after Code
   # (the default board's Deploy, after Review, is replaced by one right after Code — a flow's

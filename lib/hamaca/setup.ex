@@ -19,7 +19,7 @@ defmodule Hamaca.Setup do
   the next top-level step. Every change broadcasts `{:setup_changed, board_id}` through
   `Hamaca.Events.broadcast/2`.
 
-  Step 5's sub-steps (RE445) are reported by the `/relay-onboard` skill through
+  Step 5's sub-steps (RE445) are reported by the `/hamaca-onboard` skill through
   `GET /api/setup` / `POST /api/setup/steps/:step`; `interview_questions/0` (5.3) and
   `change_decisions/0` (5.4) are the closed sets their `data` uses. Two are also **board-observed**:
   `Hamaca.Flows` calls `observe_flow_push/2` after a committed flow push (5.5 finishes once every
@@ -184,9 +184,9 @@ defmodule Hamaca.Setup do
   }
 
   @onboard_children [
-    {"5.1", "Pull flows into .relay/flows/"},
+    {"5.1", "Pull flows into .hamaca/flows/"},
     {"5.2", "Detect & confirm repo facts"},
-    {"5.3", "Interview → .relay/project.md"},
+    {"5.3", "Interview → .hamaca/project.md"},
     {"5.4", "Customize: propose, agree 1 by 1, apply"},
     {"5.5", "Push flows back (enabled on arrival)"},
     {"5.6", "Hamaca files on origin/main"},
@@ -233,7 +233,7 @@ defmodule Hamaca.Setup do
                what_this_does: [
                  "Mints a board key in your name; Board settings → API keys lists it.",
                  "The board keeps only a hash, so the key is shown once, here.",
-                 "Export it as RELAY_API_KEY: the install script and ./relay read it from your environment."
+                 "Export it as HAMACA_API_KEY: the install script and ./hamaca read it from your environment."
                ],
                read_only_note: "Needs a computer: the key goes into the shell where your repo lives."
              },
@@ -245,11 +245,11 @@ defmodule Hamaca.Setup do
                actor: :you_terminal,
                why: "Puts the runner and the Hamaca skills in your repo. It's a script you run, not a file you set up.",
                what_this_does: [
-                 "./relay — the runner and CLI, with this board's URL baked in",
-                 "%{skill_dir}/relay-onboard, relay-update and relay-doctor — the Hamaca skills",
-                 "relay.md, plus one line in %{pointer_file} pointing at it",
-                 ".relay/runner.json — runner settings, base set to your default branch (kept if present)",
-                 ".relay/prepare-worktree.sh — the warm-up hook, empty until onboarding fills it (kept if present)",
+                 "./hamaca — the runner and CLI, with this board's URL baked in",
+                 "%{skill_dir}/hamaca-onboard, hamaca-update and hamaca-doctor — the Hamaca skills",
+                 "hamaca.md, plus one line in %{pointer_file} pointing at it",
+                 ".hamaca/runner.json — runner settings, base set to your default branch (kept if present)",
+                 ".hamaca/prepare-worktree.sh — the warm-up hook, empty until onboarding fills it (kept if present)",
                  ".gitignore — .claude/worktrees/, /tmp/ and .envrc.local, each added once",
                  "Nothing is committed; onboarding does that with you."
                ]
@@ -261,8 +261,8 @@ defmodule Hamaca.Setup do
                short: "onboard",
                actor: :ai_terminal,
                why:
-                 "Open %{cli} in your repo and run /relay-onboard. It works this list until it's green and asks you in the chat when it's stuck.",
-               what_this_does: ["Run /relay-onboard in your repo; it works sub-steps 5.1–5.8 below."],
+                 "Open %{cli} in your repo and run /hamaca-onboard. It works this list until it's green and asks you in the chat when it's stuck.",
+               what_this_does: ["Run /hamaca-onboard in your repo; it works sub-steps 5.1–5.8 below."],
                connect_why:
                  "Pulls the board's flows and checks the Hamaca files are already on origin/main. No interview, no customizing."
              }
@@ -278,7 +278,7 @@ defmodule Hamaca.Setup do
                  short: "runner",
                  actor: :you_terminal,
                  why: "The runner is what actually picks up cards. Give it its own terminal and leave it running.",
-                 what_this_does: ["Run ./relay start in its own terminal. This ticks on the runner's first heartbeat."]
+                 what_this_does: ["Run ./hamaca start in its own terminal. This ticks on the runner's first heartbeat."]
                },
                %{
                  id: "7",
@@ -409,7 +409,7 @@ defmodule Hamaca.Setup do
       id: "python3",
       label: "python3",
       headline: "Preflight stopped: python3 isn't on your PATH",
-      fix: "./relay runs on Python 3. Install it, open a new terminal, and #{@nothing_written}",
+      fix: "./hamaca runs on Python 3. Install it, open a new terminal, and #{@nothing_written}",
       fix_command: nil
     }
   ]
@@ -533,22 +533,23 @@ defmodule Hamaca.Setup do
   end
 
   defp skill_path(nil), do: nil
-  defp skill_path(skill_dir), do: "#{skill_dir}/relay-onboard/SKILL.md"
+  defp skill_path(skill_dir), do: "#{skill_dir}/hamaca-onboard/SKILL.md"
 
   @doc "The onboarding LLM for a harness key, or nil."
   @spec onboarding_llm(String.t() | nil) :: llm() | nil
   def onboarding_llm(harness_key), do: Enum.find(onboarding_llms(), &(&1.harness == harness_key))
 
   @doc ~S"""
-  The one line a project's pointer file (`CLAUDE.md`, `AGENTS.md`) carries to `relay.md`. The ONE
-  Elixir definition; the install script renders it and the runner contract fixture pins it.
+  The one line a project's pointer file (`CLAUDE.md`, `AGENTS.md`) carries to `hamaca.md`. The ONE
+  Elixir definition; the install script renders it and the runner contract fixture pins it. The
+  pre-rename line (RE478) is defined once, in the runner, as what its migration replaces.
   """
   @spec pointer_line() :: String.t()
-  def pointer_line, do: "Working Relay cards from this repo: see [relay.md](relay.md)."
+  def pointer_line, do: "Working Hamaca cards from this repo: see [hamaca.md](hamaca.md)."
 
   @doc """
   The flash a board shows when its default agent moves from harness `previous` to `next` (RE457):
-  the `./relay update --skill-dir … --pointer-file …` command that moves the repo's Hamaca skills.
+  the `./hamaca update --skill-dir … --pointer-file …` command that moves the repo's Hamaca skills.
   `nil` when `next` is no onboarding LLM, has no skill dir, or keeps `previous`'s skill dir — a
   `previous` that is nil or no onboarding LLM counts as the default LLM's. The board never changes
   repo files; this only tells the human what to run.
@@ -560,7 +561,7 @@ defmodule Hamaca.Setup do
     case onboarding_llm(next) do
       %{skill_dir: dir} = llm when is_binary(dir) and dir != old.skill_dir ->
         "Your board's default LLM is now #{llm.label}. In your repo run " <>
-          "./relay update --skill-dir #{dir} --pointer-file #{llm.pointer_file} and commit the result."
+          "./hamaca update --skill-dir #{dir} --pointer-file #{llm.pointer_file} and commit the result."
 
       _ ->
         nil
@@ -573,7 +574,7 @@ defmodule Hamaca.Setup do
 
   @doc """
   The install script's local checks, in print order: `git_repo`, `remote`, `default_branch`,
-  `python3`. The server adds the `cli` (`"<cli> on PATH"`) and `key` (`"RELAY_API_KEY"`) lines.
+  `python3`. The server adds the `cli` (`"<cli> on PATH"`) and `key` (`"HAMACA_API_KEY"`) lines.
   """
   @spec preflight_checks() :: [%{id: String.t(), label: String.t()}]
   def preflight_checks, do: Enum.map(@preflight_checks, &Map.take(&1, [:id, :label]))
@@ -619,7 +620,7 @@ defmodule Hamaca.Setup do
            ok: is_nil(failed),
            board: board.name,
            llm: Map.take(llm, [:harness, :label, :cli, :skill_dir, :skill_path, :pointer_file]),
-           relay_files: Scaffold.items(llm.skill_dir),
+           relay_files: Scaffold.primary_items(llm.skill_dir),
            checks: checks
          },
          failure
@@ -763,7 +764,7 @@ defmodule Hamaca.Setup do
   defp key_check(%ApiKey{last_four: four}) do
     %{
       "id" => "key",
-      "label" => "RELAY_API_KEY",
+      "label" => "HAMACA_API_KEY",
       "ok" => true,
       "detail" => "accepted by the board (…#{four})",
       "fix" => nil

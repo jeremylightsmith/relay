@@ -9,7 +9,7 @@ Turn a card's ask into **mockups a human can look at** — uploaded to the card,
 to the repo.
 
 This skill takes a **card ref** as its first argument (`$ARGUMENTS`), e.g. `/design RE42`. The
-**card is the home for this work**: mockups live in its `mockups` field (`./relay mockups`),
+**card is the home for this work**: mockups live in its `mockups` field (`./hamaca mockups`),
 the reasoning lives in its comments, the decisions live in a `## Design` section of its
 description, and nothing survives in the working tree.
 
@@ -17,14 +17,14 @@ description, and nothing survives in the working tree.
 This skill NEVER writes to the repository. The Design flow runs `shared_clean` — one worktree
 shared with other cards' runs, held clean for them. No file under the repo, no commit, no
 branch, no git command that changes anything, no other card. Every artifact you produce lives
-in `$RELAY_NODE_SCRATCH`'s directory (`S` below) and reaches the human by **upload**.
+in `$HAMACA_NODE_SCRATCH`'s directory (`S` below) and reaches the human by **upload**.
 </HARD-GATE>
 
 Reading the repo is encouraged. Looking at the running app is encouraged. Writing to either is
 not.
 
 ```bash
-S="$(dirname "$RELAY_NODE_SCRATCH")"   # interactively: S="$(mktemp -d)"
+S="$(dirname "$HAMACA_NODE_SCRATCH")"   # interactively: S="$(mktemp -d)"
 ```
 
 ## The round model
@@ -39,7 +39,7 @@ trail that the *next* round can do the same.
 
 ## 0. Read the situation
 
-Always, before anything else: `./relay card <ref> --json`.
+Always, before anything else: `./hamaca card <ref> --json`.
 
 - **`description`** — the ask. Design sits *before* Spec on this board, so there is usually
   **no `spec` and no acceptance criteria** (if `spec` is populated, read it — it outranks your
@@ -51,7 +51,7 @@ Always, before anything else: `./relay card <ref> --json`.
   re-proposing the layout killed in round 2.
 - **`mockups`** — the artifacts being critiqued. Pull them back byte-for-byte:
 
-      ./relay mockups <ref> --pull "$S/prev" --json
+      ./hamaca mockups <ref> --pull "$S/prev" --json
 
   **Always pass an explicit DIR** — the default `tmp/<REF>/mockups/` is inside the repo.
   `--json` returns `[{caption, url, path}]`. A card with none prints `<ref>: no mockups` and
@@ -74,7 +74,7 @@ A mockup that ignores what exists is a fantasy.
 - **Read the design intent.** `docs/designs/README.md` indexes the hi-fi artboards
   (`docs/designs/*.dc.html`); the Design System artboard maps elements to daisyUI primitives.
   Never treat a `docs/designs-as-is/` capture as intent — it is generated from the app.
-- **Read the components.** `lib/relay_web/components/` and `storybook/` show what already
+- **Read the components.** `lib/hamaca_web/components/` and `storybook/` show what already
   exists; reuse those patterns before inventing new ones.
 
 ## 2. Ask — a lot, and all at once
@@ -84,7 +84,7 @@ whole round to unwind.
 
 Collect **every** question into a **single** `needs-input` call carrying a structured array,
 then stop. The outcome contract appended to your prompt carries the exact command and
-questions-JSON shape for this run (file beside `$RELAY_NODE_SCRATCH`) — follow it. How to write
+questions-JSON shape for this run (file beside `$HAMACA_NODE_SCRATCH`) — follow it. How to write
 a good question: one decision per array item; bold the subject in `prompt`, then ask plainly;
 each option a full self-contained sentence (the human sees it alone on a button); mark your
 pick `— RECOMMENDED`; leave `allow_text` true unless the options are exhaustive.
@@ -165,13 +165,13 @@ first works.)
 ## 5. Upload, and log the round
 
 ```bash
-./relay mockups <ref> "$S/opt-a.html" "$S/opt-b.html" \
+./hamaca mockups <ref> "$S/opt-a.html" "$S/opt-b.html" \
   --caption "A — one list, filter at top" \
   --caption "B — two panes, no filter"
 ```
 
 `mockups` **replaces the card's whole list** — the card shows the current round, not a museum.
-The history lives in comments, so **every round posts one** (`./relay comment <ref>
+The history lives in comments, so **every round posts one** (`./hamaca comment <ref>
 @"$S/round.md"`) recording briefly: **what the rejection note or answers asked for**, **what
 you changed and why**, **what you deliberately left alone**, and **what you tried and
 rejected**. A round without one is incomplete work.
@@ -183,7 +183,7 @@ reads them — a `## Design` section at the end of `description`, **replaced in 
 round, never appended twice, never touching the human's text:
 
 ```bash
-./relay card <ref> --field description > "$S/desc.md"
+./hamaca card <ref> --field description > "$S/desc.md"
 python3 - "$S/desc.md" "$S/design-section.md" <<'PY'
 import re, sys
 desc, section = open(sys.argv[1]).read(), open(sys.argv[2]).read().strip()
@@ -191,7 +191,7 @@ desc, section = open(sys.argv[1]).read(), open(sys.argv[2]).read().strip()
 desc = re.sub(r'(?ms)^## Design[ \t]*\n.*?(?=^#{1,2} |\Z)', '', desc).strip()
 open(sys.argv[1], 'w').write((desc + "\n\n" if desc else "") + section + "\n")
 PY
-./relay describe <ref> @"$S/desc.md"
+./hamaca describe <ref> @"$S/desc.md"
 ```
 
 **Decisions, not description.** Bullets. Record what was *decided* and anything a later stage

@@ -141,28 +141,57 @@ defmodule Hamaca.SetupTest do
       assert Enum.map(five.children, & &1.id) == ~w(5.1 5.2 5.3 5.4 5.5 5.6 5.7 5.8)
       assert Enum.all?(five.children, &(&1.status == :pending))
       assert five.title == "Onboard, in Claude Code"
-      assert String.starts_with?(five.why, "Open claude in your repo and run /relay-onboard.")
+      assert String.starts_with?(five.why, "Open claude in your repo and run /hamaca-onboard.")
     end
 
     # RE457 scenario 9
     test "placeholders resolve against the onboarding LLM" do
       four = step(create!("bare-minimum"), "4")
 
-      assert ".claude/skills/relay-onboard, relay-update and relay-doctor — the Hamaca skills" in four.what_this_does
+      assert ".claude/skills/hamaca-onboard, hamaca-update and hamaca-doctor — the Hamaca skills" in four.what_this_does
       refute Enum.any?(four.what_this_does, &(&1 =~ "— the onboarding skill"))
-      assert "relay.md, plus one line in CLAUDE.md pointing at it" in four.what_this_does
+      assert "hamaca.md, plus one line in CLAUDE.md pointing at it" in four.what_this_does
       refute Enum.any?(four.what_this_does, &(&1 =~ "%{"))
       assert String.starts_with?(four.why, "Puts the runner and the Hamaca skills in your repo.")
     end
 
+    # RE478 task 4 scenario 7
+    test "the checklist copy names ./hamaca, HAMACA_API_KEY and .hamaca/, never the relay names" do
+      steps = "bare-minimum" |> create!() |> Setup.checklist() |> Map.fetch!(:steps)
+      by_id = Map.new(steps ++ Enum.flat_map(steps, &(&1[:children] || [])), &{&1.id, &1})
+
+      assert "Export it as HAMACA_API_KEY: the install script and ./hamaca read it from your environment." in by_id[
+               "3"
+             ].what_this_does
+
+      assert "./hamaca — the runner and CLI, with this board's URL baked in" in by_id["4"].what_this_does
+
+      assert ".hamaca/runner.json — runner settings, base set to your default branch (kept if present)" in by_id["4"].what_this_does
+
+      assert by_id["5"].what_this_does == ["Run /hamaca-onboard in your repo; it works sub-steps 5.1–5.8 below."]
+
+      assert by_id["6"].what_this_does == [
+               "Run ./hamaca start in its own terminal. This ticks on the runner's first heartbeat."
+             ]
+
+      assert by_id["5.1"].title == "Pull flows into .hamaca/flows/"
+      assert by_id["5.3"].title == "Interview → .hamaca/project.md"
+      assert String.starts_with?(Setup.python3_fix(), "./hamaca runs on Python 3.")
+
+      copy = Enum.map_join(Map.values(by_id), "\n", &inspect(Map.take(&1, [:title, :why, :what_this_does])))
+
+      for name <- ["./relay", "/relay-onboard", "relay-update", "relay-doctor", "RELAY_API_KEY", ".relay/", "relay.md"] do
+        refute copy =~ name, "the checklist still names #{name}"
+      end
+    end
+
     # RE477 scenario 11
-    test "the checklist copy says Hamaca, but the relay.md pointer line is unchanged" do
+    test "the checklist copy says Hamaca" do
       board = create!("bare-minimum")
 
       assert step(board, "5.6").title == "Hamaca files on origin/main"
       assert Enum.any?(step(board, "4").what_this_does, &(&1 =~ "— the Hamaca skills"))
       assert String.starts_with?(step(board, "4").why, "Puts the runner and the Hamaca skills in your repo.")
-      assert Setup.pointer_line() == "Working Relay cards from this repo: see [relay.md](relay.md)."
     end
 
     # Scenario 10 (warning half)
@@ -815,12 +844,12 @@ defmodule Hamaca.SetupTest do
     test "onboarding_llm/1 carries each LLM's skill_dir and derives skill_path from it" do
       claude = Setup.onboarding_llm("claude-code")
       assert claude.skill_dir == ".claude/skills"
-      assert claude.skill_path == ".claude/skills/relay-onboard/SKILL.md"
+      assert claude.skill_path == ".claude/skills/hamaca-onboard/SKILL.md"
       assert claude.pointer_file == "CLAUDE.md"
 
       codex = Setup.onboarding_llm("codex")
       assert codex.skill_dir == ".agents/skills"
-      assert codex.skill_path == ".agents/skills/relay-onboard/SKILL.md"
+      assert codex.skill_path == ".agents/skills/hamaca-onboard/SKILL.md"
 
       gemini = Setup.onboarding_llm("gemini-cli")
       assert gemini.skill_dir == nil
@@ -828,20 +857,21 @@ defmodule Hamaca.SetupTest do
     end
 
     # RE457 scenario 5
-    test "pointer_line/0 is the relay.md pointer line" do
-      assert Setup.pointer_line() == "Working Relay cards from this repo: see [relay.md](relay.md)."
+    # RE478 scenario 19
+    test "pointer_line/0 is the hamaca.md pointer line" do
+      assert Setup.pointer_line() == "Working Hamaca cards from this repo: see [hamaca.md](hamaca.md)."
     end
 
     # RE457 scenario 6
     test "llm_switch_notice/2 from Claude Code to Codex names the codex update command" do
       assert Setup.llm_switch_notice("claude-code", "codex") ==
-               "Your board's default LLM is now Codex. In your repo run ./relay update --skill-dir .agents/skills --pointer-file AGENTS.md and commit the result."
+               "Your board's default LLM is now Codex. In your repo run ./hamaca update --skill-dir .agents/skills --pointer-file AGENTS.md and commit the result."
     end
 
     # RE457 scenario 7
     test "llm_switch_notice/2 from Codex to Claude Code names the claude update command" do
       assert Setup.llm_switch_notice("codex", "claude-code") ==
-               "Your board's default LLM is now Claude Code. In your repo run ./relay update --skill-dir .claude/skills --pointer-file CLAUDE.md and commit the result."
+               "Your board's default LLM is now Claude Code. In your repo run ./hamaca update --skill-dir .claude/skills --pointer-file CLAUDE.md and commit the result."
     end
 
     # RE457 scenario 8

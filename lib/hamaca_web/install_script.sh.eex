@@ -5,11 +5,12 @@
 #
 #   curl -fsSL <%= @base_url %>/b/<%= @slug %>/install | sh
 #
-# It checks first and writes nothing until the checks pass. Then it downloads only ./relay,
+# It checks first and writes nothing until the checks pass. Then it downloads only ./hamaca,
 # appends one pointer line to the LLM's pointer file and the .gitignore entries, and lets
-# `./relay update --starter-only` write the starter .relay/ files and `./relay update` lay down
-# relay.md, the Hamaca skills under the LLM's skill dir and .relay/scaffold.json (RE457). Nothing
-# is committed. RELAY_API_KEY is sent only as an Authorization header and is never written to a
+# `./hamaca update --starter-only` write the starter .hamaca/ files and `./hamaca update` lay down
+# hamaca.md, the Hamaca skills under the LLM's skill dir, the old-name shim and
+# .hamaca/scaffold.json (RE457, RE478). Nothing
+# is committed. HAMACA_API_KEY is sent only as an Authorization header and is never written to a
 # file. Plain POSIX sh: only curl git python3 uname mktemp mkdir chmod mv rm cat grep printf.
 
 set -u
@@ -18,6 +19,7 @@ set -f
 BASE=<%= sh_quote(@base_url) %>
 SLUG=<%= sh_quote(@slug) %>
 POINTER=<%= sh_quote(@pointer_line) %>
+RUNNER_URL=<%= sh_quote(@runner_url) %>
 IGNORES='.claude/worktrees/ /tmp/ .envrc.local'
 NL='
 '
@@ -51,7 +53,7 @@ check_json() { printf '{"id":%s,"ok":%s,"detail":%s}' "$(json_str "$1")" "$2" "$
 # POST a JSON body ($2) to the board path $1 with the key. Sets $status and $resp.
 api_post() {
   out=$(printf '%s' "$2" | curl -sS -X POST \
-    -H "Authorization: Bearer $RELAY_API_KEY" \
+    -H "Authorization: Bearer $HAMACA_API_KEY" \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
     --data-binary @- -w "$NL%{http_code}" "$BASE$1") || return 1
   status=${out##*"$NL"}
@@ -101,8 +103,8 @@ append_line() {
   printf '%s\n' "$1" >> "$2"
 }
 
-[ -n "${RELAY_API_KEY:-}" ] ||
-  fail "RELAY_API_KEY is not set — copy the export line from step 3 of the setup wizard."
+[ -n "${HAMACA_API_KEY:-}" ] ||
+  fail "HAMACA_API_KEY is not set — copy the export line from step 3 of the setup wizard."
 
 say "Checking first. Nothing is written until these pass."
 
@@ -168,7 +170,7 @@ message() {
 
 case $status in
   200) ;;
-  401) fail "RELAY_API_KEY was not accepted by the board — mint a new key in step 3." ;;
+  401) fail "HAMACA_API_KEY was not accepted by the board — mint a new key in step 3." ;;
   403 | 409) fail "$(message)" ;;
   *) fail "The board answered HTTP $status. Nothing was written." ;;
 esac
@@ -199,52 +201,52 @@ printf '%s' "$resp" | py 'import json, sys
 for path in json.load(sys.stdin)["relay_files"]:
     print("  " + path)'
 [ -z "$pointer_note" ] || say "  $pointer_file$pointer_note"
-say "  .relay/runner.json"
-say "  .relay/prepare-worktree.sh"
+say "  .hamaca/runner.json"
+say "  .hamaca/prepare-worktree.sh"
 say "  .gitignore (+$missing lines)"
 
-# ---- only ./relay is fetched by hand; `./relay update` lays down the rest, each body checked
+# ---- only ./hamaca is fetched by hand; `./hamaca update` lays down the rest, each body checked
 # against the manifest's sha256
-work=$(mktemp -d "${TMPDIR:-/tmp}/relay-install.XXXXXX") || fail "Couldn't make a temp dir. Nothing was written."
+work=$(mktemp -d "${TMPDIR:-/tmp}/hamaca-install.XXXXXX") || fail "Couldn't make a temp dir. Nothing was written."
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' INT TERM
 
-curl -fsS -o "$work/relay" "$BASE/api/scaffold/relay" ||
-  fail "Couldn't download relay from the board. Nothing was written."
+curl -fsS -o "$work/hamaca" "$BASE$RUNNER_URL" ||
+  fail "Couldn't download hamaca from the board. Nothing was written."
 
-mv "$work/relay" ./relay
-chmod 755 ./relay
+mv "$work/hamaca" ./hamaca
+chmod 755 ./hamaca
 
 append_line "$POINTER" "$pointer_file"
 for line in $IGNORES; do
   append_line "$line" .gitignore
 done
 
-out=$(python3 ./relay update --starter-only --base "origin/$branch" \
+out=$(python3 ./hamaca update --starter-only --base "origin/$branch" \
   --skill-dir "$skill_dir" --pointer-file "$pointer_file" 2>&1) || {
   say "$out"
-  fail "./relay update --starter-only failed."
+  fail "./hamaca update --starter-only failed."
 }
 
-update_out=$(RELAY_URL="$BASE" python3 ./relay update --json) || {
+update_out=$(HAMACA_URL="$BASE" python3 ./hamaca update --json) || {
   say "$update_out"
-  fail "./relay update failed — run the same command again."
+  fail "./hamaca update failed — run the same command again."
 }
 
-# relay first, then every other file the update wrote (in its order, once), then the rest. The
-# report's JSON starts at its first `{` line: ./relay logs `[relay] …` to stdout.
+# hamaca first, then every other file the update wrote (in its order, once), then the rest. The
+# report's JSON starts at its first `{` line: ./hamaca logs `[relay] …` to stdout.
 written=$(printf '%s' "$update_out" | py 'import json, sys
 lines = sys.stdin.read().splitlines()
 start = next(i for i, l in enumerate(lines) if l.startswith("{"))
-seen = ["relay"]
+seen = ["hamaca"]
 for path in json.loads("\n".join(lines[start:]))["written"]:
     if path not in seen:
         seen.append(path)
 sys.stdout.write(",".join(json.dumps(p) for p in seen))') ||
-  fail "./relay update failed — run the same command again."
+  fail "./hamaca update failed — run the same command again."
 
 files=$(printf '%s,%s,%s,%s,%s' "$written" "$(json_str "$pointer_file")" \
-  "$(json_str .relay/runner.json)" "$(json_str .relay/prepare-worktree.sh)" "$(json_str .gitignore)")
+  "$(json_str .hamaca/runner.json)" "$(json_str .hamaca/prepare-worktree.sh)" "$(json_str .gitignore)")
 
 body=$(printf '{"slug":%s,"machine":%s,"repo_dir":%s,"branch":%s,"files":[%s]}' \
   "$(json_str "$SLUG")" "$(json_str "$machine")" "$(json_str "$repo_dir")" \
@@ -255,4 +257,4 @@ api_post /api/setup/installed "$body" && [ "$status" = 200 ] ||
 
 say ""
 say "Done. Nothing is committed yet; onboarding does that with you."
-say "Next: open $cli here and run /relay-onboard"
+say "Next: open $cli here and run /hamaca-onboard"

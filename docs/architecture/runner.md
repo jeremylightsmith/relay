@@ -62,9 +62,9 @@ describes what shipped. The authoritative graph is
 
 The graph above is the default library, which other boards still run. The RE board (this repo's
 own board) overrides two flows, checked in at
-[`.relay/flows/code.json`](../../.relay/flows/code.json) and
-[`.relay/flows/deploy.json`](../../.relay/flows/deploy.json) and pushed with
-`./relay flow-push <key> <file>`. Neither file has a `version`, so a push is last-write-wins.
+[`.hamaca/flows/code.json`](../../.hamaca/flows/code.json) and
+[`.hamaca/flows/deploy.json`](../../.hamaca/flows/deploy.json) and pushed with
+`./hamaca flow-push <key> <file>`. Neither file has a `version`, so a push is last-write-wins.
 `test/hamaca/flows/re_board_flow_documents_test.exs` runs both through
 `Hamaca.Flows.upsert_from_document/3`, the same path `PUT /api/flows/:key` takes.
 
@@ -103,7 +103,7 @@ flowchart LR
   pre-merge tail (`reverify` / `rebrowser`): a rebase breaks Flutter only when main also changed
   `flutter/`, and the Deploy flow's `ios` / `android` still validate before any store upload.
   The board runs the *pushed* flow, so a change to the file takes effect only after
-  `./relay flow-push code .relay/flows/code.json` (then `/relay-doctor`, interactively).
+  `./hamaca flow-push code .hamaca/flows/code.json` (then `/hamaca-doctor`, interactively).
 - **Deploy** (`deploy` flow, `Code:Done → Deploy → Review`, `exclusive`, stage WIP 1) only deploys
   what is already on `main`. Its four shell nodes (`max_retries: 1`, each parking on
   `needs_input` when it fails, with no AI fixer) run on our own runners:
@@ -181,7 +181,9 @@ double-booking (YAGNI: no multi-board reservation yet).
   batches `POST /api/board/logs` (best-effort: drops on full queue, swallows all errors) —
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
 - **Runner heartbeat**: `RunnerHeartbeat` posts `{runner, capacity,
-  running: [job-ids], held: [{ref, state}], harnesses, sessions}` to `POST /api/node-jobs/heartbeat` every
+  running: [job-ids], held: [{ref, state}], harnesses, sessions}` (`runner` =
+  `{name, host, version, cli}` — `cli` is `"hamaca"` or `"relay"`, RE478, ignored server-side
+  until RE486) to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
   release_held: [{ref, status}], want_capabilities, runner_outdated,
   required_version, latest_runner_version, harnesses_digest}` (the digest since RE433 — see
@@ -205,7 +207,8 @@ double-booking (YAGNI: no multi-board reservation yet).
   positive complement of the revoke query, so a live-but-quiet agent never falsely reads `:stale`
   in `Cards.health/1`. `latest_runner_version` (RE185/RE304) is the `RUNNER_VERSION` of the
   `./relay` the app itself serves — `Hamaca.Runs.latest_runner_version/0`, delegating to
-  `Hamaca.Scaffold.runner_version/0`, read from `priv/scaffold/relay` at runtime. Truthful
+  `Hamaca.Scaffold.runner_version/0`, read from `priv/scaffold/hamaca/hamaca` at runtime (the same
+  bytes the legacy layout serves at `relay`). Truthful
   by construction. It is a **target**, distinct from `required_version`'s **floor**; a runner
   with `auto_update` on updates itself against it. Each `harnesses[]` inventory entry carries
   that harness's `usage` (RE436) — `{source, read_at, windows, paused}`, its latest readings and
@@ -383,20 +386,47 @@ The board serves the scaffold again. Two routes on the **unauthenticated** `/api
 alongside `/api/version`:
 
 - `GET /api/scaffold` (`HamacaWeb.Api.ScaffoldController.manifest/2`) — the manifest:
-  `{"version": "<12 hex>", "items": [{"path", "sha256", "bytes"}, …]}`; the `relay` item also
-  carries `unbaked_sha256` (RE443, see **Hashing** below).
+  `{"version": "<12 hex>", "items": [{"path", "sha256", "bytes"}, …]}`; the layout's runner item
+  also carries `unbaked_sha256` (RE443, see **Hashing** below).
 - `GET /api/scaffold/*path` (`.show/2`) — the raw bytes of one manifest entry, 404 for anything
   else. `Hamaca.Scaffold.fetch/2` checks a **static allowlist**, so this is not a general file
   server and traversal is impossible by construction.
 
-Unauthenticated because the board's install script (`/b/<slug>/install`) downloads `./relay`
+**Two layouts, one source (RE478).** Both routes take an optional `layout` query param
+(`Hamaca.Scaffold.layout_param/0`); the closed set is `Hamaca.Scaffold.layouts/0` =
+`["hamaca", "legacy"]`, pinned with each layout's runner path in the contract fixture
+(`scaffold.layout_param`, `scaffold.layouts`, `scaffold.manifest` = legacy,
+`scaffold.manifest_hamaca`). A value outside the set is **400 `unknown_layout`** on both routes —
+never a silent fallback, because a client only compares a version against the same layout.
+
+- **`legacy`** — no param (`Hamaca.Scaffold.default_layout/0`), i.e. every installed v≤93
+  `./relay`, byte-for-byte what it was always served: `relay` (the FULL runner, same bytes as
+  `hamaca`), `relay.md` and `.claude/skills/relay-{doctor,onboard,update}/SKILL.md` — complete
+  copies generated from the hamaca sources by `Hamaca.Scaffold.to_legacy_names/1`, the ONE swap
+  list (`./hamaca`, `.hamaca/`, `hamaca.md`, `HAMACA_`, `hamaca-doctor|onboard|update` → the
+  `relay` spellings; `{relay}`, `~/.relay`, `.relay-retained` never match). Never the shim or an
+  alias: an old runner verifies its download by the `RUNNER_VERSION` line and writes skill
+  paths verbatim.
+- **`hamaca`** — `?layout=hamaca`: `hamaca` (the runner item), `hamaca.md`, the `hamaca-*`
+  skills, plus `Hamaca.Scaffold.alias_items/0` served as they are — the `relay` shim (execs the
+  `./hamaca` beside it, prints a dim `note: ./relay is now ./hamaca — use that name.` on a
+  terminal's stderr, never downloads, declares no `RUNNER_VERSION`) and three thin
+  `relay-*` alias skills (`Renamed: use /hamaca-X.`) that exist only for the compatibility
+  window (RE482 removes them).
+
+The repo's sources (`Hamaca.Scaffold.sources/0`, what the `Dockerfile` COPYs) are `hamaca`,
+`hamaca.md`, `relay` (the shim) and the six skill files; one `{served_path, source_path,
+transform}` table per layout in `Hamaca.Scaffold` is the ONE definition of what each serves.
+
+Unauthenticated because the board's install script (`/b/<slug>/install`) downloads `./hamaca`
 before anything has authenticated, and because these files were published openly regardless.
 
-**Exactly five files are Hamaca-owned** (`Hamaca.Scaffold.items/0`): `./relay`, the three
-`.claude/skills/relay-{update,doctor,onboard}/SKILL.md`, and `relay.md`. `.claude/skills` is the
-manifest's canonical skill dir (`Hamaca.Scaffold.skill_dir/0`, RE457, the ONE Elixir definition);
-`Hamaca.Scaffold.items/1` maps the skill items to another LLM's dir (`.agents/skills` for Codex)
-without changing the served manifest. (RE443 retired the
+**Only a layout's items are Hamaca-owned** (`Hamaca.Scaffold.items/1`): in the legacy layout
+`./relay`, the three `.claude/skills/relay-{update,doctor,onboard}/SKILL.md`, and `relay.md`.
+`.claude/skills` is the manifest's canonical skill dir (`Hamaca.Scaffold.skill_dir/0`, RE457, the
+ONE Elixir definition); `Hamaca.Scaffold.local_items/2` maps a layout's skill items to another
+LLM's dir (`.agents/skills` for Codex) without changing the served manifest, and
+`Hamaca.Scaffold.primary_items/1` is the hamaca layout's view without the aliases. (RE443 retired the
 fourth, setup skill: the board's setup wizard hands out the install command instead.) They are
 never user-edited, which is what lets `./relay update` overwrite them unconditionally — no provenance
 ledger, no per-file diff prompt. Everything else in a project (agents, other skills,
@@ -434,21 +464,22 @@ files, each only when missing: that `.relay/runner.json` and a generic
 checkout warm-up, generalized over a `WARM=""` list the project fills in; empty, it copies
 nothing and exits 0). No network, no scaffold work, not refused in the Hamaca app repo, never an
 overwrite. Report: `{"config": "created"|"present", "hook": "created"|"present", "applied":
-true}`. The install script runs it right after downloading `./relay`, before `./relay update`.
+true}`. The install script runs it right after downloading `./hamaca`, before `./hamaca update`.
 
 **The served `./relay` carries its board's URL** (RE443). The committed file has a placeholder
 line `BOARD_URL = ""` right after `RUNNER_FINGERPRINT`; `ScaffoldController.show/2` serves it
-via `Hamaca.Scaffold.fetch("relay", board_url: HamacaWeb.Endpoint.url())`, which rewrites that one
+via `Hamaca.Scaffold.fetch(runner_path(layout), layout: layout, board_url: HamacaWeb.Endpoint.url())`
+(`relay` in the legacy layout, `hamaca` in the hamaca one), which rewrites that one
 line to `BOARD_URL = "<url>"` (`Hamaca.Scaffold.bake_board_url/2` / `board_url_line/1`, the ONE
 Elixir regex; `./relay`'s `bake_board_url` / `board_url_of` / `BOARD_URL_RE` are the ONE Python
 parse; the contract fixture's `scaffold.board_url_line_example` pins the two). The URL is the
 endpoint's configured one, never the request's `Host`, because this text gets executed.
 
-- **Lookup:** `relay_url()` — `RELAY_URL` when set and non-empty, else the baked `BOARD_URL`,
+- **Lookup:** `relay_url()` — `HAMACA_URL`, else `RELAY_URL` (RE478), when set and non-empty, else the baked `BOARD_URL`,
   else it dies pointing at the install command. Every URL-needing call site goes through it; a
   node's `{url}` variable uses the non-dying `configured_relay_url()`.
 - **Hashing:** the manifest describes the **served** bytes — `Hamaca.Scaffold.manifest(board_url:
-  HamacaWeb.Endpoint.url())` sets the `relay` item's `sha256`/`bytes` to the baked copy's, because
+  HamacaWeb.Endpoint.url())` sets the layout's runner item's `sha256`/`bytes` to the baked copy's, because
   every runner up to v89 verifies a download with a raw sha256 against that field, and adds
   `unbaked_sha256`, the built placeholder copy's (the build never bakes). `./relay` v90+ hashes
   `relay` with its `BOARD_URL` reset to `""` (`runner_sha256`) and compares it with
@@ -477,23 +508,26 @@ as `curl -fsSL <host>/b/<slug>/install | sh` with `RELAY_API_KEY` exported, it:
 2. `POST /api/setup/preflight` (board key) — the key's first authed call, which ticks setup step 3
    and marks step 4 `waiting` or `failed` with the fix text. The answer's `llm` carries
    `harness` / `label` / `cli` / `skill_dir` / `skill_path` / `pointer_file`, and (RE457) its
-   `relay_files` is `Hamaca.Scaffold.items(llm.skill_dir)`, the five Hamaca-owned paths under that
-   LLM's skill dir. It prints the board's answer, one
+   `relay_files` is `Hamaca.Scaffold.primary_items(llm.skill_dir)` (RE478) — `hamaca`, `hamaca.md`
+   and the three `hamaca-*` skills under that LLM's skill dir, never the shim or the aliases. It prints the board's answer, one
    `ok`/`!!` line per check; on any failure, the fixes and `fix_command`, then exits 1 having
    written nothing;
 3. (RE457) prints a "Writing:" preview — one line per `relay_files` path, then the pointer file
-   (only when its line is absent), `.relay/runner.json`, `.relay/prepare-worktree.sh` and
-   `.gitignore (+N lines)` — and downloads **only** `relay` from `/api/scaffold/relay` (to a temp
-   dir, then `./relay`, mode 755). It appends the pointer line (`Hamaca.Setup.pointer_line/0`,
-   rendered into the script) to the LLM's `pointer_file` and the three `.gitignore` entries —
-   each only if absent — then runs `./relay update --starter-only --base origin/<branch>
-   --skill-dir <llm.skill_dir> --pointer-file <llm.pointer_file>` and `RELAY_URL=<board>
-   ./relay update --json`, which lays down `relay.md`, the three skills under `skill_dir` and
-   `.relay/scaffold.json`, every body checked against the manifest's sha256. A failed update is
-   recovered by re-running the install;
-4. `POST /api/setup/installed` (board key) with `files`: `relay`, then every other path in the
-   update report's `written` (once, in report order), then the pointer file, `.relay/runner.json`,
-   `.relay/prepare-worktree.sh` and `.gitignore`. That finishes step 4 and activates step 5; the
+   (only when its line is absent), `.hamaca/runner.json`, `.hamaca/prepare-worktree.sh` and
+   `.gitignore (+N lines)` — and downloads **only** the hamaca layout's runner item from
+   `/api/scaffold/hamaca?layout=hamaca` (RE478; the URL is built from `Hamaca.Scaffold` by
+   `HamacaWeb.InstallScript`) to a temp dir, then `./hamaca`, mode 755. It appends the pointer
+   line (`Hamaca.Setup.pointer_line/0`, rendered into the script) to the LLM's `pointer_file` and
+   the three `.gitignore` entries — each only if absent — then runs `./hamaca update
+   --starter-only --base origin/<branch> --skill-dir <llm.skill_dir> --pointer-file
+   <llm.pointer_file>` and `HAMACA_URL=<board> ./hamaca update --json`, which lays down
+   `hamaca.md`, the `hamaca-*` skills and `relay-*` aliases under `skill_dir`, the `./relay` shim
+   (mode 755, like the runner — the runner's `EXECUTABLE_ITEMS`) and `.hamaca/scaffold.json`,
+   every body checked against the manifest's sha256. A failed update is recovered by re-running
+   the install;
+4. `POST /api/setup/installed` (board key) with `files`: `hamaca`, then every other path in the
+   update report's `written` (once, in report order), then the pointer file, `.hamaca/runner.json`,
+   `.hamaca/prepare-worktree.sh` and `.gitignore`. That finishes step 4 and activates step 5; the
    script then prints `Next: open <cli> here and run /relay-onboard`.
 
 The key travels only in the `Authorization` header and is never written to a file. Both
@@ -540,13 +574,15 @@ skill's signal to stop and point at `/relay-doctor`; **1** on `409 not_current`,
 naming `not_current` and the server's `current` step, and on any other API failure.
 
 **The version is derived, never maintained.** `Hamaca.Scaffold.version/1` is the first 12 hex
-characters of the sha256 of the sorted `"<path>:<sha256>"` lines, so it changes exactly when
-content changes and cannot be forgotten. The client only compares it for equality; "N versions
+characters of the sha256 of the sorted `"<path>:<sha256>"` lines of one layout, so it changes
+exactly when that layout's content changes and cannot be forgotten (a byte in `hamaca.md` moves
+both layouts' versions; a byte in the shim moves only `hamaca`'s). The client only compares it for equality; "N versions
 behind" is deliberately unsupported.
 
-`mix hamaca.build_scaffold` writes `priv/scaffold/` (a gitignored build artifact) — from `mix
-setup`, from the `test` alias, and from the `Dockerfile` after `mix compile` and before
-`mix release`, because a release ships `priv/` but ships neither `relay` nor `.claude/`.
+`mix hamaca.build_scaffold` writes `priv/scaffold/<layout>/` plus a `manifest.json` per layout
+(a gitignored build artifact, cleared first so the pre-RE478 flat files cannot linger) — from
+`mix setup`, from the `test` alias, and from the `Dockerfile` after `mix compile` and before
+`mix release`, because a release ships `priv/` but ships neither the runner nor `.claude/`.
 
 **Consequence, accepted deliberately:** publishing is coupled to deploying. A skill fix reaches
 projects only when the app ships. In exchange, the whole publish/marker/drift apparatus is gone.
@@ -573,6 +609,33 @@ step is `chmod +x relay && ./relay update`, which also removes the leftover, and
 carry `relay` as mode 755. From then on the new CLI keeps it that way: `scaffold_status` counts a
 `./relay` whose bytes match but which is not executable as `changed`, so `relay update` reinstalls
 it through `install_runner` and restores 0o755.
+
+**The rename migration (RE478).** `update` (v94+) also moves an old repo to the Hamaca names in
+the same pass. `plan_rename` decides everything from the filesystem before the first write
+(so `--check`, the app-repo refusal — the renames count toward `touched` — and the refusal of a
+board that does not serve the Hamaca layout (no `hamaca` manifest item) all leave the tree
+untouched): a full `./relay` (declares `RUNNER_VERSION`) with no `./hamaca` → `./hamaca` + the
+shim; `.relay/` with no `.hamaca/` → `.hamaca/`; `relay.md` → `hamaca.md`; each
+`<skill_dir>/relay-X` whose bytes are not already the served alias → `hamaca-X` (alias kept, in
+the OLD skill dir under an LLM switch); and each pointer file (configured `pointer_file`, then
+`CLAUDE.md`, then `AGENTS.md`) holding `OLD_POINTER_LINE` as a whole line gets `POINTER_LINE`.
+`apply_rename` then runs in a fixed order: move `.relay/` whole with `os.rename`; install the
+scaffold — `./hamaca` first through `install_runner`, carrying the old `./relay`'s `BOARD_URL`,
+the `relay` shim last at 0755, so `./relay` is never a shim without a `./hamaca` beside it;
+remove `relay.md`; rewrite the pointer lines; then `write_scaffold_state` into
+`.hamaca/scaffold.json` (the report's `local` version was read before the move).
+
+The report (`--json` and human) gains `renamed` (`{subject, change, note}`) and `skipped`
+(`{subject, reason}`), printed as `renamed to Hamaca (N):` / `skipped (N):` (`would rename to
+Hamaca` / `would skip` under `--check`) above `updated`, which no longer lists the paths a rename
+already accounts for. An applied rename ends with `Restart the runner to pick up the new name:
+./hamaca start`. `current` is true only when nothing would be renamed and no item changed; a
+fully migrated repo prints `already on Hamaca names (…)` and `this project is current — nothing to
+do.` **A half-migrated leftover is reported, never merged or deleted:** `.relay/` beside
+`.hamaca/` and a full `./relay` beside `./hamaca` are always `skipped` (the shim item is then not
+written over that runner). Only when something is renamed are two more things listed as
+`skipped`: pointer files with neither line, and root `.envrc*` files that mention `RELAY_*`
+(still read, so they are the user's to rename). `--starter-only` never migrates.
 
 ## Node-job transport (RLY-134, ADR 0006 card 04)
 
@@ -812,7 +875,7 @@ that stays server-side.
   `node_job_id` alongside `run_id` — same nullable-string shape, not an FK. It rides through
   `Hamaca.AgentLog.stamp/1` → `Hamaca.Activity.LogSink.row/2` → `activities.node_job_id`, kept
   for W6's run panel to key log lines off a specific node-job.
-- The full outcome-file contract (`RELAY_NODE_OUTCOME`) runners must honor is
+- The full outcome-file contract (`HAMACA_NODE_OUTCOME`, also exported as `RELAY_NODE_OUTCOME`) runners must honor is
   [Declaring an outcome](#declaring-an-outcome) below.
 
 ## The foreach cursor (RE252)
@@ -1127,6 +1190,38 @@ Every iteration of the loop is the same three steps:
 Step 3 is a contract a node author has to honor — see
 [Declaring an outcome](#declaring-an-outcome) below.
 
+### The runner's name, env twins and repo state (RE478)
+
+The runner is `./hamaca`; `./relay` is the pre-rename name, kept through the relay → hamaca
+compatibility window (until RE482).
+
+- **CLI name.** `cli_name()` is the basename of the file the process runs as when it is one of
+  `CLI_NAMES = ("hamaca", "relay")`, else `"hamaca"` — read at call time. An unmigrated repo runs
+  the full runner as `./relay`; a migrated one has `./hamaca` plus a `./relay` shim that execs it.
+  Every claim and heartbeat carries it as **`runner.cli`** (`runner_ident/1`); the server
+  ignores it today (RE486 reads it). The full runner running as `./relay` prints one dim
+  stderr line before dispatch — ``note: ./relay is now ./hamaca. Run `./relay update` to
+  switch this repo.`` — only when stderr is a TTY and never with `--json`/`--field`, in
+  `start`, or inside a node (`should_note/3`, the same rule as the shim's own note).
+- **Env twins.** Every variable exists under two names: the runner reads `HAMACA_<X>` then
+  `RELAY_<X>` (first non-empty wins, `getenv/1`; `env/1` dies naming `HAMACA_<X>`) for
+  `ENV_READ` = `URL`, `API_KEY`, `STATE_DIR`, `RUNNER_LOCK_DIR`, `UPDATED_FROM`,
+  `UPDATE_ATTEMPTS`, `NODE_OUTCOME`, and exports every one of `ENV_EXPORTED` = `NODE_SCRATCH`,
+  `NODE_OUTCOME`, `PLAN`, `REF`, `BRANCH`, `BASE`, `WORKTREE`, `CACHE_DIR` to nodes and hooks
+  under **both** names (`export_env/3` — set both, or pop both when the job has no value, so
+  neither name leaks from the runner into a child). The auto-update handshake
+  (`UPDATED_FROM`/`UPDATE_ATTEMPTS`) is set and cleared under both names too. The prefix and
+  suffix lists live once in the runner and are pinned by the contract fixture's `env` section;
+  `CLI_NAMES` by `runner.cli_names`. Machine paths do **not** move: `~/.relay/locks`, the
+  `~/.relay` state dir, `~/.cache/relay/<ns>` and `.relay-retained` stay, so an old and a new
+  runner on one machine still see each other's locks.
+- **Repo state resolver.** `runner.json`, `scaffold.json`, `flows/`, `prepare-worktree.sh` and
+  `cleanup-worktree.sh` resolve through `repo_state_path/1` (`repo_state_rel/1` for messages):
+  `.hamaca/<name>` if it exists, else `.relay/<name>` if it exists, else — a new file —
+  `.hamaca/<name>`, except in an unmigrated repo running as `./relay` that only has a `.relay/`
+  dir, which keeps writing there. Resolved from `ROOT` at call time. Below, `.relay/runner.json`
+  means whichever of the two this resolves to.
+
 Agent steps run headless Claude, which uses whatever authentication the local Claude CLI has — a
 **Claude subscription** (no `ANTHROPIC_API_KEY` needed) or, if `ANTHROPIC_API_KEY` is set, the
 metered API. Subscription rate limits are the ceiling; when hit, the step is throttled, not
@@ -1163,7 +1258,7 @@ silently billed to the paid API.
   `heartbeat_interval`, and three optional per-card-worktree keys (RLY-231):
   `cache_dir` (a warm dep/build cache dir passed to the lifecycle hooks), `worktrees`
   (RE339 — `{"prepare": path, "cleanup": path}`, the project's per-worktree lifecycle hooks,
-  defaulting to `.relay/prepare-worktree.sh` and `.relay/cleanup-worktree.sh`; a flat
+  defaulting to `prepare-worktree.sh` and `cleanup-worktree.sh` in `.hamaca/` (else `.relay/`); a flat
   top-level `prepare` is still read as a **deprecated alias** for `worktrees.prepare`, which
   wins when both are set), and
   `max_retained_failed` (how many failed-run worktrees to keep for post-mortem before the
@@ -1292,10 +1387,11 @@ silently billed to the paid API.
     a new run), `RunnerPool.create_or_rebaseline/1` makes the worktree clean at base, then
     `run_prepare_hook/3` warms it: it runs the hook `RunnerPool._hook_path("prepare")` resolves —
     `worktrees.prepare` from `runner.json`, else the deprecated flat `prepare`, else
-    `.relay/prepare-worktree.sh` — if that file exists and is executable, else it is a no-op
-    (a cold build, not an error). The hook receives `[worktree, ref, branch, base, cache_dir]` as
-    both argv and env (`RELAY_WORKTREE`/`RELAY_REF`/`RELAY_BRANCH`/`RELAY_BASE`/
-    `RELAY_CACHE_DIR`) with `cwd` set to the new worktree; **a nonzero exit fails the run
+    `.hamaca/prepare-worktree.sh` (else `.relay/prepare-worktree.sh`, RE478) — if that file
+    exists and is executable, else it is a no-op (a cold build, not an error). The hook receives
+    `[worktree, ref, branch, base, cache_dir]` as both argv and env (`HAMACA_WORKTREE`/
+    `HAMACA_REF`/`HAMACA_BRANCH`/`HAMACA_BASE`/`HAMACA_CACHE_DIR`, each also under its `RELAY_`
+    name) with `cwd` set to the new worktree; **a nonzero exit fails the run
     fail-fast** (its stderr becomes the node's failure detail) rather than silently running
     against a half-warmed tree. Hamaca's own hook, `.relay/prepare-worktree.sh`, is a boring
     first cut: it copies `deps/`, `_build/`, and `assets/node_modules/` from `cache_dir` (or
@@ -1364,7 +1460,7 @@ silently billed to the paid API.
     if the tool is missing or errors, the step is skipped and the retry-and-log above covers
     the failure.
 - **Per-node scratch (RLY-214).** Alongside the worktree itself, every node gets
-  `RELAY_NODE_SCRATCH` (`scratch_path` in `./relay`): `tmp/<REF>/<node>.md` inside that same
+  `HAMACA_NODE_SCRATCH` = `RELAY_NODE_SCRATCH` (`scratch_path` in the runner): `tmp/<REF>/<node>.md` inside that same
   worktree, keyed only on `(ref, node)` so a re-queued job after a runner restart resolves
   the identical path. It sits under the checkout's own `.gitignore`, so it survives
   `reset_worktree`'s salvage/stash/clean untouched and never gets committed. See
@@ -1481,8 +1577,13 @@ silently billed to the paid API.
   `auto_update_min_interval`, and never again after three *failed* updates in one process's
   life (a refused download or a failed install — a successful one never counts, so a runner
   that has been up for months and picked up ten releases is unaffected). It downloads
-  `./relay` from the board's scaffold endpoint (`$RELAY_URL/api/scaffold/relay`) through
-  `download_runner`, which shares `verify_runner_source` with `relay update` — HTTPS, UTF-8,
+  the runner from the board's scaffold endpoint through `download_runner(config_url, layout)`.
+  The layout matches the name it runs as (`auto_update_layout/0`, RE478): `./hamaca` fetches
+  `<board>/api/scaffold/hamaca?layout=hamaca`; a full runner still running as `./relay` fetches
+  `<board>/api/scaffold/relay?layout=legacy` — a full runner, never the hamaca layout's shim —
+  and either way the download is installed over the file it runs as. `relay update` likewise
+  requests the manifest and every file with `?layout=hamaca` (its runner item is `hamaca`).
+  `download_runner` shares `verify_runner_source` with `relay update` — HTTPS, UTF-8,
   a leading `#!`, a `RUNNER_VERSION` parsed **from the downloaded bytes** (authoritative — a
   board ahead of what it serves is then harmless, not a chase), a `compile()` syntax check, and
   (for auto-update only) strictly newer. Verification is deliberately HTTPS + parse only: no
@@ -1501,7 +1602,7 @@ silently billed to the paid API.
   The restart stops the heartbeat and the log forwarder, calls `release_runner_locks()` —
   **required**, because RLY-193's flocks belong to open file descriptions that survive `execv`
   while the re-exec'd image opens new descriptors and would die "already running" — then
-  `os.execv`s with `RELAY_UPDATED_FROM`/`RELAY_UPDATE_ATTEMPTS` set. On the way back up
+  `os.execv`s with `HAMACA_`/`RELAY_UPDATED_FROM` and `HAMACA_`/`RELAY_UPDATE_ATTEMPTS` set. On the way back up
   `check_update_handshake` compares: newer, and it logs the transition **and clears the failure
   count** (the update took, so nothing before it was thrash); same or older, and auto-update is
   disabled for that process, leaving RLY-184's fail-stop as the behaviour. Three failed attempts
@@ -1753,7 +1854,7 @@ An agent node **must declare its verdict** before it exits, by running:
 relay outcome <outcome> [--detail TEXT|@file]
 ```
 
-`./relay` writes the JSON to `$RELAY_NODE_OUTCOME` (set per node; the verb refuses to run
+`./relay` writes the JSON to `$HAMACA_NODE_OUTCOME` (set per node under both prefixes — an agent started by an older runner has only `$RELAY_NODE_OUTCOME`, which it reads too; the verb refuses to run
 outside a node), so a `detail` containing quotes or newlines cannot corrupt the file. `detail`
 becomes the context handed to the next node. Which outcomes exist and what each one does to the
 run and the card is [state.md](state.md#node-outcomes)'s "Node outcomes" table — the schema owns
@@ -2036,11 +2137,11 @@ Replies: `# Escalating a plan-mandated finding` and `# Re-reviewing after a fix 
 version of this page said a `references/` file "would never reach the model"; that is wrong for
 any agent that reads it with a tool, and the probe is what settled it.
 
-**Shipping caveat for the `relay-*` skills.** The three `relay-*` skills still cannot rely on a
-sibling file — not because of how they load, but because of how they ship: `Hamaca.Scaffold.items/0`
-names `SKILL.md` only, so a reference file next to one would silently vanish from every scaffolded
-repo (which is why `test/hamaca/onboard_skill_test.exs` pins the `relay-onboard` directory to
-`SKILL.md` alone). Agents are unaffected: `Hamaca.Scaffold`
+**Shipping caveat for the scaffolded skills.** The `hamaca-*` skills (and their `relay-*`
+aliases) still cannot rely on a sibling file — not because of how they load, but because of how
+they ship: `Hamaca.Scaffold.items/1` names `SKILL.md` only, so a reference file next to one would silently vanish from every scaffolded
+repo (which is why `test/hamaca/onboard_skill_test.exs` pins the `hamaca-onboard` and `relay-onboard`
+directories to `SKILL.md` alone). Agents are unaffected: `Hamaca.Scaffold`
 ships no agents at all — every agent is the repo's own, per ADR 0010.
 `test/hamaca/agents/escalation_contract_test.exs` pins the markers so an edit can't silently drop
 the contract, and fails on any `references/` path an agent file names that does not exist (a

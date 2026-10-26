@@ -9,11 +9,13 @@ defmodule HamacaWeb.InstallScript do
   passes `HamacaWeb.Endpoint.url/0`, never the request's Host) and a slug the controller already
   checked against `Schemas.Board.slug_format/0`, both single-quoted for `sh` regardless. The
   local check ids come from `Hamaca.Setup.preflight_checks/0` and the CLIs it looks for from
-  `Hamaca.Setup.onboarding_llms/0`, so the script never re-types either list; the `relay.md` pointer
-  line comes from `Hamaca.Setup.pointer_line/0`. It downloads only `./relay` and lets
-  `./relay update` lay down the other Hamaca files under the LLM's skill dir (RE457).
+  `Hamaca.Setup.onboarding_llms/0`, so the script never re-types either list; the `hamaca.md`
+  pointer line comes from `Hamaca.Setup.pointer_line/0`. It downloads only `./hamaca` — the
+  hamaca layout's runner item, its URL built from `Hamaca.Scaffold` (RE478) — and lets
+  `./hamaca update` lay down the other Hamaca files under the LLM's skill dir (RE457).
   """
 
+  alias Hamaca.Scaffold
   alias Hamaca.Setup
 
   require EEx
@@ -32,8 +34,14 @@ defmodule HamacaWeb.InstallScript do
       check_ids: Enum.map(Setup.preflight_checks(), & &1.id),
       clis: Enum.map(Setup.onboarding_llms(), &sh_quote(&1.cli)),
       python3_fix: Setup.python3_fix(),
-      pointer_line: Setup.pointer_line()
+      pointer_line: Setup.pointer_line(),
+      runner_url: runner_url()
     )
+  end
+
+  # The hamaca layout's runner item: `/api/scaffold/hamaca?layout=hamaca`.
+  defp runner_url do
+    "/api/scaffold/" <> Scaffold.runner_path("hamaca") <> "?" <> URI.encode_query(%{Scaffold.layout_param() => "hamaca"})
   end
 
   # Single-quotes `value` for sh: the only character that needs care inside '…' is ' itself.

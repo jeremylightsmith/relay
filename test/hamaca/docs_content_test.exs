@@ -7,7 +7,7 @@ defmodule Hamaca.DocsContentTest do
     {"introduction.md", "# Introduction"},
     {"how-hamaca-works.md", "# How Hamaca works"},
     {"authentication.md", "# Authentication & API access"},
-    {"cli.md", "# CLI (`./relay`)"},
+    {"cli.md", "# CLI (`./hamaca`)"},
     {"api.md", "# REST API reference"},
     {"billing.md", "# Billing & self-hosting"}
   ]
@@ -24,35 +24,36 @@ defmodule Hamaca.DocsContentTest do
     assert html =~ "markdown-alert-note"
   end
 
-  test "the CLI page documents the ./relay command table" do
+  test "the CLI page documents the ./hamaca command table" do
     html = read("cli.md")
 
-    for cmd <- ["./relay board", "./relay card", "./relay move", "./relay needs-input", "./relay search"] do
+    for cmd <- ["./hamaca board", "./hamaca card", "./hamaca move", "./hamaca needs-input", "./hamaca search"] do
       assert html =~ cmd, "cli.md should mention `#{cmd}`"
     end
   end
 
   test "card search is documented everywhere it is described, and the known gap is gone (RE198)" do
-    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    guide = File.read!(Path.join(File.cwd!(), "hamaca.md"))
     domain = File.read!(Path.join(File.cwd!(), "docs/architecture/domain.md"))
     api = read("api.md")
 
     # The card exists to close this hole — the line that named it must not survive.
-    refute relay_md =~ "known gap"
+    refute guide =~ "known gap"
 
-    assert relay_md =~ "./relay search"
-    assert api =~ "./relay search"
+    assert guide =~ "./hamaca search"
+    assert api =~ "./hamaca search"
     assert api =~ "q=<text>"
     assert domain =~ "./relay search"
     assert domain =~ "Cards.search/3"
   end
 
-  test "the stage commands are documented in relay.md and the CLI page (RE384)" do
-    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+  test "the stage commands are documented in hamaca.md and the CLI page (RE384)" do
+    guide = File.read!(Path.join(File.cwd!(), "hamaca.md"))
     cli = read("cli.md")
 
-    for doc <- [relay_md, cli], cmd <- ["./relay stages", "./relay stage add"] do
-      assert doc =~ cmd
+    for cmd <- ["stages", "stage add"] do
+      assert guide =~ "./hamaca #{cmd}"
+      assert cli =~ "./hamaca #{cmd}"
     end
 
     assert cli =~ "Refused (409, nothing written)"
@@ -60,7 +61,7 @@ defmodule Hamaca.DocsContentTest do
 
   test "authentication.md still explains the API key + env vars" do
     html = read("authentication.md")
-    assert html =~ "RELAY_API_KEY"
+    assert html =~ "HAMACA_API_KEY"
     assert html =~ "Authorization: Bearer"
   end
 
@@ -73,8 +74,8 @@ defmodule Hamaca.DocsContentTest do
     assert runner =~ "./relay start"
     assert runner =~ "is **deleted**", "runner.md must still record that the legacy runner is gone"
 
-    refute cli =~ "./relay pull"
-    refute cli =~ "./relay layout"
+    refute cli =~ "./hamaca pull"
+    refute cli =~ "./hamaca layout"
   end
 
   test "the runner page carries the four current operating invariants and none of the retired ones" do
@@ -94,7 +95,7 @@ defmodule Hamaca.DocsContentTest do
   end
 
   test "no doc still links to the retired /docs/agent-integration page" do
-    paths = ["relay.md"] ++ Path.wildcard("priv/docs/*.md") ++ Path.wildcard("docs/**/*.md")
+    paths = ["hamaca.md"] ++ Path.wildcard("priv/docs/*.md") ++ Path.wildcard("docs/**/*.md")
 
     for path <- paths, path != "docs/adr/0008-documentation-taxonomy.md" do
       refute File.read!(Path.join(File.cwd!(), path)) =~ "docs/agent-integration",
@@ -128,15 +129,17 @@ defmodule Hamaca.DocsContentTest do
     end
   end
 
-  # RE93 — the expected author of a dependency graph is an agent, and an agent reads relay.md,
+  # RE93 — the expected author of a dependency graph is an agent, and an agent reads hamaca.md,
   # /docs/cli and /docs/api. A verb documented nowhere it looks ships dark.
   test "the dependency surface is documented everywhere an agent reads (RE93)" do
-    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    guide = File.read!(Path.join(File.cwd!(), "hamaca.md"))
     cli = read("cli.md")
     api = read("api.md")
 
-    for doc <- [relay_md, cli] do
-      assert doc =~ "./relay depends"
+    assert guide =~ "./hamaca depends"
+    assert cli =~ "./hamaca depends"
+
+    for doc <- [guide, cli] do
       assert doc =~ "--depends-on"
     end
 
@@ -148,7 +151,7 @@ defmodule Hamaca.DocsContentTest do
   test "cli.md lists every CLI verb RLY-177 added" do
     cli = read("cli.md")
 
-    for verb <- ["./relay why", "./relay runs", "./relay runners", "./relay version", "--field"] do
+    for verb <- ["./hamaca why", "./hamaca runs", "./hamaca runners", "./hamaca version", "--field"] do
       assert cli =~ verb, "cli.md should mention `#{verb}`"
     end
   end
@@ -165,21 +168,63 @@ defmodule Hamaca.DocsContentTest do
     end
   end
 
-  # RE318 — an agent reads relay.md and /docs/cli; a verb documented nowhere it looks ships dark.
+  # RE318 — an agent reads hamaca.md and /docs/cli; a verb documented nowhere it looks ships dark.
   test "title, archive and unarchive are documented everywhere an agent reads (RE318)" do
-    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    guide = File.read!(Path.join(File.cwd!(), "hamaca.md"))
     cli = read("cli.md")
 
-    for doc <- [relay_md, cli], verb <- ["./relay title", "./relay archive", "unarchive"] do
+    for {doc, cli_name} <- [{guide, "./hamaca"}, {cli, "./hamaca"}],
+        verb <- ["#{cli_name} title", "#{cli_name} archive", "unarchive"] do
       assert doc =~ verb, "expected `#{verb}` to be documented"
     end
 
-    for doc <- [relay_md, cli] do
+    for doc <- [guide, cli] do
       assert doc =~ "cancel", "the archive row should say a live run must be cancelled first"
     end
 
-    refute relay_md =~ "./relay rename"
-    refute cli =~ "./relay rename"
+    refute guide =~ "./hamaca rename"
+    refute cli =~ "./hamaca rename"
+  end
+
+  # RE478 task 4 scenario 10
+  test "the CLI page names HAMACA_* and has one Upgrading from ./relay section" do
+    cli = read("cli.md")
+
+    assert String.starts_with?(cli, "# CLI (`./hamaca`)")
+    [note | _] = String.split(cli, "## Commands")
+    assert note =~ "`HAMACA_URL`"
+    assert note =~ "`HAMACA_API_KEY`"
+
+    assert [_, upgrading] = String.split(cli, "## Upgrading from ./relay\n")
+    [upgrading | _] = String.split(upgrading, "\n## ")
+    upgrading = String.replace(upgrading, ~r/\s+/, " ")
+
+    assert upgrading =~ "installs the new runner as `./relay`"
+    assert upgrading =~ "the next `./relay update` renames the repo"
+
+    for name <- ["`./relay`", "`RELAY_*`", "`.relay/`", "`relay-*` skills", "RE482"] do
+      assert upgrading =~ name, "the upgrade section should name #{name}"
+    end
+
+    assert upgrading =~ "keep working"
+    assert upgrading =~ "`./hamaca start`"
+  end
+
+  # RE478 task 4 scenario 11
+  test "the public pages name ./hamaca and HAMACA_*, the relay names only in cli.md's upgrade section" do
+    [cli_before, rest] = String.split(read("cli.md"), "## Upgrading from ./relay\n")
+    cli_after = rest |> String.split("\n## ", parts: 2) |> Enum.at(1, "")
+
+    for {name, doc} <- [
+          {"cli.md", cli_before <> cli_after},
+          {"getting-started.md", read("getting-started.md")},
+          {"api.md", read("api.md")},
+          {"authentication.md", read("authentication.md")}
+        ] do
+      refute doc =~ "./relay ", "#{name} still names a ./relay command"
+      refute doc =~ "RELAY_API_KEY", "#{name} still names RELAY_API_KEY"
+      refute doc =~ "RELAY_URL", "#{name} still names RELAY_URL"
+    end
   end
 
   test "the glossary defines Runner and notes that older mockups use the old word (RE319)" do
@@ -219,21 +264,21 @@ defmodule Hamaca.DocsContentTest do
   # their own spelling, the strip rendered empty, and nobody found out. It is now refused at the
   # write — which only helps if the shape is written down everywhere the author looks.
   test "the AI result blob's shape and its refusal are documented everywhere an agent reads" do
-    relay_md = File.read!(Path.join(File.cwd!(), "relay.md"))
+    guide = File.read!(Path.join(File.cwd!(), "hamaca.md"))
     cli = read("cli.md")
     api = read("api.md")
 
-    for doc <- [relay_md, cli, api], key <- ~w(summary changes screens caption) do
+    for doc <- [guide, cli, api], key <- ~w(summary changes screens caption) do
       assert doc =~ key, "the ai_result key `#{key}` should be documented"
     end
 
     # `url` is the image, not the page it was taken on — the mistake that started this.
-    for doc <- [relay_md, cli, api] do
+    for {doc, cli_name} <- [{guide, "./hamaca"}, {cli, "./hamaca"}, {api, "./hamaca"}] do
       assert doc =~ "/attachments/", "the docs should show where a screen's url comes from"
-      assert doc =~ "./relay attach", "`attach` is how a screenshot becomes a url"
+      assert doc =~ "#{cli_name} attach", "`attach` is how a screenshot becomes a url"
     end
 
-    assert relay_md =~ "invalid_ai_result"
+    assert guide =~ "invalid_ai_result"
     assert api =~ "invalid_ai_result"
   end
 

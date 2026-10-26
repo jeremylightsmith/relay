@@ -3,7 +3,7 @@ defmodule Hamaca.Runs.Audit do
   Run-history health checks (RE249) — the half of `relay audit` whose data lives only in the
   server's database.
 
-  `/relay-doctor`'s nine checks all ask "does this name resolve?", so a green doctor means
+  `/hamaca-doctor`'s nine checks all ask "does this name resolve?", so a green doctor means
   "this flow can *start*", not "this board's history is clean". These checks ask the second
   question, from history the server already stores.
 
@@ -22,7 +22,7 @@ defmodule Hamaca.Runs.Audit do
     * `:planner_not_migrated` (WARNING; one per flow) — at least one run in the window had its
       tasks seeded by the legacy plan-parse fallback (`runs.tasks_from_plan`, RE368): the plan
       node's skill doesn't write tasks with `relay tasks add`. Names the affected-card count and
-      the most recent few; the fix is `/relay-doctor`. Also the telemetry for deleting the
+      the most recent few; the fix is `/hamaca-doctor`. Also the telemetry for deleting the
       fallback — when no board reports it, it is safe to remove.
     * `:outcomeless_attempts` (WARNING; one per `{run, node, visit}`) — one node in one visit
       has at least `Hamaca.Runs.max_outcomeless_reentries/0` executions with no outcome:
@@ -225,7 +225,7 @@ defmodule Hamaca.Runs.Audit do
         planner_summary(affected) <>
           " — the plan node's skill doesn't write tasks with `relay tasks add`",
       evidence: "relay runs <ref> --json — run #{latest.id}",
-      fix: "Run `/relay-doctor` to migrate the planner to `relay tasks add`, then re-plan affected cards"
+      fix: "Run `/hamaca-doctor` to migrate the planner to `relay tasks add`, then re-plan affected cards"
     }
   end
 

@@ -56,11 +56,12 @@ erl_crash.dump
 /.github/
 /.githooks/
 /.relay/
+/.hamaca/
 /.relay-watch-state.json
 __pycache__/
 .DS_Store
 
-# `COPY .claude .claude` only needs the Relay-owned skills Scaffold.items/0 lists; never ship
+# `COPY .claude .claude` only needs the Hamaca-owned skills Scaffold.sources/0 lists; never ship
 # the executor worktrees (full repo checkouts) or per-machine settings into the builder.
 /.claude/worktrees/
 /.claude/settings.local.json

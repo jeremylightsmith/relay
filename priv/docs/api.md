@@ -1,7 +1,7 @@
 # REST API reference
 
 Hamaca exposes a small JSON REST API scoped to a single **board**. It is the same
-entry point the `./relay` CLI uses, so anything the CLI does you can do directly.
+entry point the `./hamaca` CLI uses, so anything the CLI does you can do directly.
 
 ## Base URL & authentication
 
@@ -121,7 +121,7 @@ the same problem object `GET /api/flows/:key` returns (see `GET /api/flows` belo
 The whole board: its identity, stages, and cards (base shape).
 
 ```
-curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/board
+curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/board
 ```
 
 ```json
@@ -148,10 +148,10 @@ All cards on the board (base shape).
 | `limit=<n>` | Cap the number of results (the exact-ref hit counts toward it). |
 | `archived=1` | Widen the corpus so archived cards join the results. |
 
-`./relay search "words"` is the CLI wrapper for `q`.
+`./hamaca search "words"` is the CLI wrapper for `q`.
 
 ```
-curl -H "Authorization: Bearer $RELAY_KEY" "https://relay.example/api/cards?q=login&limit=10"
+curl -H "Authorization: Bearer $HAMACA_API_KEY" "https://relay.example/api/cards?q=login&limit=10"
 ```
 
 ### POST /api/cards
@@ -163,7 +163,7 @@ the single-card shape. A `depends_on` that names an unknown ref is refused with 
 **before** the card is created, so a refused create leaves no card behind.
 
 ```
-curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
   -d '{"title":"New card","stage":5}' https://relay.example/api/cards
 ```
 
@@ -176,7 +176,7 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
 One card, single-card shape (with `description`, `acceptance_criteria`, `plan`, `spec`, `timeline`).
 
 ```
-curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-12
+curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/cards/RLY-12
 ```
 
 ### PATCH /api/cards/:ref
@@ -188,11 +188,11 @@ card's blocker set (`[]` clears it). Returns the single-card shape. `depends_on`
 with `unknown_refs` or `dependency_cycle` and writes nothing.
 
 ```
-curl -X PATCH -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+curl -X PATCH -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
   -d '{"status":"working","progress":40}' https://relay.example/api/cards/RLY-12
 ```
 
-`ai_result` is also set here (this is what `./relay result` calls), and it is the one field
+`ai_result` is also set here (this is what `./hamaca result` calls), and it is the one field
 whose **shape is enforced**. Three optional keys, nothing else:
 
 ```json
@@ -205,12 +205,12 @@ whose **shape is enforced**. Three optional keys, nothing else:
 
 `summary` is a markdown string, `changes` a list of strings, `screens` a list of objects with
 `url` (required) and an optional `caption`. A screen's `url` is **the image**, not the page it
-shows — upload the file to `POST /api/cards/:ref/attachments` (`./relay attach`) and use the
+shows — upload the file to `POST /api/cards/:ref/attachments` (`./hamaca attach`) and use the
 `/attachments/<id>` path it returns. Any other key, at either level, is refused with
 `422 invalid_ai_result` and a message naming the key you used and the keys that exist; nothing
 is written.
 
-`mockups` is also set here (this is what `./relay mockups` calls). It **replaces** the card's
+`mockups` is also set here (this is what `./hamaca mockups` calls). It **replaces** the card's
 whole list; `[]` or `null` clears it:
 
 ```json
@@ -220,7 +220,7 @@ whole list; `[]` or `null` clears it:
 Each entry takes only `url` (required) and `caption` (optional string). The `url` must be the
 `/attachments/<id>` path of an **HTML or image attachment on this same card** — upload it
 first with `POST /api/cards/:ref/attachments` (`content_type` `text/html`, `image/png`,
-`image/jpeg`, `image/webp` or `image/gif`; `./relay mockups` takes `.html .png .jpg .jpeg .webp
+`image/jpeg`, `image/webp` or `image/gif`; `./hamaca mockups` takes `.html .png .jpg .jpeg .webp
 .gif` files). Anything else is refused with
 `422 invalid_mockups` naming the entry's index; nothing is written. `GET /api/cards/:ref`
 returns the list as `mockups` (`[]` when none). HTML mockups are served under a sandbox CSP:
@@ -241,7 +241,7 @@ that `url` is what a screenshot's `screens[].url` should be.
 
 ### GET /api/attachments/:id
 
-Download an attachment's raw bytes with the board API key — how `./relay mockups REF --pull`
+Download an attachment's raw bytes with the board API key — how `./hamaca mockups REF --pull`
 reads a card's mockups back (it names each file by the returned `Content-Type`, so a PNG
 mockup lands as `NN-<slug>.png`). `:id` is the last segment of the `/attachments/<id>` url the
 upload returned (and that a card's `mockups[].url` / `screens[].url` carry). Returns `200` with
@@ -253,7 +253,7 @@ key's board: an unknown or malformed id, or an attachment on **another board**, 
 the board (screenshots too), not only mockups.
 
 ```
-curl -H "Authorization: Bearer $RELAY_KEY" -o mock.html https://relay.example/api/attachments/135e5539-…
+curl -H "Authorization: Bearer $HAMACA_API_KEY" -o mock.html https://relay.example/api/attachments/135e5539-…
 ```
 
 ### Stages
@@ -297,7 +297,7 @@ category); optionally `type` (defaults from the category), `description`, `wip_l
 `422 invalid_request` (`"send before or after, not both"`).
 
 ```
-curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
   -d '{"name":"Triage","after":3,"type":"queue"}' https://relay.example/api/stages
 ```
 
@@ -373,7 +373,7 @@ Move a card. `stage` is a stage **id or name**; `position` is **1-based** (omit 
 append). Returns the single-card shape.
 
 ```
-curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
   -d '{"stage":"Plan","position":1}' https://relay.example/api/cards/RLY-12/move
 ```
 
@@ -391,7 +391,7 @@ Flag the card as needing human input. Requires `question`. Returns the single-ca
 shape.
 
 ```
-curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
   -d '{"question":"Which auth provider?"}' https://relay.example/api/cards/RLY-12/needs-input
 ```
 
@@ -408,7 +408,7 @@ target is `422 invalid_target`. Without `to`, uses the gate's reject flow. Retur
 single-card shape.
 
 ```
-curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
   -d '{"note":"needs a test","to":"Plan"}' https://relay.example/api/cards/RLY-12/reject
 ```
 
@@ -420,11 +420,11 @@ recorded against Hamaca AI, and any dependency rows that name it as a blocker ar
 is a `200` that records nothing new.
 
 A card with a live run is refused with **`409 active_run`** and nothing is written — cancel the
-run first (`POST /api/cards/:ref/cancel`, or `./relay cancel REF`), then archive. The board's
+run first (`POST /api/cards/:ref/cancel`, or `./hamaca cancel REF`), then archive. The board's
 own Archive button is not guarded this way.
 
 ```
-curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
   -d '{}' https://relay.example/api/cards/RLY-12/archive
 ```
 
@@ -440,7 +440,7 @@ timeline entry against Hamaca AI. Body `{}`. Returns the single-card shape with
 live-run guard. Blockers removed when the card was archived are not restored.
 
 ```
-curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application/json" \
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
   -d '{}' https://relay.example/api/cards/RLY-12/unarchive
 ```
 
@@ -453,7 +453,7 @@ predicates with `plan/1`), not by a separate reimplementation, so it cannot drif
 actually dispatches.
 
 ```
-curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-12/diagnosis
+curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/cards/RLY-12/diagnosis
 ```
 
 ```json
@@ -469,7 +469,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 | `no_enabled_flow` | no enabled flow pulls from this card's stage |
 | `flow_paused` | the enabled flow that pulls from this card's stage is paused by a broken board shape; `evidence.problem` carries `what`, `why` and `fixes`. Runs already going finish and land; fix the board and the next reconcile un-pauses it |
 | `awaiting_capacity` | a flow would dispatch; no runner advertises a free slot of the needed class |
-| `resume_refused` | a parked run's resume is being refused on every scheduler tick; `evidence.resume_refused_reason` names why (`no_isolation` · `pin_unresolved` · `pinned_runner_absent` · `no_free_slot`) and `evidence.resume_refused_since` when it started. After 30 minutes the reaper fails the run so `relay retry` applies |
+| `resume_refused` | a parked run's resume is being refused on every scheduler tick; `evidence.resume_refused_reason` names why (`no_isolation` · `pin_unresolved` · `pinned_runner_absent` · `no_free_slot`) and `evidence.resume_refused_since` when it started. After 30 minutes the reaper fails the run so `./hamaca retry` applies |
 | `wip_full` | the works-in column (plus its sub-lanes) is at its WIP limit |
 | `owned_by_human` | a human holds the baton (ADR 0004) |
 | `blocked_on_input` | card status `needs_input`, or the run is parked `needs_input` |
@@ -481,7 +481,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
 | `runner_outdated` | every connected runner is running code below the required minimum and is being refused at claim; `evidence.required_version` and `evidence.running_versions` name the mismatch |
 | `no_runner` | no runner is connected (or every one has gone silent), so nothing is running this board's node-jobs. Also the verdict for an aged unclaimed job when the roster is empty — nothing was ever holding it to go quiet on it (RE311) |
 
-CLI: `./relay why RLY-12`.
+CLI: `./hamaca why RLY-12`.
 
 ### GET /api/cards/:ref/runs
 
@@ -490,7 +490,7 @@ The card's runs, newest first, each with its node-execution history. `detail` an
 operator reaches for instead of hand-writing an Ecto query over `fly ssh console`.
 
 ```
-curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-12/runs
+curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/cards/RLY-12/runs
 ```
 
 ```json
@@ -500,7 +500,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/cards/RLY-1
   ] } ] }
 ```
 
-CLI: `./relay runs RLY-12`.
+CLI: `./hamaca runs RLY-12`.
 
 ### GET /api/runners
 
@@ -514,11 +514,10 @@ freshness**: a runner can be beating normally and still be running code below th
 server's minimum version, in which case it is refused work (409 `runner_outdated`) with
 no other visible symptom — this is the field that explains a healthy-looking runner that
 picks up nothing. A runner process that predates the rename to *runner* is refused with the
-same 409 `runner_outdated` and told to install `./relay` (`relay update`) and restart it with
-`./relay start`.
+same 409 `runner_outdated` and told to update the runner and restart it.
 
 ```
-curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/runners
+curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/runners
 ```
 
 ```json
@@ -529,7 +528,7 @@ curl -H "Authorization: Bearer $RELAY_KEY" https://relay.example/api/runners
   ] } ] }
 ```
 
-CLI: `./relay runners`.
+CLI: `./hamaca runners`.
 
 ### GET /api/version
 
@@ -545,25 +544,35 @@ curl https://relay.example/api/version
 { "sha": "0123456789abcdef0123456789abcdef01234567", "built_at": "2026-07-19T10:00:00Z", "version": "0.1.0" }
 ```
 
-CLI: `./relay version`.
+CLI: `./hamaca version`.
 
 ### GET /api/scaffold
 
-The manifest of the five Hamaca-owned files this board serves: `./relay`, the three
-`relay-*` skills, and `relay.md` (`Hamaca.Scaffold.items/0`). **Unauthenticated**, on purpose and on the same
-pipeline as `GET /api/version` — the board's install script (`/b/<slug>/install`) fetches them
-before anything has authenticated, so this has to be reachable with no `Authorization` header at
-all. `503 scaffold_unavailable` if the
-board has not built its scaffold (`mix hamaca.build_scaffold`, which `mix setup` runs
-automatically); a deployed board never returns it.
+The manifest of the Hamaca-owned files this board serves (`Hamaca.Scaffold`). **Unauthenticated**,
+on purpose and on the same pipeline as `GET /api/version` — the board's install script
+(`/b/<slug>/install`) fetches them before anything has authenticated, so this has to be reachable
+with no `Authorization` header at all. `503 scaffold_unavailable` if the board has not built its
+scaffold (`mix hamaca.build_scaffold`, which `mix setup` runs automatically); a deployed board
+never returns it.
+
+The board serves two layouts (RE478), picked by the `layout` query param on both scaffold routes:
+
+- **`?layout=hamaca`** — what `./hamaca` and the install script ask for: `hamaca` (the runner),
+  `hamaca.md`, the three `hamaca-*` skills, plus a small `relay` shim that runs `./hamaca` and
+  three thin `relay-*` alias skills, kept for the [upgrade window](/docs/cli#upgrading-from-relay).
+- **No param** — the older layout, still served unchanged to runners installed before the rename:
+  the full runner at `relay`, `relay.md` and the three `relay-*` skills.
+
+Any other `layout` value is `400 unknown_layout`. Each layout has its own `version`, so a client
+only ever compares versions within one layout.
 
 ```
-curl https://relay.example/api/scaffold
+curl "https://relay.example/api/scaffold?layout=hamaca"
 ```
 
 ```json
 { "version": "0123456789ab", "items": [
-  { "path": "relay", "sha256": "…", "bytes": 12345 }
+  { "path": "hamaca", "sha256": "…", "bytes": 12345 }
 ] }
 ```
 
@@ -572,23 +581,24 @@ curl https://relay.example/api/scaffold
 
 ### GET /api/scaffold/\*path
 
-One file's raw bytes. `path` is checked against the manifest's `items` — a static allowlist —
-before it ever reaches the filesystem, so this is not a general file server: any path outside
-the five Hamaca-owned files is `404 not_found`. **Unauthenticated**, same reasoning as above.
+One file's raw bytes. `path` is checked against the requested layout's manifest `items` — a
+static allowlist — before it ever reaches the filesystem, so this is not a general file server:
+any path outside that layout's Hamaca-owned files is `404 not_found`. **Unauthenticated**, same
+reasoning as above.
 
-`relay` is served with this board's URL baked into its `BOARD_URL = "<url>"` line (RE443), so a
-project needs no `RELAY_URL`. The URL is the board's configured one, never the request's `Host`.
-The manifest's `sha256` for `relay` is that of the placeholder copy (`BOARD_URL = ""`), and
-`./relay update` resets the line before comparing.
+The runner is served with this board's URL baked into its `BOARD_URL = "<url>"` line (RE443), so
+a project needs no `HAMACA_URL`. The URL is the board's configured one, never the request's
+`Host`. The manifest's `sha256` for the runner is that of the placeholder copy
+(`BOARD_URL = ""`), and `./hamaca update` resets the line before comparing.
 
 ```
-curl https://relay.example/api/scaffold/relay
-curl https://relay.example/api/scaffold/.claude/skills/relay-update/SKILL.md
+curl "https://relay.example/api/scaffold/hamaca?layout=hamaca"
+curl "https://relay.example/api/scaffold/.claude/skills/hamaca-update/SKILL.md?layout=hamaca"
 ```
 
-CLI: `./relay update` fetches the manifest, hashes each of the five files against it, and
-re-downloads only the ones whose content differs — which covers a file that is missing, and one
-that has been edited. `.relay/scaffold.json` records what was installed; it is not the trigger.
+CLI: `./hamaca update` fetches the manifest, hashes each file against it, and re-downloads only
+the ones whose content differs — which covers a file that is missing, and one that has been
+edited. `.hamaca/scaffold.json` records what was installed; it is not the trigger.
 
 ### POST /api/setup/preflight
 
@@ -601,7 +611,7 @@ nothing.
 
 ```
 curl -X POST https://relay.example/api/setup/preflight \
-  -H "Authorization: Bearer $RELAY_API_KEY" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $HAMACA_API_KEY" -H 'Content-Type: application/json' \
   -d '{"slug": "streaks", "machine": "jl-mbp", "repo_dir": "~/src/streaks",
        "remote": "git@github.com:jl/streaks.git", "branch": "main",
        "checks": [{"id": "git_repo", "ok": true, "detail": "~/src/streaks"},
@@ -617,14 +627,14 @@ curl -X POST https://relay.example/api/setup/preflight \
 ```json
 { "ok": true, "board": "Streaks",
   "llm": { "harness": "claude-code", "label": "Claude Code", "cli": "claude",
-           "skill_path": ".claude/skills/relay-onboard/SKILL.md", "pointer_file": "CLAUDE.md" },
+           "skill_path": ".claude/skills/hamaca-onboard/SKILL.md", "pointer_file": "CLAUDE.md" },
   "checks": [
     { "id": "git_repo", "label": "git repo", "ok": true, "detail": "~/src/streaks", "fix": null },
     { "id": "remote", "label": "remote", "ok": true, "detail": "origin → git@github.com:jl/streaks.git", "fix": null },
     { "id": "default_branch", "label": "default branch", "ok": true, "detail": "main", "fix": null },
     { "id": "python3", "label": "python3", "ok": true, "detail": "/usr/bin/python3", "fix": null },
     { "id": "cli", "label": "claude on PATH", "ok": true, "detail": "/usr/local/bin/claude", "fix": null },
-    { "id": "key", "label": "RELAY_API_KEY", "ok": true, "detail": "accepted by the board (…Wm7x)", "fix": null }
+    { "id": "key", "label": "HAMACA_API_KEY", "ok": true, "detail": "accepted by the board (…Wm7x)", "fix": null }
   ],
   "headline": null, "fix": null, "fix_command": null }
 ```
@@ -642,10 +652,10 @@ Finishes setup step 4 (activating step 5) when it is the current step; otherwise
 
 ```
 curl -X POST https://relay.example/api/setup/installed \
-  -H "Authorization: Bearer $RELAY_API_KEY" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $HAMACA_API_KEY" -H 'Content-Type: application/json' \
   -d '{"slug": "streaks", "machine": "jl-mbp", "repo_dir": "~/src/streaks", "branch": "main",
-       "files": ["relay", ".claude/skills/relay-onboard/SKILL.md", "relay.md", "CLAUDE.md",
-                 ".relay/runner.json", ".relay/prepare-worktree.sh", ".gitignore"]}'
+       "files": ["hamaca", ".claude/skills/hamaca-onboard/SKILL.md", "hamaca.md", "CLAUDE.md",
+                 ".hamaca/runner.json", ".hamaca/prepare-worktree.sh", ".gitignore"]}'
 ```
 
 ```json
@@ -656,7 +666,7 @@ Errors: `403 wrong_board`, `422 invalid`.
 
 ### GET /api/setup
 
-The board's setup checklist, as the `/relay-onboard` skill reads it (RE445). Board key required.
+The board's setup checklist, as the `/hamaca-onboard` skill reads it (RE445). Board key required.
 `current` is the one step a report may move — the current sub-step of step 5 while onboarding.
 `referenced_files` lists the `.claude/` agent and skill files the board's flows name (a skill is
 present when either of its `paths` exists) — `[]` when they name none, as on every template
@@ -664,14 +674,14 @@ board; a board copied from another board can name files its repo doesn't have ye
 `missing_file_resolutions` are the ways step 5.4 resolves a missing one.
 
 ```
-curl https://relay.example/api/setup -H "Authorization: Bearer $RELAY_API_KEY"
+curl https://relay.example/api/setup -H "Authorization: Bearer $HAMACA_API_KEY"
 ```
 
 ```json
 { "data": {
     "board": "Streaks", "template": "Bare minimum",
     "llm": { "harness": "claude-code", "label": "Claude Code", "cli": "claude",
-             "skill_path": ".claude/skills/relay-onboard/SKILL.md" },
+             "skill_path": ".claude/skills/hamaca-onboard/SKILL.md" },
     "current_id": "5", "current_sub_id": "5.1", "current": "5.1",
     "first_flow_stage": "Plan", "first_card_stage": "Backlog", "position": 5, "done_count": 4, "finished": false,
     "interview": [{ "id": "done", "label": "Done means", "question": "What does \"done\" mean for a card: …" }, …],
@@ -704,7 +714,7 @@ answers 200 and changes nothing.
 
 ```
 curl -X POST https://relay.example/api/setup/steps/5.3 \
-  -H "Authorization: Bearer $RELAY_API_KEY" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $HAMACA_API_KEY" -H 'Content-Type: application/json' \
   -d '{"status": "waiting", "data": {"answers": {"done": "PR merged"}}}'
 ```
 
@@ -716,6 +726,6 @@ non-string `evidence` / `error`, or a non-object `data`.
 
 ## CLI
 
-Most of the time you'll drive this API through the `./relay` CLI rather than raw
-HTTP — it wraps pull/work/hand-back into a few commands. See `relay.md`
+Most of the time you'll drive this API through the `./hamaca` CLI rather than raw
+HTTP — it wraps pull/work/hand-back into a few commands. See `hamaca.md`
 in the repository for the full agent workflow.

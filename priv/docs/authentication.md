@@ -1,6 +1,6 @@
 # Authentication & API access
 
-Hamaca is drivable over a small **REST API** and the zero-dependency **`relay` CLI**, so a
+Hamaca is drivable over a small **REST API** and the zero-dependency **`./hamaca` CLI**, so a
 Claude (or any) agent can pull a card, work it, and hand it back. Every write is attributed
 to the board's AI agent, **"Hamaca AI"**.
 
@@ -18,11 +18,13 @@ reference — request bodies, response shapes, and error codes — see the
    a gitignored `.envrc.local`):
 
    ```bash
-   export RELAY_URL="https://<your-relay-host>"
-   export RELAY_API_KEY="relay_xxxxxxxxxxxx_…"
+   export HAMACA_URL="https://<your-board-host>"
+   export HAMACA_API_KEY="relay_xxxxxxxxxxxx_…"
    ```
-3. **Confirm access.** Run `relay board` — it should print your board's stages and cards.
-   The CLI is Python-3-stdlib only, so it runs anywhere your agent does.
+3. **Confirm access.** Run `./hamaca board` — it should print your board's stages and cards.
+   The CLI is Python-3-stdlib only, so it runs anywhere your agent does. A repo still on the
+   older `./relay` keeps its old variable names for now; see
+   [Upgrading from ./relay](/docs/cli#upgrading-from-relay).
 
 ## Authentication
 

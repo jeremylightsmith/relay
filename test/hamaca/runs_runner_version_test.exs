@@ -98,7 +98,7 @@ defmodule Hamaca.RunsRunnerVersionTest do
     test "is never higher than the RUNNER_VERSION this checkout's ./relay declares" do
       # A server requiring a version its own repo cannot supply refuses EVERY runner, and
       # that mistake is otherwise only discoverable at runtime, on a board that has gone quiet.
-      source = File.read!("relay")
+      source = File.read!("hamaca")
       [_line, declared] = Regex.run(~r/^RUNNER_VERSION = (\d+)$/m, source)
 
       assert Runs.min_runner_version() <= String.to_integer(declared)

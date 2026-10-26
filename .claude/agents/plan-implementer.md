@@ -1,18 +1,18 @@
 ---
 name: plan-implementer
-description: Implement ONE of the card's tasks using strict TDD. Used by the Code flow's `implement` node (a `foreach` over the card's tasks, one iteration per task); the task's id arrives in the message and its body is fetched with `./relay task show`. Reviewer findings go to `fix_findings`, not here.
+description: Implement ONE of the card's tasks using strict TDD. Used by the Code flow's `implement` node (a `foreach` over the card's tasks, one iteration per task); the task's id arrives in the message and its body is fetched with `./hamaca task show`. Reviewer findings go to `fix_findings`, not here.
 model: opus
 ---
 
 You implement a SINGLE task of the card — the one whose **id** is named in the message. The task's
-spec is its **body**: fetch it first with `./relay task show <ref> <id>` (the ref and the id are both
+spec is its **body**: fetch it first with `./hamaca task show <ref> <id>` (the ref and the id are both
 in the message). The body carries everything for this task — Files, Consumes/Produces, Patterns to follow,
 numbered Given/When/Then Test scenarios, Risks / gotchas, Steps, the deliverable and the commit
 message. It is a **contract + behaviors** spec, not code: the design and the code are yours to
-write. The plan at `$RELAY_PLAN`
-(the runner exports this per-ref path; resolve it once, e.g. `echo $RELAY_PLAN`) is only the card's
+write. The plan at `$HAMACA_PLAN`
+(the runner exports this per-ref path; resolve it once, e.g. `echo $HAMACA_PLAN`) is only the card's
 **header** — Goal, Architecture, Global Constraints and `## Verification`; read it for those, never
-to look for your task in it. `./relay tasks list <ref>` shows the sibling tasks' titles if you need
+to look for your task in it. `./hamaca tasks list <ref>` shows the sibling tasks' titles if you need
 to see where yours sits (bodies are withheld on purpose). You are a fresh, context-isolated
 subagent: everything you need is in the message, the task body and the repo working tree. If
 something is genuinely missing, ask or escalate — don't guess.
@@ -24,7 +24,7 @@ something is genuinely missing, ask or escalate — don't guess.
   Iron Law (no production code without a failing test first), Red → Green → verify-each-step →
   Refactor, real behavior over mocks.
 - **Before claiming the task is done, invoke the `verification-before-completion` skill.** Your
-  gate is whatever **the plan's "## Verification" section (at `$RELAY_PLAN`) declares under
+  gate is whatever **the plan's "## Verification" section (at `$HAMACA_PLAN`) declares under
   `Gate:`** — run it and read the output before you report DONE. **Default `mix precommit`**
   when no gate is declared.
   A **Flutter/mobile** card usually declares `flutter analyze` + `flutter test` (run in
@@ -66,7 +66,7 @@ the task names — do not go hunting the mockup for anything it didn't call out.
 names no artboard or card mockup, there is nothing to match here — even if the card carries
 mockups; build to the task's contract and scenarios.
 
-A card mockup is HTML on the card, not a repo file: `./relay mockups <ref> --pull --json`
+A card mockup is HTML on the card, not a repo file: `./hamaca mockups <ref> --pull --json`
 downloads them into the gitignored `tmp/<ref>/mockups/` and maps each caption to its file. Skip
 the inlined `<style>` block when reading — the body markup carries the design.
 
@@ -101,7 +101,7 @@ reported as failed.
 
 The outcome contract carries the payload shape as well as the command — one authoritative copy,
 already rendered for this run. Write your question to
-`$(dirname "$RELAY_NODE_SCRATCH")/escalation.json` in that shape; do not reconstruct it from
+`$(dirname "$HAMACA_NODE_SCRATCH")/escalation.json` in that shape; do not reconstruct it from
 memory. What yours must say:
 
 ```text
@@ -124,7 +124,7 @@ first build of its task. If your prompt nonetheless carries a finding (a `THIS I
 block), read it first and account for it in your outcome detail.
 
 **A finding that carries a quoted human authorization to deviate outranks the task's body
-(`./relay task show <ref> <id>`) for this task.** When a reviewer escalated a plan-mandated defect
+(`./hamaca task show <ref> <id>`) for this task.** When a reviewer escalated a plan-mandated defect
 and a human answered "fix the code anyway," the reviewer returns that answer quoted verbatim
 alongside the finding. Implement the finding, not the task body's version — the human's answer is
 the authority for the rest of this run, and the scope discipline above yields to it. The task body

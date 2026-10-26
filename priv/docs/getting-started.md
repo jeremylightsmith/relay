@@ -26,7 +26,7 @@ change it later in Board settings → Agents.
 The checklist shows a line with your board's key in it:
 
 ```bash
-export RELAY_API_KEY=relay_xxxxxxxxxxxx_…
+export HAMACA_API_KEY=relay_xxxxxxxxxxxx_…
 ```
 
 Copy it now, because it's only shown once. Put it where your shell will load it, such as your
@@ -41,7 +41,7 @@ folder:
 curl -fsSL "https://<your-board-host>/b/<board>/install" | sh
 ```
 
-It checks your repo before writing anything. Then it adds `./relay`, the tool that runs agents
+It checks your repo before writing anything. Then it adds `./hamaca`, the tool that runs agents
 on your machine, and a few files that tell your agent how to work with Hamaca. It doesn't commit
 anything.
 
@@ -50,7 +50,7 @@ anything.
 Open Claude Code in your repo and run:
 
 ```
-/relay-onboard
+/hamaca-onboard
 ```
 
 It asks a few questions about your project, shows you each change before making it, turns on
@@ -62,7 +62,7 @@ If you stop partway, run it again and it picks up where it left off.
 Open a new terminal in your repo and run:
 
 ```bash
-./relay start
+./hamaca start
 ```
 
 Leave it running. The runner is what picks up cards and starts agents on them. Within a few
@@ -86,19 +86,20 @@ order.
 1. **The stage has no flow turned on.** Open Settings › Stages and check that the stage's flow
    is on.
 2. **The runner isn't running.** Open the board's Runners page. Your machine should show
-   FRESH. If it shows STALE or GONE, or isn't listed, restart `./relay start` in a terminal
-   where `RELAY_API_KEY` is set.
+   FRESH. If it shows STALE or GONE, or isn't listed, restart `./hamaca start` in a terminal
+   where `HAMACA_API_KEY` is set.
 3. **The runner can't take this kind of work.** Code cards need a runner with `exclusive`
    capacity. The Runners page shows what each machine can take, and
    [Runner config](/docs/cli#runner-config) shows how to change it.
 4. **The card is waiting on you.** If an agent asked a question, the card shows it. Answer it
    on the card.
 
-Still stuck? Run `./relay why <card>` and it tells you why that card isn't moving.
+Still stuck? Run `./hamaca why <card>` and it tells you why that card isn't moving.
 
 ## Where to go next
 
 - [How Hamaca works](/docs/how-hamaca-works) follows one card across a board, from you to an
   agent and back.
-- [CLI](/docs/cli) lists every `./relay` command.
+- [CLI](/docs/cli) lists every `./hamaca` command. A repo set up with the older `./relay`
+  moves over with two updates; see [Upgrading from ./relay](/docs/cli#upgrading-from-relay).
 - [REST API](/docs/api) is for building your own tools on Hamaca.

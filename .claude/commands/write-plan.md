@@ -16,11 +16,11 @@ context, so authoring in-context is how those decisions reach the plan.
 1. **Resolve the card and spec.** Take the card ref from `$ARGUMENTS`; if absent, ask the user
    which card to plan. Read the approved spec from the card's `spec` field:
 
-       ./relay card <ref> --json
+       ./hamaca card <ref> --json
 
    If the `spec` field is empty or missing, stop — there's no approved spec to plan from. Tell
    the user to produce one first with `/brainstorm <ref>`, then come back to `/write-plan <ref>`.
-   Do NOT invent a spec. Otherwise, read it fully. If `./relay card <ref>` shows a
+   Do NOT invent a spec. Otherwise, read it fully. If `./hamaca card <ref>` shows a
    **CHANGES REQUESTED** block, treat resolving that feedback as this pass's primary goal.
 
    **Delta re-plan (rejected card):** if the card already has a **non-empty `plan`** AND an open
@@ -54,7 +54,7 @@ context, so authoring in-context is how those decisions reach the plan.
 4. **Self-review** (checklist at the end), fixing inline.
 5. **Write the plan to the card** — clear stale tasks, write the header, add the tasks in ONE
    call, then check the result (see "Writing it to the card"). Do NOT leave a durable repo-root
-   `plan.md` (the Code flow materializes the header per-run at `$RELAY_PLAN`).
+   `plan.md` (the Code flow materializes the header per-run at `$HAMACA_PLAN`).
 
    Then summarize the task breakdown to the user. There is no runner command to launch by hand
    anymore (RLY-139): once the card is approved into `Plan:Done`, the Code flow
@@ -74,16 +74,16 @@ header, its own task body and the repo — nothing else. Hand it every **decisio
 fixes what must be built, how it must behave, and where in the repo to look.
 
 ### Input
-The approved spec, read from the card's `spec` field (`./relay card <ref> --json`). Read
+The approved spec, read from the card's `spec` field (`./hamaca card <ref> --json`). Read
 it fully. **Design fidelity is the spec's call, not yours** — artboards drift from the shipped
 app, so match a mockup only where the spec **explicitly** says a UI should match a named
 `docs/designs/*.dc.html` artboard (`/brainstorm` settles this with the human and records the
 decision in the spec). When the spec does name one, open that artboard and read the relevant
 section so its concrete values (classes, tokens, measurements, states) reach the plan. A spec
 can instead name a **card mockup** — `Match card mockup "<caption>"`, one of the HTML mockups
-the Design stage uploaded to the card. Pull them outside the repo (`./relay mockups <ref>
---pull "$(dirname "$RELAY_NODE_SCRATCH")/mockups" --json` maps each caption to its file —
-interactively, with no `$RELAY_NODE_SCRATCH`, omit the DIR to get the gitignored
+the Design stage uploaded to the card. Pull them outside the repo (`./hamaca mockups <ref>
+--pull "$(dirname "$HAMACA_NODE_SCRATCH")/mockups" --json` maps each caption to its file —
+interactively, with no `$HAMACA_NODE_SCRATCH`, omit the DIR to get the gitignored
 `tmp/<ref>/mockups/`; skip the inlined `<style>` block when reading) and read the named one the same way. Where the spec
 does not tie a UI to an artboard or card mockup, do **not** go hunting one — even if the card
 carries mockups — plan to the spec and the existing design system.
@@ -117,7 +117,7 @@ The header holds only what EVERY task needs; nothing per-task goes in it.
   The `plan-implementer`, the whole-suite gate, the `smoke-tester`, and the `acceptance-tester`
   all read these lines, so they must be exact.
 - **Cover the card's acceptance criteria.** Read the card's `acceptance_criteria` field
-  (`./relay card <ref> --json`) and make sure the tasks actually deliver every criterion — a
+  (`./hamaca card <ref> --json`) and make sure the tasks actually deliver every criterion — a
   criterion no task covers is a gap: add a task for it. Do **NOT** copy the criteria into the
   header or a task: the `acceptance-tester` reads them off the card at the Code stage, so a copy
   would only drift.
@@ -126,7 +126,7 @@ The header holds only what EVERY task needs; nothing per-task goes in it.
 Each task is a card task with a short **title** (what a human scans on the card and in the run
 log) and a **body** (the task's whole spec). The Code flow's `implement`, `spec_review`,
 `quality_review` and `fix_findings` nodes each fetch ONE task's body by id
-(`./relay task show <ref> <id>`) and see no other task's body, so a body must stand alone.
+(`./hamaca task show <ref> <id>`) and see no other task's body, so a body must stand alone.
 Each body carries these sections, in this order:
 - **Files** — exact create/modify/test paths.
 - **Interfaces** — split as **Consumes** (what this task uses from earlier tasks or existing
@@ -196,15 +196,15 @@ inline.
 
 ## Writing it to the card
 
-Write the files under your scratch directory — `$(dirname "$RELAY_NODE_SCRATCH")` when the flow
+Write the files under your scratch directory — `$(dirname "$HAMACA_NODE_SCRATCH")` when the flow
 runs you, a temp directory otherwise — never an invented `/tmp` path and never the repo root.
 Then, in this order:
 
-1. **Clear stale tasks first.** `./relay tasks add` **appends** after the card's last task — it
+1. **Clear stale tasks first.** `./hamaca tasks add` **appends** after the card's last task — it
    never replaces — so a re-plan that skips this step leaves duplicates for the Code flow to
    build twice. List what is there:
 
-       ./relay tasks list <ref> --json
+       ./hamaca tasks list <ref> --json
 
    - **Greenfield plan or re-plan** (no open rejection): remove every existing task.
    - **Delta re-plan** (open rejection): keep the tasks that are already done (`"done": true` —
@@ -212,23 +212,23 @@ Then, in this order:
 
    Remove each one with:
 
-       ./relay task rm <ref> <id>
+       ./hamaca task rm <ref> <id>
 
 2. **Write the header:**
 
-       ./relay plan <ref> @<dir>/header.md
+       ./hamaca plan <ref> @<dir>/header.md
 
 3. **Add every task in ONE call**, in execution order — one `--task` per task, its title then
    its body file:
 
-       ./relay tasks add <ref> --task "<title>" @<dir>/task1.md --task "<title>" @<dir>/task2.md --task "<title>" @<dir>/task3.md
+       ./hamaca tasks add <ref> --task "<title>" @<dir>/task1.md --task "<title>" @<dir>/task2.md --task "<title>" @<dir>/task3.md
 
    The batch is all-or-nothing: if it is refused (e.g. a blank title), nothing was added — fix
    it and re-run the same single call.
 
-4. **Check the result.** `./relay tasks list <ref>` must show exactly the titles you intended,
-   in order, with no leftovers; spot-check one body with `./relay task show <ref> <id>`, and
-   `./relay card <ref> --json` must show a `plan` that is the header alone.
+4. **Check the result.** `./hamaca tasks list <ref>` must show exactly the titles you intended,
+   in order, with no leftovers; spot-check one body with `./hamaca task show <ref> <id>`, and
+   `./hamaca card <ref> --json` must show a `plan` that is the header alone.
 
 The Plan flow's `write_plan` node declares that it writes both `plan` and `tasks`: a run
 that reports success with either still empty is failed by the engine at the Plan stage.
@@ -242,7 +242,7 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
   the header and the tasks, stop.
 - **Blast radius: do not touch git, do not touch other cards.** No branches, no commits, no
   pushes, no stage moves. The only writes you make are to the card you were given: its tasks
-  (`./relay task rm`, `./relay tasks add`) and its header (`./relay plan <ref> @<file>`).
+  (`./hamaca task rm`, `./hamaca tasks add`) and its header (`./hamaca plan <ref> @<file>`).
 - **Terminal STOP.** When the header and tasks are on the card, you are done — stop. Explicitly
   do **NOT** start implementing, and do not move or approve the card into `Plan:Done` yourself —
   the Code flow's dispatch is automatic and server-side (RLY-139) once a human does that. The
@@ -252,11 +252,11 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
   path to stop and tell the user. Headless there is no user to tell, and a silent stop reads to
   the engine as `succeeded` — which the writes guard would then fail with a confusing "plan is
   still empty". So if the card's `spec` field is empty or missing, park the card where the
-  problem actually is, writing the questions to a scratch file under `$RELAY_NODE_SCRATCH`'s
+  problem actually is, writing the questions to a scratch file under `$HAMACA_NODE_SCRATCH`'s
   directory (never an invented `/tmp` path — see
-  [`relay.md`](../../relay.md#the-relay_node_scratch-contract)):
+  [`hamaca.md`](../../hamaca.md#the-hamaca_node_scratch-contract)):
 
-      questions_file="$(dirname "$RELAY_NODE_SCRATCH")/questions.json"
+      questions_file="$(dirname "$HAMACA_NODE_SCRATCH")/questions.json"
       cat > "$questions_file" <<'JSON'
       [
         {
@@ -269,7 +269,7 @@ the loop. The node's `run` is a bare `/write-plan {ref}`, so every operational r
         }
       ]
       JSON
-      ./relay needs-input <ref> --questions @"$questions_file"
+      ./hamaca needs-input <ref> --questions @"$questions_file"
 
   Then stop. **Always the structured `--questions @<tmpfile>` JSON-array form** of
   `{prompt, options, allow_text}` objects — never a hand-numbered prose string. The drawer

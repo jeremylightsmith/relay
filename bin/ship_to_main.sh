@@ -22,7 +22,7 @@
 # flow's `merge -> resync` edge rebases; refreshing and resetting here would silently squash
 # someone else's commits into this card's commit.
 #
-# The Relay CLI is called as "${RELAY:-./relay}" (tests point RELAY at a stub).
+# The Hamaca CLI is called as "${HAMACA:-./hamaca}" (tests point HAMACA at a stub).
 
 set -euo pipefail
 
@@ -33,7 +33,7 @@ if [ -z "$ref" ]; then
   echo "usage: bin/ship_to_main.sh <REF>" >&2
   exit 64
 fi
-relay="${RELAY:-./relay}"
+hamaca="${HAMACA:-./hamaca}"
 
 if [ -z "$(git rev-list origin/main..HEAD)" ]; then
   say "nothing to ship — origin/main..HEAD is empty"
@@ -41,7 +41,7 @@ if [ -z "$(git rev-list origin/main..HEAD)" ]; then
 fi
 
 base="$(git merge-base origin/main HEAD)"
-title="$("$relay" card "$ref" --field title)"
+title="$("$hamaca" card "$ref" --field title)"
 if [ -z "${title//[[:space:]]/}" ]; then
   say "card $ref has no title — refusing to ship a commit card_touched_flutter.sh cannot find"
   exit 1
@@ -62,7 +62,7 @@ say "pushing $(git rev-parse --short HEAD) to main"
 git push origin HEAD:main
 
 sha="$(git rev-parse --short HEAD)"
-if ! "$relay" comment "$ref" "Shipped to main as $sha"; then
+if ! "$hamaca" comment "$ref" "Shipped to main as $sha"; then
   say "warning: could not comment on $ref (shipped as $sha) — post it by hand"
 fi
 say "shipped $ref as $sha"

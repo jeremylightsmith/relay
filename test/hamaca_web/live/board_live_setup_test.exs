@@ -35,8 +35,8 @@ defmodule HamacaWeb.BoardLiveSetupTest do
   end
 
   defp token_in(view) do
-    assert text(view, "#setup-key-box") =~ "export RELAY_API_KEY=relay_"
-    "export RELAY_API_KEY=" <> token = view |> text("#setup-key-line code") |> String.trim()
+    assert text(view, "#setup-key-box") =~ "export HAMACA_API_KEY=relay_"
+    "export HAMACA_API_KEY=" <> token = view |> text("#setup-key-line code") |> String.trim()
     token
   end
 
@@ -81,7 +81,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       step2 = text(view, "#setup-step-2")
       assert step2 =~ "Default LLM: Codex"
       assert step2 =~ "chosen"
-      assert text(view, "#setup-key-box") =~ "export RELAY_API_KEY=relay_"
+      assert text(view, "#setup-key-box") =~ "export HAMACA_API_KEY=relay_"
       assert text(view, "#setup-step-5") =~ "Onboard, in Codex"
     end
 
@@ -600,7 +600,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       assert has_element?(view, "#setup-install-command-copy")
 
       assert text(view, "#setup-install-rerun") =~
-               "Safe to run again: rewrites ./relay and the skill, keeps runner.json and prepare-worktree.sh"
+               "Safe to run again: rewrites ./hamaca and the skill, keeps runner.json and prepare-worktree.sh"
 
       refute has_element?(view, "#setup-then")
     end
@@ -616,6 +616,22 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       assert String.trim(command) == Setup.install_command(HamacaWeb.Endpoint.url(), board.slug)
       assert String.starts_with?(String.trim(command), "curl -fsSL " <> HamacaWeb.Endpoint.url() <> "/b/")
       refute command =~ "relayboard.fly.dev"
+    end
+
+    # RE478 task 4 scenario 5
+    test "every step, peeked open, names ./hamaca and /hamaca-onboard and none of the relay names",
+         %{conn: conn, user: user} do
+      %{board: board} = keyed!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      for id <- ~w(1 2 3 4 5 6 7), do: open_peek!(view, id)
+      html = render(view)
+
+      for name <- ["./hamaca", "/hamaca-onboard", "HAMACA_API_KEY"], do: assert(html =~ name, "missing #{name}")
+
+      for name <- ["./relay", "/relay-onboard", "relay-update", "relay-doctor", "RELAY_API_KEY"] do
+        refute html =~ name, "the wizard still names #{name}"
+      end
     end
 
     # Scenario 3
@@ -664,8 +680,8 @@ defmodule HamacaWeb.BoardLiveSetupTest do
 
       open_peek!(view, "3")
 
-      assert masked(view) =~ ~r/^export RELAY_API_KEY=relay_[^_]+_••••\w{4}$/
-      assert masked(view) == "export RELAY_API_KEY=relay_#{key.token_prefix}_••••#{key.last_four}"
+      assert masked(view) =~ ~r/^export HAMACA_API_KEY=relay_[^_]+_••••\w{4}$/
+      assert masked(view) == "export HAMACA_API_KEY=relay_#{key.token_prefix}_••••#{key.last_four}"
       refute has_element?(view, "#setup-key-masked button")
     end
 
@@ -677,7 +693,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
 
       view |> element("#setup-mint-key") |> render_click()
 
-      assert text(view, "#setup-step-3-peek #setup-key-box") =~ "export RELAY_API_KEY=relay_"
+      assert text(view, "#setup-step-3-peek #setup-key-box") =~ "export HAMACA_API_KEY=relay_"
       assert {:ok, _key} = view |> token_in() |> ApiKeys.authenticate()
       for id <- top_ids(), do: assert(has_element?(view, ~s(#setup-step-#{id}[data-status="done"])))
       assert has_element?(view, "#setup-done")

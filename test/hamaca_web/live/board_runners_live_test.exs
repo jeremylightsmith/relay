@@ -357,8 +357,9 @@ defmodule HamacaWeb.BoardRunnersLiveTest do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
 
     assert has_element?(view, "#runners-empty", "No runners connected")
-    assert has_element?(view, "#runner-start-command", "./relay start")
-    assert has_element?(view, "#copy-start-command")
+    assert has_element?(view, "#runner-start-command", "./hamaca start")
+    assert has_element?(view, ~s(#copy-start-command[data-command="./hamaca start"]))
+    refute render(view) =~ "./relay"
     assert has_element?(view, "#runners-empty", "Waiting for a heartbeat…")
     # deliberate deviation from the artboard: the real command, not npx relay-runner
     refute render(view) =~ "npx relay-runner"

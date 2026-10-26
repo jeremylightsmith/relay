@@ -31,9 +31,9 @@ options  "Fix the code anyway — deviate from the plan for this run."
          "Waive it — ship as planned; I'll file a follow-up card."
 ```
 
-Write the file beside `$RELAY_NODE_SCRATCH`, in the shape the outcome contract spells out:
+Write the file beside `$HAMACA_NODE_SCRATCH`, in the shape the outcome contract spells out:
 
-    escalation_file="$(dirname "$RELAY_NODE_SCRATCH")/escalation.json"
+    escalation_file="$(dirname "$HAMACA_NODE_SCRATCH")/escalation.json"
 
 Then post it with the `needs-input <ref> --questions @"$escalation_file"` command **exactly as it
 appears in the outcome contract**, and **stop without declaring an outcome** — that is what
@@ -43,9 +43,9 @@ that rule protects the checkout.
 ## When the run resumes
 
 The run re-enters the same node with your session resumed. The human's answer arrives as a
-**card comment** — read it with `./relay card <ref>`; it is not interpolated into your prompt.
+**card comment** — read it with `./hamaca card <ref>`; it is not interpolated into your prompt.
 **The answer, not the plan, is authoritative for the rest of this run.** The plan (the
-header at `$RELAY_PLAN`), the card's `plan` field and its tasks' bodies stay as they are by
+header at `$HAMACA_PLAN`), the card's `plan` field and its tasks' bodies stay as they are by
 design; any lasting plan correction is a follow-up card.
 
 Resolve, and do not park again on the same finding:

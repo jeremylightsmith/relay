@@ -14,7 +14,7 @@ Unit and integration tests already passed. You are not re-running them — you a
 confirm the feature demonstrably does what the plan says.
 
 ## 0. Which app — web (default) or mobile?
-Read the plan's **"## Verification" → `Smoke:`** directive first (the plan is at `$RELAY_PLAN`).
+Read the plan's **"## Verification" → `Smoke:`** directive first (the plan is at `$HAMACA_PLAN`).
 - **No directive, or a web directive → the default web smoke** (§1–§4 below): the Phoenix
   LiveView app on `http://localhost:4003`, driven with Playwright.
 - **`Smoke: none`** → the card has no runtime surface. Say so in `summary` and pass.
@@ -36,11 +36,11 @@ Read the plan's **"## Verification" → `Smoke:`** directive first (the plan is 
   setup — not a code defect), naming what's missing. Do not fail the card for that.
 
 ## 1. Understand what to exercise
-- Read the plan at `$RELAY_PLAN` (the branch's contract) and `git diff main...HEAD --stat` + the relevant
+- Read the plan at `$HAMACA_PLAN` (the branch's contract) and `git diff main...HEAD --stat` + the relevant
   parts of `git diff main...HEAD`. Identify the user-visible or externally-observable behavior
   the branch adds, and the exact surface that exercises it (a LiveView route + interactions, an
   HTTP endpoint, an email path, a background job, a context function reachable through a page).
-- The card's spec is on the card, not in the repo: `./relay card <ref> --field spec` (the ref
+- The card's spec is on the card, not in the repo: `./hamaca card <ref> --field spec` (the ref
   is in the `needs-input` command of the outcome contract at the end of your prompt).
 
 ## 2. Make sure you're testing THIS branch's code
@@ -78,7 +78,7 @@ broken layout, wrong structure), not pixel nitpicks or copy differences. Save sc
 
 **Card mockups outrank artboards where the spec names one.** If the card's spec says
 `Match card mockup "<caption>"`, that mockup — HTML the Design stage uploaded to the card — is
-the comparison target for that UI: `./relay mockups <ref> --pull --json` downloads the card's
+the comparison target for that UI: `./hamaca mockups <ref> --pull --json` downloads the card's
 mockups into the gitignored `tmp/<ref>/mockups/` and maps each caption to its file. Screenshot
 the named mockup with the same Playwright script (`page.goto('file://' + path)`, same viewport)
 and compare it side by side with the app's screenshot, judging the elements/states the spec

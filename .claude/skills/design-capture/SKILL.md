@@ -50,7 +50,7 @@ Which screen. `node bin/design-capture.mjs --list` prints the ones already defin
    It prints one line per artboard with its pixel size. **Every artboard must say `ok`** —
    a `FAILED` line means that state is missing from the mockup, not that it degraded
    gracefully. Iterate on one with `--only <id>[,<id>]`, writing the probe to scratch —
-   `--out "$(dirname "$RELAY_NODE_SCRATCH")/probe.dc.html"` — so a half-built capture never
+   `--out "$(dirname "$HAMACA_NODE_SCRATCH")/probe.dc.html"` — so a half-built capture never
    lands in `docs/designs-as-is/`.
 
 3. **Look at it.** Open the output and compare a couple of artboards against the live app

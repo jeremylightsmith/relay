@@ -59,7 +59,7 @@ defmodule HamacaWeb.Api.SetupControllerTest do
         "machine" => "jl-mbp",
         "repo_dir" => "~/src/streaks",
         "branch" => "main",
-        "files" => ["relay", ".claude/skills/relay-onboard/SKILL.md", "relay.md"]
+        "files" => ["relay", ".claude/skills/hamaca-onboard/SKILL.md", "relay.md"]
       },
       attrs
     )
@@ -90,16 +90,17 @@ defmodule HamacaWeb.Api.SetupControllerTest do
                "label" => "Claude Code",
                "cli" => "claude",
                "skill_dir" => ".claude/skills",
-               "skill_path" => ".claude/skills/relay-onboard/SKILL.md",
+               "skill_path" => ".claude/skills/hamaca-onboard/SKILL.md",
                "pointer_file" => "CLAUDE.md"
              }
 
+      # RE478: the wizard lists the Hamaca-named files — never the ./relay shim or the aliases.
       assert body["relay_files"] == [
-               ".claude/skills/relay-doctor/SKILL.md",
-               ".claude/skills/relay-onboard/SKILL.md",
-               ".claude/skills/relay-update/SKILL.md",
-               "relay",
-               "relay.md"
+               ".claude/skills/hamaca-doctor/SKILL.md",
+               ".claude/skills/hamaca-onboard/SKILL.md",
+               ".claude/skills/hamaca-update/SKILL.md",
+               "hamaca",
+               "hamaca.md"
              ]
 
       ids = Enum.map(body["checks"], & &1["id"])
@@ -108,7 +109,7 @@ defmodule HamacaWeb.Api.SetupControllerTest do
       assert [cli, key] = Enum.take(body["checks"], -2)
       assert %{"label" => "claude on PATH", "ok" => true, "detail" => "/usr/bin/claude", "fix" => nil} = cli
 
-      assert %{"label" => "RELAY_API_KEY", "ok" => true} = key
+      assert %{"label" => "HAMACA_API_KEY", "ok" => true} = key
       assert key["detail"] == "accepted by the board (…#{four})"
 
       three = step(board, "3")
@@ -130,7 +131,7 @@ defmodule HamacaWeb.Api.SetupControllerTest do
 
       assert body["ok"] == true
       assert body["llm"]["skill_dir"] == ".agents/skills"
-      assert ".agents/skills/relay-update/SKILL.md" in body["relay_files"]
+      assert ".agents/skills/hamaca-update/SKILL.md" in body["relay_files"]
       refute Enum.any?(body["relay_files"], &String.starts_with?(&1, ".claude/"))
     end
 
@@ -333,7 +334,7 @@ defmodule HamacaWeb.Api.SetupControllerTest do
       four = step(board, "4")
       assert four.status == :done
       assert four.evidence =~ ~r/^downloaded \d\d:\d\d · ~\/src\/streaks · main$/
-      assert four.data["files"] == ["relay", ".claude/skills/relay-onboard/SKILL.md", "relay.md"]
+      assert four.data["files"] == ["relay", ".claude/skills/hamaca-onboard/SKILL.md", "relay.md"]
       assert step(board, "5").status == :active
       assert step(board, "5").children |> hd() |> Map.take([:id, :status]) == %{id: "5.1", status: :active}
       assert_receive {:setup_changed, ^board_id}
@@ -406,7 +407,7 @@ defmodule HamacaWeb.Api.SetupControllerTest do
                "label" => "Claude Code",
                "cli" => "claude",
                "skill_dir" => ".claude/skills",
-               "skill_path" => ".claude/skills/relay-onboard/SKILL.md",
+               "skill_path" => ".claude/skills/hamaca-onboard/SKILL.md",
                "pointer_file" => "CLAUDE.md"
              }
 

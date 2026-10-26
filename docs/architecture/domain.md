@@ -1153,9 +1153,13 @@ sharing behavior.
   ignores talk jobs; `stop_turn/1` revokes unconditionally so a person can always end it. Not
   here in step 1: receipts, `awaiting` turns, the write lease, card-level runner pinning — a
   talk turn never moves the card's baton.
-- **Scaffold** — the five Hamaca-owned files (`./relay`, the three `relay-*` skills and
-  `relay.md`) the board serves at `/api/scaffold`, `relay` with the board's URL baked into its
-  `BOARD_URL` line (RE443), built into `priv/scaffold/` by `mix hamaca.build_scaffold`
+- **Scaffold** — the Hamaca-owned files the board serves at `/api/scaffold`, in two layouts
+  (RE478, `Hamaca.Scaffold.layouts/0`): **legacy** (no `layout` param — `./relay` as the full
+  runner, `relay.md` and the three `relay-*` skills, generated from the hamaca sources by
+  `to_legacy_names/1`) and **hamaca** (`?layout=hamaca` — `./hamaca`, `hamaca.md`, the
+  `hamaca-*` skills, the `./relay` shim and the `relay-*` alias skills); an unknown layout is a
+  400 `unknown_layout`. The layout's runner has the board's URL baked into its `BOARD_URL` line
+  (RE443). Built into `priv/scaffold/<layout>/` by `mix hamaca.build_scaffold`
   (RE304, [ADR 0010](../adr/0010-serving-the-scaffold-from-the-app.md)).
 - **Setup** (`Hamaca.Setup`, RE443) — a board's **setup checklist**, the guided path from "board
   created from a template" to "an agent picked up the first card". Owns the ONE step catalog
@@ -1257,8 +1261,8 @@ sharing behavior.
   and marks step 4 `:waiting`
   (`"preflight passed HH:MM · <machine>"`, `data.checks`) or `:failed` (the first failure's
   `headline` as `error`, plus `checks` / `headline` / `fix` / `fix_command` in `data`); it answers
-  the board name, the onboarding LLM, `relay_files` (`Hamaca.Scaffold.items/1` over the LLM's
-  `skill_dir`, RE457) and every check with its fix text. `preflight_checks/0` is
+  the board name, the onboarding LLM, `relay_files` (`Hamaca.Scaffold.primary_items/1` over the LLM's
+  `skill_dir`, RE457/RE478) and every check with its fix text. `preflight_checks/0` is
   the ONE list of the script's local check ids and labels (`git_repo`, `remote`,
   `default_branch`, `python3`), whose fix texts live beside it; the server adds the `cli` and
   `key` lines. `installed/2` finishes step 4 (`"downloaded HH:MM · <repo_dir> · <branch>"`,

@@ -235,7 +235,8 @@ defmodule Hamaca.Runs.AuditTest do
 
       assert [finding] = findings(flow)
       text = Enum.join([finding.summary, finding.evidence, finding.fix], "\n")
-      assert text =~ "/relay-doctor"
+      assert text =~ "/hamaca-doctor"
+      refute text =~ "/relay-doctor"
       assert text =~ "relay tasks add"
       assert text =~ "tasks"
       refute text =~ "sub_tasks"

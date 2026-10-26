@@ -21,7 +21,7 @@ defmodule HamacaWeb.DocsController do
     {"how-hamaca-works", "How Hamaca works", "Get started", "how-hamaca-works.md"},
     {"statuses-and-outcomes", "Statuses & outcomes", "Get started", "statuses-and-outcomes.md"},
     {"billing", "Billing & self-hosting", "Get started", "billing.md"},
-    {"cli", "CLI (./relay)", "Build with Hamaca", "cli.md"},
+    {"cli", "CLI (./hamaca)", "Build with Hamaca", "cli.md"},
     {"api", "REST API reference", "Build with Hamaca", "api.md"},
     {"authentication", "Authentication & API access", "Build with Hamaca", "authentication.md"},
     {"runbook-flow-cutover", "Enabling a flow safely", "Operations", "runbooks/flow-cutover.md"},

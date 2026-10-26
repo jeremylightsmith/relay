@@ -1,14 +1,14 @@
 defmodule Hamaca.OnboardSkillTest do
   @moduledoc """
-  The static contract for `/relay-onboard` (RE445): a loop over the board's guided-setup
-  checklist, sub-steps 5.1–5.8, driven through `./relay setup status|report`. The skill asks
+  The static contract for `/hamaca-onboard` (RE445): a loop over the board's guided-setup
+  checklist, sub-steps 5.1–5.8, driven through `./hamaca setup status|report`. The skill asks
   questions, so it is never run from a flow node — this test is the check.
   """
   use ExUnit.Case, async: true
 
   alias Hamaca.Setup
 
-  @skill Path.join([File.cwd!(), ".claude", "skills", "relay-onboard", "SKILL.md"])
+  @skill Path.join([File.cwd!(), ".claude", "skills", "hamaca-onboard", "SKILL.md"])
 
   setup do
     {:ok, doc: File.read!(@skill)}
@@ -20,7 +20,7 @@ defmodule Hamaca.OnboardSkillTest do
   end
 
   test "declares its name in frontmatter", %{doc: doc} do
-    assert doc =~ ~r/^name: relay-onboard$/m
+    assert doc =~ ~r/^name: hamaca-onboard$/m
   end
 
   # Scenario 2
@@ -47,7 +47,7 @@ defmodule Hamaca.OnboardSkillTest do
 
   # Scenario 4
   test "refuses a board with no checklist politely", %{doc: doc} do
-    assert doc =~ "This board predates guided setup; use /relay-doctor."
+    assert doc =~ "This board predates guided setup; use /hamaca-doctor."
   end
 
   # Scenario 5
@@ -57,13 +57,13 @@ defmodule Hamaca.OnboardSkillTest do
   end
 
   # Scenario 6
-  test "drives the loop through ./relay setup and names its artifacts", %{doc: doc} do
+  test "drives the loop through ./hamaca setup and names its artifacts", %{doc: doc} do
     for needle <- [
-          "./relay setup status",
-          "./relay setup report",
+          "./hamaca setup status",
+          "./hamaca setup report",
           "not_current",
-          ".relay/project.md",
-          "In a new terminal, run ./relay start",
+          ".hamaca/project.md",
+          "In a new terminal, run ./hamaca start",
           "--tag setup",
           ~s("enabled": true),
           "your LLM"
@@ -137,25 +137,64 @@ defmodule Hamaca.OnboardSkillTest do
   end
 
   # Scenario 10
-  test "no flow in this repo names relay-onboard as a node step" do
-    files = Path.wildcard(".relay/flows/*.json") ++ Path.wildcard("docs/designs/flows/*.json")
-    assert files != []
+  test "no flow in this repo names relay-onboard (or hamaca-onboard) as a node step" do
+    re_flows = Path.wildcard(".hamaca/flows/*.json")
+    assert ".hamaca/flows/code.json" in re_flows
+    assert ".hamaca/flows/deploy.json" in re_flows
+    files = re_flows ++ Path.wildcard("docs/designs/flows/*.json")
 
     for file <- files, node <- file |> File.read!() |> Jason.decode!() |> Map.get("nodes", []) do
-      refute Jason.encode!(node) =~ "relay-onboard",
-             "#{file} node #{node["key"]} names relay-onboard as a step"
+      refute Jason.encode!(node) =~ ~r/(relay|hamaca)-onboard/,
+             "#{file} node #{node["key"]} names an onboard skill as a step"
     end
   end
 
   describe "discoverability" do
-    test "relay.md's Setup section names the skill" do
-      assert File.read!("relay.md") =~ "/relay-onboard"
+    test "hamaca.md's Setup section names the skill" do
+      assert File.read!("hamaca.md") =~ "/hamaca-onboard"
     end
 
     test "AGENTS.md names it under Skill discipline, without the retired paths" do
       agents = File.read!("AGENTS.md")
-      assert agents =~ "/relay-onboard"
+      assert agents =~ "/hamaca-onboard"
       refute agents =~ ~r/seed \/ adopt \/ hybrid/
     end
+  end
+
+  # RE478: the source is the Hamaca-named skill; `relay-onboard` stays only as a thin alias for the
+  # compatibility window (the legacy scaffold layout generates its full copy from this source).
+  describe "the Hamaca rename (RE478)" do
+    @alias_skill Path.join([File.cwd!(), ".claude", "skills", "relay-onboard", "SKILL.md"])
+
+    test "the hamaca-onboard source speaks only the Hamaca names", %{doc: doc} do
+      assert doc =~ ~r/^name: hamaca-onboard$/m
+
+      for stale <- ["./relay", ".relay/", "relay.md", "RELAY_"] do
+        refute doc =~ stale, "hamaca-onboard still says #{stale}"
+      end
+    end
+
+    test "relay-onboard is an alias: its own name, the same description, a one-line body",
+         %{doc: doc} do
+      alias_doc = File.read!(@alias_skill)
+
+      assert alias_doc =~ ~r/^name: relay-onboard$/m
+      assert frontmatter(alias_doc, "description") == frontmatter(doc, "description")
+      assert alias_doc |> body() |> String.trim() == "Renamed: use /hamaca-onboard."
+    end
+
+    test "the alias directory holds exactly SKILL.md" do
+      assert File.ls!(Path.dirname(@alias_skill)) == ["SKILL.md"]
+    end
+  end
+
+  defp frontmatter(doc, key) do
+    [_, value] = Regex.run(~r/^#{key}: (.*)$/m, doc)
+    value
+  end
+
+  defp body(doc) do
+    ["", _frontmatter, body] = String.split(doc, ~r/^---$/m, parts: 3)
+    body
   end
 end

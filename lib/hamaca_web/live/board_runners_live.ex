@@ -5,7 +5,7 @@ defmodule HamacaWeb.BoardRunnersLive do
   (dot + FRESH/STALE/GONE/OUTDATED pill, capacity chips with used/total pips, WORKING NOW rows
   linking into the card drawer, dark streaming log tail), header summary chips, the at-risk
   note on a stale/gone runner with jobs, and the empty state naming the real
-  `./relay start` start command.
+  `./hamaca start` start command (`HamacaWeb.SetupComponents.runner_command/0`).
 
   RLY-191: `OUTDATED` is a top-level `display_state` (precedence
   `:gone > :stale > :outdated > :rate_limited > :fresh`), replacing the FRESH pill/dot rather than
@@ -78,6 +78,7 @@ defmodule HamacaWeb.BoardRunnersLive do
   alias HamacaWeb.BoardSettingsLive
   alias HamacaWeb.RunComponents
   alias HamacaWeb.RunnerHarnessComponents
+  alias HamacaWeb.SetupComponents
 
   @tick_every to_timeout(second: 10)
   @log_cap 30
@@ -199,7 +200,7 @@ defmodule HamacaWeb.BoardRunnersLive do
             </div>
           </div>
           <%= if @runners == [] do %>
-            <%!-- Empty state — artboard lines ~139-157; command is ./relay start on
+            <%!-- Empty state — artboard lines ~139-157; command is ./hamaca start on
                  purpose (spec §6: npx relay-runner doesn't exist yet; RLY-139 retired the
                  legacy bin/relay watch board-runner this used to name). --%>
             <div
@@ -225,13 +226,13 @@ defmodule HamacaWeb.BoardRunnersLive do
                   class="font-mono"
                   style="font-size:12.5px;color:color-mix(in oklab, var(--color-neutral-content) 85%, transparent);"
                 >
-                  <span style="color:var(--color-success);">$</span> ./relay start
+                  <span style="color:var(--color-success);">$</span> {SetupComponents.runner_command()}
                 </span>
                 <button
                   type="button"
                   id="copy-start-command"
                   phx-hook=".CopyCmd"
-                  data-command="./relay start"
+                  data-command={SetupComponents.runner_command()}
                   class="font-mono"
                   style="background:color-mix(in oklab, var(--color-neutral-content) 15%, var(--color-neutral));border:1px solid color-mix(in oklab, var(--color-neutral-content) 25%, var(--color-neutral));color:color-mix(in oklab, var(--color-neutral-content) 80%, transparent);border-radius:7px;padding:6px 11px;font-size:11.5px;font-weight:600;"
                 >

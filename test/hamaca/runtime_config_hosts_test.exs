@@ -18,12 +18,15 @@ defmodule Hamaca.RuntimeConfigHostsTest do
     {"PHX_HOST", "hamaca.app"}
   ]
 
+  @payload_open "<<CONFIG>>"
+  @payload_close "<</CONFIG>>"
+
   # The config `runtime.exs` evaluates to for `env`, with `extra_hosts` as PHX_EXTRA_HOSTS
   # (`nil` unsets it in the child).
   defp read(env, extra_hosts) do
     script = """
     config = Config.Reader.read!(#{inspect(@runtime)}, env: #{inspect(env)})
-    IO.write(config |> :erlang.term_to_binary() |> Base.encode64())
+    IO.write("\n#{@payload_open}" <> (config |> :erlang.term_to_binary() |> Base.encode64()) <> "#{@payload_close}\n")
     """
 
     {out, 0} =
@@ -32,8 +35,10 @@ defmodule Hamaca.RuntimeConfigHostsTest do
         env: @base_env ++ [{"PHX_EXTRA_HOSTS", extra_hosts}, {"PHX_SERVER", nil}]
       )
 
-    # Logger lines (the prod block's APNs warning) precede the payload on stdout.
-    out |> String.split() |> List.last() |> Base.decode64!() |> :erlang.binary_to_term()
+    # Logger lines (the prod block's APNs warning) share stdout and are written asynchronously, so
+    # under a loaded suite they can land before OR after the payload — hence the sentinels.
+    [_, payload] = Regex.run(~r/#{@payload_open}([A-Za-z0-9+\/=]+)#{@payload_close}/, out)
+    payload |> Base.decode64!() |> :erlang.binary_to_term()
   end
 
   test "prod trims, downcases and drops blanks, and check_origin uses the same list" do

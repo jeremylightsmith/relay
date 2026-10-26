@@ -27,7 +27,8 @@ defmodule Hamaca.ScaffoldBuildWiringTest do
   end
 
   test "EVERY scaffold source is copied in before the scaffold is built", %{builder: builder} do
-    # Derived from Scaffold.items/0, never a hand-listed pair. This test used to name `.claude`
+    # Derived from Scaffold.sources/0 (RE478: every layout is built from those), never a
+    # hand-listed pair. This test used to name `.claude`
     # and `bin` literally, so adding `relay.md` to items/0 left the Dockerfile a source short and
     # the suite green — `build!/2` raises on the missing file and the DEPLOY is what failed.
     # Anything added to items/0 from now on fails here instead, which is the whole point of the
@@ -39,14 +40,19 @@ defmodule Hamaca.ScaffoldBuildWiringTest do
 
       assert offset(builder, copy) < build_at,
              "Dockerfile must `COPY #{source}` before `RUN mix hamaca.build_scaffold` — " <>
-               "#{source} holds a Scaffold.items/0 entry, and build!/2 raises without it"
+               "#{source} holds a Scaffold.sources/0 entry, and build!/2 raises without it"
     end
   end
 
-  # The top-level path each served item arrives by: `relay` -> `relay`, a skill -> `.claude`,
-  # `relay.md` -> `relay.md` (a root file is copied by name).
+  # Scenario 13 (RE478): the sources are hamaca, hamaca.md, the relay shim and the skills.
+  test "the copy sources are exactly the hamaca runner, guide, shim and .claude" do
+    assert Enum.sort(scaffold_copy_sources()) == [".claude", "hamaca", "hamaca.md", "relay"]
+  end
+
+  # The top-level path each source arrives by: `hamaca` -> `hamaca`, a skill -> `.claude`,
+  # `hamaca.md` -> `hamaca.md` (a root file is copied by name).
   defp scaffold_copy_sources do
-    Hamaca.Scaffold.items()
+    Hamaca.Scaffold.sources()
     |> Enum.map(&(&1 |> Path.split() |> hd()))
     |> Enum.uniq()
   end

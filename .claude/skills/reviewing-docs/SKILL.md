@@ -18,7 +18,7 @@ good and bad sections before scoring. Its **anchor** section is a scored page: r
 
 ## When to Use
 
-Reviewing or rewriting anything a human reader lands on. Not for `relay.md`, skills, agent
+Reviewing or rewriting anything a human reader lands on. Not for `hamaca.md`, skills, agent
 prompts, `docs/architecture/`, or ADRs — those are written for agents and maintainers, and
 density is fine there. If maintainer pages are *published* on the public docs site, don't score
 them; report that as a site-structure finding.
@@ -84,7 +84,7 @@ in the wrong section, and pages missing from the path.
 - **Copyediting a structural problem.** Smoothing sentences on a page that mixes tutorial and
   reference. Split first.
 - **Keeping the "for agents" framing.** Public docs are for humans. Agent instructions belong in
-  `relay.md` and skills; one pointer line is enough.
+  `hamaca.md` and skills; one pointer line is enough.
 - **Fact-checking the wrong things.** Don't audit every claim. Do check step 3's list (prices,
   commands, screen names), because a stale one stops or misleads the reader.
 - **Treating counter output as the verdict.** It finds tells; the cold read finds the problem.

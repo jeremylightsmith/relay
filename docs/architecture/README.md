@@ -8,7 +8,7 @@ its supervised processes, the runner, the state machines, or the dependencies.
 The *why* behind these shapes lives in [`docs/adr/`](../adr/README.md); terms are defined in
 [`../glossary.md`](../glossary.md); the product north star is [`../vision.md`](../vision.md);
 UI truth is [`../designs/`](../designs/README.md); the agent-facing CLI/REST surface is
-[`../../relay.md`](../../relay.md).
+[`../../hamaca.md`](../../hamaca.md).
 
 ## System map
 
@@ -17,7 +17,7 @@ flowchart LR
     subgraph client["Clients"]
         browser["Browser<br/>(LiveView over WebSocket)"]
         mobile["Mobile app (Flutter, iOS-first)<br/>hybrid: native decision layer + embedded LiveView — ADR 0001/0005"]
-        agents["Agents & runner<br/>./relay · claude sessions"]
+        agents["Agents & runner<br/>./hamaca · claude sessions"]
     end
     subgraph fly["Phoenix app — Fly app 'relayboard'"]
         web["HamacaWeb<br/>LiveViews · REST controllers"]
@@ -47,7 +47,7 @@ is the primary UI: it serves the web, and the mobile app embeds it for content (
 body, spec/plan, comments, mockups). Around it, ADR 0005 scopes a small native (Flutter)
 decision layer — sign-in, push, the Needs-you inbox, the review bar, the answer stepper and
 the like — fed by the human-authed `/api/all` + `/api/auth/native` API (ADR 0001, ADR
-0005). Agents drive the same domain through the board-key REST API and the `./relay`
+0005). Agents drive the same domain through the board-key REST API and the `./hamaca`
 CLI/runner.
 
 ## Pages

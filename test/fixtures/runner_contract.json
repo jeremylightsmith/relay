@@ -108,12 +108,38 @@
     ],
     "held": [],
     "runner": {
+      "cli": "hamaca",
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
       "version": 88
     },
     "running": []
+  },
+  "env": {
+    "exported": [
+      "NODE_SCRATCH",
+      "NODE_OUTCOME",
+      "PLAN",
+      "REF",
+      "BRANCH",
+      "BASE",
+      "WORKTREE",
+      "CACHE_DIR"
+    ],
+    "prefixes": [
+      "HAMACA_",
+      "RELAY_"
+    ],
+    "read": [
+      "URL",
+      "API_KEY",
+      "STATE_DIR",
+      "RUNNER_LOCK_DIR",
+      "UPDATED_FROM",
+      "UPDATE_ATTEMPTS",
+      "NODE_OUTCOME"
+    ]
   },
   "flows": {
     "column_keys": [
@@ -212,6 +238,7 @@
       ],
       "held": [],
       "runner": {
+        "cli": "hamaca",
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
@@ -289,9 +316,20 @@
       "status": "ok"
     }
   },
+  "runner": {
+    "cli_names": [
+      "hamaca",
+      "relay"
+    ]
+  },
   "scaffold": {
     "board_url_line_example": "BOARD_URL = \"http://board.test\"",
     "file_path_example": "/api/scaffold/relay",
+    "layout_param": "layout",
+    "layouts": {
+      "hamaca": "hamaca",
+      "legacy": "relay"
+    },
     "manifest": {
       "items": [
         {
@@ -323,6 +361,57 @@
       ],
       "version": "<scaffold-version>"
     },
+    "manifest_hamaca": {
+      "items": [
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/hamaca-doctor/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/hamaca-onboard/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/hamaca-update/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/relay-doctor/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/relay-onboard/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": ".claude/skills/relay-update/SKILL.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": "hamaca",
+          "sha256": "<sha256>",
+          "unbaked_sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": "hamaca.md",
+          "sha256": "<sha256>"
+        },
+        {
+          "bytes": "<bytes>",
+          "path": "relay",
+          "sha256": "<sha256>"
+        }
+      ],
+      "version": "<scaffold-version>"
+    },
     "manifest_path": "/api/scaffold"
   },
   "setup": {
@@ -346,7 +435,7 @@
       "current",
       "message"
     ],
-    "pointer_line": "Working Relay cards from this repo: see [relay.md](relay.md).",
+    "pointer_line": "Working Hamaca cards from this repo: see [hamaca.md](hamaca.md).",
     "report_path_example": "/api/setup/steps/5.1",
     "report_request_keys": [
       "data",

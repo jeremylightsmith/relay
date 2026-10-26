@@ -20,11 +20,15 @@ defmodule HamacaWeb.InstallScriptE2ETest do
 
   @ignores [".claude/worktrees/", "/tmp/", ".envrc.local"]
 
-  # RE457: every Hamaca-owned file `./relay update` lays down, skills under the LLM's skill dir.
-  @codex_files ~w(.agents/skills/relay-onboard/SKILL.md .agents/skills/relay-update/SKILL.md
-                  .agents/skills/relay-doctor/SKILL.md relay relay.md .relay/scaffold.json)
-  @claude_files ~w(.claude/skills/relay-onboard/SKILL.md .claude/skills/relay-update/SKILL.md
-                   .claude/skills/relay-doctor/SKILL.md relay relay.md .relay/scaffold.json)
+  # RE457: every Hamaca-owned file `./hamaca update` lays down, skills under the LLM's skill dir.
+  # RE478: the hamaca layout — `./hamaca`, `hamaca.md`, the `hamaca-*` skills, the `./relay` shim
+  # and the `relay-*` alias skills, with the repo state under `.hamaca/`.
+  @codex_files ~w(.agents/skills/hamaca-onboard/SKILL.md .agents/skills/hamaca-update/SKILL.md
+                  .agents/skills/hamaca-doctor/SKILL.md .agents/skills/relay-onboard/SKILL.md
+                  hamaca hamaca.md relay .hamaca/scaffold.json)
+  @claude_files ~w(.claude/skills/hamaca-onboard/SKILL.md .claude/skills/hamaca-update/SKILL.md
+                   .claude/skills/hamaca-doctor/SKILL.md .claude/skills/relay-onboard/SKILL.md
+                   hamaca hamaca.md relay .hamaca/scaffold.json)
 
   setup %{tmp_dir: tmp} = tags do
     home = Path.join(tmp, "home")
@@ -71,7 +75,15 @@ defmodule HamacaWeb.InstallScriptE2ETest do
 
     env =
       git_env ++
-        [{"PATH", bin}, {"TMPDIR", tmpdir}, {"RELAY_URL", nil}, {"RELAY_API_KEY", token}, {"PYTHONPATH", nil}]
+        [
+          {"PATH", bin},
+          {"TMPDIR", tmpdir},
+          {"RELAY_URL", nil},
+          {"HAMACA_URL", nil},
+          {"HAMACA_API_KEY", token},
+          {"RELAY_API_KEY", nil},
+          {"PYTHONPATH", nil}
+        ]
 
     %{
       board: board,
@@ -94,13 +106,14 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     assert out =~ "!!  codex on PATH"
     assert out =~ "npm install -g @openai/codex"
     assert git_status(ctx) == ""
+    refute File.exists?(Path.join(ctx.repo, "hamaca"))
     refute File.exists?(Path.join(ctx.repo, "relay"))
     assert step(ctx.board, "3").status == :done
     assert step(ctx.board, "4").status == :failed
   end
 
   # RE457 scenario 1 (acceptance criterion 2)
-  test "a Codex install lays down every Hamaca file under .agents/skills via ./relay update", ctx do
+  test "a Codex install lays down every Hamaca file under .agents/skills via ./hamaca update", ctx do
     stub_cli!(ctx, "codex")
 
     {out, status} = run_script(ctx)
@@ -110,10 +123,12 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     refute File.exists?(Path.join(ctx.repo, ".claude/skills"))
 
     assert %{"skill_dir" => ".agents/skills", "pointer_file" => "AGENTS.md", "base" => "origin/main"} =
-             decode_commented_json!(file(ctx, ".relay/runner.json"))
+             decode_commented_json!(file(ctx, ".hamaca/runner.json"))
+
+    refute File.exists?(Path.join(ctx.repo, ".relay"))
 
     assert count_lines(file(ctx, "AGENTS.md"), Setup.pointer_line()) == 1
-    assert out =~ "  .agents/skills/relay-update/SKILL.md"
+    assert out =~ "  .agents/skills/hamaca-update/SKILL.md"
   end
 
   # RE457 scenario 2
@@ -138,29 +153,39 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     assert status == 0, out
     for rel <- @claude_files, do: assert(File.exists?(Path.join(ctx.repo, rel)), "#{rel} missing\n#{out}")
     assert count_lines(file(ctx, "CLAUDE.md"), Setup.pointer_line()) == 1
-    assert %{"skill_dir" => ".claude/skills"} = decode_commented_json!(file(ctx, ".relay/runner.json"))
+
+    assert %{"skill_dir" => ".claude/skills", "base" => "origin/main"} =
+             decode_commented_json!(file(ctx, ".hamaca/runner.json"))
+
+    # RE478 task 4 scenario 1: the hamaca names only — no `.relay/`, no `relay.md`.
+    assert file(ctx, "hamaca") =~ ~r/^#{Regex.escape(~s(BOARD_URL = "#{HamacaWeb.Endpoint.url()}"))}$/m
+    assert executable?(ctx, "hamaca")
+    assert executable?(ctx, ".hamaca/prepare-worktree.sh")
+    assert file(ctx, "CLAUDE.md") =~ "Working Hamaca cards from this repo: see [hamaca.md](hamaca.md)."
+    refute File.exists?(Path.join(ctx.repo, ".relay"))
+    refute File.exists?(Path.join(ctx.repo, "relay.md"))
 
     {check_out, 0} = update_check(ctx)
     assert %{"current" => true, "local_version" => version} = decode_report!(check_out)
     assert is_binary(version)
 
-    assert out |> String.trim_trailing() |> String.ends_with?("Next: open claude here and run /relay-onboard")
+    assert out |> String.trim_trailing() |> String.ends_with?("Next: open claude here and run /hamaca-onboard")
   end
 
   # RE457 scenario 4
-  test "the installed report lists every file once, relay first", ctx do
+  test "the installed report lists every file once, hamaca first", ctx do
     stub_cli!(ctx, "codex")
 
     {out, 0} = run_script(ctx)
 
     four = step(ctx.board, "4")
     files = four.data["files"]
-    assert ["relay" | _] = files, out
+    assert ["hamaca" | _] = files, out
 
     for rel <-
-          ~w(.agents/skills/relay-onboard/SKILL.md .agents/skills/relay-update/SKILL.md
-             .agents/skills/relay-doctor/SKILL.md relay.md AGENTS.md .relay/runner.json
-             .relay/prepare-worktree.sh .gitignore),
+          ~w(.agents/skills/hamaca-onboard/SKILL.md .agents/skills/hamaca-update/SKILL.md
+             .agents/skills/hamaca-doctor/SKILL.md hamaca.md relay AGENTS.md .hamaca/runner.json
+             .hamaca/prepare-worktree.sh .gitignore),
         do: assert(rel in files, "#{rel} not in #{inspect(files)}")
 
     assert files == Enum.uniq(files)
@@ -175,15 +200,19 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     {out, status} = run_script(ctx)
 
     assert status == 0, out
-    relay = file(ctx, "relay")
-    assert relay =~ ~r/^#{Regex.escape(~s(BOARD_URL = "#{HamacaWeb.Endpoint.url()}"))}$/m
+    hamaca = file(ctx, "hamaca")
+    assert hamaca =~ ~r/^#{Regex.escape(~s(BOARD_URL = "#{HamacaWeb.Endpoint.url()}"))}$/m
+    assert executable?(ctx, "hamaca")
+    # RE478: ./relay is the compatibility shim that execs ./hamaca — not a runner.
+    refute file(ctx, "relay") =~ ~r/^RUNNER_VERSION\s*=/m
     assert executable?(ctx, "relay")
 
-    assert File.exists?(Path.join(ctx.repo, ".agents/skills/relay-onboard/SKILL.md"))
-    assert File.exists?(Path.join(ctx.repo, "relay.md"))
+    assert File.exists?(Path.join(ctx.repo, ".agents/skills/hamaca-onboard/SKILL.md"))
+    assert File.exists?(Path.join(ctx.repo, "hamaca.md"))
+    refute File.exists?(Path.join(ctx.repo, "relay.md"))
     assert count_lines(file(ctx, "AGENTS.md"), Setup.pointer_line()) == 1
-    assert %{"base" => "origin/main"} = decode_commented_json!(file(ctx, ".relay/runner.json"))
-    assert executable?(ctx, ".relay/prepare-worktree.sh")
+    assert %{"base" => "origin/main"} = decode_commented_json!(file(ctx, ".hamaca/runner.json"))
+    assert executable?(ctx, ".hamaca/prepare-worktree.sh")
 
     gitignore = file(ctx, ".gitignore")
     for entry <- @ignores, do: assert(count_lines(gitignore, entry) == 1)
@@ -192,7 +221,7 @@ defmodule HamacaWeb.InstallScriptE2ETest do
       refute File.read!(path) =~ ctx.token, "#{path} contains the key"
     end
 
-    assert out |> String.trim_trailing() |> String.ends_with?("Next: open codex here and run /relay-onboard")
+    assert out |> String.trim_trailing() |> String.ends_with?("Next: open codex here and run /hamaca-onboard")
     assert out =~ "Hamaca install for board Streaks · default LLM: Codex"
     assert step(ctx.board, "4").status == :done
     assert step(ctx.board, "5").status == :active
@@ -203,7 +232,7 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     stub_cli!(ctx, "codex")
     {out, 0} = run_script(ctx)
 
-    runner_json = Path.join(ctx.repo, ".relay/runner.json")
+    runner_json = Path.join(ctx.repo, ".hamaca/runner.json")
     edited = String.replace(File.read!(runner_json), "origin/main", "origin/edited")
     File.write!(runner_json, edited)
 
@@ -228,7 +257,7 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     {:ok, %{token: other_token}} = Setup.choose_llm(other, other_user, "codex")
     stub_cli!(ctx, "codex")
 
-    {out, status} = run_script(%{ctx | env: List.keystore(ctx.env, "RELAY_API_KEY", 0, {"RELAY_API_KEY", other_token})})
+    {out, status} = run_script(%{ctx | env: List.keystore(ctx.env, "HAMACA_API_KEY", 0, {"HAMACA_API_KEY", other_token})})
 
     assert status == 1, out
     assert out =~ "this key belongs to a different board"
@@ -248,12 +277,20 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     assert String.ends_with?(detail, ~S(/str"e\aks))
   end
 
-  test "RELAY_API_KEY unset: exit 1 without calling the board", ctx do
-    {out, status} = run_script(%{ctx | env: List.keystore(ctx.env, "RELAY_API_KEY", 0, {"RELAY_API_KEY", nil})})
+  test "HAMACA_API_KEY unset: exit 1 without calling the board", ctx do
+    {out, status} = run_script(%{ctx | env: List.keystore(ctx.env, "HAMACA_API_KEY", 0, {"HAMACA_API_KEY", nil})})
 
     assert status == 1
-    assert out =~ "RELAY_API_KEY is not set — copy the export line from step 3 of the setup wizard."
+    assert out =~ "HAMACA_API_KEY is not set — copy the export line from step 3 of the setup wizard."
     assert step(ctx.board, "3").status == :active
+  end
+
+  # RE478 task 4 scenario 3: the script a new board hands out names only the Hamaca CLI.
+  test "the rendered script names ./hamaca, /hamaca-onboard and HAMACA_API_KEY, never the relay names", ctx do
+    script = File.read!(ctx.script)
+
+    for name <- ["./hamaca", "/hamaca-onboard", "HAMACA_API_KEY"], do: assert(script =~ name, "missing #{name}")
+    for name <- ["./relay", "/relay-onboard", "RELAY_API_KEY"], do: refute(script =~ name, "still names #{name}")
   end
 
   defp run_script(ctx) do
@@ -267,14 +304,14 @@ defmodule HamacaWeb.InstallScriptE2ETest do
   end
 
   defp update_check(ctx) do
-    System.cmd(Path.join(ctx.bin, "python3"), ["./relay", "update", "--check", "--json"],
+    System.cmd(Path.join(ctx.bin, "python3"), ["./hamaca", "update", "--check", "--json"],
       cd: ctx.repo,
-      env: List.keystore(ctx.env, "RELAY_URL", 0, {"RELAY_URL", ctx.base}),
+      env: List.keystore(ctx.env, "HAMACA_URL", 0, {"HAMACA_URL", ctx.base}),
       stderr_to_stdout: true
     )
   end
 
-  # `./relay` logs `[relay] …` to stdout, so the report starts at the first `{` line.
+  # `./hamaca` logs `[relay] …` to stdout, so the report starts at the first `{` line.
   defp decode_report!(out) do
     out
     |> String.split("\n")

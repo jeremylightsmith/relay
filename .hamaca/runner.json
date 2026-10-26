@@ -7,7 +7,7 @@
   "base": "origin/main",
   "cache_dir": "~/.cache/relay/exec",
   "worktrees": {
-    "prepare": ".relay/prepare-worktree.sh"
+    "prepare": ".hamaca/prepare-worktree.sh"
   },
   "max_retained_failed": 3,
   "poll_timeout": 25,

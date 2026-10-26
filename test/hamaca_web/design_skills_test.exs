@@ -19,8 +19,8 @@ defmodule Hamaca.DesignSkillsTest do
     end
 
     test "never writes the repo: mockups are pulled into the node scratch dir", %{doc: doc} do
-      assert doc =~ ~S|S="$(dirname "$RELAY_NODE_SCRATCH")"|
-      assert doc =~ ~S|./relay mockups <ref> --pull "$S/prev"|
+      assert doc =~ ~S|S="$(dirname "$HAMACA_NODE_SCRATCH")"|
+      assert doc =~ ~S|./hamaca mockups <ref> --pull "$S/prev"|
     end
 
     test "builds CSS with the tailwind version config.exs pins, not the last binary listed", %{doc: doc} do
@@ -33,7 +33,7 @@ defmodule Hamaca.DesignSkillsTest do
     end
 
     test "replaces the ## Design section in place", %{doc: doc} do
-      assert doc =~ "./relay describe <ref>"
+      assert doc =~ "./hamaca describe <ref>"
       assert doc =~ ~S|^#{1,2} |
     end
   end
@@ -50,7 +50,7 @@ defmodule Hamaca.DesignSkillsTest do
     test "splits by creating slices in Backlog and moving them to Spec:Review last", %{doc: doc} do
       assert doc =~ "## Splitting a card that's too big"
       assert doc =~ "--stage Backlog"
-      assert doc =~ ~S|./relay move "$ref" "Spec:Review"|
+      assert doc =~ ~S|./hamaca move "$ref" "Spec:Review"|
       refute doc =~ ~S|--stage "Spec:Review"|
     end
   end
@@ -66,7 +66,7 @@ defmodule Hamaca.DesignSkillsTest do
       test "#{List.last(path)} knows a card mockup and how to pull it" do
         doc = File.read!(Path.join([@root | unquote(path)]))
         assert doc =~ "card mockup"
-        assert doc =~ ~r/\.\/relay mockups <ref>\s+--pull/
+        assert doc =~ ~r/\.\/hamaca mockups <ref>\s+--pull/
       end
     end
   end

@@ -19,10 +19,10 @@ burnt review budget on this board. So orient first:
     git --no-pager diff --stat -M "$BASE"..HEAD
 
 Then read full diffs a slice at a time — `git --no-pager diff "$BASE"..HEAD -- <paths>` — through
-`lib/`, `test/`, `assets/` and `./relay` by subsystem. Skip what carries no signal: lockfiles,
+`lib/`, `test/`, `assets/` and `./hamaca` by subsystem. Skip what carries no signal: lockfiles,
 generated assets, `docs/designs-as-is/` captures, and pure moves. On a branch large enough that
 reading everything would leave no room to write a verdict, take the highest-risk slices first —
-changed contracts, migrations, the runner (`./relay`) and its wire contract, anything more than
+changed contracts, migrations, the runner (`./hamaca`) and its wire contract, anything more than
 one task touched. Name in your verdict whatever you deliberately did not read: a scoped review
 that lands beats a thorough one that never reports.
 
@@ -32,14 +32,14 @@ or branch state. If you need a different revision, check it out into a temp work
 (`git worktree add`) — never move HEAD here.
 
 ## Assess against the plan (the card's header and its tasks — the spec for this work)
-The plan at `$RELAY_PLAN` is only the card's **header** — Goal, Architecture, Global Constraints,
-`## Verification`. The per-task specs are the card's **tasks**: run `./relay tasks list <ref>` for
-the whole picture (titles and done-state), then `./relay task show <ref> <id>` for any task whose
+The plan at `$HAMACA_PLAN` is only the card's **header** — Goal, Architecture, Global Constraints,
+`## Verification`. The per-task specs are the card's **tasks**: run `./hamaca tasks list <ref>` for
+the whole picture (titles and done-state), then `./hamaca task show <ref> <id>` for any task whose
 body you need to judge coverage or a cross-task interface.
 
 - **Spec coverage:** every task / acceptance item actually implemented? List gaps.
 - **Design fidelity & consistency:** for any task whose body named a `docs/designs/*.dc.html`
-  artboard or a `card mockup "<caption>"` (`./relay mockups <ref> --pull --json` downloads the
+  artboard or a `card mockup "<caption>"` (`./hamaca mockups <ref> --pull --json` downloads the
   card's mockups into the gitignored `tmp/<ref>/mockups/`), confirm the built UI matches the
   elements/states it called out, and that tasks touching the same component styled it one
   consistent way (per the mockup), not two competing ways. Only judge what a task body named an
@@ -54,7 +54,7 @@ body you need to judge coverage or a cross-task interface.
 - **Architecture & production readiness:** sound boundaries (the `boundary` exports in
   `lib/hamaca.ex`), sensible error handling, security (no injection / unsafe `String.to_atom` on
   input / missing authz), migrations safe and reversible, backward compatibility considered.
-- **Runner contract:** if the branch changes `./relay`, `RUNNER_VERSION` was bumped, and any
+- **Runner contract:** if the branch changes `./hamaca`, `RUNNER_VERSION` was bumped, and any
   vocabulary mirrored across the wire is pinned in `test/fixtures/runner_contract.json`.
 - **Dead code / scope creep:** anything built that no task asked for, or left unused.
 - **Architecture records current:**
@@ -120,7 +120,7 @@ in it. Escalate instead (see `## Decide`).
 - **Fix** (`failed`, with the findings as the detail) — blocking issues remain. Give each with a `file:line` reference, what's wrong, why it matters, and how to
   fix (if not obvious), so one consolidated fix pass (`final_fix`) can address them all.
 - **Escalate** — the branch is a *faithful* implementation of the plan (the header at
-  `$RELAY_PLAN` and the tasks' bodies) and the defect is in the plan itself. The consolidated fix pass cannot correct it without
+  `$HAMACA_PLAN` and the tasks' bodies) and the defect is in the plan itself. The consolidated fix pass cannot correct it without
   contradicting the plan, and approving with a note would merge it. Raise `needs-input` and
   stop — do **not** also declare an outcome.
 

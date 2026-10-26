@@ -174,7 +174,7 @@ defmodule Hamaca.Agents.EscalationContractTest do
     assert sent_back =~ "outranks the task's body",
            "it must say that authorization outranks the task's body for this task"
 
-    assert sent_back =~ "./relay task show <ref> <id>",
+    assert sent_back =~ "./hamaca task show <ref> <id>",
            "it must say where that body comes from"
   end
 
@@ -188,11 +188,11 @@ defmodule Hamaca.Agents.EscalationContractTest do
 
   test "the escalation command the agent files point at renders a real ref" do
     contract =
-      "relay"
+      "hamaca"
       |> File.read!()
       |> section("OUTCOME_CONTRACT = \"\"\"")
 
-    assert contract, "./relay must define OUTCOME_CONTRACT"
+    assert contract, "the runner (./hamaca) must define OUTCOME_CONTRACT"
     [contract | _] = String.split(contract, "\"\"\"", parts: 2)
 
     assert contract =~ "needs-input {ref}",

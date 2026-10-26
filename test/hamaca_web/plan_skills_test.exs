@@ -17,12 +17,12 @@ defmodule Hamaca.PlanSkillsTest do
     end
 
     test "reads the spec from the card", %{doc: doc} do
-      assert doc =~ "./relay card"
+      assert doc =~ "./hamaca card"
       assert doc =~ "spec"
     end
 
     test "writes the plan back to the card", %{doc: doc} do
-      assert doc =~ "./relay plan"
+      assert doc =~ "./hamaca plan"
     end
 
     test "no longer points onward to the retired /exec-plan command", %{doc: doc} do
@@ -49,25 +49,25 @@ defmodule Hamaca.PlanSkillsTest do
   end
 
   @agents_dir Path.join([File.cwd!(), ".claude", "agents"])
-  @doctor Path.join([File.cwd!(), ".claude", "skills", "relay-doctor", "SKILL.md"])
+  @doctor Path.join([File.cwd!(), ".claude", "skills", "hamaca-doctor", "SKILL.md"])
 
   describe "the Code flow's agents fetch their task by id (RE357)" do
     for name <- ~w(plan-implementer spec-reviewer quality-reviewer final-fixer) do
-      test "#{name} fetches the task body with relay task show" do
+      test "#{name} fetches the task body with hamaca task show" do
         doc = File.read!(Path.join(@agents_dir, unquote(name) <> ".md"))
-        assert doc =~ "./relay task show <ref> <id>"
+        assert doc =~ "./hamaca task show <ref> <id>"
         refute doc =~ "## Task N"
       end
     end
 
     test "final-reviewer reads the whole task list, then bodies as needed" do
       doc = File.read!(Path.join(@agents_dir, "final-reviewer.md"))
-      assert doc =~ "./relay tasks list <ref>"
-      assert doc =~ "./relay task show <ref> <id>"
+      assert doc =~ "./hamaca tasks list <ref>"
+      assert doc =~ "./hamaca task show <ref> <id>"
       refute doc =~ "## Task N"
     end
 
-    test "/relay-doctor counts the task verbs as tasks evidence" do
+    test "/hamaca-doctor counts the task verbs as tasks evidence" do
       doc = File.read!(@doctor)
       assert doc =~ "| `tasks` | `relay tasks add` |"
       assert doc =~ "`relay task show`"
@@ -80,12 +80,12 @@ defmodule Hamaca.PlanSkillsTest do
       {:ok, doc: File.read!(@write_plan)}
     end
 
-    test "writes every task in ONE relay tasks add call", %{doc: doc} do
-      assert doc =~ ~s(./relay tasks add <ref> --task "<title>" @)
+    test "writes every task in ONE hamaca tasks add call", %{doc: doc} do
+      assert doc =~ ~s(./hamaca tasks add <ref> --task "<title>" @)
     end
 
-    test "writes only the header with relay plan", %{doc: doc} do
-      assert doc =~ "./relay plan <ref> @"
+    test "writes only the header with hamaca plan", %{doc: doc} do
+      assert doc =~ "./hamaca plan <ref> @"
       assert doc =~ "header"
     end
 
@@ -97,12 +97,12 @@ defmodule Hamaca.PlanSkillsTest do
     end
 
     test "clears stale tasks before a re-plan so it never appends duplicates", %{doc: doc} do
-      assert doc =~ "./relay task rm <ref> <id>"
+      assert doc =~ "./hamaca task rm <ref> <id>"
       assert doc =~ "appends"
     end
 
     test "self-review checks the written task list", %{doc: doc} do
-      assert doc =~ "./relay tasks list <ref>"
+      assert doc =~ "./hamaca tasks list <ref>"
     end
   end
 

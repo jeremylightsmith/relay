@@ -81,9 +81,13 @@ defmodule Hamaca.Runs.ResumeTest do
 
     restart_engine!()
 
-    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm", state: :queued} = fresh}
+    # Re-entry happens on the boot task and the run server it starts, not in this process —
+    # under a loaded full suite that outlasts assert_receive's default 500ms.
+    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm", state: :queued} = fresh}, 5_000
     refute fresh.id == job_id
-    assert_receive {:node_started, _run, %NodeExecution{node_key: "brainstorm", visit: 1, attempt: 2}}
+
+    assert_receive {:node_started, _run, %NodeExecution{node_key: "brainstorm", visit: 1, attempt: 2}},
+                   5_000
   end
 
   test "boot_mode/1 attaches a run with a queued or claimed job and re-enters one with none",

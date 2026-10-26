@@ -1,7 +1,7 @@
 defmodule Hamaca.DoctorSkillTest do
   use ExUnit.Case, async: true
 
-  @skill Path.join([File.cwd!(), ".claude", "skills", "relay-doctor", "SKILL.md"])
+  @skill Path.join([File.cwd!(), ".claude", "skills", "hamaca-doctor", "SKILL.md"])
 
   setup do
     {:ok, doc: File.read!(@skill)}
@@ -31,7 +31,7 @@ defmodule Hamaca.DoctorSkillTest do
   end
 
   test "declares its name in frontmatter", %{doc: doc} do
-    assert doc =~ ~r/^name: relay-doctor$/m
+    assert doc =~ ~r/^name: hamaca-doctor$/m
   end
 
   describe "## Factory migrations" do
@@ -77,14 +77,14 @@ defmodule Hamaca.DoctorSkillTest do
       plan_side = flat(subsection(migration(doc), "#### Plan-side recipe"))
 
       for token <- [
-            "./relay plan <ref> @header.md",
+            "./hamaca plan <ref> @header.md",
             "## Verification",
-            "./relay tasks list <ref> --json",
-            "./relay task rm <ref> <id>",
-            ~s(./relay tasks add <ref> --task "<title>" @task1.md),
+            "./hamaca tasks list <ref> --json",
+            "./hamaca task rm <ref> <id>",
+            ~s(./hamaca tasks add <ref> --task "<title>" @task1.md),
             "ONE call",
-            "./relay task show <ref> <id>",
-            "$RELAY_NODE_SCRATCH",
+            "./hamaca task show <ref> <id>",
+            "$HAMACA_NODE_SCRATCH",
             ~s(writes: ["plan", "tasks"])
           ] do
         assert plan_side =~ token
@@ -98,7 +98,7 @@ defmodule Hamaca.DoctorSkillTest do
             ~s(foreach: "card.tasks"),
             ~s(reads: ["tasks"]),
             "{relay} task show {ref} {task_id}",
-            "`$RELAY_PLAN` **only** for the header",
+            "`$HAMACA_PLAN` **only** for the header",
             "## Task N"
           ] do
         assert exec_side =~ token
@@ -174,5 +174,42 @@ defmodule Hamaca.DoctorSkillTest do
     [_rule3, after_rule] = String.split(rest, "4. **The audit says so.**", parts: 2)
 
     refute before <> after_rule =~ ~r/sub[_-]tasks?/i
+  end
+
+  # RE478: the source is the Hamaca-named skill; `relay-doctor` stays only as a thin alias for the
+  # compatibility window (the legacy scaffold layout generates its full copy from this source).
+  describe "the Hamaca rename (RE478)" do
+    @alias_skill Path.join([File.cwd!(), ".claude", "skills", "relay-doctor", "SKILL.md"])
+
+    test "the hamaca-doctor source speaks only the Hamaca names", %{doc: doc} do
+      assert doc =~ ~r/^name: hamaca-doctor$/m
+
+      for stale <- ["./relay", ".relay/", "relay.md", "RELAY_"] do
+        refute doc =~ stale, "hamaca-doctor still says #{stale}"
+      end
+    end
+
+    test "relay-doctor is an alias: its own name, the same description, a one-line body",
+         %{doc: doc} do
+      alias_doc = File.read!(@alias_skill)
+
+      assert alias_doc =~ ~r/^name: relay-doctor$/m
+      assert frontmatter(alias_doc, "description") == frontmatter(doc, "description")
+      assert alias_doc |> body() |> String.trim() == "Renamed: use /hamaca-doctor."
+    end
+
+    test "the alias directory holds exactly SKILL.md" do
+      assert File.ls!(Path.dirname(@alias_skill)) == ["SKILL.md"]
+    end
+  end
+
+  defp frontmatter(doc, key) do
+    [_, value] = Regex.run(~r/^#{key}: (.*)$/m, doc)
+    value
+  end
+
+  defp body(doc) do
+    ["", _frontmatter, body] = String.split(doc, ~r/^---$/m, parts: 3)
+    body
   end
 end

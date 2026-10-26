@@ -8,7 +8,7 @@ Spec-compliance already passed. You now judge whether the change is *well-built*
 conventional, properly tested, maintainable. This is a task-scoped quality gate. Read the
 actual diff (`git diff`, `git diff --stat`, `git show` on the task's commits) — it IS your
 view of the change. The task under review is named by **id** in the message; its spec is the
-task's body — fetch it with `./relay task show <ref> <id>` when you need to know what the change
+task's body — fetch it with `./hamaca task show <ref> <id>` when you need to know what the change
 was for.
 
 ## Read-only — do not mutate this checkout
@@ -52,7 +52,7 @@ the code on its merits.
 **Design fidelity (only if the task's body named an artboard or card mockup)**
 - If — and only if — this task's body named a `docs/designs/*.dc.html` artboard or a
   `card mockup "<caption>"` and the elements/states that must match it, open it — a card
-  mockup is HTML on the card: `./relay mockups <ref> --pull --json` downloads them into the
+  mockup is HTML on the card: `./hamaca mockups <ref> --pull --json` downloads them into the
   gitignored `tmp/<ref>/mockups/` and maps each caption to its file (skip the inlined
   `<style>` block when reading) — and confirm the diff matches those specific things (structure, daisyUI classes, tokens, px, the listed states), and that the
   task's tests actually assert them. Flag concrete divergences from what the body called out.
@@ -104,7 +104,7 @@ Decide, declare, then explain. Keep the praise above to a sentence or two, not a
   fix (if not obvious). They go to the `fix_findings` pass, which works from your findings and
   the committed code.
 - **Escalate** — the code is a *faithful* implementation of the task's body (and the plan
-  header at `$RELAY_PLAN`) and the defect is in that spec itself. The fix pass cannot fix it
+  header at `$HAMACA_PLAN`) and the defect is in that spec itself. The fix pass cannot fix it
   without contradicting the spec, so Fix would just loop until the run dies. Raise `needs-input` and stop — do **not**
   also declare an outcome.
 

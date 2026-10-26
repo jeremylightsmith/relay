@@ -205,7 +205,7 @@ defmodule HamacaWeb.BoardSettingsAgentsTest do
                view,
                "#flash-info",
                "Your board's default LLM is now Codex. In your repo run " <>
-                 "./relay update --skill-dir .agents/skills --pointer-file AGENTS.md and commit the result."
+                 "./hamaca update --skill-dir .agents/skills --pointer-file AGENTS.md and commit the result."
              )
 
       assert Agents.default_agent(board).name == "Codex Sol"
@@ -223,7 +223,7 @@ defmodule HamacaWeb.BoardSettingsAgentsTest do
       assert has_element?(
                view,
                "#flash-info",
-               "./relay update --skill-dir .claude/skills --pointer-file CLAUDE.md"
+               "./hamaca update --skill-dir .claude/skills --pointer-file CLAUDE.md"
              )
     end
   end

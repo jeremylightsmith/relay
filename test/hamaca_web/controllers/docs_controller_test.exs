@@ -22,18 +22,19 @@ defmodule HamacaWeb.DocsControllerTest do
 
     for needle <- [
           "Create a board",
-          "RELAY_API_KEY",
+          "HAMACA_API_KEY",
           "/install",
-          "/relay-onboard",
-          "./relay start",
+          "/hamaca-onboard",
+          "./hamaca start",
           "Settings",
           "Next up"
         ] do
       assert html =~ needle, "the getting-started page never mentions #{inspect(needle)}"
     end
 
-    # The install bakes the board URL into ./relay, and /relay-onboard turns the flows on.
+    # The install bakes the board URL into ./hamaca, and /hamaca-onboard turns the flows on.
     refute html =~ "RELAY_URL"
+    refute html =~ "HAMACA_URL"
     refute html =~ "Enable a flow"
   end
 
@@ -76,15 +77,16 @@ defmodule HamacaWeb.DocsControllerTest do
     refute html =~ "/relay-setup"
     refute html =~ "relay-config"
     refute html =~ "install.sh"
+    refute html =~ "./hamaca init"
     refute html =~ "./relay init"
   end
 
   test "the CLI page documents update and has retired init", %{conn: conn} do
     html = conn |> get(~p"/docs/cli") |> html_response(200)
 
-    assert html =~ "./relay update"
+    assert html =~ "./hamaca update"
     assert html =~ "--check"
-    refute html =~ "./relay init"
+    refute html =~ "./hamaca init"
     refute html =~ "relay-config"
     refute html =~ "publish_config"
   end
@@ -272,14 +274,14 @@ defmodule HamacaWeb.DocsControllerTest do
     assert html =~ "except"
   end
 
-  # RE443: the install command lays down the starter runner.json (`./relay update
+  # RE443: the install command lays down the starter runner.json (`./hamaca update
   # --starter-only`). Getting started only says to run the install; the CLI page has the detail.
-  test "the CLI page says the install lays down runner.json and relay.md", %{conn: conn} do
+  test "the CLI page says the install lays down runner.json and hamaca.md", %{conn: conn} do
     html = conn |> get(~p"/docs/cli") |> html_response(200)
 
-    assert html =~ "./relay update --starter-only"
-    assert html =~ "relay.md"
-    assert html =~ ".relay/runner.json"
+    assert html =~ "./hamaca update --starter-only"
+    assert html =~ "hamaca.md"
+    assert html =~ ".hamaca/runner.json"
   end
 
   test "How Hamaca works follows one card across a board", %{conn: conn} do
@@ -444,7 +446,7 @@ defmodule HamacaWeb.DocsControllerTest do
           "Introduction",
           "How Hamaca works",
           "Statuses &amp; outcomes",
-          "CLI (./relay)",
+          "CLI (./hamaca)",
           "REST API reference",
           "Authentication &amp; API access",
           "Enabling a flow safely"
@@ -596,23 +598,23 @@ defmodule HamacaWeb.DocsControllerTest do
     |> then(&Regex.replace(~r{https?://\S+}, &1, " "))
   end
 
-  test "the getting-started prose says Hamaca and keeps the ./relay commands", %{conn: conn} do
+  test "the getting-started prose says Hamaca and names the ./hamaca commands", %{conn: conn} do
     html = conn |> get(~p"/docs/getting-started") |> html_response(200)
     prose = article_prose(html)
 
     assert prose =~ "Hamaca"
     refute prose =~ ~r/\bRelay\b/, "getting-started prose still names Relay"
-    assert html =~ "./relay"
+    assert html =~ "./hamaca"
   end
 
-  test "the CLI page says Hamaca and leaves the commands, env vars and nav label alone",
+  test "the CLI page says Hamaca and names the ./hamaca commands, env vars and nav label",
        %{conn: conn} do
     html = conn |> get(~p"/docs/cli") |> html_response(200)
 
     assert article_prose(html) =~ "Hamaca"
-    assert html =~ "./relay card"
-    assert html =~ "RELAY_"
-    assert html =~ "CLI (./relay)"
+    assert html =~ "./hamaca card"
+    assert html =~ "HAMACA_"
+    assert html =~ "CLI (./hamaca)"
   end
 
   test "the API reference shows the agent as Hamaca AI", %{conn: conn} do

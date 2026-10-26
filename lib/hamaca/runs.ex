@@ -1326,7 +1326,7 @@ defmodule Hamaca.Runs do
           "plan-parse fallback to read — the planner has not migrated to `relay tasks add`."
       end
 
-    "The #{flow.key} flow could not start: #{why} Run `/relay-doctor` to migrate the planner, " <>
+    "The #{flow.key} flow could not start: #{why} Run `/hamaca-doctor` to migrate the planner, " <>
       "then re-plan the card (or add its tasks directly with " <>
       "`relay tasks add <ref> --task \"<title>\" @<body-file>`) and move the card back to re-run."
   end
@@ -1449,7 +1449,7 @@ defmodule Hamaca.Runs do
 
     Logger.warning(
       "deprecated: #{ref} (#{flow.key} flow): seeded #{count} sub_tasks by parsing card.plan; " <>
-        "migrate the planner to `relay tasks add` (run /relay-doctor)"
+        "migrate the planner to `relay tasks add` (run /hamaca-doctor)"
     )
   end
 

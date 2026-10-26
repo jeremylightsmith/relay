@@ -159,12 +159,12 @@ defmodule HamacaWeb.BoardSettingsSetupTest do
       {:ok, view, _html} = live(conn, setup_url(board))
 
       block = text(view, "#setup-project-answers")
-      assert block =~ "from onboarding · also in .relay/project.md"
+      assert block =~ "from onboarding · also in .hamaca/project.md"
       assert texts(view, "#setup-project-answers-done", "span") == ["Done means", "PR merged"]
       assert texts(view, "#setup-project-answers-never_touch", "span") == ["Never touch", "priv/repo/migrations"]
 
       assert text(view, "#setup-project-answers-footnote") ==
-               "A copy for reference. To change one, edit .relay/project.md in the repo; the next onboard run reports it here."
+               "A copy for reference. To change one, edit .hamaca/project.md in the repo; the next onboard run reports it here."
     end
 
     # Scenario 4, no answers

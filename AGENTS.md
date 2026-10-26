@@ -43,14 +43,14 @@ client-side or API surface.
   already does.
 - **LiveView Native** remains the documented future path, adopted for iOS and Android together.
 
-**Working Hamaca from Claude Code:** the `mix relay` CLI + REST API let a Claude session pull a
-card, work it, and hand it back. See [`relay.md`](relay.md).
+**Working Hamaca from Claude Code:** the `./hamaca` CLI + REST API let a Claude session pull a
+card, work it, and hand it back. See [`hamaca.md`](hamaca.md).
 
 **Deploying:** the RE board doesn't deploy from CI. The Code flow squashes and fast-forwards
 the card to `main` (`bin/ship_to_main.sh`), and the **Deploy** stage runs `bin/deploy_fly.sh`,
 then `bin/deploy_ios.sh <REF>` / `bin/deploy_android.sh <REF>` when the commit touched
 `flutter/`. Secrets come from the runner's environment (`.envrc.local` via direnv; restart the
-runner after changing them). The flows live in `.relay/flows/`, and
+runner after changing them). The flows live in `.hamaca/flows/`, and
 [`docs/architecture/runner.md`](docs/architecture/runner.md) has the full picture.
 
 ## Skill discipline
@@ -66,15 +66,15 @@ use them.
   "Fix this bug / a test fails" → `systematic-debugging` first. Implementing a feature → the
   `test-driven-development` skill before any code. About to claim something works/passes →
   `verification-before-completion`.
-- **Editing the factory triggers `/relay-doctor`.** After you change a flow (or push one with
-  `./relay flow-push`), or add, rename, or remove a `.claude/agents/*.md`,
-  `.claude/skills/*/SKILL.md`, or `.claude/commands/*.md`, run `/relay-doctor` by hand in an
+- **Editing the factory triggers `/hamaca-doctor`.** After you change a flow (or push one with
+  `./hamaca flow-push`), or add, rename, or remove a `.claude/agents/*.md`,
+  `.claude/skills/*/SKILL.md`, or `.claude/commands/*.md`, run `/hamaca-doctor` by hand in an
   interactive session — it asks questions, so never invoke it from a flow node. It checks
   that every flow node still resolves to a real step in this repo and walks you through each
   fix. A flow that names an agent this repo no longer has fails at run time, not at edit time.
-- **Wiring a repo to a board is `/relay-onboard`.** After the board's install script, run it
+- **Wiring a repo to a board is `/hamaca-onboard`.** After the board's install script, run it
   interactively: it works the board's guided-setup checklist (sub-steps 5.1–5.8) as a resumable
-  loop through `./relay setup status|report`. `/relay-doctor` is for a board with no checklist,
+  loop through `./hamaca setup status|report`. `/hamaca-doctor` is for a board with no checklist,
   or when the repo is already wired and one node broke.
 - **These thoughts are rationalizations — stop and check for a skill instead:** "this is too
   simple," "let me just explore first," "I'll check the files quickly," "the skill is
@@ -85,19 +85,19 @@ use them.
 ## Project guidelines
 
 - Running `mix precommit` is REQUIRED on every development cycle and must pass before work is considered done. It runs compile (warnings as errors), `mix format` (with Styler), `mix credo --strict`, `mix sobelow`, `mix deps.audit`, and the full test suite (warnings as errors). Fix any failure before finishing — never commit work with a failing `mix precommit`.
-- **`./relay` carries `RUNNER_VERSION` — bump it past `origin/main`'s on every change to that
+- **`./hamaca` carries `RUNNER_VERSION` — bump it past `origin/main`'s on every change to that
   file.** A running
-  `relay start` holds the version it started with in memory, so an unbumped fix reaches
+  `hamaca start` holds the version it started with in memory, so an unbumped fix reaches
   nobody: the server compares the runner's declared version against
   `Hamaca.Runs.min_runner_version/0` and **refuses work** to anything below it (409
   `runner_outdated`), which is the only thing that turns "the fix was merged" into "the fix
   is running". `bin/test_relay.py`'s `RunnerVersionBumpGuardTest` (RE425) enforces this: when
-  `./relay`'s masked contents changed since the merge-base with `origin/main`, it requires
+  `./hamaca`'s masked contents changed since the merge-base with `origin/main`, it requires
   `RUNNER_VERSION` to be **strictly greater than `origin/main`'s** and names the minimum — so
   two parallel branches bumping to the same number fail for whichever lands second (rebase and
   bump again). It never fetches, and skips with a `WARNING:` on stderr when `origin/main` (or
   a merge-base) isn't available, e.g. a shallow CI checkout. `RunnerFingerprintGuardTest`
-  hashes `./relay` with the two constant lines masked and fails with the exact fingerprint to
+  hashes `./hamaca` with the two constant lines masked and fails with the exact fingerprint to
   paste into `RUNNER_FINGERPRINT`. Raise `@min_runner_version` in `lib/hamaca/runs.ex` only when
   running the old runner is genuinely worse than a stopped one.
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
@@ -111,7 +111,7 @@ use them.
   calls it. Never re-type a list literal (`in [:running, :parked]`) or partition (active vs
   terminal) in a second module, the web layer, or a test when a source function exists; if none
   exists, add it where the concept lives and call it from both places. Anything mirrored across
-  the wire into `./relay` must be pinned by the runner contract fixture
+  the wire into `./hamaca` must be pinned by the runner contract fixture
   (`test/fixtures/runner_contract.json`, RLY-176) so drift breaks CI instead of shipping.
   Nearly every recent engine bug reduced to "two copies of one fact disagreed" — reviews should
   treat a duplicated closed set the way they treat a failing test.

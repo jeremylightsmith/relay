@@ -3,7 +3,7 @@
 helpers and deploy steps the Deploy flow runs.
 
 The scripts are bash, so these tests drive them as subprocesses against throwaway git repos
-(a bare `origin` plus a clone) and a stub `relay` CLI (`RELAY=<stub>`). They need only `git`,
+(a bare `origin` plus a clone) and a stub `hamaca` CLI (`HAMACA=<stub>`). They need only `git`,
 `bash` and `python3`, because `mix precommit` runs them on CI's ubuntu runner too.
 
 Run: python3 bin/test_deploy.py
@@ -112,7 +112,7 @@ exit 0
 
 
 class ScriptCase(unittest.TestCase):
-    """Shared fixture: a fresh origin + clone and a stub relay that logs its argv."""
+    """Shared fixture: a fresh origin + clone and a stub hamaca CLI that logs its argv."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -121,7 +121,7 @@ class ScriptCase(unittest.TestCase):
         self.work, self.origin = make_repo(self.tmp)
         self.relay_log = os.path.join(self.tmp, "relay.log")
         self.relay = stub_bin(
-            self.tmp, "relay", RELAY_STUB.format(log=self.relay_log, title=TITLE)
+            self.tmp, "hamaca", RELAY_STUB.format(log=self.relay_log, title=TITLE)
         )
 
     def run_in_work(self, script, *args):
@@ -129,7 +129,7 @@ class ScriptCase(unittest.TestCase):
             script,
             list(args),
             self.work,
-            {"RELAY": self.relay, "STUBS": os.path.dirname(self.relay)},
+            {"HAMACA": self.relay, "STUBS": os.path.dirname(self.relay)},
         )
 
     def relay_calls(self):
@@ -223,7 +223,7 @@ class ShipToMainTest(ScriptCase):
     def test_an_empty_card_title_fails_before_squashing(self):
         self.branch_two_ahead()
         head_before = git(self.work, "rev-parse", "HEAD")
-        stub_bin(self.tmp, "relay", RELAY_STUB.format(log=self.relay_log, title="  "))
+        stub_bin(self.tmp, "hamaca", RELAY_STUB.format(log=self.relay_log, title="  "))
 
         result = self.run_in_work(SHIP, "RE408")
         self.assertNotEqual(result.returncode, 0, result.stdout)
@@ -235,7 +235,7 @@ class ShipToMainTest(ScriptCase):
         self.branch_two_ahead()
         stub_bin(
             self.tmp,
-            "relay",
+            "hamaca",
             RELAY_STUB.format(log=self.relay_log, title=TITLE).replace(
                 "exit 0", '[ "$1" = comment ] && exit 7\nexit 0'
             ),
@@ -257,6 +257,10 @@ class ShipToMainTest(ScriptCase):
         for banned in ("--force", "--force-with-lease", "git fetch", "git-fetch"):
             self.assertNotIn(banned, text)
         self.assertIsNone(re.search(r"push[^\n]*\s\+", text), "push with a + refspec")
+
+    def test_the_default_cli_is_hamaca(self):
+        with open(SHIP, encoding="utf-8") as f:
+            self.assertIn('"${HAMACA:-./hamaca}"', f.read())
 
 
 class CardTouchedFlutterTest(ScriptCase):
@@ -571,7 +575,7 @@ class DeployCase(ScriptCase):
         self.head = git(self.work, "rev-parse", "HEAD")
 
     def run_deploy(self, script, args=(), env=None):
-        overrides = {"RELAY": self.relay, "STUBS": self.stubs, "TMPDIR": self.scratch}
+        overrides = {"HAMACA": self.relay, "STUBS": self.stubs, "TMPDIR": self.scratch}
         overrides.update(env or {})
         return run_script(script, list(args), self.work, overrides)
 
@@ -609,10 +613,14 @@ class DeployFlyTest(DeployCase):
         seq = os.path.join(self.tmp, "versions")
         with open(seq, "w", encoding="utf-8") as f:
             f.write("".join(s + "\n" for s in shas))
-        stub_bin(self.tmp, "relay", RELAY_VERSION_STUB.format(log=self.relay_log, seq=seq))
+        stub_bin(self.tmp, "hamaca", RELAY_VERSION_STUB.format(log=self.relay_log, seq=seq))
 
     def version_calls(self):
         return [c for c in self.relay_calls() if c.startswith("version")]
+
+    def test_the_default_cli_is_hamaca(self):
+        with open(DEPLOY_FLY, encoding="utf-8") as f:
+            self.assertIn('"${HAMACA:-./hamaca}"', f.read())
 
     def test_no_fly_token_fails_without_calling_flyctl(self):
         result = self.run_deploy(DEPLOY_FLY)

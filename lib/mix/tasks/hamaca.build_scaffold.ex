@@ -1,9 +1,9 @@
 defmodule Mix.Tasks.Hamaca.BuildScaffold do
-  @shortdoc "Build priv/scaffold/ — the files the app serves at /api/scaffold"
+  @shortdoc "Build priv/scaffold/<layout>/ — the files the app serves at /api/scaffold"
 
   @moduledoc """
-  Copy the five Hamaca-owned files into `priv/scaffold/` and write `priv/scaffold/manifest.json`
-  (RE304).
+  Build every scaffold layout from the Hamaca-owned sources into `priv/scaffold/<layout>/`, each
+  with its `manifest.json` (RE304, RE478). The old flat `priv/scaffold/` contents are removed.
 
       mix hamaca.build_scaffold
 
@@ -13,8 +13,8 @@ defmodule Mix.Tasks.Hamaca.BuildScaffold do
   `mix phx.server` serves the same thing a release does, and the `Dockerfile` runs it before
   `mix release` bundles `priv/` into the image.
 
-  The rules (which files, how the version is derived) live in `Hamaca.Scaffold`, not here; this
-  task is only the entry point.
+  The rules (which layouts, which files, how the version is derived) live in `Hamaca.Scaffold`,
+  not here; this task is only the entry point.
   """
 
   use Mix.Task
@@ -34,10 +34,14 @@ defmodule Mix.Tasks.Hamaca.BuildScaffold do
   def run(_args) do
     Mix.Task.run("compile")
 
-    manifest = Hamaca.Scaffold.build!(File.cwd!(), Hamaca.Scaffold.root())
+    manifests = Hamaca.Scaffold.build!(File.cwd!(), Hamaca.Scaffold.root())
 
-    Mix.shell().info(
-      "scaffold: #{length(manifest["items"])} items · version #{manifest["version"]} → #{Hamaca.Scaffold.root()}"
-    )
+    layouts =
+      Enum.map_join(Hamaca.Scaffold.layouts(), ", ", fn layout ->
+        manifest = Map.fetch!(manifests, layout)
+        "#{layout} #{length(manifest["items"])} items · version #{manifest["version"]}"
+      end)
+
+    Mix.shell().info("scaffold: #{layouts} → #{Hamaca.Scaffold.root()}")
   end
 end

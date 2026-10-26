@@ -63,7 +63,7 @@ Two scope decisions (2026-10-25):
 | 2b | [RE477 Say Hamaca everywhere a person reads the name] | none |
 | 3 | [RE480 Make hamaca.app the main address] (done, see Phase 3) | RE476, RE477 |
 | 4 | [RE481 Rename the code to Hamaca (modules, app, docs, repo)], done 2026-10-26 | RE476, RE477 |
-| 5 | [RE478 Rename the runner to ./hamaca with a compatibility window] | RE481 |
+| 5 | [RE478 Rename the runner to ./hamaca with a compatibility window], done | RE481 |
 | 5 | [RE479 Mobile app as Hamaca: new bundle IDs, name, icons] | RE480 |
 | 6 | [RE482 End the relay → hamaca compatibility window] | RE478 |
 
@@ -78,6 +78,18 @@ Why this order:
 - The mobile app follows the host flip, so the new app points at hamaca.app from its first build.
 - Cleanup waits until every active runner is on `./hamaca`.
 
+## RE482 scope: ending the compatibility window
+
+[RE478 Rename the runner to ./hamaca with a compatibility window] moved everything the runner puts
+in a repo to the Hamaca names and left the old names working. [RE482 End the relay → hamaca
+compatibility window] removes what it left behind, once every active runner is on `./hamaca`:
+- Rewrite existing boards' flow data to the Hamaca names: `$RELAY_NODE_SCRATCH`, `./relay` and
+  the `/relay-*` skill names in node prompts and commands. RE478 rewrote no flow data.
+- Rename the machine-level paths: `~/.relay/locks`, the runner's cache and state dirs, and
+  `.relay-retained`. Rename the `{relay}` flow placeholder.
+- Remove the `./relay` shim, the `relay-*` alias skills, the legacy scaffold layout (the default
+  when `/api/scaffold` gets no `layout` param), and the `RELAY_*` env var fallbacks.
+
 ## RE481 residual names
 
 After [RE481 Rename the code to Hamaca], every line printed by
@@ -89,17 +101,6 @@ these, on purpose. Anything else it prints is a missed rename.
   token must carry as `aud`.
 - `test/hamaca/config_test.exs:7` and `test/support/apple_token_fixtures.ex:67` — the same id,
   asserted and signed into the test tokens.
-
-**Runner wire text, owned by [RE478 Rename the runner to ./hamaca with a compatibility window]:**
-- `lib/hamaca/setup.ex` `pointer_line/0` — `"Working Relay cards from this repo: see [relay.md](relay.md)."`,
-  the line `./relay update` writes into a project's CLAUDE.md / AGENTS.md.
-- `test/fixtures/runner_contract.json` (`"pointer_line"`), `test/hamaca/setup_test.exs:165,832`
-  and `test/hamaca_web/controllers/api/runner_contract_test.exs:514` — the same line, pinned
-  for `./relay`.
-- **Known gap:** `./relay`'s `in_relay_app_repo()` recognises this repo by
-  `lib/relay/scaffold.ex`, which is now `lib/hamaca/scaffold.ex`. Until RE478 updates it,
-  `./relay update` (without `--check`) run *in this repo* no longer refuses to overwrite the
-  scaffold sources — don't run it here.
 
 **Design artboard file names** — `docs/designs/Relay *.dc.html` are real file names (the Claude
 Design project's), so a reference to one keeps the name until the artboards are renamed:

@@ -38,14 +38,14 @@ It says nothing about models or ORM yet. Those come once you need them.
 
 | Smell | Before | After |
 |---|---|---|
-| Meta-opener | "This page is written so an agent can follow it." | Cut. Agents read `relay.md`. |
+| Meta-opener | "This page is written so an agent can follow it." | Cut. Agents read `hamaca.md`. |
 | Describes the system, not the reader | "Relay provides a robust AI-first kanban experience that serves as a testament to human–agent collaboration." | "Put a card on the board and an agent starts on it. When it needs you, the card turns blue." |
-| Implementation leak | "it fetches `./relay` from `$RELAY_URL/api/scaffold/relay` with your board's URL already baked in" | "It downloads `./relay`, already set up for your board." |
-| Card sediment | "(an exported `RELAY_URL` still overrides it, and `./relay update` keeps it)" | Move to the CLI reference. A newcomer never needs this. |
-| Hedge and parenthetical stack | "The runner will (generally) pick up cards (unless paused), which may (in some cases) require a restart." | "The runner picks up new cards on its own. If you paused it, run `./relay start`." |
+| Implementation leak | "it fetches `./hamaca` from `$HAMACA_URL/api/scaffold/hamaca` with your board's URL already baked in" | "It downloads `./hamaca`, already set up for your board." |
+| Card sediment | "(an exported `HAMACA_URL` still overrides it, and `./hamaca update` keeps it)" | Move to the CLI reference. A newcomer never needs this. |
+| Hedge and parenthetical stack | "The runner will (generally) pick up cards (unless paused), which may (in some cases) require a restart." | "The runner picks up new cards on its own. If you paused it, run `./hamaca start`." |
 | Passive voice hides who acts | "The card is moved to Review once the plan has been completed." | "When the agent finishes, it moves the card to Review for you to approve." |
 | Undefined internal terms | "seeds the Spec:Review, Spec:Done and Plan:Done lanes" | Cut, or: "Each stage has a lane where finished cards wait for your OK." |
-| Ticket or ADR refs | "As of RE425, runner versions are enforced (see RLY-176)." | "If Relay says your runner is out of date, run `./relay update` and restart it." |
+| Ticket or ADR refs | "As of RE425, runner versions are enforced (see RLY-176)." | "If Relay says your runner is out of date, run `./hamaca update` and restart it." |
 | Em-dash chain | "Cards move between stages — each with its own flow — and agents — when allowed — work them." | "Each stage has its own flow. Where you allow it, an agent works the card." |
 | Bold on everything | "**That is the whole of setup.** … **no access to the Relay repository is needed** … **Step 4 of the wizard gives you the install command**" | At most one bold phrase per section, for the thing that hurts if you miss it ("The key is shown once. Copy it now."). |
 | Flat list, no priority | Every config key in the main path: `base`, `limits.max_five_hour`, capacity classes… | "Most people don't change anything here. Other options are in the runner reference." |
@@ -65,7 +65,7 @@ It says nothing about models or ORM yet. Those come once you need them.
 | 3 | 0 | `base`, `limits` and the capacity classes all sit in the main path with no "you can skip this". |
 | 4 | 1 | 229 words before the first command, and that command only exports variables. |
 | 5 | 0 | Spec:Review lanes, FLOW band, `shared_clean`/`exclusive` and "sub-steps 5.1–5.8" are all undefined. |
-| 6 | 0 | `/api/scaffold/relay`, `--starter-only`, and "scaffold manifest" all appear. |
+| 6 | 0 | `/api/scaffold/hamaca`, `--starter-only`, and "scaffold manifest" all appear. |
 | 7 | 1 | It uses "you", but reads like a spec ("Relay owns exactly five files in your project and updates them as a set"). |
 | 8 | 0 | Step 3's second paragraph puts six facts in two sentences. |
 | 9 | 0 | 3.2 bold spans per 100 words. |

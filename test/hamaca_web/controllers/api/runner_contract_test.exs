@@ -192,6 +192,7 @@ defmodule HamacaWeb.Api.RunnerContractTest do
     # project's bootstrap. Captured off the real route, unauthenticated like the runner's own
     # first call.
     scaffold_manifest = build_conn() |> get(~p"/api/scaffold") |> json_response(200)
+    scaffold_manifest_hamaca = build_conn() |> get(~p"/api/scaffold?layout=hamaca") |> json_response(200)
 
     # RE355 — the card-task routes are runner wire: `./relay tasks add|list` and
     # `./relay task show|update|rm` build their requests and read their responses against these
@@ -434,9 +435,22 @@ defmodule HamacaWeb.Api.RunnerContractTest do
         # RE443 — the BOARD_URL line the app bakes into a served ./relay; ./relay's
         # BOARD_URL_RE parses it back.
         "board_url_line_example" => Scaffold.board_url_line("http://board.test"),
-        "manifest" => scaffold_placeholders(scaffold_manifest)
+        "manifest" => scaffold_placeholders(scaffold_manifest),
+        # RE478 — the query param that picks a layout, and each layout's runner item path.
+        "layout_param" => Scaffold.layout_param(),
+        "layouts" => Map.new(Scaffold.layouts(), &{&1, Scaffold.runner_path(&1)}),
+        "manifest_hamaca" => scaffold_placeholders(scaffold_manifest_hamaca)
       },
       "setup" => setup,
+      # RE478 — owned by ./hamaca, not the app: the env prefixes it reads in precedence order, the
+      # suffixes it reads and the ones it exports to every node and hook under both prefixes,
+      # and the names it may run as. Pinned here so a drift on either side breaks CI.
+      "env" => %{
+        "prefixes" => ["HAMACA_", "RELAY_"],
+        "read" => ~w(URL API_KEY STATE_DIR RUNNER_LOCK_DIR UPDATED_FROM UPDATE_ATTEMPTS NODE_OUTCOME),
+        "exported" => ~w(NODE_SCRATCH NODE_OUTCOME PLAN REF BRANCH BASE WORKTREE CACHE_DIR)
+      },
+      "runner" => %{"cli_names" => ["hamaca", "relay"]},
       "tasks" => %{
         "create_request" => tasks_create_request,
         "create_response" => task_placeholders(tasks_create_response),
@@ -454,6 +468,38 @@ defmodule HamacaWeb.Api.RunnerContractTest do
     assert note_entry["origin"] == %{"kind" => "answer", "question" => 2}
     assert document["note_images"]["origin_kinds"] == ["answer", "rejection"]
     assert document["version"] == 15
+
+    # RE478 scenario 14: the default stays today's five legacy items; ?layout=hamaca is nine.
+    assert document["scaffold"]["layout_param"] == "layout"
+    assert document["scaffold"]["layouts"] == %{"hamaca" => "hamaca", "legacy" => "relay"}
+
+    assert Enum.map(document["scaffold"]["manifest"]["items"], & &1["path"]) == [
+             ".claude/skills/relay-doctor/SKILL.md",
+             ".claude/skills/relay-onboard/SKILL.md",
+             ".claude/skills/relay-update/SKILL.md",
+             "relay",
+             "relay.md"
+           ]
+
+    assert Enum.map(document["scaffold"]["manifest_hamaca"]["items"], & &1["path"]) == [
+             ".claude/skills/hamaca-doctor/SKILL.md",
+             ".claude/skills/hamaca-onboard/SKILL.md",
+             ".claude/skills/hamaca-update/SKILL.md",
+             ".claude/skills/relay-doctor/SKILL.md",
+             ".claude/skills/relay-onboard/SKILL.md",
+             ".claude/skills/relay-update/SKILL.md",
+             "hamaca",
+             "hamaca.md",
+             "relay"
+           ]
+
+    assert document["scaffold"]["manifest_hamaca"]["version"] == "<scaffold-version>"
+
+    for item <- document["scaffold"]["manifest_hamaca"]["items"] do
+      assert item["sha256"] == "<sha256>"
+      assert item["bytes"] == "<bytes>"
+    end
+
     assert document["usage_rule_cases"] == Hamaca.UsageRuleCases.cases()
     assert "usage" in document["harnesses"]["harness_keys"]
 
@@ -511,7 +557,15 @@ defmodule HamacaWeb.Api.RunnerContractTest do
 
     # RE457 — the runner.json defaults and the relay.md pointer line ./relay asserts against.
     assert document["setup"]["llm_keys"] == ~w(cli harness label pointer_file skill_dir skill_path)
-    assert document["setup"]["pointer_line"] == "Working Relay cards from this repo: see [relay.md](relay.md)."
+    assert document["setup"]["pointer_line"] == "Working Hamaca cards from this repo: see [hamaca.md](hamaca.md)."
+
+    # RE478 — the runner names its CLI on every claim and heartbeat (the server ignores it until
+    # RE486), and the env twins + CLI names ./hamaca defines are pinned here.
+    assert document["claim_request"]["runner"]["cli"] == "hamaca"
+    assert document["heartbeat"]["request"]["runner"]["cli"] == "hamaca"
+    assert document["env"]["prefixes"] == ["HAMACA_", "RELAY_"]
+    assert "API_KEY" in document["env"]["read"] and "NODE_SCRATCH" in document["env"]["exported"]
+    assert document["runner"]["cli_names"] == ["hamaca", "relay"]
 
     assert document["setup"]["runner_config_defaults"] == %{
              "pointer_file" => "CLAUDE.md",
@@ -526,8 +580,17 @@ defmodule HamacaWeb.Api.RunnerContractTest do
   # depicts a CURRENT runner — a literal would start 409ing the moment the minimum moves. It
   # also makes the fixture talk-capable: it claims a talk job, which `Hamaca.Runs.talk_capable?/1`
   # hides from a runner below that same floor.
+  #
+  # `cli` (RE478) is the name the runner runs as — `"hamaca"` or `"relay"`; the server ignores it
+  # until RE486 reads it.
   defp runner_ident do
-    %{"name" => "fixture", "host" => "fixture-host", "interval" => 30, "version" => Runs.min_runner_version()}
+    %{
+      "name" => "fixture",
+      "host" => "fixture-host",
+      "interval" => 30,
+      "version" => Runs.min_runner_version(),
+      "cli" => "hamaca"
+    }
   end
 
   # `running` (RE268) is what lets a no-job claim reply carry `revoked` — the fast Stop path.

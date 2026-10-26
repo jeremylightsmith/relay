@@ -71,7 +71,7 @@ defmodule HamacaWeb.Api.AuditControllerTest do
     assert finding["node_key"] == nil
     assert finding["run_id"] == run.id
     assert finding["summary"] =~ Hamaca.Cards.ref(board, card)
-    assert finding["fix"] =~ "/relay-doctor"
+    assert finding["fix"] =~ "/hamaca-doctor"
   end
 
   test "honors an explicit window and echoes it", %{conn: conn, board: board} do

@@ -230,7 +230,7 @@ defmodule HamacaWeb.SetupComponentsTest do
       assert text(doc, "#setup-answer-baton") == "Baton back plans + finished code"
 
       assert text(doc, "#setup-question-next") == "question 5 of 9 in your terminal…"
-      assert text(doc, "#setup-project-md") == "→ .relay/project.md (committed in 5.6) · copy kept on the board"
+      assert text(doc, "#setup-project-md") == "→ .hamaca/project.md (committed in 5.6) · copy kept on the board"
       assert glyph(doc, "5-3") == "◌"
     end
 
@@ -390,9 +390,9 @@ defmodule HamacaWeb.SetupComponentsTest do
       doc = onboard_doc(Map.put(first_four_done(), "5", :active))
 
       assert text(doc, "#setup-step-5 .setup-why") ==
-               "Open claude in your repo and run /relay-onboard. It works this list until it's green and asks you in the chat when it's stuck."
+               "Open claude in your repo and run /hamaca-onboard. It works this list until it's green and asks you in the chat when it's stuck."
 
-      assert text(doc, "#setup-step-5-1 .setup-substep-title") == "Pull flows into .relay/flows/"
+      assert text(doc, "#setup-step-5-1 .setup-substep-title") == "Pull flows into .hamaca/flows/"
     end
   end
 
@@ -688,7 +688,7 @@ defmodule HamacaWeb.SetupComponentsTest do
       assert squish(only(doc, "#c-step-4-peek")) =~ "Run it at the root of your repo"
 
       assert doc |> only("#c-install-rerun") |> squish() ==
-               "Safe to run again: rewrites ./relay and the skill, keeps runner.json and prepare-worktree.sh"
+               "Safe to run again: rewrites ./hamaca and the skill, keeps runner.json and prepare-worktree.sh"
 
       assert present?(doc, "#c-install-rerun .hero-arrow-path")
 
@@ -701,7 +701,7 @@ defmodule HamacaWeb.SetupComponentsTest do
     test "step 3's peek masks the key, has no copy control and offers a new one" do
       doc = peek_doc(peeks: ["3"])
 
-      assert doc |> only("#c-key-masked") |> squish() == "export RELAY_API_KEY=relay_k7f2q9_••••3a9c"
+      assert doc |> only("#c-key-masked") |> squish() == "export HAMACA_API_KEY=relay_k7f2q9_••••3a9c"
       refute present?(doc, "#c-key-masked button")
       refute present?(doc, ~s(#c-key-masked [id$="-copy"]))
       assert squish(only(doc, "#c-step-3-peek")) =~ "Masked: the board keeps only a hash, so there's nothing to copy."
@@ -722,7 +722,7 @@ defmodule HamacaWeb.SetupComponentsTest do
       doc = peek_doc(peeks: ["3"], token: "relay_newprefix_secret")
 
       assert squish(only(doc, "#c-step-3-peek #c-key-box")) =~ "Shown once. Copy it now."
-      assert doc |> only("#c-key-line code") |> squish() == "export RELAY_API_KEY=relay_newprefix_secret"
+      assert doc |> only("#c-key-line code") |> squish() == "export HAMACA_API_KEY=relay_newprefix_secret"
       refute present?(doc, "#c-key-saved")
     end
 
@@ -771,13 +771,13 @@ defmodule HamacaWeb.SetupComponentsTest do
     test "steps 5 and 6 peek at their commands; step 5's sub-steps stay" do
       doc = peek_doc(peeks: ["5", "6"])
 
-      assert doc |> only("#c-step-5-peek #c-onboard-command code") |> squish() == "/relay-onboard"
+      assert doc |> only("#c-step-5-peek #c-onboard-command code") |> squish() == "/hamaca-onboard"
       assert present?(doc, "#c-onboard-command-copy")
       for n <- 1..8, do: assert(present?(doc, "#c-step-5-#{n}"))
 
-      assert doc |> only("#c-step-6-peek #c-runner-command code") |> squish() == "./relay start"
+      assert doc |> only("#c-step-6-peek #c-runner-command code") |> squish() == "./hamaca start"
       assert present?(doc, "#c-runner-command-copy")
-      assert doc |> only("#c-runner-restart") |> squish() == "Restart it after changing env vars or updating ./relay."
+      assert doc |> only("#c-runner-restart") |> squish() == "Restart it after changing env vars or updating ./hamaca."
 
       # The peek sits before step 5's sub-step list.
       ids = doc |> LazyHTML.query("#c-step-5-peek, #c-step-5-1") |> LazyHTML.attribute("id")
@@ -887,11 +887,11 @@ defmodule HamacaWeb.SetupComponentsTest do
 
     defp runner_nodes(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.to_list()
 
-    test "the current step 6 shows ./relay start in a code row with a copy button" do
+    test "the current step 6 shows ./hamaca start in a code row with a copy button" do
       doc = runner_doc()
 
       [code] = runner_nodes(doc, "#setup-step-6 #setup-runner-command code")
-      assert code |> LazyHTML.text() |> String.trim() == "./relay start"
+      assert code |> LazyHTML.text() |> String.trim() == "./hamaca start"
       assert runner_nodes(doc, "#setup-runner-command-copy") != []
     end
 

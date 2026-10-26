@@ -1,15 +1,15 @@
 defmodule Hamaca.DocsTasksContractTest do
   @moduledoc """
-  RE367: the factory, relay.md and the flow docs speak the canonical flow-contract names
+  RE367: the factory, hamaca.md and the flow docs speak the canonical flow-contract names
   (`tasks`, `card.tasks`, `{task}`, `{task_id}`). A `sub_task` / `sub-task` mention survives only
   on a line that documents the legacy alias (it says "legacy").
   """
   use ExUnit.Case, async: true
 
-  @swept ["relay.md"] ++
+  @swept ["hamaca.md"] ++
            Path.wildcard(".claude/commands/*.md") ++
            Path.wildcard(".claude/agents/**/*.md") ++
-           Path.wildcard(".claude/skills/relay-*/**/*.md") ++
+           Path.wildcard(".claude/skills/hamaca-*/**/*.md") ++
            Path.wildcard("docs/designs/flows/*.{json,md,dot}")
 
   test "no stale sub_task contract name outside a legacy note" do
