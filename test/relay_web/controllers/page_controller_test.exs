@@ -336,7 +336,7 @@ defmodule RelayWeb.PageControllerTest do
       assert squish(start) == "Start your board"
 
       watch = LazyHTML.query(hero, "a#hero-watch")
-      assert LazyHTML.attribute(watch, "href") == ["/board/relay/public"]
+      assert LazyHTML.attribute(watch, "href") == ["/board/hamaca/public"]
       assert "btn-outline" in classes(watch)
       assert squish(watch) == "Watch Hamaca build itself"
     end
@@ -875,7 +875,7 @@ defmodule RelayWeb.PageControllerTest do
       assert story_texts(built, "i") == ["jidoka", "andon"]
 
       watch = LazyHTML.query(built, "a#built-watch")
-      assert LazyHTML.attribute(watch, "href") == ["/board/relay/public"]
+      assert LazyHTML.attribute(watch, "href") == ["/board/hamaca/public"]
       assert story_text(watch) == "Watch it build itself →"
       assert ["link", "link-primary"] -- story_classes(watch) == []
     end
@@ -1037,7 +1037,7 @@ defmodule RelayWeb.PageControllerTest do
       assert ["btn", "btn-primary"] -- story_classes(start) == []
 
       watch = LazyHTML.query(cta, "a#cta-watch")
-      assert LazyHTML.attribute(watch, "href") == ["/board/relay/public"]
+      assert LazyHTML.attribute(watch, "href") == ["/board/hamaca/public"]
       assert story_text(watch) == "Watch Hamaca build itself"
 
       assert ["btn", "btn-ghost", "text-neutral-content", "hover:bg-neutral-content/10"] --
