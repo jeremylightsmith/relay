@@ -205,6 +205,16 @@ defmodule RelayWeb.PageControllerTest do
       assert content_of(doc, "meta[property='og:url']") == RelayWeb.Endpoint.url() <> "/"
     end
 
+    # RE480 scenario 9
+    test "the OG url and images follow the configured host, not the request's", %{conn: conn} do
+      doc = head_doc(%{conn | host: "relayboard.fly.dev"}, ~p"/")
+      image = RelayWeb.Endpoint.url() <> "/images/og-image.png"
+
+      assert content_of(doc, "meta[property='og:url']") == RelayWeb.Endpoint.url() <> "/"
+      assert content_of(doc, "meta[property='og:image']") == image
+      assert content_of(doc, "meta[name='twitter:image']") == image
+    end
+
     test "/privacy carries no social meta and a Hamaca title", %{conn: conn} do
       doc = head_doc(conn, ~p"/privacy")
 

@@ -5,6 +5,7 @@ defmodule RelayWeb.Router do
   import RelayWeb.Auth
 
   alias RelayWeb.Plugs.ApiLogger
+  alias RelayWeb.Plugs.CanonicalHost
   alias RelayWeb.Plugs.Embed
   alias RelayWeb.Plugs.UsageTrack
 
@@ -19,6 +20,8 @@ defmodule RelayWeb.Router do
                              "frame-ancestors 'self';"
 
   pipeline :browser do
+    # RE480: first, so a redirect off an extra host never sets a cookie there.
+    plug CanonicalHost
     plug :accepts, ["html"]
     plug :fetch_session
     plug Embed

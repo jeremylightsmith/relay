@@ -60,7 +60,7 @@ defmodule Storybook.Components.CoreComponents.CardReviewPanel do
           reject_form:
             reject_form(
               "The empty state is too tall on mobile — it pushes the composer off-screen:\n" <>
-                "![empty-mobile.png](https://relayboard.fly.dev/attachments/story-empty-mobile)\n" <>
+                "![empty-mobile.png](https://hamaca.app/attachments/story-empty-mobile)\n" <>
                 "![Uploading phone.png…]()"
             ),
           upload: upload([uploading("phone.png")]),

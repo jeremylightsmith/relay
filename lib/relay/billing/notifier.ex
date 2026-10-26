@@ -15,8 +15,8 @@ defmodule Relay.Billing.Notifier do
   sends. The unique index `billing_notices_once`, not this code, is the guarantee. Notices are
   recorded even while mail is off, so switching a provider on later never sends a backlog.
 
-  Links point at `billing_url/0`, built from the `:app_url` config rather than
-  `RelayWeb.Endpoint` — `Relay.Billing` may not depend on the web layer.
+  Links point at `billing_url/0`, built from the `:app_url` config (read through `Relay.Config`)
+  rather than `RelayWeb.Endpoint` — `Relay.Billing` may not depend on the web layer.
   """
 
   import Ecto.Query
@@ -144,7 +144,7 @@ defmodule Relay.Billing.Notifier do
 
   @doc "The absolute URL of the Billing page every email links to."
   @spec billing_url() :: String.t()
-  def billing_url, do: Application.get_env(:relay, :app_url) <> @billing_path
+  def billing_url, do: Relay.Config.get(:app_url) <> @billing_path
 
   @doc "The notice sent when charging `amount_cents` was declined."
   @spec card_declined_email(User.t(), pos_integer()) :: Swoosh.Email.t()

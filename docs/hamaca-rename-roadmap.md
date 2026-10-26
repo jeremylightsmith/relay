@@ -21,8 +21,8 @@ Two scope decisions (2026-10-25):
 3. **relayboard.fly.dev answers forever.** Installed runners, `.envrc` files and links point at it.
 4. **Not renamed:** the Fly app `relayboard` (renaming means a new Fly app and moving the database)
    and card keys (RE-, RLY-), which are user data.
-5. **Announce the two steps people will notice:** signing in once more ([RE480]) and the runner
-   update ([RE478]).
+5. **Announce the step people will notice:** the runner update ([RE478 Rename the runner to
+   ./hamaca with a compatibility window]).
 
 ## Phase 0: lock it in, done 2026-10-25
 
@@ -39,8 +39,21 @@ Two scope decisions (2026-10-25):
       foreign origin still gets 403.
 - [x] Google OAuth (project `relay-501716`): hamaca.app JS origin, and
       `https://hamaca.app/auth/google/callback` + www as redirect URIs.
-- [x] Email: nothing to do yet. Prod has no `RESEND_API_KEY`, so mail is off; the sending domain
-      is part of [RE480].
+- [x] Email: nothing to do yet. Prod has no `RESEND_API_KEY`, so mail is off. The sending domain
+      waits until mail is turned on (see Phase 3).
+
+## Phase 3: hamaca.app is the main address, done 2026-10-26
+
+[RE480 Make hamaca.app the main address]
+
+- [x] `PHX_HOST` = hamaca.app, so the absolute URLs the app builds name hamaca.app.
+- [x] Browser pages on the old hosts (relayboard.fly.dev, www.hamaca.app) answer 301 to the same
+      path on hamaca.app.
+- [x] `/api`, install scripts, webhooks, OAuth callbacks and attachments keep answering on every
+      host, so installed runners, old app builds, Stripe and in-flight sign-ins keep working.
+- [x] Announcement dropped. Only a couple of people use the board.
+- [ ] When mail is turned on: add hamaca.app as the Resend sending domain, put its SPF, DKIM and
+      DMARC records in Porkbun DNS, and set `MAIL_FROM=…@hamaca.app`.
 
 ## Phases 2–6: cards on the RE board (Backlog)
 
@@ -48,7 +61,7 @@ Two scope decisions (2026-10-25):
 |---|---|---|
 | 2a | [RE476 Hamaca landing page: Hammock Driven Development] | none |
 | 2b | [RE477 Say Hamaca everywhere a person reads the name] | none |
-| 3 | [RE480 Make hamaca.app the main address] | RE476, RE477 |
+| 3 | [RE480 Make hamaca.app the main address] (done, see Phase 3) | RE476, RE477 |
 | 4 | [RE481 Rename the code to Hamaca (modules, app, docs, repo)] | RE476, RE477 |
 | 5 | [RE478 Rename the runner to ./hamaca with a compatibility window] | RE481 |
 | 5 | [RE479 Mobile app as Hamaca: new bundle IDs, name, icons] | RE480 |

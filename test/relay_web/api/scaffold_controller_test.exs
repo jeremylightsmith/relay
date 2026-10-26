@@ -46,6 +46,19 @@ defmodule RelayWeb.Api.ScaffoldControllerTest do
     assert String.replace(body, ~s(BOARD_URL = "#{url}"), ~s(BOARD_URL = "")) == placeholder
   end
 
+  # RE480 scenario 3: the old production host as request host never reaches the runner or
+  # the manifest.
+  test "the baked BOARD_URL follows the configured host, not the request's", %{conn: conn} do
+    conn = %{conn | host: "relayboard.fly.dev"}
+    body = conn |> get("/api/scaffold/relay") |> response(200)
+
+    assert body =~ ~r/^#{Regex.escape(~s(BOARD_URL = "#{RelayWeb.Endpoint.url()}"))}$/m
+    refute body =~ "relayboard.fly.dev"
+
+    manifest = conn |> get(~p"/api/scaffold") |> response(200)
+    refute manifest =~ "relayboard.fly.dev"
+  end
+
   # RE443 review: every runner up to v89 checks a downloaded body with a RAW
   # `sha256(body) == item["sha256"]` and refuses to write it otherwise. The manifest's `sha256`
   # must therefore be the sha of the bytes this board actually serves — the baked copy — or no

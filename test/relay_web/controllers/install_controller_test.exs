@@ -21,6 +21,15 @@ defmodule RelayWeb.InstallControllerTest do
     refute body =~ "evil.example"
   end
 
+  # RE480 scenario 2: after the hamaca.app flip, a script fetched on the old host still bakes
+  # the configured one.
+  test "the old production host as request host still bakes the configured host", %{conn: conn} do
+    body = %{conn | host: "relayboard.fly.dev"} |> get("/b/streaks/install") |> response(200)
+
+    assert body =~ RelayWeb.Endpoint.url()
+    refute body =~ "relayboard.fly.dev"
+  end
+
   test "a malformed slug is a plain 404", %{conn: conn} do
     conn = get(conn, "/b/Bad%20Slug%3B/install")
 

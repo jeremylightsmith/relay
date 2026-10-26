@@ -86,6 +86,14 @@ defmodule RelayWeb.AttachmentPathTest do
       assert RelayWeb.attachment_url("x") == RelayWeb.Endpoint.url() <> "/attachments/x"
     end
 
+    # RE480 scenario 8
+    test "the absolute url's host is the configured endpoint host" do
+      url = RelayWeb.attachment_url("x")
+
+      assert url == RelayWeb.Endpoint.url() <> "/attachments/x"
+      assert URI.parse(url).host == RelayWeb.Endpoint.config(:url)[:host]
+    end
+
     test "the markdown escapes the filename's brackets" do
       assert RelayWeb.image_markdown("a[1].png", "http://h/attachments/x") == "![a\\[1\\].png](http://h/attachments/x)"
     end

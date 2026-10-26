@@ -605,6 +605,19 @@ defmodule RelayWeb.BoardLiveSetupTest do
       refute has_element?(view, "#setup-then")
     end
 
+    # RE480 scenario 1
+    test "step 4's install command follows the configured host, not the request's", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(%{conn | host: "relayboard.fly.dev"}, ~p"/board/#{board.slug}")
+
+      open_peek!(view, "4")
+
+      command = text(view, "#setup-step-4-peek #setup-install-command code")
+      assert String.trim(command) == Setup.install_command(RelayWeb.Endpoint.url(), board.slug)
+      assert String.starts_with?(String.trim(command), "curl -fsSL " <> RelayWeb.Endpoint.url() <> "/b/")
+      refute command =~ "relayboard.fly.dev"
+    end
+
     # Scenario 3
     test "peeks open independently and a second click closes only that one", %{conn: conn, user: user} do
       %{board: board} = finished!(user)

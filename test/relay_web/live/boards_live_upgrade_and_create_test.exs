@@ -69,6 +69,15 @@ defmodule RelayWeb.BoardsLiveUpgradeAndCreateTest do
     assert length(Boards.list_boards(user)) == 1
   end
 
+  # RE480 scenario 7
+  test "Upgrade and create's checkout return URL follows the configured host, not the request's", %{conn: conn} do
+    assert {:error, {:redirect, %{to: url}}} =
+             %{conn | host: "relayboard.fly.dev"} |> open_picker() |> fill() |> click_upgrade_create()
+
+    assert String.starts_with?(url, RelayWeb.Endpoint.url() <> "/dev/billing-checkout?")
+    refute url =~ "relayboard.fly.dev"
+  end
+
   test "6. the successful return creates the board, opens it and upgrades the owner", %{
     conn: conn,
     user: user,

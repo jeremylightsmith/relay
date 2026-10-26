@@ -97,6 +97,10 @@ config :relay,
   ecto_repos: [Relay.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Other hostnames that serve this app (RE480); config/runtime.exs fills it from PHX_EXTRA_HOSTS.
+# Their browser pages 301 to the canonical host (`RelayWeb.Plugs.CanonicalHost`).
+config :relay, extra_hosts: []
+
 config :relay,
   mail_enabled: false,
   mail_from: "Hamaca <billing@localhost>",

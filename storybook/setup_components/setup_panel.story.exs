@@ -21,7 +21,7 @@ defmodule Storybook.SetupComponents.SetupPanel do
   # `Relay.Setup.checklist/1` uses, with no database.
   def variations do
     [_pending, active, waiting, done, failed, _skipped] = BoardSetupStep.statuses()
-    install = "curl -fsSL https://relayboard.fly.dev/b/streaks/install | sh"
+    install = "curl -fsSL https://hamaca.app/b/streaks/install | sh"
 
     [
       %Variation{
@@ -105,7 +105,7 @@ defmodule Storybook.SetupComponents.SetupPanel do
           id: "setup-panel",
           board_name: "acme-web",
           board_slug: "acme-web",
-          install_command: "curl -fsSL https://relayboard.fly.dev/b/acme-web/install | sh",
+          install_command: "curl -fsSL https://hamaca.app/b/acme-web/install | sh",
           checklist: payoff_checklist(key_hint: key_hint()),
           peeks: MapSet.new([Relay.Setup.step_id(:install)])
         }
@@ -117,7 +117,7 @@ defmodule Storybook.SetupComponents.SetupPanel do
           id: "setup-panel",
           board_name: "acme-web",
           board_slug: "acme-web",
-          install_command: "curl -fsSL https://relayboard.fly.dev/b/acme-web/install | sh",
+          install_command: "curl -fsSL https://hamaca.app/b/acme-web/install | sh",
           selected_llm: "codex",
           checklist: payoff_checklist(key_hint: key_hint()),
           peeks:

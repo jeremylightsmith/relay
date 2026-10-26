@@ -48,6 +48,37 @@ One flat `one_for_one` supervisor (`Relay.Supervisor`, started by `Relay.Applica
 | `Relay.Runs.RunnerReaper` | inside `Relay.Runs.Supervisor` — periodic (30s) run-lifecycle sweeps (runner liveness + orphaned-run closure + unresumable-run ageing + scheduler presence): `Relay.Runs.reclaim_stale_runners/0` applies three liveness windows (RE449): past the stale threshold (`Relay.Runs.runner_stale?/2`, `max(60s, 2 × interval)`) a runner stops counting — its `Relay.Runs.Capacity` entry is cleared (RE402) — but no job is touched; its `shared_clean` jobs are requeued unpinned only once silent past `Relay.Runs.shared_reclaim_after_s/0` (3 min) and its `exclusive` runs parked (`parked_reason: :runner_gone`) only past `Relay.Runs.exclusive_reclaim_after_s/0` (10 min), each window floored at the stale threshold — so a runner back from a blip reattaches to its still-`:claimed` jobs for free; `Relay.Runs.close_orphaned_runs/0` closes any run still active while its card is already in a terminal-type stage (RLY-233) or archived (RE335); `Relay.Runs.abandon_unresumable_runs/0` fails a parked run whose resume the scheduler has refused continuously for `Relay.Runs.unresumable_after_s/0` (30 min), so a dead end becomes a visible failure a human can `retry` (RE297); and `Relay.Runs.SchedulerSupervisor.reconcile/0` (last in the sweep) adopts any board lacking a scheduler (RE387). No new PubSub topic — the claim long-poll (`POST /api/node-jobs/claim`) reuses `board:<id>:runs` below. |
 | `RelayWeb.Endpoint` | Bandit HTTP server, WebSockets |
 
+## Hosts
+
+`PHX_HOST` is the canonical host (`hamaca.app` in `fly.toml`): `RelayWeb.Endpoint.url/0`, and so
+every absolute URL the app generates (install scripts, mail links, the runner's board URL), uses
+it. `PHX_EXTRA_HOSTS` (comma-separated; `relayboard.fly.dev,www.hamaca.app` in prod) names the
+other hostnames that serve the same app. `config/runtime.exs` parses it once — trimmed,
+downcased, blanks dropped — into `:relay, :extra_hosts` (default `[]` in `config/config.exs`;
+never set from the environment in `:test`), and both consumers read that one list:
+
+- the prod endpoint's `check_origin` accepts `//<host>` for `PHX_HOST` and every extra host, so
+  a tab still open on an old host keeps its LiveView socket;
+- `RelayWeb.Plugs.CanonicalHost` (RE480), the **first** plug in the router's `:browser`
+  pipeline (before `:fetch_session`, so a redirect never sets a cookie on the old host), answers
+  a `GET` on an extra host with `301` to `RelayWeb.Endpoint.url/0` plus the same path and query.
+
+What never redirects, and why:
+
+| Request | Why it answers in place |
+| --- | --- |
+| `/api/*`, `/api/auth/native/*` | runners, `.envrc` `RELAY_URL`s and old app builds point at the old host; not in `:browser` |
+| `/b/:slug/install` | install scripts are piped into `sh` (pipeline-free route) |
+| `/webhooks/*` | Stripe posts to the URL it was configured with (`:webhook` pipeline) |
+| `/auth/*` | an OAuth flow in flight must finish on the host it started on (plug's `@pass_through`) |
+| `/attachments/*` | links embedded in card markdown keep loading (plug's `@pass_through`) |
+| non-`GET` | a 301 turns a POST into a GET and drops its body (`HEAD` is already `GET` via `Plug.Head`) |
+| `/live`, `/live/longpoll` | the socket never passes the router — open tabs keep their connection |
+
+Sessions are per host (the `_relay_key` cookie belongs to the host that set it), so a user
+signed in on `relayboard.fly.dev` signs in once more on `hamaca.app`. The 301 is intentionally
+permanent.
+
 ## Stripe webhook (RE460)
 
 `POST /webhooks/stripe` → `RelayWeb.StripeWebhookController.create/2`, in the `:webhook`

@@ -85,7 +85,7 @@ defmodule Storybook.CoreComponents.NeedsInputPanel do
             0 => "A banner above the form.",
             1 =>
               "The banner, but full-width above the form — like this:\n\n" <>
-                "![overflow.png](https://relayboard.fly.dev/attachments/story-overflow)\n" <>
+                "![overflow.png](https://hamaca.app/attachments/story-overflow)\n" <>
                 "![Uploading phone.png…]()"
           },
           answer_questions: [

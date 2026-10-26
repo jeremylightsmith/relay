@@ -110,6 +110,17 @@ defmodule RelayWeb.BillingLiveTest do
       assert url =~ "/dev/billing-checkout"
     end
 
+    # RE480 scenario 6
+    test "the checkout return URL follows the configured host, not the request's", %{conn: conn} do
+      {:ok, view, _html} = live(%{conn | host: "relayboard.fly.dev"}, ~p"/account/billing")
+
+      assert {:error, {:redirect, %{to: url}}} = render_click(view, "upgrade")
+      assert String.starts_with?(url, RelayWeb.Endpoint.url() <> "/dev/billing-checkout?")
+
+      succeed = url |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query() |> Map.fetch!("succeed")
+      assert String.starts_with?(succeed, "/account/billing")
+    end
+
     test "Upgrade with a 100% code upgrades in place, without checkout (scenario 42)", %{conn: conn, user: user} do
       insert(:promo_code, code: "FRIENDS", percent_off: 100, months: 2)
       {:ok, _account} = Billing.redeem_code(user, "FRIENDS", Date.utc_today())

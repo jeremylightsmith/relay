@@ -7,7 +7,7 @@
 # Google OAuth (MMF 01). Create an OAuth client in Google Cloud Console with
 # authorized redirect URIs:
 #   http://localhost:4003/auth/google/callback
-#   https://relayboard.fly.dev/auth/google/callback
+#   https://hamaca.app/auth/google/callback
 # In prod, set the same two values with `fly secrets set`.
 # export GOOGLE_CLIENT_ID=...
 # export GOOGLE_CLIENT_SECRET=...
@@ -23,7 +23,7 @@
 # export MATCH_GIT_BASIC_AUTHORIZATION=…      # base64 of "user:token" for the match certs repo
 # export FASTLANE_USER=…                      # Apple ID
 # export FASTLANE_PASSWORD=…                  # its app-specific password
-# export RELAY_BASE_URL=https://relayboard.fly.dev
+# export RELAY_BASE_URL=https://hamaca.app
 # export GOOGLE_IOS_CLIENT_ID=…
 # export GOOGLE_SERVER_CLIENT_ID=…
 # Optional: BETA_GROUP (default Beta), TESTFLIGHT_EXTERNAL=false to skip external testers.

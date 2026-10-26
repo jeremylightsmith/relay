@@ -91,6 +91,28 @@ if config_env() != :test do
   end
 end
 
+# PHX_EXTRA_HOSTS (comma-separated, RE480): other hostnames that serve this app, e.g. the old
+# domain. Their browser pages 301 to PHX_HOST (`RelayWeb.Plugs.CanonicalHost`), and everything
+# else (the API, install scripts, webhooks, OAuth, attachments, the LiveView socket) keeps
+# answering. Parsed here, once, into `:relay, :extra_hosts`; the prod `check_origin` below uses
+# the same list. Never in :test — a shell exporting it must not redirect the suite, which sets
+# the list per test (default `[]` in config/config.exs). Every absolute URL the app generates
+# still uses PHX_HOST.
+extra_hosts =
+  if config_env() == :test do
+    []
+  else
+    "PHX_EXTRA_HOSTS"
+    |> System.get_env("")
+    |> String.split(",")
+    |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+    |> Enum.reject(&(&1 == ""))
+  end
+
+if config_env() != :test do
+  config :relay, extra_hosts: extra_hosts
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -114,12 +136,6 @@ if config_env() == :prod do
       """
 
   host = System.get_env("PHX_HOST") || "example.com"
-
-  # Other hostnames that serve this same app (comma-separated), e.g. a second domain pointed at
-  # it. They're only accepted as LiveView socket origins; every absolute URL the app generates
-  # (install scripts, mail links, the runner's board URL) still uses PHX_HOST.
-  extra_hosts =
-    "PHX_EXTRA_HOSTS" |> System.get_env("") |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 
   mail_blank? = fn value -> is_nil(value) or String.trim(value) == "" end
   resend_api_key = System.get_env("RESEND_API_KEY")

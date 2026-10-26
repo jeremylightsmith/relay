@@ -48,7 +48,7 @@ defmodule Storybook.SetupComponents.SetupChecklist do
               },
               "4" => active
             }),
-          install_command: "curl -fsSL https://relayboard.fly.dev/b/streaks/install | sh",
+          install_command: "curl -fsSL https://hamaca.app/b/streaks/install | sh",
           board_slug: "streaks"
         }
       },
@@ -79,7 +79,7 @@ defmodule Storybook.SetupComponents.SetupChecklist do
           id: "setup-story-failed",
           checklist:
             checklist(%{"1" => done, "2" => done, "3" => done, "4" => Map.put(install_failure(), :status, failed)}),
-          install_command: "curl -fsSL https://relayboard.fly.dev/b/streaks/install | sh",
+          install_command: "curl -fsSL https://hamaca.app/b/streaks/install | sh",
           board_slug: "streaks"
         }
       },

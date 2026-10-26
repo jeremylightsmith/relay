@@ -5,7 +5,7 @@ moves back and forth between humans and AI agents, and the board makes each hand
 explicit — whose turn it is, what's waiting on a person, and what an agent is actively
 working. "Who holds the baton" is a first-class property of every card.
 
-**Try it:** <https://relayboard.fly.dev> (sign in with Google).
+**Try it:** <https://hamaca.app> (sign in with Google).
 
 ![A Relay board: agents working cards through Spec, Plan and Code, two cards parked waiting on a human answer, cards ready for your review, and shipped work in Done](docs/images/board.png)
 

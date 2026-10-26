@@ -34,4 +34,16 @@ defmodule RelayWeb.BoardSettingsPublicTest do
 
     assert has_element?(view, "#public-url-row[style*='background:var(--color-field-bg)']")
   end
+
+  # RE480 scenario 4
+  test "the public URL follows the configured host, not the request's", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(%{conn | host: "relayboard.fly.dev"}, ~p"/board/#{board.slug}/settings?section=public")
+
+    view
+    |> element("#public-settings-form")
+    |> render_change(%{"board" => %{"public_enabled" => "true"}})
+
+    text = view |> element("#public-url-row") |> render() |> LazyHTML.from_fragment() |> LazyHTML.text() |> String.trim()
+    assert text == "#{RelayWeb.Endpoint.url()}/board/#{board.slug}/public"
+  end
 end
