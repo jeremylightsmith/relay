@@ -94,7 +94,9 @@ class ApiClient {
       }
       return resp.data;
     } on DioException catch (e) {
-      throw ApiException(e.message ?? 'Network error — could not reach Relay.');
+      throw ApiException(
+        e.message ?? 'Network error — could not reach Hamaca.',
+      );
     }
   }
 
@@ -105,7 +107,9 @@ class ApiClient {
       final resp = await _dio.post<dynamic>(path, data: body);
       return ApiResponse(resp.statusCode, resp.data);
     } on DioException catch (e) {
-      throw ApiException(e.message ?? 'Network error — could not reach Relay.');
+      throw ApiException(
+        e.message ?? 'Network error — could not reach Hamaca.',
+      );
     }
   }
 

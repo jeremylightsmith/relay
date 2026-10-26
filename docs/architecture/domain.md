@@ -7,6 +7,8 @@ sharing behavior.
 
 ## Contexts
 
+- **Brand** — the one source for the user-facing names (RE477): `name/0` (`"Hamaca"`) and
+  `agent_name/0` (`"Hamaca AI"`). A leaf with no deps; every code-level use of either name calls it.
 - **Boards** — boards and their stage tree (stages, sub-lanes, review gates, WIP limits;
   AI-enabled is derived — `Relay.Flows.ai_stage_ids/1`: a stage some flow works in); renaming a main stage cascades to its sub-lane names (`"<name>:Review"` /
   `"<name>:Done"`, one transaction in `update_stage/2` — RE385), the sub-lane vocabulary and
@@ -603,7 +605,7 @@ sharing behavior.
   install never bills. `ensure_account/1` is get-or-create (`on_conflict: :nothing` on
   `user_id`) and writes no date — every new account stands on Free. `cancel/2` keeps unlimited
   boards through `paid_through`; `resume/2` clears the cancellation (billing date unchanged);
-  both broadcast `{:billing_changed, user_id}` on `billing:<user_id>`, as does a Free board pick. Depends on Config, Mailer,
+  both broadcast `{:billing_changed, user_id}` on `billing:<user_id>`, as does a Free board pick. Depends on Brand, Config, Mailer,
   Repo and Schemas only — Accounts and Runs call in, so it never reaches Accounts, Boards, Cards
   or Runs; it counts a Free owner's boards by reading `Schemas.Board` and `Schemas.Card` directly.
   `Relay.Billing.Periods` (pure) is the billing-date arithmetic (`renews_on/3` clamps a day past

@@ -400,7 +400,7 @@ class _Priming extends StatelessWidget {
       children: [
         const Text('Dictate instead of typing', style: _title),
         const _Secondary(
-          "Relay listens only while you're dictating and transcribes on your "
+          "Hamaca listens only while you're dictating and transcribes on your "
           'phone — audio never leaves it.',
         ),
         _Buttons([

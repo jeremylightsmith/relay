@@ -29,7 +29,7 @@ defmodule RelayWeb.Api.CardArchiveTest do
   defp reload(card), do: Relay.Repo.get!(Schemas.Card, card.id)
 
   describe "POST /api/cards/:ref/archive" do
-    test "archives the card, logs :archived as Relay AI, and drops it from the board", %{
+    test "archives the card, logs :archived as Hamaca AI, and drops it from the board", %{
       conn: conn,
       board: board,
       backlog: backlog
@@ -49,7 +49,7 @@ defmodule RelayWeb.Api.CardArchiveTest do
       assert Enum.any?(
                body["timeline"],
                &(&1["kind"] == "activity" and &1["type"] == "archived" and
-                   &1["author"]["name"] == "Relay AI")
+                   &1["author"]["name"] == Relay.Brand.agent_name())
              )
 
       board_refs =
@@ -129,7 +129,7 @@ defmodule RelayWeb.Api.CardArchiveTest do
   end
 
   describe "POST /api/cards/:ref/unarchive" do
-    test "restores an archived card and logs :unarchived as Relay AI", %{
+    test "restores an archived card and logs :unarchived as Hamaca AI", %{
       conn: conn,
       board: board,
       backlog: backlog
@@ -150,7 +150,7 @@ defmodule RelayWeb.Api.CardArchiveTest do
       assert Enum.any?(
                body["timeline"],
                &(&1["kind"] == "activity" and &1["type"] == "unarchived" and
-                   &1["author"]["name"] == "Relay AI")
+                   &1["author"]["name"] == Relay.Brand.agent_name())
              )
 
       board_refs =

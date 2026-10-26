@@ -3,6 +3,7 @@ defmodule Relay.Billing.ChargingTest do
 
   alias Relay.Billing
   alias Relay.Billing.Charging
+  alias Relay.Billing.Payments
   alias Relay.Billing.Payments.Local
   alias Relay.Billing.Periods
   alias Schemas.BillingAccount
@@ -12,7 +13,7 @@ defmodule Relay.Billing.ChargingTest do
 
   defmodule RaisingPayments do
     @moduledoc false
-    @behaviour Relay.Billing.Payments
+    @behaviour Payments
 
     @impl true
     defdelegate create_setup_checkout(customer_id, user, return_url), to: Local
@@ -25,9 +26,38 @@ defmodule Relay.Billing.ChargingTest do
     def charge(_customer_id, _payment_method_id, _amount_cents, _key, _meta), do: raise("charge/5 must not be called")
   end
 
+  # Charges through `Local`, and tells the charging process what `meta` it was handed.
+  defmodule CapturingPayments do
+    @moduledoc false
+    @behaviour Payments
+
+    @impl true
+    defdelegate create_setup_checkout(customer_id, user, return_url), to: Local
+    @impl true
+    defdelegate fetch_setup(id), to: Local
+    @impl true
+    defdelegate find_payment(customer_id, payment_intent_id, attempt), to: Local
+
+    @impl true
+    def charge(customer_id, payment_method_id, amount_cents, key, meta) do
+      send(self(), {:charged_meta, meta})
+      Local.charge(customer_id, payment_method_id, amount_cents, key, meta)
+    end
+  end
+
   setup do
     Process.put(:billing_enabled, true)
     :ok
+  end
+
+  # RE477 scenario 10
+  test "the charge description names Hamaca and the period" do
+    Process.put(:billing_payments, CapturingPayments)
+    user = insert(:user)
+
+    assert {:ok, %{charged: :paid}} = Billing.complete_setup("local_4242_#{user.id}", nil, ~D[2026-10-01])
+
+    assert_received {:charged_meta, %{description: "Hamaca · Oct 1 – Oct 31, 2026"}}
   end
 
   defp account_for(user, attrs), do: insert(:billing_account, Map.merge(%{user: user}, attrs))

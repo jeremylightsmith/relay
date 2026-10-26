@@ -124,7 +124,7 @@ void main() {
     expect(find.text("You're all caught up"), findsOneWidget);
     expect(
       find.text(
-        "Relay AI is working. We'll ping you the moment it needs a decision.",
+        "Hamaca AI is working. We'll ping you the moment it needs a decision.",
       ),
       findsOneWidget,
     );
@@ -301,7 +301,7 @@ void main() {
 
       expect(find.byType(WorkingStrip), findsOneWidget);
       expect(find.text('working · 3 cards'), findsOneWidget);
-      expect(find.text('Relay AI is on it'), findsOneWidget);
+      expect(find.text('Hamaca AI is on it'), findsOneWidget);
       expect(find.textContaining('%'), findsNothing);
     },
   );

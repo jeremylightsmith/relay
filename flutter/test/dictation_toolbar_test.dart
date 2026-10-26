@@ -203,6 +203,15 @@ void main() {
       findsOneWidget,
     );
     expect(
+      find.descendant(
+        of: priming,
+        matching: find.textContaining(
+          "Hamaca listens only while you're dictating",
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
       find.descendant(of: priming, matching: find.text('Allow microphone')),
       findsOneWidget,
     );
@@ -226,7 +235,7 @@ void main() {
     expect(_key('dictation_error'), findsOneWidget);
     expect(
       _text(tester, 'dictation_error_message'),
-      'Microphone access is off for Relay.',
+      'Microphone access is off for Hamaca.',
     );
     expect(_key('dictation_open_settings'), findsOneWidget);
     expect(_key('dictation_try_again'), findsNothing);

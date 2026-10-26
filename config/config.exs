@@ -99,7 +99,7 @@ config :relay,
 
 config :relay,
   mail_enabled: false,
-  mail_from: "Relay <billing@localhost>",
+  mail_from: "Hamaca <billing@localhost>",
   app_url: "http://localhost:4000"
 
 # Server-side scheduler shell (ADR 0006 / RLY-133): off by default (no auto-start

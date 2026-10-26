@@ -122,7 +122,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('logout_confirm')), findsOneWidget);
-    expect(find.text('Log out of Relay?'), findsOneWidget);
+    expect(find.text('Log out of Hamaca?'), findsOneWidget);
     expect(
       find.text("You'll stop receiving notifications until you sign back in."),
       findsOneWidget,

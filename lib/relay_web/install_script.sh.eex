@@ -179,7 +179,7 @@ if [ "$python3_ok" != true ]; then
   fail <%= sh_quote(@python3_fix) %>
 fi
 
-say "Relay install for board $(field board) · default LLM: $(field llm.label)"
+say "Hamaca install for board $(field board) · default LLM: $(field llm.label)"
 report
 [ "$(field ok)" = true ] || exit 1
 

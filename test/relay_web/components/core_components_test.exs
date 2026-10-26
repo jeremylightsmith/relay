@@ -570,7 +570,7 @@ defmodule RelayWeb.CoreComponentsTest do
       chip = chip(html, "stage-col-3-ai-listening")
       assert LazyHTML.tag(chip) == ["span"]
       assert LazyHTML.attribute(chip, "href") == []
-      assert LazyHTML.attribute(chip, "title") == ["Relay AI works this stage"]
+      assert LazyHTML.attribute(chip, "title") == ["#{Relay.Brand.agent_name()} works this stage"]
       refute LazyHTML.to_html(chip) =~ "hero-arrow-up-right-mini"
       refute html =~ "<a "
     end
@@ -1549,7 +1549,7 @@ defmodule RelayWeb.CoreComponentsTest do
         )
 
       assert html =~ "background:var(--color-secondary)"
-      assert html =~ "Relay AI"
+      assert html =~ Relay.Brand.agent_name()
     end
 
     test "a question note keeps its amber chip and amber body box" do
@@ -1635,9 +1635,25 @@ defmodule RelayWeb.CoreComponentsTest do
       html = render_component(&CoreComponents.card_drawer/1, attrs)
 
       assert html =~ ~s(id="working-strip")
-      assert html =~ "Relay AI is working"
+      assert html =~ "#{Relay.Brand.agent_name()} is working"
       assert html =~ ~s(id="working-strip-pct")
       assert html =~ "50%"
+    end
+
+    test "the stale health chip says the agent has gone quiet (RE477)" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{health: :stale}))
+
+      chip = html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-activity-health-chip")
+      assert LazyHTML.text(chip) =~ "#{Relay.Brand.agent_name()} has gone quiet"
+      assert LazyHTML.text(chip) =~ "Hamaca AI has gone quiet"
+    end
+
+    test "the stopped health chip says the agent stopped (RE477)" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{health: :stopped}))
+
+      chip = html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-activity-health-chip")
+      assert LazyHTML.text(chip) =~ "#{Relay.Brand.agent_name()} stopped"
+      assert LazyHTML.text(chip) =~ "Hamaca AI stopped"
     end
 
     test "working with no sub-tasks shows the strip but no percentage" do
@@ -3415,7 +3431,7 @@ defmodule RelayWeb.CoreComponentsTest do
     test "a question park keeps today's label, markdown question and placeholder, with no Retry" do
       html = panel(%{question: "Billing timezone or the viewer's?"})
 
-      assert html =~ "RELAY AI NEEDS YOUR INPUT"
+      assert html =~ "HAMACA AI NEEDS YOUR INPUT"
       assert html =~ ~s(id="needs-input-question")
       assert html =~ "Billing timezone"
       assert html =~ "Type your answer"
@@ -5984,18 +6000,18 @@ defmodule RelayWeb.CoreComponentsTest do
     test "embed with a gate points at the native bar below" do
       html = hint_html(@embed_gate, true)
 
-      assert html =~ "Relay AI finished this. Approve or reject below."
+      assert html =~ "#{Relay.Brand.agent_name()} finished this. Approve or reject below."
       refute html =~ "Approve to move it forward"
     end
 
     test "non-embed with a gate keeps today's copy" do
       assert hint_html(@embed_gate, false) =~
-               "Relay AI finished this. Approve to move it forward, or send it back with a note."
+               "#{Relay.Brand.agent_name()} finished this. Approve to move it forward, or send it back with a note."
     end
 
     test "embed with no gate keeps the drag / Move to copy" do
       assert hint_html(nil, true) =~
-               "Relay AI finished this. Drag it or use Move to… when you&#39;re ready."
+               "#{Relay.Brand.agent_name()} finished this. Drag it or use Move to… when you&#39;re ready."
     end
   end
 

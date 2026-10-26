@@ -189,7 +189,7 @@ defmodule Relay.Setup do
     {"5.3", "Interview → .relay/project.md"},
     {"5.4", "Customize: propose, agree 1 by 1, apply"},
     {"5.5", "Push flows back (enabled on arrival)"},
-    {"5.6", "Relay files on origin/main"},
+    {"5.6", "Hamaca files on origin/main"},
     {"5.7", "Follow-up cards #setup"},
     {"5.8", "First card"}
   ]
@@ -243,10 +243,10 @@ defmodule Relay.Setup do
                connect_title: "Install on this machine",
                short: "install",
                actor: :you_terminal,
-               why: "Puts the runner and the Relay skills in your repo. It's a script you run, not a file you set up.",
+               why: "Puts the runner and the Hamaca skills in your repo. It's a script you run, not a file you set up.",
                what_this_does: [
                  "./relay — the runner and CLI, with this board's URL baked in",
-                 "%{skill_dir}/relay-onboard, relay-update and relay-doctor — the Relay skills",
+                 "%{skill_dir}/relay-onboard, relay-update and relay-doctor — the Hamaca skills",
                  "relay.md, plus one line in %{pointer_file} pointing at it",
                  ".relay/runner.json — runner settings, base set to your default branch (kept if present)",
                  ".relay/prepare-worktree.sh — the warm-up hook, empty until onboarding fills it (kept if present)",
@@ -264,7 +264,7 @@ defmodule Relay.Setup do
                  "Open %{cli} in your repo and run /relay-onboard. It works this list until it's green and asks you in the chat when it's stuck.",
                what_this_does: ["Run /relay-onboard in your repo; it works sub-steps 5.1–5.8 below."],
                connect_why:
-                 "Pulls the board's flows and checks the Relay files are already on origin/main. No interview, no customizing."
+                 "Pulls the board's flows and checks the Hamaca files are already on origin/main. No interview, no customizing."
              }
            ] ++
              Enum.map(@onboard_children, fn {id, title} ->
@@ -350,7 +350,7 @@ defmodule Relay.Setup do
     %{
       id: "deploy",
       label: "Deploy",
-      question: "How do you deploy, and does Relay ever do it (by default Deploy stays human)?"
+      question: "How do you deploy, and does Hamaca ever do it (by default Deploy stays human)?"
     },
     %{id: "baton", label: "Baton back", question: "Where does the baton come back to you?"},
     %{
@@ -367,7 +367,7 @@ defmodule Relay.Setup do
     %{
       id: "capacity",
       label: "Capacity",
-      question: "How many cards at once, and how much of your LLM plan may Relay use?"
+      question: "How many cards at once, and how much of your LLM plan may Hamaca use?"
     },
     %{id: "misfits", label: "Misfits", question: "Is there anything in the template that doesn't fit how you work?"}
   ]
@@ -424,7 +424,7 @@ defmodule Relay.Setup do
   @llm_facts %{
     "claude-code" => %{
       cli: "claude",
-      blurb: "Recommended. Best tested with Relay's flows.",
+      blurb: "Recommended. Best tested with Hamaca's flows.",
       install: "npm install -g @anthropic-ai/claude-code",
       skill_dir: Scaffold.skill_dir(),
       pointer_file: "CLAUDE.md",

@@ -319,7 +319,7 @@ defmodule RelayWeb.BoardSettingsLive do
                       New public ideas arrive in
                     </label>
                     <p style="font-size:12.5px;line-height:1.5;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);margin:0 0 2px 0;max-width:520px;">
-                      When someone posts on the public board, Relay creates a card in this stage.
+                      When someone posts on the public board, Hamaca creates a card in this stage.
                     </p>
                     <div
                       id="intake-stage-picker"
@@ -973,7 +973,7 @@ defmodule RelayWeb.BoardSettingsLive do
                 </div>
                 <div style="flex:1;min-width:0;">
                   <div style="font-size:14px;font-weight:600;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);">
-                    Relay AI
+                    {Relay.Brand.agent_name()}
                   </div>
                   <%!-- `oklch 0.50 0.03 292` is a grey-violet, not a violet: C 0.03 is a Rule-N near-neutral
                     (see `delete_style/1` in story_map_components.ex), and Rule B's ink formula would
@@ -1059,7 +1059,7 @@ defmodule RelayWeb.BoardSettingsLive do
                   `secondary` at 60% to reach L 0.44, landing at C 0.10 — the violet AI dot beside
                   it carries the signal, not this caption. --%>
                 <span style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
-                  These keys authenticate <b>Relay AI</b> on this board.
+                  These keys authenticate <b>{Relay.Brand.agent_name()}</b> on this board.
                 </span>
               </div>
 

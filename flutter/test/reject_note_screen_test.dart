@@ -118,7 +118,7 @@ void main() {
       );
       expect(
         copy.textSpan!.toPlainText(),
-        'Tell Relay AI what to fix. A note is required so it can revise.',
+        'Tell Hamaca AI what to fix. A note is required so it can revise.',
       );
       final bolded = (copy.textSpan! as TextSpan).children!
           .cast<TextSpan>()
@@ -307,7 +307,10 @@ void main() {
     tester,
   ) async {
     final api = FakeDecisionApi(
-      const DecisionFailed('network', 'Network error — could not reach Relay.'),
+      const DecisionFailed(
+        'network',
+        'Network error — could not reach Hamaca.',
+      ),
     );
     await pumpReject(tester, api: api);
 
@@ -318,7 +321,10 @@ void main() {
 
     // Never silently discard a typed note.
     expect(find.text('Please revise'), findsOneWidget);
-    expect(find.text('Network error — could not reach Relay.'), findsOneWidget);
+    expect(
+      find.text('Network error — could not reach Hamaca.'),
+      findsOneWidget,
+    );
     expect(find.text('card RLY-B'), findsNothing, reason: 'must not advance');
     expect(_sendButton(tester).onPressed, isNotNull, reason: 'retryable');
   });
@@ -423,7 +429,7 @@ void main() {
       final api = FakeDecisionApi(
         const DecisionFailed(
           'network',
-          'Network error — could not reach Relay.',
+          'Network error — could not reach Hamaca.',
         ),
       );
       final router = await pumpReject(tester, api: api);

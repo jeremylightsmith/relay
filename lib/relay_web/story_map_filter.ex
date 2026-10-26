@@ -169,7 +169,7 @@ defmodule RelayWeb.StoryMapFilter do
   end
 
   defp ai_chip(selected?) do
-    %{key: "agent", actor: :ai, name: "Relay AI", email: nil, avatar_url: nil, selected?: selected?}
+    %{key: "agent", actor: :ai, name: Relay.Brand.agent_name(), email: nil, avatar_url: nil, selected?: selected?}
   end
 
   # `Map.get/2` rather than `owner.user`: an unloaded association is a struct without the

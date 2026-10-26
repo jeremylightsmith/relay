@@ -1,10 +1,10 @@
 # Introduction
 
-**Relay is an AI-first kanban board where work is a baton passed back and forth between
+**Hamaca is an AI-first kanban board where work is a baton passed back and forth between
 humans and AI agents.**
 
 Most tools treat AI as a side panel — a chat you copy out of, disconnected from where the
-work lives. Relay makes the **hand-off** the center of the product: every card knows *who is
+work lives. Hamaca makes the **hand-off** the center of the product: every card knows *who is
 holding it* and *whose move is next*.
 
 ## Passing the baton

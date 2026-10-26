@@ -132,7 +132,7 @@ defmodule RelayWeb.BoardsLive do
           </div>
         </div>
         <p class="mb-7 mt-1 hidden max-w-[560px] text-sm leading-relaxed text-base-content/70 drawer:block">
-          Each board is a shared workspace where you and Relay AI pass work between each other.
+          Each board is a shared workspace where you and {Relay.Brand.agent_name()} pass work between each other.
         </p>
 
         <%!-- RE470 · mockup A: the first-run picker sits over this tile (≥720px only). --%>

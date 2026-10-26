@@ -81,7 +81,7 @@ void main() {
       // iOS will never show the prompt again, so AUTH-03 could only lie about what
       // its button does. Land on the inbox instead.
       expect(
-        find.text('Let Relay reach you'),
+        find.text('Let Hamaca reach you'),
         findsNothing,
         reason: 'AUTH-03 primed even though the OS has permanently denied push',
       );
@@ -100,7 +100,7 @@ void main() {
     await signIn(tester, auth);
 
     // The one-shot OS prompt is unspent — priming is exactly what AUTH-03 is for.
-    expect(find.text('Let Relay reach you'), findsOneWidget);
+    expect(find.text('Let Hamaca reach you'), findsOneWidget);
   });
 
   testWidgets('an interactive sign-in does not re-prime within the cooldown', (
@@ -116,7 +116,7 @@ void main() {
 
     // "Not now" a day ago. Don't nag.
     expect(
-      find.text('Let Relay reach you'),
+      find.text('Let Hamaca reach you'),
       findsNothing,
       reason: 'AUTH-03 re-primed one day after the user tapped "Not now"',
     );
@@ -134,7 +134,7 @@ void main() {
 
       await signIn(tester, auth);
 
-      expect(find.text('Let Relay reach you'), findsOneWidget);
+      expect(find.text('Let Hamaca reach you'), findsOneWidget);
     },
   );
 
@@ -150,7 +150,7 @@ void main() {
       await signIn(tester, auth);
 
       expect(
-        find.text('Let Relay reach you'),
+        find.text('Let Hamaca reach you'),
         findsNothing,
         reason: 'AUTH-03 primed at a user who has already allowed push',
       );

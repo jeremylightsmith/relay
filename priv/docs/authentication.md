@@ -1,8 +1,8 @@
 # Authentication & API access
 
-Relay is drivable over a small **REST API** and the zero-dependency **`relay` CLI**, so a
+Hamaca is drivable over a small **REST API** and the zero-dependency **`relay` CLI**, so a
 Claude (or any) agent can pull a card, work it, and hand it back. Every write is attributed
-to the board's AI agent, **"Relay AI"**.
+to the board's AI agent, **"Hamaca AI"**.
 
 This page covers how a request proves who it is. If you are setting up for the first time,
 start at [Getting started](/docs/getting-started). For the full endpoint-by-endpoint

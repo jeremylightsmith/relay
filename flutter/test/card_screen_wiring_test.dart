@@ -261,7 +261,7 @@ void main() {
       final api = FakeDecisionApi(
         const DecisionFailed(
           'network',
-          'Network error — could not reach Relay.',
+          'Network error — could not reach Hamaca.',
         ),
       );
       await pumpCardHost(tester, api: api);
@@ -275,7 +275,7 @@ void main() {
         reason: 'a failed decision must never advance',
       );
       expect(
-        find.text('Network error — could not reach Relay.'),
+        find.text('Network error — could not reach Hamaca.'),
         findsOneWidget,
       );
       expect(find.text('Retry'), findsOneWidget);
@@ -317,7 +317,7 @@ void main() {
       final api = FakeDecisionApi(
         const DecisionFailed(
           'network',
-          'Network error — could not reach Relay.',
+          'Network error — could not reach Hamaca.',
         ),
       );
       await pumpCardHost(tester, api: api);

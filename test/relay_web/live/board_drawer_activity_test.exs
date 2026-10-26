@@ -107,7 +107,8 @@ defmodule RelayWeb.BoardDrawerActivityTest do
     view = open(conn, board, ref)
 
     assert has_element?(view, "#card-drawer-activity-health-chip[data-health='live']")
-    assert render(view) =~ "Relay AI is live"
+    assert render(view) =~ "#{Relay.Brand.agent_name()} is live"
+    refute render(view) =~ "Relay AI"
     refute render(view) =~ "Retry"
   end
 
@@ -126,7 +127,7 @@ defmodule RelayWeb.BoardDrawerActivityTest do
 
     assert has_element?(view, "#card-drawer-activity-health-chip[data-health='stale']")
     chip = view |> element("#card-drawer-activity-health-chip") |> render()
-    assert chip =~ "Relay AI has gone quiet"
+    assert chip =~ "#{Relay.Brand.agent_name()} has gone quiet"
     assert chip =~ "var(--color-warning)"
   end
 

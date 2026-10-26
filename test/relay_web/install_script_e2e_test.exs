@@ -193,7 +193,7 @@ defmodule RelayWeb.InstallScriptE2ETest do
     end
 
     assert out |> String.trim_trailing() |> String.ends_with?("Next: open codex here and run /relay-onboard")
-    assert out =~ "Relay install for board Streaks · default LLM: Codex"
+    assert out =~ "Hamaca install for board Streaks · default LLM: Codex"
     assert step(ctx.board, "4").status == :done
     assert step(ctx.board, "5").status == :active
   end

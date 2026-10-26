@@ -1,21 +1,21 @@
 # Billing & self-hosting
 
-Relay is **open source**, and it's free to run yourself. **Relay Cloud** is the same Relay,
+Hamaca is **open source**, and it's free to run yourself. **Hamaca Cloud** is the same Hamaca,
 run by us, for **$20/month**.
 
-## Self-host or Relay Cloud
+## Self-host or Hamaca Cloud
 
 It's **the same software** either way: open source under the **MIT license**, with every
 feature and no "enterprise edition".
 
 - **Self-hosting is free forever.** You run the upgrades, backups and push certificates
   yourself. See the [README](https://github.com/jeremylightsmith/relay#readme) for how.
-- **The name is protected.** You can fork Relay, but a fork can't be called "Relay".
-- **Relay Cloud** is us running it for you, for $20/month.
+- **The name is protected.** You can fork Hamaca, but a fork can't be called "Hamaca".
+- **Hamaca Cloud** is us running it for you, for $20/month.
 
 ## Your free trial
 
-Relay Cloud starts with **30 days free**, and you don't need a card to start. Add a card in
+Hamaca Cloud starts with **30 days free**, and you don't need a card to start. Add a card in
 [Billing](/account/billing) to keep going after the trial.
 
 ## What you pay

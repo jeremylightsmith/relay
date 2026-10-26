@@ -163,7 +163,7 @@ void main() {
         final c = _listening(async, fake).controller;
 
         expect(c.stage, DictationStage.error);
-        expect(c.errorMessage, 'Microphone access is off for Relay.');
+        expect(c.errorMessage, 'Microphone access is off for Hamaca.');
         expect(c.showOpenSettings, isTrue);
         expect(c.showTryAgain, isFalse);
 

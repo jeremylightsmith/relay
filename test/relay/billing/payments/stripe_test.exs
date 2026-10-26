@@ -3,7 +3,7 @@ defmodule Relay.Billing.Payments.StripeTest do
 
   alias Relay.Billing.Payments.Stripe
 
-  @meta %{description: "Relay · Aug 12 – Sep 11, 2026", receipt_email: "owner@example.com", attempt_id: 7}
+  @meta %{description: "Hamaca · Aug 12 – Sep 11, 2026", receipt_email: "owner@example.com", attempt_id: 7}
 
   # Answers every request with `status`/`body` and reports it to the test as
   # `{:stripe_request, method, path, headers, form_or_query}`.
@@ -41,7 +41,7 @@ defmodule Relay.Billing.Payments.StripeTest do
                "customer" => "cus_1",
                "payment_method" => "pm_1",
                "receipt_email" => "owner@example.com",
-               "description" => "Relay · Aug 12 – Sep 11, 2026",
+               "description" => "Hamaca · Aug 12 – Sep 11, 2026",
                "metadata[billing_payment_attempt_id]" => "7",
                "expand[]" => "latest_charge"
              } = form

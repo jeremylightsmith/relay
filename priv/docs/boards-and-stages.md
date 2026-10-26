@@ -28,7 +28,7 @@ A stage can also carry a **WIP limit** and act as an **approval gate**.
 ## Human vs. AI stages
 
 - **Human stages** are lanes where people work or decide. AI owners are "paused" here.
-- **AI stages** are lanes where the Relay AI agent works — or is queued to. While it works, the
+- **AI stages** are lanes where the Hamaca AI agent works — or is queued to. While it works, the
   card streams live progress; when it needs a call it can't make, it blocks and asks.
 
 ## Review and Done

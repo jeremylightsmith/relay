@@ -34,7 +34,7 @@ class PushPermissionScreen extends StatelessWidget {
               const Center(child: _BellIcon()),
               const SizedBox(height: 24),
               Text(
-                'Let Relay reach you',
+                'Let Hamaca reach you',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 20,

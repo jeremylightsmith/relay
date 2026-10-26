@@ -22,6 +22,7 @@ defmodule Relay.Runs do
       Relay.Agents,
       Relay.Billing,
       Relay.Boards,
+      Relay.Brand,
       Relay.Cards,
       Relay.Config,
       Relay.Events,
@@ -5291,7 +5292,7 @@ defmodule Relay.Runs do
 
   defp guidance_author(%Comment{actor_type: :user, user: %User{name: name}}) when is_binary(name) and name != "", do: name
   defp guidance_author(%Comment{actor_type: :user, user: %User{email: email}}) when is_binary(email), do: email
-  defp guidance_author(%Comment{}), do: "Relay AI"
+  defp guidance_author(%Comment{}), do: Relay.Brand.agent_name()
 
   defp guidance_body(body) when is_binary(body), do: if(String.trim(body) == "", do: nil, else: body)
   defp guidance_body(_body), do: nil

@@ -1,6 +1,6 @@
 # REST API reference
 
-Relay exposes a small JSON REST API scoped to a single **board**. It is the same
+Hamaca exposes a small JSON REST API scoped to a single **board**. It is the same
 entry point the `./relay` CLI uses, so anything the CLI does you can do directly.
 
 ## Base URL & authentication
@@ -14,7 +14,7 @@ Authorization: Bearer <board API key>
 ```
 
 Mint a key at **`/board/:slug/settings` → API keys** (each board has a single key;
-regenerating replaces it). Every write is attributed to **"Relay AI"** (the agent
+regenerating replaces it). Every write is attributed to **"Hamaca AI"** (the agent
 actor). Requests without a valid key get `401 unauthorized`.
 
 ## Conventions
@@ -56,13 +56,13 @@ Cards are serialized by `CardJSON`. The **base shape** (returned in lists and as
   "branch": "rly-12-api-docs",
   "pr_url": "https://github.com/acme/relay/pull/7",
   "stage_id": 5,
-  "owners": [{ "type": "agent", "name": "Relay AI" }],
+  "owners": [{ "type": "agent", "name": "Hamaca AI" }],
   "active_owner": "agent",
   "rejection": null
 }
 ```
 
-`owners` entries are either `{ "type": "agent", "name": "Relay AI" }` or
+`owners` entries are either `{ "type": "agent", "name": "Hamaca AI" }` or
 `{ "type": "user", "id": 3, "name": "Ada" }`. `rejection`, when present, is
 `{ "note", "from_stage", "to_stage", "rejected_by", "rejected_at" }`.
 
@@ -78,9 +78,9 @@ heavy fields:
   "depends_on": [{ "ref": "RLY-13", "title": "Ship the migration", "satisfied": false }],
   "blocks": [{ "ref": "RLY-20", "title": "Backfill the index" }],
   "timeline": [
-    { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" },
-    { "kind": "activity", "type": "moved", "meta": { "from_stage": "Spec", "to_stage": "Code" }, "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" },
-    { "kind": "activity", "type": "action", "text": "implement: starting", "meta": {}, "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" }
+    { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" },
+    { "kind": "activity", "type": "moved", "meta": { "from_stage": "Spec", "to_stage": "Code" }, "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" },
+    { "kind": "activity", "type": "action", "text": "implement: starting", "meta": {}, "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" }
   ]
 }
 ```
@@ -230,7 +230,7 @@ Every other request (remote scripts and images, fetch/XHR/WebSocket/EventSource,
 submission) is blocked. Opening a mockup that
 links Google Fonts sends a request to Google, which sees the viewer's IP and the font URL
 (mockups are served with `Referrer-Policy: no-referrer` and run in an opaque origin, so no
-Relay host, path or cookie goes with it).
+Hamaca host, path or cookie goes with it).
 
 ### POST /api/cards/:ref/attachments
 
@@ -382,7 +382,7 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
 Add an agent comment. Requires `body`. Returns `201` with the new timeline entry:
 
 ```json
-{ "data": { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Relay AI" }, "inserted_at": "…" } }
+{ "data": { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" } }
 ```
 
 ### POST /api/cards/:ref/needs-input
@@ -415,7 +415,7 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
 ### POST /api/cards/:ref/archive
 
 Archive a card: it leaves the board (open boards drop it live), an `archived` timeline entry is
-recorded against Relay AI, and any dependency rows that name it as a blocker are removed. Body
+recorded against Hamaca AI, and any dependency rows that name it as a blocker are removed. Body
 `{}`. Returns the single-card shape with `"archived": true`. Archiving an already-archived card
 is a `200` that records nothing new.
 
@@ -435,7 +435,7 @@ curl -X POST -H "Authorization: Bearer $RELAY_KEY" -H "Content-Type: application
 ### POST /api/cards/:ref/unarchive
 
 Restore an archived card to its stage (open boards re-insert it live) and record an `unarchived`
-timeline entry against Relay AI. Body `{}`. Returns the single-card shape with
+timeline entry against Hamaca AI. Body `{}`. Returns the single-card shape with
 `"archived": false`. Unarchiving a card that is not archived is a `200` no-op. There is no
 live-run guard. Blockers removed when the card was archived are not restored.
 
@@ -549,7 +549,7 @@ CLI: `./relay version`.
 
 ### GET /api/scaffold
 
-The manifest of the five Relay-owned files this board serves: `./relay`, the three
+The manifest of the five Hamaca-owned files this board serves: `./relay`, the three
 `relay-*` skills, and `relay.md` (`Relay.Scaffold.items/0`). **Unauthenticated**, on purpose and on the same
 pipeline as `GET /api/version` — the board's install script (`/b/<slug>/install`) fetches them
 before anything has authenticated, so this has to be reachable with no `Authorization` header at
@@ -574,7 +574,7 @@ curl https://relay.example/api/scaffold
 
 One file's raw bytes. `path` is checked against the manifest's `items` — a static allowlist —
 before it ever reaches the filesystem, so this is not a general file server: any path outside
-the five Relay-owned files is `404 not_found`. **Unauthenticated**, same reasoning as above.
+the five Hamaca-owned files is `404 not_found`. **Unauthenticated**, same reasoning as above.
 
 `relay` is served with this board's URL baked into its `BOARD_URL = "<url>"` line (RE443), so a
 project needs no `RELAY_URL`. The URL is the board's configured one, never the request's `Host`.
@@ -637,7 +637,7 @@ setup hasn't picked a default LLM yet; `422 invalid` for a malformed body or an 
 
 ### POST /api/setup/installed
 
-The install script's success report, after it wrote the Relay files. Board key required.
+The install script's success report, after it wrote the Hamaca files. Board key required.
 Finishes setup step 4 (activating step 5) when it is the current step; otherwise changes nothing.
 
 ```

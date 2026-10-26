@@ -523,7 +523,7 @@ defmodule RelayWeb.BoardLiveRealtimeTest do
 
       comment = Repo.get_by!(Schemas.Comment, card_id: card.id)
       assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-comment-body", "From the agent")
-      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", "Relay AI")
+      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", Relay.Brand.agent_name())
     end
 
     test "an API branch/plan update refreshes another session's open drawer",

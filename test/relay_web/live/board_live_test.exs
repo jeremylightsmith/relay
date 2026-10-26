@@ -31,12 +31,27 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.aggregate(Stage, :count) == 11
     end
 
-    test "titles the board tab with the board name and the · Relay suffix", %{conn: conn, user: user} do
+    test "titles the board tab with the board name and the · Hamaca suffix", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, _view, html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert html =~ "#{board.name} · Relay"
+      assert html =~ "#{board.name} · Hamaca"
       refute html =~ "Phoenix Framework"
+    end
+
+    # RE477 scenario 4
+    test "the top bar names Hamaca in the wordmark, both logos and the tab title", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      html = conn |> get(~p"/board/#{board.slug}") |> html_response(200)
+      document = LazyHTML.from_document(html)
+
+      assert document |> LazyHTML.query("#top-bar-logo span") |> LazyHTML.text() |> String.trim() == "Hamaca"
+
+      alts = document |> LazyHTML.query("img[src^='/images/logo_']") |> LazyHTML.attribute("alt")
+      assert length(alts) == 2
+      assert Enum.all?(alts, &(&1 == "Hamaca"))
+
+      assert document |> LazyHTML.query("title") |> LazyHTML.text() |> String.trim() |> String.ends_with?(" · Hamaca")
     end
 
     test "relaxes the board-name width cap on mobile, keeps the desktop cap", %{conn: conn, user: user} do
@@ -1967,7 +1982,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='human']")
     end
 
-    test "Assign AI via the reassign picker makes Relay AI the sole owner: Take over shows",
+    test "Assign AI via the reassign picker makes Hamaca AI the sole owner: Take over shows",
          %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
@@ -1980,14 +1995,14 @@ defmodule RelayWeb.BoardLiveTest do
       assert has_element?(
                view,
                "#card-drawer-rail .rail-owner[data-actor-type='agent'][data-active='true']",
-               "Relay AI"
+               Relay.Brand.agent_name()
              )
 
       # exclusivity: the human owner is gone; no paused badge remains
       refute has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='user']")
       refute has_element?(view, "#card-drawer-rail .rail-owner-paused")
 
-      # Take over is the affordance next to Relay AI
+      # Take over is the affordance next to Hamaca AI
       assert has_element?(view, "#card-drawer-take-over")
 
       assert has_element?(view, "#stage-col-1-cards .board-card[data-active-owner='ai']")
@@ -2021,14 +2036,14 @@ defmodule RelayWeb.BoardLiveTest do
       assert reloaded.status == :working
     end
 
-    test "an AI-owned card renders the Relay AI owner label", %{conn: conn, user: user, card: card} do
+    test "an AI-owned card renders the Hamaca AI owner label", %{conn: conn, user: user, card: card} do
       {:ok, _card} = Cards.add_owner(card, :agent)
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
-      assert has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='agent']", "Relay AI")
+      assert has_element?(view, "#card-drawer-rail .rail-owner[data-actor-type='agent']", Relay.Brand.agent_name())
     end
 
     test "removing the human owner leaves the card unowned", %{conn: conn, user: user} do
@@ -2319,7 +2334,7 @@ defmodule RelayWeb.BoardLiveTest do
       assert Repo.aggregate(Comment, :count) == 0
     end
 
-    test "an agent-authored comment renders with the Relay AI identity",
+    test "an agent-authored comment renders with the Hamaca AI identity",
          %{conn: conn, card: card, user: user} do
       comment = insert(:comment, card: card, body: "Implemented — ready for review.")
 
@@ -2327,7 +2342,7 @@ defmodule RelayWeb.BoardLiveTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
 
-      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", "Relay AI")
+      assert has_element?(view, "#timeline-comment-#{comment.id} .timeline-author", Relay.Brand.agent_name())
 
       assert has_element?(
                view,

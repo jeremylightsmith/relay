@@ -69,7 +69,7 @@ defmodule RelayWeb.CardMedia do
 
   @doc "How a note's author is named: \"Relay AI\" for the agent, else the user's name or email."
   @spec author(Comment.t()) :: String.t()
-  def author(%Comment{actor_type: :agent}), do: "Relay AI"
+  def author(%Comment{actor_type: :agent}), do: Relay.Brand.agent_name()
   def author(%Comment{actor_type: :user, user: user}), do: user.name || user.email
 
   @doc """

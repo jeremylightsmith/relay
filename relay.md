@@ -1,6 +1,6 @@
-# Working with Relay from your agent
+# Working with Hamaca from your agent
 
-Relay is an AI-first kanban board. Work passes back and forth between humans and AI as cards flow
+Hamaca is an AI-first kanban board. Work passes back and forth between humans and AI as cards flow
 **left → right** through a board's stages. You drive it with one tool, `./relay` (zero-dependency
 Python 3). `./relay start` runs as a runner and claims jobs from the server; setup lives at
 `$RELAY_URL/docs/architecture-runner`.
@@ -14,7 +14,7 @@ are configured per board in **Settings › Stages** (the stage's FLOW band), nev
 ## Setup
 
 1. Mint a board API key at `/board/<slug>/settings?section=keys`, one per machine. Writes are
-   attributed to the board's AI agent ("Relay AI").
+   attributed to the board's AI agent ("Hamaca AI").
 2. Export `RELAY_URL` and `RELAY_API_KEY` in the agent's shell (e.g. a gitignored `.envrc.local`).
 3. Confirm: `./relay board` prints your board.
 4. Wire the repo to a flow: run `/relay-onboard` in Claude Code. If the repo is already wired and

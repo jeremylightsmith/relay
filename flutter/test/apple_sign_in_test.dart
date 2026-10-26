@@ -207,7 +207,7 @@ void main() {
 
     final state = container.read(authProvider);
     expect(state.status, AuthStatus.signedOut);
-    expect(state.error, "Relay couldn't sign you in with that Apple ID.");
+    expect(state.error, "Hamaca couldn't sign you in with that Apple ID.");
     expect(state.method, SignInMethod.apple);
     expect(store.value, isNull);
   });

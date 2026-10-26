@@ -19,8 +19,15 @@ defmodule Relay.Billing.NotifierTest do
 
   describe "sender/1" do
     test "splits a display name from the address" do
-      assert Notifier.sender("Relay <billing@relay.example>") == {"Relay", "billing@relay.example"}
-      assert Notifier.sender(~s( "Relay Billing"  <billing@relay.example> )) == {"Relay Billing", "billing@relay.example"}
+      assert Notifier.sender("Hamaca <billing@relay.example>") == {"Hamaca", "billing@relay.example"}
+
+      assert Notifier.sender(~s( "Hamaca Billing"  <billing@relay.example> )) ==
+               {"Hamaca Billing", "billing@relay.example"}
+    end
+
+    # RE477 scenario 9
+    test "the configured sender's display name is Hamaca" do
+      assert {"Hamaca", _address} = Notifier.sender(Application.get_env(:relay, :mail_from))
     end
 
     test "takes a bare address as the address with no name" do
@@ -40,17 +47,17 @@ defmodule Relay.Billing.NotifierTest do
       email = Notifier.card_declined_email(user, 2000)
 
       assert recipients(email) == ["owner@example.com"]
-      assert email.subject == "We couldn't charge your card for Relay"
+      assert email.subject == "We couldn't charge your card for Hamaca"
 
       assert email.text_body =~
-               "We couldn't charge your card for Relay ($20.00). Update it today to keep your boards editable."
+               "We couldn't charge your card for Hamaca ($20.00). Update it today to keep your boards editable."
 
       assert email.text_body =~ @billing_url
       assert email.html_body =~ ~s(href="#{@billing_url}")
     end
   end
 
-  @dropped_to_free_text "We couldn't renew your Relay plan, so you're on Free now. Free includes one editable board; " <>
+  @dropped_to_free_text "We couldn't renew your Hamaca plan, so you're on Free now. Free includes one editable board; " <>
                           "your other boards are read-only and nothing has been deleted. Upgrade any time to unlock them all:"
 
   describe "dropped_to_free_email/1" do
@@ -58,7 +65,8 @@ defmodule Relay.Billing.NotifierTest do
       email = Notifier.dropped_to_free_email(user)
 
       assert recipients(email) == ["owner@example.com"]
-      assert email.subject == "Your Relay plan is now Free"
+      assert email.subject == "Your Hamaca plan is now Free"
+      assert String.starts_with?(email.text_body, "We couldn't renew your Hamaca plan, so you're on Free now.")
       assert email.text_body =~ @dropped_to_free_text <> " " <> @billing_url
       assert email.html_body =~ ~s(href="#{@billing_url}")
     end
@@ -78,7 +86,7 @@ defmodule Relay.Billing.NotifierTest do
     test "sends the email through the mailer when mail is enabled", %{user: user} do
       assert Notifier.deliver(Notifier.dropped_to_free_email(user)) == :ok
 
-      assert_email_sent(subject: "Your Relay plan is now Free", to: "owner@example.com")
+      assert_email_sent(subject: "Your Hamaca plan is now Free", to: "owner@example.com")
     end
   end
 
@@ -132,6 +140,6 @@ defmodule Relay.Billing.NotifierDisabledLogTest do
 
     assert_no_email_sent()
     assert log =~ "no mail provider configured"
-    assert log =~ ~s(not sending "Your Relay plan is now Free" to owner@example.com)
+    assert log =~ ~s(not sending "Your Hamaca plan is now Free" to owner@example.com)
   end
 end

@@ -919,7 +919,7 @@ defmodule RelayWeb.RunComponents do
           CLAIMED BY A HUMAN
         </div>
         <p style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);margin:0;">
-          A human claimed this card while Relay AI was working, so the run at
+          A human claimed this card while {Relay.Brand.agent_name()} was working, so the run at
           <strong>{@detail.current_node}</strong>
           was cancelled. Nothing is lost — the branch {@card.branch} keeps the work so far.
         </p>

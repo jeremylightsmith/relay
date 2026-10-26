@@ -192,7 +192,7 @@ defmodule Relay.Runs.GuidanceTest do
                "Ada Lovelace · 2026-10-11 21:04 UTC\nUse approach A"
     end
 
-    test "the author falls back to the email, then to Relay AI for an agent row" do
+    test "the author falls back to the email, then to Hamaca AI for an agent row" do
       base = %Comment{kind: :comment, body: "x", inserted_at: ~U[2026-10-11 21:04:05Z], images: []}
       nameless = %User{name: nil, email: "ada@example.com"}
 
@@ -200,7 +200,7 @@ defmodule Relay.Runs.GuidanceTest do
                "ada@example.com · 2026-10-11 21:04 UTC\nx"
 
       assert Runs.render_guidance([%{base | actor_type: :agent, user: nil, kind: :changes_requested}], "RE7") ==
-               "Relay AI · 2026-10-11 21:04 UTC · CHANGES REQUESTED\nx"
+               "#{Relay.Brand.agent_name()} · 2026-10-11 21:04 UTC · CHANGES REQUESTED\nx"
     end
 
     test "entries are joined by one blank line", %{user: user} do

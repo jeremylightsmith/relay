@@ -49,7 +49,7 @@ defmodule Relay.Billing do
   self-hosted install — there is no limit, nothing is read-only or noticed, and no account is
   opened at sign-up.
 
-  **Depends on `Relay.Config`, `Relay.Mailer`, `Relay.Repo` and `Schemas` only** — `Relay.Accounts`
+  **Depends on `Relay.Brand`, `Relay.Config`, `Relay.Mailer`, `Relay.Repo` and `Schemas` only** — `Relay.Accounts`
   (the account at sign-up) and `Relay.Runs` call in, so a back-dependency would be a boundary
   cycle. Billing emails (`Relay.Billing.Notifier`, RE464) — card declined, dropped to Free, each
   once per account and period, sent by `run_clock/2`'s last step — go out through the leaf
@@ -57,7 +57,7 @@ defmodule Relay.Billing do
   `Schemas.Board` and `Schemas.Card` directly.
   """
 
-  use Boundary, deps: [Relay.Config, Relay.Mailer, Relay.Repo, Schemas], exports: [Standing]
+  use Boundary, deps: [Relay.Brand, Relay.Config, Relay.Mailer, Relay.Repo, Schemas], exports: [Standing]
 
   import Ecto.Query
 

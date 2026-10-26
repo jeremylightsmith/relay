@@ -20,6 +20,12 @@ defmodule RelayWeb.CardMediaTest do
     end
   end
 
+  describe "author/1" do
+    test "an agent note is attributed to the agent's brand name (RE477)" do
+      assert CardMedia.author(%Schemas.Comment{actor_type: :agent}) == Relay.Brand.agent_name()
+    end
+  end
+
   describe "screens/2" do
     test "reads every entry shape, keys the fetchable ones 1, 2, … and placeholders the rest" do
       ai_result = %{
@@ -96,7 +102,7 @@ defmodule RelayWeb.CardMediaTest do
       assert [by_a, by_b, by_c] = Enum.map(items, & &1.byline)
       assert String.starts_with?(by_a, "From a note by Jeremy · ")
       assert String.starts_with?(by_b, "From a note by Jeremy · ")
-      assert String.starts_with?(by_c, "From a note by Relay AI · ")
+      assert String.starts_with?(by_c, "From a note by #{Relay.Brand.agent_name()} · ")
       assert by_a == "From a note by Jeremy · just now"
     end
 

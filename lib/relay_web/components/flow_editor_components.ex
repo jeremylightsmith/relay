@@ -918,7 +918,7 @@ defmodule RelayWeb.FlowEditorComponents do
           style="font-size:11.5px;line-height:1.5;padding:9px 11px;border-radius:8px;background:color-mix(in oklab, var(--color-accent) 6%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-accent) 25%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
         >
           <b>Shared checkout.</b>
-          Branches run at the same time in this run's worktree. Relay does no git work for them, so edits to the same file, concurrent commits, and parallel
+          Branches run at the same time in this run's worktree. Hamaca does no git work for them, so edits to the same file, concurrent commits, and parallel
           <span class="font-mono">mix compile</span>
           are up to the flow.
         </div>

@@ -10,7 +10,7 @@ defmodule RelayWeb.BoardLiveMembersTest do
 
   setup :register_and_log_in_user
 
-  test "the reassign picker lists every resolved member and Relay AI", %{conn: conn, user: user} do
+  test "the reassign picker lists every resolved member and Hamaca AI", %{conn: conn, user: user} do
     board = Boards.get_or_create_default_board(user)
     teammate = insert(:user, name: "Morgan Lee")
     insert(:membership, board: board, user: teammate, email: teammate.email)

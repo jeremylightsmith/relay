@@ -292,7 +292,7 @@ class _SuggestIdeaRow extends ConsumerWidget {
         ),
       ),
       subtitle: Text(
-        "Share or upvote ideas on Relay's public roadmap",
+        "Share or upvote ideas on Hamaca's public roadmap",
         style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
       ),
       trailing: Icon(

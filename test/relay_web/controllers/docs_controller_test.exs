@@ -99,7 +99,7 @@ defmodule RelayWeb.DocsControllerTest do
 
     assert html =~ ~s(href="/docs/runbook-flow-cutover")
     # The sentence the whole scaffold-over-HTTP design exists to make true (plan goal).
-    assert html =~ "no access to the Relay repository"
+    assert html =~ "no access to the Hamaca repository"
     refute html =~ "git clone"
     refute html =~ "copy this file"
   end
@@ -141,7 +141,7 @@ defmodule RelayWeb.DocsControllerTest do
     html = conn |> get(~p"/docs/billing") |> html_response(200)
 
     for heading <- [
-          "Self-host or Relay Cloud",
+          "Self-host or Hamaca Cloud",
           "Your free trial",
           "What you pay",
           "If a payment fails",
@@ -390,10 +390,23 @@ defmodule RelayWeb.DocsControllerTest do
     assert html =~ "https://github.com/jeremylightsmith/relay/blob/main/docs/vision.md"
   end
 
+  # RE477 scenario 5
+  test "the sidebar sections and the docs wordmark say Hamaca", %{conn: conn} do
+    document = conn |> get(~p"/docs/getting-started") |> html_response(200) |> LazyHTML.from_document()
+    text = LazyHTML.text(document)
+
+    for section <- ["Get started", "Build with Hamaca", "Operations", "Architecture"] do
+      assert text =~ section
+    end
+
+    refute text =~ "Build with Relay"
+    assert document |> LazyHTML.query("span") |> Enum.any?(&(LazyHTML.text(&1) == "Hamaca"))
+  end
+
   test "the sidebar lists every page grouped into its section", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
-    for section <- ["Get started", "Build with Relay", "Operations", "Architecture"] do
+    for section <- ["Get started", "Build with Hamaca", "Operations", "Architecture"] do
       assert html =~ section
     end
 
@@ -482,7 +495,7 @@ defmodule RelayWeb.DocsControllerTest do
       |> LazyHTML.text()
 
     assert breadcrumb =~ "Docs"
-    assert breadcrumb =~ "Build with Relay"
+    assert breadcrumb =~ "Build with Hamaca"
     assert breadcrumb =~ "Authentication"
 
     eyebrow =
@@ -491,7 +504,7 @@ defmodule RelayWeb.DocsControllerTest do
       |> LazyHTML.query(".docs-eyebrow")
       |> LazyHTML.text()
 
-    assert eyebrow =~ "BUILD WITH RELAY"
+    assert eyebrow =~ "BUILD WITH HAMACA"
   end
 
   test "the breadcrumb and eyebrow track the page's own section", %{conn: conn} do
@@ -526,5 +539,68 @@ defmodule RelayWeb.DocsControllerTest do
     html = conn |> get(~p"/docs/architecture-runtime") |> html_response(200)
 
     assert html =~ "/assets/js/docs.js"
+  end
+
+  # RE477 task 3: the docs prose names the product Hamaca; commands, URLs, env vars and
+  # module references stay verbatim (they're renamed by RE478/RE480/RE481).
+  @top_level_slugs ~w(introduction getting-started boards-and-stages cards-and-handoffs
+                      statuses-and-outcomes billing cli authentication api)
+
+  # The rendered article's prose, with <pre> and <code> blocks removed and the tags stripped.
+  defp article_prose(html) do
+    article =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("article#docs")
+      |> LazyHTML.to_html()
+
+    article
+    |> then(&Regex.replace(~r/<pre[\s\S]*?<\/pre>/, &1, " "))
+    |> then(&Regex.replace(~r/<code[\s\S]*?<\/code>/, &1, " "))
+    |> then(&Regex.replace(~r/<[^>]+>/, &1, " "))
+  end
+
+  # The raw markdown with fenced code, inline code spans, URLs and `Relay.`-module refs removed.
+  defp markdown_prose(markdown) do
+    markdown
+    |> then(&Regex.replace(~r/^```[\s\S]*?^```/m, &1, " "))
+    |> then(&Regex.replace(~r/`[^`]*`/, &1, " "))
+    |> then(&Regex.replace(~r{https?://\S+}, &1, " "))
+    |> then(&Regex.replace(~r/\bRelay\.[A-Z]\w*/, &1, " "))
+  end
+
+  test "the getting-started prose says Hamaca and keeps the ./relay commands", %{conn: conn} do
+    html = conn |> get(~p"/docs/getting-started") |> html_response(200)
+    prose = article_prose(html)
+
+    assert prose =~ "Hamaca"
+    refute prose =~ ~r/\bRelay\b/, "getting-started prose still names Relay"
+    assert html =~ "./relay"
+  end
+
+  test "the CLI page says Hamaca and leaves the commands, env vars and nav label alone",
+       %{conn: conn} do
+    html = conn |> get(~p"/docs/cli") |> html_response(200)
+
+    assert article_prose(html) =~ "Hamaca"
+    assert html =~ "./relay card"
+    assert html =~ "RELAY_"
+    assert html =~ "CLI (./relay)"
+  end
+
+  test "the API reference shows the agent as Hamaca AI", %{conn: conn} do
+    html = conn |> get(~p"/docs/api") |> html_response(200)
+
+    assert html =~ ~s("name": "#{Relay.Brand.agent_name()}")
+    refute html =~ "Relay AI"
+  end
+
+  test "no top-level docs page names Relay in its prose" do
+    for slug <- @top_level_slugs do
+      prose = "priv/docs/#{slug}.md" |> File.read!() |> markdown_prose()
+
+      hits = ~r/.{0,30}\bRelay\b.{0,30}/ |> Regex.scan(prose) |> List.flatten()
+      assert hits == [], "priv/docs/#{slug}.md still names Relay: #{inspect(hits)}"
+    end
   end
 end

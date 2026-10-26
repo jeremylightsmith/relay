@@ -76,7 +76,7 @@ defmodule RelayWeb.BoardLiveStrandedMoveTest do
   end
 
   # RE309 — cancel_run/2 hardcoded actor: :agent, so a human killing a run from the board
-  # was logged as Relay AI. The confirm-move handler now passes the signed-in user.
+  # was logged as Hamaca AI. The confirm-move handler now passes the signed-in user.
   test "the cancel is credited to the human who confirmed it, not the agent", ctx do
     {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
     drop(view, ctx.board, ctx.card, ctx.done)

@@ -40,6 +40,7 @@ flowchart LR
     ApiKeys --> Repo
     Attachments --> Boards
     Attachments --> Repo
+    Billing --> Brand
     Billing --> Config
     Billing --> Mailer
     Billing --> Repo
@@ -51,6 +52,7 @@ flowchart LR
     Boards --> Setup
     Cards --> Activity
     Cards --> Boards
+    Cards --> Brand
     Cards --> Events
     Cards --> Flows
     Cards --> Members
@@ -74,6 +76,7 @@ flowchart LR
     Runs --> Agents
     Runs --> Billing
     Runs --> Boards
+    Runs --> Brand
     Runs --> Cards
     Runs --> Config
     Runs --> Events

@@ -262,7 +262,7 @@ defmodule Relay.RunsTest do
       assert_receive {:node_started, _run, %NodeExecution{node_key: "brainstorm", visit: 1, attempt: 1}}
       assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"} = job}
 
-      # The move claimed the card for Relay AI and snapped it :working in Spec.
+      # The move claimed the card for Hamaca AI and snapped it :working in Spec.
       card = Relay.Cards.get_card(board, card.id)
       assert card.stage_id == flow.stage_id
       assert card.status == :working

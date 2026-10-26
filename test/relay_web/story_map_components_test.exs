@@ -1220,7 +1220,7 @@ defmodule RelayWeb.StoryMapComponentsTest do
     end
 
     defp ai_chip(selected?) do
-      %{key: "agent", actor: :ai, name: "Relay AI", email: nil, avatar_url: nil, selected?: selected?}
+      %{key: "agent", actor: :ai, name: Relay.Brand.agent_name(), email: nil, avatar_url: nil, selected?: selected?}
     end
 
     defp filter_bar(overrides) do

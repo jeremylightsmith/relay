@@ -40,7 +40,7 @@ void main() {
 
     router.go('/push-permission');
     await tester.pumpAndSettle();
-    expect(find.text('Let Relay reach you'), findsOneWidget);
+    expect(find.text('Let Hamaca reach you'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('push_skip')));
     await tester.pumpAndSettle();

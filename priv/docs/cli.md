@@ -5,7 +5,7 @@ its REST API. Human-readable output by default; add `--json` for machine output.
 exits non-zero.
 
 > [!NOTE]
-> Every write is attributed to the board's AI agent, **"Relay AI"**. Set `RELAY_URL` and
+> Every write is attributed to the board's AI agent, **"Hamaca AI"**. Set `RELAY_URL` and
 > `RELAY_API_KEY` first — see [Authentication & API access](/docs/authentication). The one
 > exception is `./relay update`, which needs only `RELAY_URL`: the board serves the scaffold
 > unauthenticated, because it runs before a board key exists.
@@ -14,7 +14,7 @@ exits non-zero.
 
 | Command | What it does |
 | --- | --- |
-| `./relay update [--check \| --starter-only] [--base REF]` | Install or refresh the five Relay-owned files from the board (`./relay`, the three `relay-*` skills, and `relay.md`). `--check` reports the served vs. local version and which files would change, and writes nothing. `--starter-only` writes only a missing `.relay/runner.json` and `.relay/prepare-worktree.sh`, offline. `--base REF` sets the `base` of a runner.json it creates. Add `--json` for machine output. It also removes a leftover Relay-owned `bin/relay` (the CLI moved to `./relay`). Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
+| `./relay update [--check \| --starter-only] [--base REF]` | Install or refresh the five Hamaca-owned files from the board (`./relay`, the three `relay-*` skills, and `relay.md`). `--check` reports the served vs. local version and which files would change, and writes nothing. `--starter-only` writes only a missing `.relay/runner.json` and `.relay/prepare-worktree.sh`, offline. `--base REF` sets the `base` of a runner.json it creates. Add `--json` for machine output. It also removes a leftover Hamaca-owned `bin/relay` (the CLI moved to `./relay`). Prefer the `/relay-update` skill, which wraps it. See [Getting started](/docs) |
 | `./relay setup status` | **The board's guided-setup checklist** (the one `/relay-onboard` loops over): a `Setup checklist for <board>: N of 7 done. Next is <step> (<title>).` line, then each step and its indented sub-steps with a status glyph (`✓` done, `–` skipped, `!` failed, `◌` waiting, `▸` active, `○` pending) and its evidence — or its error, for a failed step. `--json` prints the whole checklist (`current` is the one step a report may move); `--field current` prints that id alone. Exits **3** with `relay: no guided setup on this board` on a board that has no checklist |
 | `./relay setup report 5.1 --status done [--evidence TEXT] [--error TEXT] [--data JSON]` | **Report one guided-setup step.** `--status` is `waiting`, `done`, `failed` or `skipped`; `--data` is a JSON object (text, `-` for stdin, or `@path`) and anything else is refused before the request. Prints `✓ 5.1 done · <evidence>` then `Next is <step> (<title>).` (or `Setup checklist done.`). A step that isn't the current one is refused — `relay: not_current: … the current step is 5.3`, exit 1. Exits **3** on a board with no checklist |
 | `./relay board` | The board: stages with their cards |
@@ -32,9 +32,9 @@ exits non-zero.
 | `./relay version` | The git SHA the deployed app was built from |
 | `./relay create "Fix login" --stage Backlog` | Create a card (optional `--stage`/`--description`/`--tag`/`--depends-on RE12,RE13`) |
 | `./relay depends RLY-12 RLY-13 RLY-14` | **Replace the card's blocker set** — the card stays undispatchable until every blocker reaches a top-level Done column (`./relay why` reports `blocked_by_dependencies`). Passing no BLOCKERs clears the set. Refs may be separate arguments or comma-separated. A ref this board does not have, or an edge that would close a cycle, is refused and nothing is written |
-| `./relay comment RLY-12 "…"` | Post a comment (as Relay AI) |
+| `./relay comment RLY-12 "…"` | Post a comment (as Hamaca AI) |
 | `./relay move RLY-12 Code` | Move to a stage by name |
-| `./relay archive RLY-12` | **Archive the card** — it leaves the board and the timeline records it against Relay AI. Prints the card line ending in `(archived)`. A card with a live run is refused (`409 active_run`) and nothing is written: `./relay cancel RLY-12` first. Archiving an archived card is harmless |
+| `./relay archive RLY-12` | **Archive the card** — it leaves the board and the timeline records it against Hamaca AI. Prints the card line ending in `(archived)`. A card with a live run is refused (`409 active_run`) and nothing is written: `./relay cancel RLY-12` first. Archiving an archived card is harmless |
 | `./relay unarchive RLY-12` | **Restore an archived card** to its stage. Harmless on a card that is not archived |
 | `./relay status RLY-12 working` | Set status (any card status, e.g. `working` — see [Statuses & outcomes](/docs/statuses-and-outcomes); it snaps to one the stage allows) |
 | `./relay title RLY-12 "New title"` | Retitle the card (accepts `-` / `@file` like other text arguments). A blank title is refused |
@@ -124,8 +124,8 @@ Every `--json` command also takes `--field PATH` to print a single dotted-path v
 
 ## Keeping `./relay` current
 
-Relay owns five files in your project — `./relay`, the three `relay-*` skills, and `relay.md` — and your
-board serves them at `GET /api/scaffold`. They are Relay's, never yours, so an update overwrites
+Hamaca owns five files in your project — `./relay`, the three `relay-*` skills, and `relay.md` — and your
+board serves them at `GET /api/scaffold`. They are Hamaca's, never yours, so an update overwrites
 them unconditionally; nothing else in `.claude/` is ever touched.
 
 ```bash
@@ -142,7 +142,7 @@ The manifest's `version` is derived from the files' content, so it moves exactly
 **What gets written is decided by content, not by that version:** `./relay update` hashes all
 five files against the manifest on every run and writes the ones that differ, so "this project is
 current" means "nothing needs writing". A deleted skill comes back, and so does an **edited** one
-— these five are Relay-owned, so a local change to them is damage to repair, not a customisation
+— these five are Hamaca-owned, so a local change to them is damage to repair, not a customisation
 to keep. A version that has moved while the bytes already match writes nothing but the recorded
 version itself (the normal state after `./relay start` self-updates).
 

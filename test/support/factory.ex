@@ -220,7 +220,7 @@ defmodule Relay.Factory do
   end
 
   # Full-control factory: `card` (when overridden) must be a persisted card.
-  # With a `user`, a human comment; without, an agent ("Relay AI") comment.
+  # With a `user`, a human comment; without, an agent ("Hamaca AI") comment.
   def comment_factory(attrs) do
     {card, attrs} = Map.pop_lazy(attrs, :card, fn -> insert(:card) end)
     {user, attrs} = Map.pop(attrs, :user)

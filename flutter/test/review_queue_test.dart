@@ -385,7 +385,7 @@ void main() {
       api: FakeDecisionApi(
         const DecisionFailed(
           'network',
-          'Network error — could not reach Relay.',
+          'Network error — could not reach Hamaca.',
         ),
       ),
     );
@@ -404,7 +404,7 @@ void main() {
     );
     final state = h.container.read(reviewQueueProvider);
     expect(state.index, 0);
-    expect(state.error, 'Network error — could not reach Relay.');
+    expect(state.error, 'Network error — could not reach Hamaca.');
     expect(state.banner, isNull);
   });
 
@@ -978,7 +978,7 @@ void main() {
       api: FakeDecisionApi(
         const DecisionFailed(
           'network',
-          'Network error — could not reach Relay.',
+          'Network error — could not reach Hamaca.',
         ),
       ),
       feed: feed,

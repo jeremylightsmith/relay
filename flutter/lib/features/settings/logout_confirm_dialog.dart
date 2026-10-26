@@ -18,7 +18,7 @@ Future<void> showLogoutConfirmDialog(BuildContext context) {
         final scheme = Theme.of(context).colorScheme;
         return AlertDialog(
           key: const Key('logout_confirm'),
-          title: const Text('Log out of Relay?', textAlign: TextAlign.center),
+          title: const Text('Log out of Hamaca?', textAlign: TextAlign.center),
           content: const Text(
             "You'll stop receiving notifications until you sign back in.",
             textAlign: TextAlign.center,

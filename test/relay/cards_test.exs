@@ -220,7 +220,7 @@ defmodule Relay.CardsTest do
           from_stage_name: "Code",
           to_stage_id: stage.id,
           to_stage_name: "Plan",
-          rejected_by: "Relay AI",
+          rejected_by: Relay.Brand.agent_name(),
           rejected_at: DateTime.truncate(DateTime.utc_now(), :second)
         })
         |> Repo.update()
@@ -707,7 +707,7 @@ defmodule Relay.CardsTest do
       assert uid == user.id
     end
 
-    test "an unowned card an AGENT moves into an AI-enabled stage is claimed by Relay AI (rule 1)",
+    test "an unowned card an AGENT moves into an AI-enabled stage is claimed by Hamaca AI (rule 1)",
          %{stage: stage, ai_stage: ai_stage} do
       {:ok, card} = Cards.create_card(stage, %{title: "x"})
 
@@ -741,7 +741,7 @@ defmodule Relay.CardsTest do
       end
     end
 
-    test "an agent move into a work stage a DISABLED flow works in is claimed by Relay AI (RE409)",
+    test "an agent move into a work stage a DISABLED flow works in is claimed by Hamaca AI (RE409)",
          %{board: board, stage: stage} do
       target = insert_ai_stage(board: board, position: 25)
       {:ok, card} = Cards.create_card(stage, %{title: "x"})
@@ -750,7 +750,7 @@ defmodule Relay.CardsTest do
       assert [%{actor_type: :agent}] = moved.owners
     end
 
-    test "an agent move into a work stage an ENABLED flow works in is claimed by Relay AI (RE409)",
+    test "an agent move into a work stage an ENABLED flow works in is claimed by Hamaca AI (RE409)",
          %{board: board, stage: stage} do
       target = insert_ai_stage([board: board, position: 25], enabled: true)
       {:ok, card} = Cards.create_card(stage, %{title: "x"})
@@ -791,7 +791,7 @@ defmodule Relay.CardsTest do
       assert {:ok, at_work} = Cards.move_card(card, human_work, 0, {:user, user.id})
       assert [%{actor_type: :agent}] = at_work.owners
 
-      # Reaching a Done stage keeps Relay AI as the owner (provenance).
+      # Reaching a Done stage keeps Hamaca AI as the owner (provenance).
       assert {:ok, in_done} = Cards.move_card(at_work, done_stage, 0)
       assert [%{actor_type: :agent}] = in_done.owners
       assert in_done.status == :ready
@@ -1008,7 +1008,7 @@ defmodule Relay.CardsTest do
       assert uid == user.id
     end
 
-    test "assign_ai/2 makes Relay AI the sole owner and logs :owners_changed",
+    test "assign_ai/2 makes Hamaca AI the sole owner and logs :owners_changed",
          %{card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
 

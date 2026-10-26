@@ -41,13 +41,13 @@ String? signInErrorMessage(Object error) {
     return null;
   }
   if (error is DioException && _connectivityFailures.contains(error.type)) {
-    return "Couldn't reach Relay. Check your connection and try again.";
+    return "Couldn't reach Hamaca. Check your connection and try again.";
   }
   if (error is SignInRejected) {
     return switch (error.method) {
       SignInMethod.google =>
-        "Relay couldn't sign you in with that Google account.",
-      SignInMethod.apple => "Relay couldn't sign you in with that Apple ID.",
+        "Hamaca couldn't sign you in with that Google account.",
+      SignInMethod.apple => "Hamaca couldn't sign you in with that Apple ID.",
     };
   }
   return 'Something went wrong signing you in. Please try again.';

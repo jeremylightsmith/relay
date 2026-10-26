@@ -27,7 +27,7 @@ void main() {
   testWidgets('matches AUTH-03 headline and body copy', (tester) async {
     await pumpScreen(tester);
 
-    expect(find.text('Let Relay reach you'), findsOneWidget);
+    expect(find.text('Let Hamaca reach you'), findsOneWidget);
     expect(
       find.text(
         "The AI works while you're away. Notifications are how it tells you "
@@ -40,7 +40,7 @@ void main() {
   testWidgets('headline uses the mockup 20px/600 type', (tester) async {
     await pumpScreen(tester);
 
-    final headline = tester.widget<Text>(find.text('Let Relay reach you'));
+    final headline = tester.widget<Text>(find.text('Let Hamaca reach you'));
     expect(headline.style?.fontSize, 20);
     expect(headline.style?.fontWeight, FontWeight.w600);
   });

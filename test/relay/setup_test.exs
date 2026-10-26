@@ -148,11 +148,21 @@ defmodule Relay.SetupTest do
     test "placeholders resolve against the onboarding LLM" do
       four = step(create!("bare-minimum"), "4")
 
-      assert ".claude/skills/relay-onboard, relay-update and relay-doctor — the Relay skills" in four.what_this_does
+      assert ".claude/skills/relay-onboard, relay-update and relay-doctor — the Hamaca skills" in four.what_this_does
       refute Enum.any?(four.what_this_does, &(&1 =~ "— the onboarding skill"))
       assert "relay.md, plus one line in CLAUDE.md pointing at it" in four.what_this_does
       refute Enum.any?(four.what_this_does, &(&1 =~ "%{"))
-      assert String.starts_with?(four.why, "Puts the runner and the Relay skills in your repo.")
+      assert String.starts_with?(four.why, "Puts the runner and the Hamaca skills in your repo.")
+    end
+
+    # RE477 scenario 11
+    test "the checklist copy says Hamaca, but the relay.md pointer line is unchanged" do
+      board = create!("bare-minimum")
+
+      assert step(board, "5.6").title == "Hamaca files on origin/main"
+      assert Enum.any?(step(board, "4").what_this_does, &(&1 =~ "— the Hamaca skills"))
+      assert String.starts_with?(step(board, "4").why, "Puts the runner and the Hamaca skills in your repo.")
+      assert Setup.pointer_line() == "Working Relay cards from this repo: see [relay.md](relay.md)."
     end
 
     # Scenario 10 (warning half)
@@ -1038,7 +1048,7 @@ defmodule Relay.SetupTest do
       set_step!(board, "5.6", status: :waiting, evidence: "PR #4 open")
 
       row = admin_row(board)
-      assert row.current == %{id: "5.6", title: "Relay files on origin/main", status: :waiting, actor: :ai_terminal}
+      assert row.current == %{id: "5.6", title: "Hamaca files on origin/main", status: :waiting, actor: :ai_terminal}
       assert row.on_step == 3600
       assert row.last == %{kind: :evidence, text: "PR #4 open"}
     end

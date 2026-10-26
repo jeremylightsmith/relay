@@ -49,7 +49,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
-    assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
+    assert has_element?(view, "#needs-input-panel", "HAMACA AI NEEDS YOUR INPUT")
     assert has_element?(view, "#needs-input-question", "Billing timezone or the viewer's?")
     # RE279 — the wait time lives only in the blocked strip now
     refute has_element?(view, "#needs-input-waiting")
@@ -208,7 +208,7 @@ defmodule RelayWeb.BoardLiveNeedsInputTest do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
     render_async(view)
 
-    assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
+    assert has_element?(view, "#needs-input-panel", "HAMACA AI NEEDS YOUR INPUT")
     assert has_element?(view, "#needs-input-progress", "Question 1 of 2")
     assert has_element?(view, "#needs-input-question", "Which timezone?")
     assert has_element?(view, "#needs-input-option-0", "Billing")

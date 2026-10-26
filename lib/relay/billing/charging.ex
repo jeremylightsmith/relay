@@ -25,6 +25,7 @@ defmodule Relay.Billing.Charging do
   alias Relay.Billing.Payments
   alias Relay.Billing.Periods
   alias Relay.Billing.Standing
+  alias Relay.Brand
   alias Relay.Repo
   alias Schemas.BillingAccount
   alias Schemas.BillingPaymentAttempt
@@ -363,9 +364,10 @@ defmodule Relay.Billing.Charging do
   defp charge_answer({:error, {:processing, payment_intent_id}}), do: {:unknown, "processing", payment_intent_id}
   defp charge_answer({:error, reason}), do: {:unknown, inspect(reason), nil}
 
-  # "Relay · Apr 4 – May 3, 2026"
+  # "Hamaca · Apr 4 – May 3, 2026" — the product name from `Relay.Brand`
   defp description(attempt),
-    do: "Relay · #{month_day(attempt.period_start)} – #{month_day(attempt.period_end)}, #{attempt.period_end.year}"
+    do:
+      "#{Brand.name()} · #{month_day(attempt.period_start)} – #{month_day(attempt.period_end)}, #{attempt.period_end.year}"
 
   defp month_day(date), do: Calendar.strftime(date, "%b %-d")
 

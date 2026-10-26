@@ -913,7 +913,7 @@ defmodule RelayWeb.CoreComponents do
     <span
       class={@class}
       style={avatar_circle_style(@size, "var(--color-secondary)", @ring, @grayed)}
-      title={@title || "Relay AI"}
+      title={@title || Relay.Brand.agent_name()}
       data-avatar="ai"
     >
       <span style={"width:#{@mark_size}px;height:#{@mark_size}px;border-radius:50%;border:1.5px solid var(--color-secondary-content);display:block"}>
@@ -1122,7 +1122,7 @@ defmodule RelayWeb.CoreComponents do
             src: nil,
             name: nil,
             email: nil,
-            title: "Relay AI",
+            title: Relay.Brand.agent_name(),
             actor_type: :agent,
             ring: "var(--color-secondary)",
             grayed: false,
@@ -1887,9 +1887,9 @@ defmodule RelayWeb.CoreComponents do
   defp health_chip_color(:stopped), do: "var(--color-error)"
   defp health_chip_color(_health), do: "var(--color-base-300)"
 
-  defp health_chip_label(:live), do: "Relay AI is live"
-  defp health_chip_label(:stale), do: "Relay AI has gone quiet"
-  defp health_chip_label(:stopped), do: "Relay AI stopped"
+  defp health_chip_label(:live), do: "#{Relay.Brand.agent_name()} is live"
+  defp health_chip_label(:stale), do: "#{Relay.Brand.agent_name()} has gone quiet"
+  defp health_chip_label(:stopped), do: "#{Relay.Brand.agent_name()} stopped"
   defp health_chip_label(_health), do: ""
 
   # §04 dot colour by kind. The artboard paints the Approved decision green; the spec's
@@ -5026,7 +5026,7 @@ defmodule RelayWeb.CoreComponents do
                     class="text-[12.5px] font-semibold"
                     style="color:color-mix(in oklab, var(--color-secondary) 75%, var(--color-base-content));"
                   >
-                    Relay AI is working
+                    {Relay.Brand.agent_name()} is working
                   </span>
                   <span
                     :if={@steer_state}
@@ -5919,7 +5919,7 @@ defmodule RelayWeb.CoreComponents do
                     >
                       <.avatar size={22} actor={:ai} />
                       <span class="flex-1 text-[12.5px] text-base-content/90">
-                        Relay AI
+                        {Relay.Brand.agent_name()}
                       </span>
                       <span :if={agent_owner?(@card)} class="text-[11px] text-primary">
                         ✓
@@ -6660,7 +6660,7 @@ defmodule RelayWeb.CoreComponents do
 
   defp panel_label(:escalation), do: "NODE FAILED · YOUR CALL"
   defp panel_label(:infrastructure), do: "AGENT COULD NOT RUN"
-  defp panel_label(_kind), do: "RELAY AI NEEDS YOUR INPUT"
+  defp panel_label(_kind), do: String.upcase(Relay.Brand.agent_name()) <> " NEEDS YOUR INPUT"
 
   defp answer_placeholder(:escalation), do: "Tell the agent what to do differently — it retries this node with your note…"
 
@@ -7286,7 +7286,7 @@ defmodule RelayWeb.CoreComponents do
   defp talk_busy?(nil), do: false
   defp talk_busy?(%{status: status}), do: status in Schemas.TalkTurn.active_statuses()
 
-  defp owner_name(%{actor_type: :agent}), do: "Relay AI"
+  defp owner_name(%{actor_type: :agent}), do: Relay.Brand.agent_name()
   defp owner_name(%{actor_type: :user, user: user}), do: user.name || user.email
 
   # RLY-43: the active owner is the baton-holder — ringed inside OWNERS (the old
@@ -7400,10 +7400,13 @@ defmodule RelayWeb.CoreComponents do
   # offers the approve/send-back pair; an ungated one has no drawer decision
   # button (RLY-37) — move it forward by drag or Move to… when ready. Embedded
   # (RE393), a gated stage's pair is the native review bar under the page.
-  defp review_hint(nil, _embed), do: "Relay AI finished this. Drag it or use Move to… when you're ready."
-  defp review_hint(_gate, true), do: "Relay AI finished this. Approve or reject below."
+  defp review_hint(nil, _embed),
+    do: "#{Relay.Brand.agent_name()} finished this. Drag it or use Move to… when you're ready."
 
-  defp review_hint(_gate, _embed), do: "Relay AI finished this. Approve to move it forward, or send it back with a note."
+  defp review_hint(_gate, true), do: "#{Relay.Brand.agent_name()} finished this. Approve or reject below."
+
+  defp review_hint(_gate, _embed),
+    do: "#{Relay.Brand.agent_name()} finished this. Approve to move it forward, or send it back with a note."
 
   # RE279 — compact time since `Card.blocked_since` ("47m", "3h", "2d"), clamped to >= 0. The ONE
   # copy of the minute/hour/day thresholds; the blocked strip's 21px wait value renders it.
@@ -7519,7 +7522,7 @@ defmodule RelayWeb.CoreComponents do
             "#{@chip_style}background:color-mix(in oklab, var(--color-secondary) 10%, var(--color-base-100));"
         )
       }
-      title={if(@paused, do: @tip, else: "Relay AI works this stage")}
+      title={if(@paused, do: @tip, else: "#{Relay.Brand.agent_name()} works this stage")}
       aria-label={@paused && @tip}
       data-flow-key={@key}
       data-flow-enabled={to_string(@enabled)}

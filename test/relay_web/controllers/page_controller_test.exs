@@ -25,12 +25,24 @@ defmodule RelayWeb.PageControllerTest do
       assert html =~ ~s(data-phx-theme="dark")
     end
 
-    test "titles the landing tab with the · Relay suffix and drops the Phoenix suffix", %{conn: conn} do
+    test "titles the landing tab with the · Hamaca suffix and drops the Phoenix suffix", %{conn: conn} do
       html = conn |> get(~p"/") |> html_response(200)
 
-      assert html =~ "AI-first kanban board · Relay"
+      assert html =~ "AI-first kanban board · Hamaca"
       refute html =~ "Phoenix Framework"
       refute html =~ "Relay · Relay"
+      refute html =~ "Hamaca · Hamaca"
+    end
+
+    # RE477 scenario 1
+    test "names Hamaca in the logo and the GitHub link", %{conn: conn} do
+      html = conn |> get(~p"/") |> html_response(200)
+
+      # The landing nav has no logo <img> (its mark is a CSS dot), so the brand is its wordmark.
+      assert html =~ ~s(tracking-[-0.02em]">Hamaca</span>)
+      refute html =~ ~s(alt="Relay")
+      assert html =~ ~s(aria-label="Hamaca on GitHub")
+      refute html =~ ~s(aria-label="Relay on GitHub")
     end
 
     test "renders the marketing body sections and anchors", %{conn: conn} do
@@ -73,7 +85,7 @@ defmodule RelayWeb.PageControllerTest do
 
       assert Enum.count(link) == 1
       assert LazyHTML.attribute(link, "href") == ["https://github.com/jeremylightsmith/relay"]
-      assert LazyHTML.attribute(link, "aria-label") == ["Relay on GitHub"]
+      assert LazyHTML.attribute(link, "aria-label") == ["Hamaca on GitHub"]
       assert link |> LazyHTML.query("svg[aria-hidden='true']") |> Enum.count() == 1
 
       label = LazyHTML.query(link, ~s(span[class="hidden lg:inline"]))
@@ -96,7 +108,7 @@ defmodule RelayWeb.PageControllerTest do
 
       assert Enum.count(readme) == 1
       assert text_of(readme) == "Self-host from the README →"
-      assert html =~ "Relay is open source under the MIT license. Rather run it yourself?"
+      assert html =~ "Hamaca is open source under the MIT license. Rather run it yourself?"
 
       # the CTA band and the #pricing self-host card both link the README
       assert doc |> LazyHTML.query(~s(a[href="#{@github}#readme"])) |> Enum.count() == 2
@@ -346,12 +358,12 @@ defmodule RelayWeb.PageControllerTest do
       end
     end
 
-    test "the Relay Cloud · Free card lists the $0, one-board terms", %{conn: conn} do
+    test "the Hamaca Cloud · Free card lists the $0, one-board terms", %{conn: conn} do
       free = conn |> pricing_doc() |> LazyHTML.query("#pricing-free")
       text = pricing_text(free)
 
       for snippet <- [
-            "RELAY CLOUD · FREE",
+            "HAMACA CLOUD · FREE",
             "No card",
             "$0",
             "forever",
@@ -366,11 +378,11 @@ defmodule RelayWeb.PageControllerTest do
       assert free |> LazyHTML.query("b") |> pricing_text() == "One board"
     end
 
-    test "the Relay Cloud card lists the $20/month unlimited-boards terms", %{conn: conn} do
+    test "the Hamaca Cloud card lists the $20/month unlimited-boards terms", %{conn: conn} do
       text = conn |> pricing_doc() |> LazyHTML.query("#pricing-cloud") |> pricing_text()
 
       for snippet <- [
-            "RELAY CLOUD",
+            "HAMACA CLOUD",
             "$20",
             "/ month",
             "Everything in Free",
@@ -420,7 +432,7 @@ defmodule RelayWeb.PageControllerTest do
       doc = pricing_doc(conn)
 
       assert doc |> LazyHTML.query("#pricing") |> pricing_text() =~
-               "Relay is open source under the MIT license. Your $20 pays for hosting and funds the project. Monthly only for now, no refunds."
+               "Hamaca is open source under the MIT license. Your $20 pays for hosting and funds the project. Monthly only for now, no refunds."
 
       link = LazyHTML.query(doc, "a#pricing-billing-docs")
       assert LazyHTML.attribute(link, "href") == ["/docs/billing"]
@@ -501,6 +513,22 @@ defmodule RelayWeb.PageControllerTest do
     test "GET /terms renders the terms of service", %{conn: conn} do
       html = conn |> get(~p"/terms") |> html_response(200)
       assert html =~ "Terms of Service"
+    end
+
+    # RE477 scenario 2
+    test "GET /terms names Hamaca, never Relay", %{conn: conn} do
+      html = conn |> get(~p"/terms") |> html_response(200)
+
+      refute html =~ ~r/\bRelay\b/
+      assert html =~ "govern your use of Hamaca, an AI-first kanban board"
+    end
+
+    # RE477 scenario 2
+    test "GET /privacy names Hamaca, never Relay", %{conn: conn} do
+      html = conn |> get(~p"/privacy") |> html_response(200)
+
+      refute html =~ ~r/\bRelay\b/
+      assert html =~ "Hamaca is an AI-first kanban board"
     end
 
     test "the sign-in page links to terms and privacy", %{conn: conn} do

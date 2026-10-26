@@ -226,7 +226,7 @@ class _BodyCopy extends StatelessWidget {
             color: Color(0xFF313942), // oklch(0.34 0.02 255)
           ),
           children: [
-            TextSpan(text: 'Tell Relay AI what to fix. A note is '),
+            TextSpan(text: 'Tell Hamaca AI what to fix. A note is '),
             TextSpan(
               text: 'required',
               style: TextStyle(fontWeight: FontWeight.w700),

@@ -47,7 +47,23 @@ defmodule RelayWeb.Api.CardControllerTest do
     body = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
     assert body["title"] == "Read me"
     assert body["description"] == "details"
-    assert Enum.any?(body["timeline"], &(&1["kind"] == "comment" and &1["author"]["name"] == "Relay AI"))
+    assert Enum.any?(body["timeline"], &(&1["kind"] == "comment" and &1["author"]["name"] == Relay.Brand.agent_name()))
+  end
+
+  test "GET /api/cards/:ref names the agent owner and agent author by the brand (RE477)", %{
+    conn: conn,
+    board: board,
+    stage: stage
+  } do
+    card = insert(:card, stage: stage)
+    {:ok, card} = Cards.assign_ai(card)
+    {:ok, _} = Activity.add_comment(card, %{actor: :agent, body: "on it"})
+
+    body = conn |> get(~p"/api/cards/#{ref(board, card)}") |> json_response(200) |> Map.fetch!("data")
+
+    assert %{"type" => "agent", "name" => Relay.Brand.agent_name()} in body["owners"]
+    comment = Enum.find(body["timeline"], &(&1["kind"] == "comment" and &1["body"] == "on it"))
+    assert comment["author"]["name"] == Relay.Brand.agent_name()
   end
 
   describe "note images on the timeline (RE427)" do
@@ -365,7 +381,7 @@ defmodule RelayWeb.Api.CardControllerTest do
       body = conn |> post(~p"/api/cards", %{title: "Logged"}) |> json_response(201) |> Map.fetch!("data")
 
       assert Enum.any?(body["timeline"], fn e ->
-               e["kind"] == "activity" and e["type"] == "created" and e["author"]["name"] == "Relay AI"
+               e["kind"] == "activity" and e["type"] == "created" and e["author"]["name"] == Relay.Brand.agent_name()
              end)
     end
 

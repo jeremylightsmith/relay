@@ -133,7 +133,7 @@ defmodule RelayWeb.PublicBoardLiveTest do
 
       view |> element("#public-board-sign-in") |> render_click()
 
-      assert has_element?(view, "#public-signin-modal", "Sign in to Relay")
+      assert has_element?(view, "#public-signin-modal", "Sign in to Hamaca")
       refute has_element?(view, "#public-signin-modal", "Sign in to vote")
     end
 
@@ -143,7 +143,7 @@ defmodule RelayWeb.PublicBoardLiveTest do
       view |> element("#public-vote-#{mobile.id}") |> render_click()
 
       assert has_element?(view, "#public-signin-modal", "Sign in to vote")
-      refute has_element?(view, "#public-signin-modal", "Sign in to Relay")
+      refute has_element?(view, "#public-signin-modal", "Sign in to Hamaca")
     end
 
     test "the sign-in modal's Google link carries return_to, from either entry point",

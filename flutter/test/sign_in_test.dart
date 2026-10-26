@@ -262,7 +262,7 @@ void main() {
   });
 
   testWidgets('a failed Apple sign-in retries with Apple', (tester) async {
-    const message = "Relay couldn't sign you in with that Apple ID.";
+    const message = "Hamaca couldn't sign you in with that Apple ID.";
     final fake = await pumpSignIn(
       tester,
       seed: const AuthState(

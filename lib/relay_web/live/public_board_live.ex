@@ -680,7 +680,7 @@ defmodule RelayWeb.PublicBoardLive do
   # Sign in button) reads "Sign in to Relay".
   defp signin_title(:vote), do: "Sign in to vote"
   defp signin_title(:post), do: "Sign in to post"
-  defp signin_title(:browse), do: "Sign in to Relay"
+  defp signin_title(:browse), do: "Sign in to " <> Relay.Brand.name()
 
   # Moves the signed-in viewer's own supporter entry (if present on this preview
   # page) to the front — the detail modal's "you first" ordering (RLY-69 spec

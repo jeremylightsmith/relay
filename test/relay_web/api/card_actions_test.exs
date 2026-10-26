@@ -61,12 +61,12 @@ defmodule RelayWeb.Api.CardActionsTest do
     assert Cards.get_card_by_ref(board, ref(board, card)).stage_id == code.id
   end
 
-  test "comments posts an agent comment shown as Relay AI", %{conn: conn, board: board, spec: spec} do
+  test "comments posts an agent comment shown as Hamaca AI", %{conn: conn, board: board, spec: spec} do
     card = insert(:card, stage: spec)
 
     body = conn |> post(~p"/api/cards/#{ref(board, card)}/comments", %{body: "on it"}) |> json_response(201)
     assert body["data"]["body"] == "on it"
-    assert body["data"]["author"]["name"] == "Relay AI"
+    assert body["data"]["author"]["name"] == Relay.Brand.agent_name()
   end
 
   test "needs-input sets status and records the question", %{conn: conn, board: board, spec: spec} do

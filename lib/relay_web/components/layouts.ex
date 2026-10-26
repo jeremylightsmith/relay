@@ -21,11 +21,16 @@ defmodule RelayWeb.Layouts do
 
   defp logo(assigns) do
     ~H"""
-    <img src={~p"/images/logo_light_128.png"} width={@width} alt="Relay" class="dark:hidden" />
+    <img
+      src={~p"/images/logo_light_128.png"}
+      width={@width}
+      alt={Relay.Brand.name()}
+      class="dark:hidden"
+    />
     <img
       src={~p"/images/logo_dark_128.png"}
       width={@width}
-      alt="Relay"
+      alt={Relay.Brand.name()}
       class="hidden dark:block"
     />
     """
@@ -94,7 +99,9 @@ defmodule RelayWeb.Layouts do
         class="flex items-center gap-2"
       >
         <.logo width="23" />
-        <span class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]">Relay</span>
+        <span class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]">
+          {Relay.Brand.name()}
+        </span>
       </.link>
       <div
         :if={@crumbs != [] or @title != []}
@@ -289,7 +296,7 @@ defmodule RelayWeb.Layouts do
       <header class="docs-nav">
         <a href={~p"/"} class="docs-nav-brand">
           <.logo width="22" />
-          <span>Relay</span>
+          <span>{Relay.Brand.name()}</span>
         </a>
         <span class="docs-nav-eyebrow">/ Docs</span>
         <a href={~p"/board"} class="docs-nav-cta">Open the board</a>
@@ -405,7 +412,7 @@ defmodule RelayWeb.Layouts do
       <.flash
         id="client-error"
         kind={:info}
-        title={gettext("Relay is updating")}
+        title={gettext("%{name} is updating", name: Relay.Brand.name())}
         phx-disconnected={show(".phx-client-error #client-error") |> JS.remove_attribute("hidden")}
         phx-connected={hide("#client-error") |> JS.set_attribute({"hidden", ""})}
         hidden
@@ -417,7 +424,7 @@ defmodule RelayWeb.Layouts do
       <.flash
         id="server-error"
         kind={:info}
-        title={gettext("Relay is updating")}
+        title={gettext("%{name} is updating", name: Relay.Brand.name())}
         phx-disconnected={show(".phx-server-error #server-error") |> JS.remove_attribute("hidden")}
         phx-connected={hide("#server-error") |> JS.set_attribute({"hidden", ""})}
         hidden

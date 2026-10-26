@@ -34,7 +34,7 @@ defmodule RelayWeb.Api.CardGatesTest do
     card
   end
 
-  test "POST approve advances the card, attributed to Relay AI", %{
+  test "POST approve advances the card, attributed to Hamaca AI", %{
     conn: conn,
     board: board,
     review: review,
@@ -52,7 +52,7 @@ defmodule RelayWeb.Api.CardGatesTest do
     assert body["status"] == "working"
 
     approved = Enum.find(body["timeline"], &(&1["kind"] == "activity" and &1["type"] == "approved"))
-    assert approved["author"]["name"] == "Relay AI"
+    assert approved["author"]["name"] == Relay.Brand.agent_name()
 
     assert approved["meta"] == %{
              "from_stage" => "Review",
@@ -81,7 +81,7 @@ defmodule RelayWeb.Api.CardGatesTest do
     assert Enum.any?(body["timeline"], &(&1["kind"] == "comment" and &1["body"] == "Handle the empty case"))
 
     rejected = Enum.find(body["timeline"], &(&1["kind"] == "activity" and &1["type"] == "rejected"))
-    assert rejected["author"]["name"] == "Relay AI"
+    assert rejected["author"]["name"] == Relay.Brand.agent_name()
     assert rejected["meta"]["note"] == "Handle the empty case"
   end
 
@@ -124,7 +124,7 @@ defmodule RelayWeb.Api.CardGatesTest do
     assert data["rejection"]["note"] == "Handle the empty case"
     assert data["rejection"]["to_stage"] == "Code"
     assert data["rejection"]["from_stage"] == "Review"
-    assert data["rejection"]["rejected_by"] == "Relay AI"
+    assert data["rejection"]["rejected_by"] == Relay.Brand.agent_name()
     # It is NOT just another timeline comment/activity of its own kind.
     refute Enum.any?(data["timeline"], &(&1["kind"] == "rejection"))
     assert code.id == data["stage_id"]

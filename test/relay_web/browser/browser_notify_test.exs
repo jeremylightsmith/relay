@@ -316,7 +316,7 @@ defmodule RelayWeb.Browser.BrowserNotifyTest do
       |> assert_has("#card-drawer-title", text: ctx.cx2.title)
 
     # Opening the drawer patched the page; the count survives it until the tab is focused.
-    conn = wait!(conn, ~s|document.title === "(1) #{ctx.x.name} · Relay"|)
+    conn = wait!(conn, ~s|document.title === "(1) #{ctx.x.name} · Hamaca"|)
 
     conn =
       conn

@@ -151,7 +151,7 @@ defmodule RelayWeb.BoardLiveEscalationTest do
 
     view = open(ctx.conn, ctx.board, card)
 
-    assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
+    assert has_element?(view, "#needs-input-panel", "HAMACA AI NEEDS YOUR INPUT")
     assert has_element?(view, "#card-drawer-blocked-strip-eyebrow", "BRAINSTORM ASKED AND EXITED")
     refute has_element?(view, ".run-banner-parked")
     refute render(view) =~ "NODE FAILED"
@@ -161,7 +161,7 @@ defmodule RelayWeb.BoardLiveEscalationTest do
     {card, _run} = park(ctx.board, ctx.flow, "Real question", :needs_input, "Which auth model?")
     view = open(ctx.conn, ctx.board, card)
 
-    assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
+    assert has_element?(view, "#needs-input-panel", "HAMACA AI NEEDS YOUR INPUT")
     assert has_element?(view, "#needs-input-question", "Which auth model?")
     refute has_element?(view, "#needs-input-retry")
     refute has_element?(view, "#needs-input-failure-detail")

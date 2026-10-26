@@ -43,7 +43,7 @@ void main() {
 
     expect(find.text('Pass work between people and AI.'), findsOneWidget);
     expect(
-      find.text('One board, one thread. Relay keeps the handoff clear.'),
+      find.text('One board, one thread. Hamaca keeps the handoff clear.'),
       findsOneWidget,
     );
     // Decision 2: signing in with Google *is* signing up.

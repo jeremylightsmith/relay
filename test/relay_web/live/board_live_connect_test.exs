@@ -192,7 +192,7 @@ defmodule RelayWeb.BoardLiveConnectTest do
     assert text(view, "#{step_dom(Setup.step_id(:onboard))} .setup-actor-tag") == "AI · terminal"
 
     assert onboard =~
-             "Pulls the board's flows and checks the Relay files are already on origin/main. No interview, no customizing."
+             "Pulls the board's flows and checks the Hamaca files are already on origin/main. No interview, no customizing."
 
     refute has_element?(view, step_dom(Setup.step_id(:interview)))
   end

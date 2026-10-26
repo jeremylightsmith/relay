@@ -153,7 +153,7 @@ defmodule RelayWeb.Api.CardJSON do
     }
   end
 
-  defp author(%{actor_type: :agent}), do: %{type: "agent", name: "Relay AI"}
+  defp author(%{actor_type: :agent}), do: %{type: "agent", name: Relay.Brand.agent_name()}
   defp author(%{actor_type: :user, user: user}), do: %{type: "user", id: user.id, name: user.name || user.email}
 
   defp rejection(nil), do: nil
@@ -175,7 +175,7 @@ defmodule RelayWeb.Api.CardJSON do
 
   defp dependent(%{ref: ref, title: title}), do: %{ref: ref, title: title}
 
-  defp owner(%Schemas.CardOwner{actor_type: :agent}), do: %{type: "agent", name: "Relay AI"}
+  defp owner(%Schemas.CardOwner{actor_type: :agent}), do: %{type: "agent", name: Relay.Brand.agent_name()}
 
   defp owner(%Schemas.CardOwner{actor_type: :user, user: user}) do
     %{type: "user", id: user.id, name: user.name || user.email}

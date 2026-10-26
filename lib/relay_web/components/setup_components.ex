@@ -934,7 +934,7 @@ defmodule RelayWeb.SetupComponents do
       <.code_row id={"#{@prefix}-key-line"} text={"export RELAY_API_KEY=#{@token}"} label="Copy key" />
       <div style={"font-size:11.5px;" <> muted()}>
         Put it wherever you keep secrets: <code class="font-mono">.envrc</code>, your shell profile,
-        1Password. Relay never writes it to disk.
+        1Password. Hamaca never writes it to disk.
       </div>
     </div>
     <button
@@ -1141,7 +1141,7 @@ defmodule RelayWeb.SetupComponents do
             class="toggle toggle-xs"
             checked={@hide_explanations}
             phx-click="setup_toggle_explanations"
-          /> I know Relay, hide explanations
+          /> I know Hamaca, hide explanations
         </label>
       </div>
       <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
@@ -1537,7 +1537,7 @@ defmodule RelayWeb.SetupComponents do
     ~H"""
     <details id={@id} open class="rounded-xl border border-base-300 bg-base-100 p-3">
       <summary class="cursor-pointer list-none" style="font-size:12px;font-weight:600">
-        <span class="font-mono" style={"font-size:10px;" <> faint()}>▾</span> How Relay works
+        <span class="font-mono" style={"font-size:10px;" <> faint()}>▾</span> How Hamaca works
       </summary>
       <div class="mt-2 flex items-center gap-1.5">
         <.diagram_box glyph="🌐" name="Board" caption="cloud · cards, flows" tone="primary" />

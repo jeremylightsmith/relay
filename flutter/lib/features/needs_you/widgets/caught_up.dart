@@ -48,7 +48,7 @@ class CaughtUp extends StatelessWidget {
           ),
           const SizedBox(height: 12), // artboard 8
           Text(
-            "Relay AI is working. We'll ping you the moment it needs a decision.",
+            "Hamaca AI is working. We'll ping you the moment it needs a decision.",
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 20, // artboard 13

@@ -66,7 +66,7 @@ class WelcomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'One board, one thread. Relay keeps the handoff clear.',
+                  'One board, one thread. Hamaca keeps the handoff clear.',
                   style: TextStyle(
                     fontSize: 14,
                     height: 1.5,

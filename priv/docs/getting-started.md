@@ -2,7 +2,7 @@
 
 **From nothing to a card being worked by agents.** Follow the steps in order — each one
 is a board URL, a click in the UI, or a command you already have. Nothing here needs
-access to Relay's own source repository.
+access to Hamaca's own source repository.
 
 This page is written so an **agent** can follow it. Where you need a human to decide
 something, it is called out **as a question**.
@@ -44,7 +44,7 @@ the error you get without it.
 
 ## 3. Get the CLI and scaffold your project
 
-Everything the CLI needs is served by **your board** — **no access to the Relay repository is
+Everything the CLI needs is served by **your board** — **no access to the Hamaca repository is
 needed**, there is no repository to clone, and nothing comes from a third party.
 
 Create the board from a template and follow its **setup wizard**, docked beside the board.
@@ -58,7 +58,7 @@ curl -fsSL "https://<board-host>/b/<slug>/install" | sh
 The script checks your project first and writes nothing until those checks pass. Then it
 fetches `./relay` from `$RELAY_URL/api/scaffold/relay` **with your board's URL already baked
 in**, so the CLI finds its board without `RELAY_URL` (an exported `RELAY_URL` still overrides
-it, and `./relay update` keeps it). It also installs the Relay-owned skills and `relay.md`, and
+it, and `./relay update` keeps it). It also installs the Hamaca-owned skills and `relay.md`, and
 lays down a starter `.relay/runner.json` and `.relay/prepare-worktree.sh` with
 `./relay update --starter-only` — that is where step 4's capacity configuration comes from.
 Your board API key is never written to disk.
@@ -68,12 +68,12 @@ wires this repo to your board's flows and reviews the starter `.relay/runner.jso
 works sub-steps 5.1–5.8 of the board's setup checklist, one at a time, reporting each one to
 the board's setup wizard as it goes: pull the flows, confirm what it found in the repo, ask the
 questions the repo can't answer (saved to a committed `.relay/project.md`), agree each proposed
-change with you before writing anything, push the flows back enabled, get Relay's files onto
+change with you before writing anything, push the flows back enabled, get Hamaca's files onto
 your base branch, file any follow-ups as `#setup` cards, and create your first card. Interrupt
 it any time; running it again picks up where it stopped. On a board created before guided
 setup it says so and points you at `/relay-doctor`.
 
-Relay owns exactly five files in your project and updates them as a set:
+Hamaca owns exactly five files in your project and updates them as a set:
 
 | Item | Path |
 |---|---|
@@ -83,7 +83,7 @@ Relay owns exactly five files in your project and updates them as a set:
 | doctor skill | `.claude/skills/relay-doctor/SKILL.md` |
 | onboarding skill | `.claude/skills/relay-onboard/SKILL.md` |
 
-Everything else in `.claude/` is yours; Relay never writes it.
+Everything else in `.claude/` is yours; Hamaca never writes it.
 
 Already have `./relay`? Run `/relay-update` (or `./relay update --check` to see what would
 change first). It compares the board's scaffold manifest against what is on disk, refetches only

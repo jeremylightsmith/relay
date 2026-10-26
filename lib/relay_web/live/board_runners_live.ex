@@ -274,7 +274,7 @@ defmodule RelayWeb.BoardRunnersLive do
                   Runners
                 </h1>
                 <p style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0;max-width:600px;">
-                  Runners are the machines that work this board's cards. Relay hands each card to
+                  Runners are the machines that work this board's cards. Hamaca hands each card to
                   a runner with a free slot in the right pool. This is the instrument you open
                   when nothing is running.
                 </p>

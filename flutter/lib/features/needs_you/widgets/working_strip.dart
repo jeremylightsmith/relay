@@ -54,7 +54,7 @@ class WorkingStrip extends StatelessWidget {
             ),
             const SizedBox(height: 10), // artboard 6
             Text(
-              'Relay AI is on it',
+              'Hamaca AI is on it',
               style: TextStyle(
                 fontSize: 19, // artboard 12
                 color: scheme.onSurfaceVariant,

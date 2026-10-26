@@ -90,7 +90,7 @@ defmodule RelayWeb.StoryMapFilterTest do
       assert mara_chip.key == "u:4"
       assert ai_chip.key == "agent"
       assert ai_chip.actor == :ai
-      assert ai_chip.name == "Relay AI"
+      assert ai_chip.name == Relay.Brand.agent_name()
     end
 
     test "a selected key with no card left still gets a chip, so it can be cleared" do
@@ -100,7 +100,7 @@ defmodule RelayWeb.StoryMapFilterTest do
 
       assert Enum.map(chips, & &1.key) == ["u:3", "agent"]
       assert Enum.all?(chips, & &1.selected?)
-      assert Enum.find(chips, &(&1.key == "agent")).name == "Relay AI"
+      assert Enum.find(chips, &(&1.key == "agent")).name == Relay.Brand.agent_name()
     end
 
     test "a selection is marked, and a forged selected key is ignored" do

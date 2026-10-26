@@ -85,7 +85,7 @@ defmodule Relay.FlowsShapeTest do
     assert problem.what == "Triage is the first column on the board, so there is no column before it."
 
     assert problem.why ==
-             "A flow only ever pulls work from the column before its stage — Relay never pushes work in. " <>
+             "A flow only ever pulls work from the column before its stage — Hamaca never pushes work in. " <>
                "With nothing before Triage, no card can ever reach the flow."
 
     assert problem.fixes == [

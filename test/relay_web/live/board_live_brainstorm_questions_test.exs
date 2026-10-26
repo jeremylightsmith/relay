@@ -46,7 +46,7 @@ defmodule RelayWeb.BoardLiveBrainstormQuestionsTest do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=#{ref}")
     render_async(view)
 
-    assert has_element?(view, "#needs-input-panel", "RELAY AI NEEDS YOUR INPUT")
+    assert has_element?(view, "#needs-input-panel", "HAMACA AI NEEDS YOUR INPUT")
     assert has_element?(view, "#needs-input-stepper")
     assert has_element?(view, "#needs-input-progress", "Question 1 of #{length(questions)}")
     assert has_element?(view, "#needs-input-option-0")

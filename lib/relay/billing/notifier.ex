@@ -25,6 +25,7 @@ defmodule Relay.Billing.Notifier do
   alias Relay.Billing
   alias Relay.Billing.Charging
   alias Relay.Billing.Standing
+  alias Relay.Brand
   alias Relay.Repo
   alias Schemas.BillingAccount
   alias Schemas.BillingNotice
@@ -37,7 +38,7 @@ defmodule Relay.Billing.Notifier do
   @once_target [:billing_account_id, :kind, :period_key]
 
   @doc """
-  Parses the `:mail_from` config (`"Relay <billing@example.com>"` or a bare
+  Parses the `:mail_from` config (`"Hamaca <billing@example.com>"` or a bare
   `"billing@example.com"`) into Swoosh's `{name, address}`. Handing Swoosh the raw
   `"Name <addr>"` string makes the whole thing the address, which breaks every path that renders
   it (the `/dev/mailbox` preview punycodes the domain `example.com>`).
@@ -148,8 +149,8 @@ defmodule Relay.Billing.Notifier do
   @doc "The notice sent when charging `amount_cents` was declined."
   @spec card_declined_email(User.t(), pos_integer()) :: Swoosh.Email.t()
   def card_declined_email(%User{} = user, amount_cents) when is_integer(amount_cents) and amount_cents > 0 do
-    build(user, "We couldn't charge your card for Relay", [
-      "We couldn't charge your card for Relay (#{Billing.format_cents(amount_cents)}). " <>
+    build(user, "We couldn't charge your card for #{Brand.name()}", [
+      "We couldn't charge your card for #{Brand.name()} (#{Billing.format_cents(amount_cents)}). " <>
         "Update it today to keep your boards editable."
     ])
   end
@@ -157,8 +158,8 @@ defmodule Relay.Billing.Notifier do
   @doc "The notice sent when a lapsed paid plan drops the owner to Free."
   @spec dropped_to_free_email(User.t()) :: Swoosh.Email.t()
   def dropped_to_free_email(%User{} = user) do
-    build(user, "Your Relay plan is now Free", [
-      "We couldn't renew your Relay plan, so you're on Free now. Free includes one editable board; " <>
+    build(user, "Your #{Brand.name()} plan is now Free", [
+      "We couldn't renew your #{Brand.name()} plan, so you're on Free now. Free includes one editable board; " <>
         "your other boards are read-only and nothing has been deleted. Upgrade any time to unlock them all: " <>
         billing_url()
     ])

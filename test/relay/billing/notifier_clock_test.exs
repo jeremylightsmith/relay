@@ -12,8 +12,8 @@ defmodule Relay.Billing.NotifierClockTest do
   alias Schemas.BillingNotice
   alias Schemas.BillingPaymentAttempt
 
-  @declined "We couldn't charge your card for Relay"
-  @dropped "Your Relay plan is now Free"
+  @declined "We couldn't charge your card for Hamaca"
+  @dropped "Your Hamaca plan is now Free"
 
   setup do
     Process.put(:billing_enabled, true)
@@ -66,7 +66,7 @@ defmodule Relay.Billing.NotifierClockTest do
         assert email.to == [{"", "lapsed@example.com"}]
 
         assert email.text_body =~
-                 "We couldn't renew your Relay plan, so you're on Free now. Free includes one editable board; " <>
+                 "We couldn't renew your Hamaca plan, so you're on Free now. Free includes one editable board; " <>
                    "your other boards are read-only and nothing has been deleted. Upgrade any time to unlock them all: " <>
                    Notifier.billing_url()
       end)

@@ -86,7 +86,7 @@ void main() {
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(
-      find.text('Let Relay reach you'),
+      find.text('Let Hamaca reach you'),
       findsNothing,
       reason:
           'AUTH-03 primes after an interactive sign-in, not on every cold start',
@@ -152,7 +152,7 @@ void main() {
       await tester.tap(find.byKey(const Key('sign_in_google')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Let Relay reach you'), findsOneWidget);
+      expect(find.text('Let Hamaca reach you'), findsOneWidget);
     },
   );
 

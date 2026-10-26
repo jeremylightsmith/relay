@@ -125,7 +125,7 @@ class DictationController extends ChangeNotifier {
       case MicPermission.notDetermined:
         _set(DictationStage.priming);
       case MicPermission.denied:
-        errorMessage = 'Microphone access is off for Relay.';
+        errorMessage = 'Microphone access is off for Hamaca.';
         showOpenSettings = true;
         showTryAgain = false;
         _set(DictationStage.error);

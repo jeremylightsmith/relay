@@ -34,7 +34,7 @@ defmodule Relay.CardsRejectTest do
       assert r.from_stage_name == "Review"
       assert r.to_stage_id == code.id
       assert r.to_stage_name == "Code"
-      assert r.rejected_by == "Relay AI"
+      assert r.rejected_by == Relay.Brand.agent_name()
       assert r.rejected_at
 
       timeline = Activity.list_timeline(card)

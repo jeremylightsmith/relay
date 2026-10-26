@@ -63,15 +63,16 @@ defmodule RelayWeb.LayoutsTest do
 
     # wordmark span is hidden until md; logo img is always present
     assert html =~ ~s(class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]")
-    assert html =~ ~s(alt="Relay")
+    assert html =~ ~s(alt="Hamaca")
   end
 
-  test "reconnect banners read 'Relay is updating' as calm info alerts" do
+  test "reconnect banners read 'Hamaca is updating' as calm info alerts" do
     html = render_app(%{inner_block: inner_block_slot()})
 
     assert html =~ ~s(id="client-error")
     assert html =~ ~s(id="server-error")
-    assert html =~ "Relay is updating"
+    assert html |> String.split("Hamaca is updating") |> length() == 3
+    refute html =~ "Relay is updating"
     assert html =~ "Standby"
     assert html =~ "alert-info"
 

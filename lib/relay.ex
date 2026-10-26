@@ -29,6 +29,7 @@ defmodule Relay do
       Billing.Standing,
       BoardWatch,
       Boards,
+      Brand,
       Cards,
       Config,
       Events,

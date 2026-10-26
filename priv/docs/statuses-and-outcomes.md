@@ -1,6 +1,6 @@
 # Statuses & outcomes
 
-Relay is about **passing the baton**: work moves back and forth between you and AI agents,
+Hamaca is about **passing the baton**: work moves back and forth between you and AI agents,
 and the board makes the hand-off explicit. Two small vocabularies carry that — a card's
 **status**, and the **outcome** an agent declares when it finishes a step. Learn these six
 and four words and the board reads itself.

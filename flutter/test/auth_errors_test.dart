@@ -29,7 +29,7 @@ void main() {
     ]) {
       expect(
         signInErrorMessage(_dioError(type)),
-        "Couldn't reach Relay. Check your connection and try again.",
+        "Couldn't reach Hamaca. Check your connection and try again.",
         reason: '$type should read as a connectivity problem',
       );
     }
@@ -38,7 +38,7 @@ void main() {
   test('a backend rejection names the account, not the status code', () {
     expect(
       signInErrorMessage(const SignInRejected(403)),
-      "Relay couldn't sign you in with that Google account.",
+      "Hamaca couldn't sign you in with that Google account.",
     );
   });
 
@@ -97,14 +97,14 @@ void main() {
   test('an Apple rejection names the Apple ID', () {
     expect(
       signInErrorMessage(const SignInRejected(401, method: SignInMethod.apple)),
-      "Relay couldn't sign you in with that Apple ID.",
+      "Hamaca couldn't sign you in with that Apple ID.",
     );
   });
 
   test('a rejection defaults to the Google wording', () {
     expect(
       signInErrorMessage(const SignInRejected(403)),
-      "Relay couldn't sign you in with that Google account.",
+      "Hamaca couldn't sign you in with that Google account.",
     );
   });
 }

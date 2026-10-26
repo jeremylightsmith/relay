@@ -77,7 +77,7 @@ void main() {
     router.go('/push-permission');
     await tester.pumpAndSettle();
 
-    expect(find.text('Let Relay reach you'), findsOneWidget);
+    expect(find.text('Let Hamaca reach you'), findsOneWidget);
   });
 
   test('cardUrl builds the embedded LiveView deep link', () {

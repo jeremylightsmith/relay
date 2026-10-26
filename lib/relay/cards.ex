@@ -12,6 +12,7 @@ defmodule Relay.Cards do
     deps: [
       Relay.Activity,
       Relay.Boards,
+      Relay.Brand,
       Relay.Events,
       Relay.Flows,
       Relay.Members,
@@ -2734,7 +2735,7 @@ defmodule Relay.Cards do
   end
 
   # The rejecter's display name snapshotted into the rejection banner.
-  defp actor_display_name(:agent), do: "Relay AI"
+  defp actor_display_name(:agent), do: Relay.Brand.agent_name()
 
   defp actor_display_name({:user, user_id}) do
     user = Repo.get!(User, user_id)

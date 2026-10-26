@@ -81,7 +81,7 @@ void main() {
     expect(find.byKey(_row), findsOneWidget);
     expect(find.text('Suggest an idea'), findsOneWidget);
     expect(
-      find.text("Share or upvote ideas on Relay's public roadmap"),
+      find.text("Share or upvote ideas on Hamaca's public roadmap"),
       findsOneWidget,
     );
     expect(find.byIcon(Icons.lightbulb_outline), findsOneWidget);
