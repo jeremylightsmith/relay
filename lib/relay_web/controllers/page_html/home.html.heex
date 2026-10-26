@@ -599,9 +599,9 @@
         PRICING
       </div>
       <h2 class="mx-auto mt-2 max-w-xl text-center text-[28px] font-semibold leading-tight tracking-[-0.02em]">
-        Same Relay either way. Pay only if you want us to run it.
+        Start free. Pay when you want more boards.
       </h2>
-      <div class="mx-auto mt-8 grid max-w-3xl gap-4 md:grid-cols-2">
+      <div class="mx-auto mt-8 grid max-w-[1000px] gap-4 md:grid-cols-3">
         <div id="pricing-self-host" class="card border border-base-300 bg-base-100 p-6">
           <div class="font-mono text-[11px] text-base-content/65">SELF-HOST</div>
           <div class="mt-2 flex flex-wrap items-baseline gap-1">
@@ -611,12 +611,12 @@
           <ul class="mt-4 space-y-2 text-sm text-base-content/75">
             <li>✓ Every feature. No "enterprise edition."</li>
             <li>✓ Your server, your database, your keys</li>
-            <li>✓ Fork it, change it, use it at work</li>
+            <li>✓ Unlimited boards</li>
             <li class="text-base-content/55">
               — You run upgrades, backups and push certificates
             </li>
-            <li class="text-base-content/55">— A fork can't be called "Relay"</li>
           </ul>
+          <span class="flex-1"></span>
           <a
             id="pricing-self-host-cta"
             class="btn btn-outline mt-6"
@@ -625,23 +625,40 @@
             Self-host from the README →
           </a>
         </div>
-        <div id="pricing-cloud" class="card border-2 border-primary bg-base-100 p-6">
+        <div id="pricing-free" class="card border-2 border-primary bg-base-100 p-6">
           <div class="flex items-center justify-between">
-            <span class="font-mono text-[11px] text-primary">RELAY CLOUD</span>
-            <span class="badge badge-primary badge-sm">1 month free</span>
+            <span class="font-mono text-[11px] text-primary">RELAY CLOUD · FREE</span>
+            <span class="badge badge-primary badge-sm">No card</span>
           </div>
+          <div class="mt-2 flex items-baseline gap-1">
+            <span class="text-4xl font-semibold">$0</span>
+            <span class="text-sm text-base-content/65">forever</span>
+          </div>
+          <ul class="mt-4 space-y-2 text-sm text-base-content/75">
+            <li>✓ <b>One board</b>, every feature</li>
+            <li>✓ Agent runs, flows, iOS & Android push</li>
+            <li>✓ Invite your team. Members are free.</li>
+            <li>✓ We run upgrades and backups</li>
+          </ul>
+          <span class="flex-1"></span>
+          <a id="pricing-free-cta" class="btn btn-primary mt-6" href={~p"/auth/google"}>
+            Start free, no card →
+          </a>
+        </div>
+        <div id="pricing-cloud" class="card border border-base-300 bg-base-100 p-6">
+          <div class="font-mono text-[11px] text-base-content/65">RELAY CLOUD</div>
           <div class="mt-2 flex items-baseline gap-1">
             <span class="text-4xl font-semibold">$20</span>
             <span class="text-sm text-base-content/65">/ month</span>
           </div>
           <ul class="mt-4 space-y-2 text-sm text-base-content/75">
-            <li>✓ Everything in self-host, run by us</li>
-            <li>✓ Upgrades, backups, iOS & Android push</li>
-            <li>✓ Unlimited boards. Bring your team; invited members are free.</li>
-            <li>✓ Cancel anytime. Data is never deleted.</li>
+            <li>✓ Everything in Free</li>
+            <li>✓ <b>Unlimited boards</b></li>
+            <li>✓ Cancel anytime. You drop to Free; nothing is deleted.</li>
           </ul>
-          <a id="pricing-cloud-cta" class="btn btn-primary mt-6" href={~p"/auth/google"}>
-            Start free trial, no card →
+          <span class="flex-1"></span>
+          <a id="pricing-cloud-cta" class="btn btn-outline mt-6" href={~p"/auth/google"}>
+            Start free, upgrade anytime →
           </a>
         </div>
       </div>

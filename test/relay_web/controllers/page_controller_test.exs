@@ -317,7 +317,17 @@ defmodule RelayWeb.PageControllerTest do
       assert "text-primary" in pricing_classes(eyebrow)
 
       assert section |> LazyHTML.query("h2") |> pricing_text() ==
-               "Same Relay either way. Pay only if you want us to run it."
+               "Start free. Pay when you want more boards."
+    end
+
+    test "renders the three tiers once each, Self-host then Free then Cloud", %{conn: conn} do
+      cards =
+        conn
+        |> pricing_doc()
+        |> LazyHTML.query("#pricing")
+        |> LazyHTML.query("#pricing-self-host, #pricing-free, #pricing-cloud")
+
+      assert LazyHTML.attribute(cards, "id") == ["pricing-self-host", "pricing-free", "pricing-cloud"]
     end
 
     test "the self-host card lists the free, MIT terms", %{conn: conn} do
@@ -329,29 +339,49 @@ defmodule RelayWeb.PageControllerTest do
             "forever · MIT",
             ~s(Every feature. No "enterprise edition."),
             "Your server, your database, your keys",
-            "Fork it, change it, use it at work",
-            "You run upgrades, backups and push certificates",
-            ~s(A fork can't be called "Relay")
+            "Unlimited boards",
+            "You run upgrades, backups and push certificates"
           ] do
         assert text =~ snippet, "expected #pricing-self-host to contain #{inspect(snippet)}"
       end
     end
 
-    test "the Relay Cloud card lists the $20/month terms", %{conn: conn} do
+    test "the Relay Cloud · Free card lists the $0, one-board terms", %{conn: conn} do
+      free = conn |> pricing_doc() |> LazyHTML.query("#pricing-free")
+      text = pricing_text(free)
+
+      for snippet <- [
+            "RELAY CLOUD · FREE",
+            "No card",
+            "$0",
+            "forever",
+            "One board, every feature",
+            "Agent runs, flows, iOS & Android push",
+            "Invite your team. Members are free.",
+            "We run upgrades and backups"
+          ] do
+        assert text =~ snippet, "expected #pricing-free to contain #{inspect(snippet)}"
+      end
+
+      assert free |> LazyHTML.query("b") |> pricing_text() == "One board"
+    end
+
+    test "the Relay Cloud card lists the $20/month unlimited-boards terms", %{conn: conn} do
       text = conn |> pricing_doc() |> LazyHTML.query("#pricing-cloud") |> pricing_text()
 
       for snippet <- [
             "RELAY CLOUD",
-            "1 month free",
             "$20",
             "/ month",
-            "Everything in self-host, run by us",
-            "Upgrades, backups, iOS & Android push",
-            "invited members are free",
-            "Cancel anytime. Data is never deleted."
+            "Everything in Free",
+            "Unlimited boards",
+            "Cancel anytime. You drop to Free; nothing is deleted."
           ] do
         assert text =~ snippet, "expected #pricing-cloud to contain #{inspect(snippet)}"
       end
+
+      refute text =~ "$0"
+      refute text =~ "No card"
     end
 
     test "the pricing section does not mention promo codes", %{conn: conn} do
@@ -360,16 +390,30 @@ defmodule RelayWeb.PageControllerTest do
       refute text =~ "Have a code?", "expected #pricing not to mention \"Have a code?\""
     end
 
-    test "the two CTAs link the README and the free trial sign-up", %{conn: conn} do
+    test "the three CTAs link the README and the Google sign-up", %{conn: conn} do
       doc = pricing_doc(conn)
 
       self_host = LazyHTML.query(doc, "a#pricing-self-host-cta")
       assert LazyHTML.attribute(self_host, "href") == [@readme]
       assert pricing_text(self_host) == "Self-host from the README →"
 
+      free = LazyHTML.query(doc, "a#pricing-free-cta")
+      assert LazyHTML.attribute(free, "href") == ["/auth/google"]
+      assert pricing_text(free) == "Start free, no card →"
+      assert "btn-primary" in pricing_classes(free)
+
       cloud = LazyHTML.query(doc, "a#pricing-cloud-cta")
       assert LazyHTML.attribute(cloud, "href") == ["/auth/google"]
-      assert pricing_text(cloud) == "Start free trial, no card →"
+      assert pricing_text(cloud) == "Start free, upgrade anytime →"
+      assert "btn-outline" in pricing_classes(cloud)
+      refute "btn-primary" in pricing_classes(cloud)
+    end
+
+    test "the landing page never mentions a trial", %{conn: conn} do
+      text = conn |> pricing_doc() |> LazyHTML.text() |> String.downcase()
+
+      refute text =~ "trial"
+      refute text =~ "1 month free"
     end
 
     test "the footnote states the MIT model and links to /docs/billing", %{conn: conn} do
@@ -394,18 +438,23 @@ defmodule RelayWeb.PageControllerTest do
       assert pricing < cta
     end
 
-    test "the cloud card is primary and the grid stacks below md", %{conn: conn} do
+    test "the free card is primary and the grid is three columns from md up", %{conn: conn} do
       doc = pricing_doc(conn)
 
-      cloud = pricing_classes(LazyHTML.query(doc, "#pricing-cloud"))
-      assert "border-2" in cloud
-      assert "border-primary" in cloud
+      free = pricing_classes(LazyHTML.query(doc, "#pricing-free"))
+      assert "border-2" in free
+      assert "border-primary" in free
 
-      assert "border-base-300" in pricing_classes(LazyHTML.query(doc, "#pricing-self-host"))
+      for id <- ["#pricing-self-host", "#pricing-cloud"] do
+        classes = pricing_classes(LazyHTML.query(doc, id))
+        assert "border-base-300" in classes, "expected #{id} to have border-base-300"
+        refute "border-primary" in classes, "expected #{id} not to have border-primary"
+      end
 
       grid = doc |> LazyHTML.query("#pricing div:has(> #pricing-cloud)") |> pricing_classes()
-      assert "md:grid-cols-2" in grid
-      refute "grid-cols-2" in grid
+      assert "md:grid-cols-3" in grid
+      refute "grid-cols-3" in grid
+      refute "md:grid-cols-2" in grid
     end
 
     test "the nav links Pricing", %{conn: conn} do
