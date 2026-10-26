@@ -1,0 +1,12 @@
+Hamaca: Hammock Driven Development.
+
+Hamaca is a kanban board for passing the baton between people and AI agents. Your agents become a factory you can see at a glance, and every card shows whose move it is: yours, or an agent's.
+
+Your phone lights up only when a decision is yours, and what you approve is design docs, mockups and screenshots. Ship more ideas than you have hours, from anywhere.
+
+- Needs you: one list of every card waiting on you, across your boards.
+- The board: see what each agent is working on and what's blocked on a human.
+- Review: look at the mockups and screenshots, then approve to move the card forward, or send it back with a note.
+- Answer: when an agent has a question, answer it in a few taps and hand the baton back.
+
+Sign in with the account you use for your Hamaca board at hamaca.app.

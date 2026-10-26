@@ -109,7 +109,9 @@ flowchart LR
   `needs_input` when it fails, with no AI fixer) run on our own runners:
   - `checkout`: `{relay} git-fetch && git checkout -B {branch} origin/main`.
   - `fly`: `bin/deploy_fly.sh`. This deploy always runs, and it bakes `GIT_SHA` / `BUILT_AT` into the image.
-  - `ios`: `bin/deploy_ios.sh {ref}`, which goes to TestFlight.
+  - `ios`: `bin/deploy_ios.sh {ref}`, which goes to TestFlight. When the card changed the App
+    Store listing (`flutter/ios/fastlane/metadata` or `…/screenshots`), it then runs `fastlane ios
+    upload_listing`, which uploads only metadata and screenshots and never submits for review.
   - `android`: `bin/deploy_android.sh {ref}`, which goes to Google Play.
 
   `ios` and `android` skip with exit 0 when the card's commit didn't touch `flutter/`

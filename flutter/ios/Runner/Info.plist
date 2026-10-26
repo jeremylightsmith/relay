@@ -5,9 +5,9 @@
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
 		<key>NSMicrophoneUsageDescription</key>
-		<string>Relay listens only while you're dictating and transcribes on this phone — audio never leaves it.</string>
+		<string>Hamaca listens only while you're dictating and transcribes on this phone — audio never leaves it.</string>
 		<key>NSSpeechRecognitionUsageDescription</key>
-		<string>Relay transcribes your dictation on this phone — audio never leaves it.</string>
+		<string>Hamaca transcribes your dictation on this phone — audio never leaves it.</string>
 		<!-- Enables silent APNs delivery to the app process (RLY-81). -->
 		<key>UIBackgroundModes</key>
 		<array>
@@ -27,14 +27,14 @@
 				<string>Editor</string>
 				<key>CFBundleURLSchemes</key>
 				<array>
-					<string>com.googleusercontent.apps.1033120416481-2iv7j9n6umr9mf01galu7ojfps5ut1nc</string>
+					<string>com.googleusercontent.apps.1033120416481-dr0881bvltpbi063b1vuukg5cvchlvut</string>
 				</array>
 			</dict>
 		</array>
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
-		<string>Relay</string>
+		<string>Hamaca</string>
 		<key>CFBundleExecutable</key>
 		<string>$(EXECUTABLE_NAME)</string>
 		<key>CFBundleIdentifier</key>

@@ -1,10 +1,15 @@
 import 'package:flutter/foundation.dart';
 
-/// Environment-aware configuration for the Relay mobile wrapper.
+/// Environment-aware configuration for the Hamaca mobile wrapper.
+///
+/// Note: the shipped app does not read this class. Its host is
+/// `AppConfig.baseUrl` in `lib/config.dart`, baked in from the
+/// `RELAY_BASE_URL` dart-define (`https://hamaca.app` for release builds; see
+/// `ios/fastlane/Fastfile`). Keep [productionUrl] in step with it.
 ///
 /// The base URL is chosen automatically:
 ///   * Debug builds  -> http://localhost:4000 (local Phoenix server)
-///   * Release/profile builds -> https://relayboard.fly.dev (production)
+///   * Release/profile builds -> https://hamaca.app (production)
 ///
 /// Override at build/run time with:
 ///   flutter run --dart-define=APP_API_URL=http://192.168.1.5:4000
@@ -17,8 +22,8 @@ class AppConfig {
     defaultValue: '',
   );
 
-  /// Production Phoenix host (Fly app `relayboard`).
-  static const String productionUrl = 'https://relayboard.fly.dev';
+  /// Production Phoenix host (`https://hamaca.app`, served by Fly app `relayboard`).
+  static const String productionUrl = 'https://hamaca.app';
 
   /// Localhost for the iOS simulator (Android emulator uses 10.0.2.2).
   static const String localhostUrl = 'http://localhost:4000';

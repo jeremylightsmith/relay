@@ -6,9 +6,15 @@ via `lib/config/app_config.dart`.
 | Build mode | API URL |
 | --- | --- |
 | Debug (`flutter run`) | `http://localhost:4000` |
-| Release / Profile (`flutter build`, `--release`) | `https://relayboard.fly.dev` |
+| Release / Profile (`flutter build`, `--release`) | `https://hamaca.app` |
 
 Use it in code with `AppConfig.apiBaseUrl`.
+
+> The shipped app's host is not this table: it is `AppConfig.baseUrl` in
+> `lib/config.dart`, baked in from the `RELAY_BASE_URL` dart-define by
+> `ios/fastlane/Fastfile` (`https://hamaca.app` for release builds). The deploy
+> runner reads `RELAY_BASE_URL` from its `.envrc.local` — see
+> [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Overriding the API URL
 

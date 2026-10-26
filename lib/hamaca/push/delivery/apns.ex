@@ -27,6 +27,11 @@ defmodule Hamaca.Push.Delivery.APNS do
 
   require Logger
 
+  # 400 reasons that mean the token itself is dead for this app — `BadDeviceToken` (a sandbox
+  # token on production, or garbage) and `DeviceTokenNotForTopic` (a token minted for another
+  # bundle id, e.g. the legacy app's tokens after the move to app.hamaca.Hamaca). Prune the row.
+  @prunable_400_reasons ~w(BadDeviceToken DeviceTokenNotForTopic)
+
   @impl Hamaca.Push.Delivery
   def deliver(token, payload), do: deliver(token, payload, Push.config().apns)
 
@@ -86,8 +91,8 @@ defmodule Hamaca.Push.Delivery.APNS do
     Push.delete_device_token(token)
   end
 
-  defp maybe_prune(token, 400, %{"reason" => "BadDeviceToken"} = body) do
-    Logger.info("[apns] 400 BadDeviceToken — pruning #{mask(token)}: #{inspect(body)}")
+  defp maybe_prune(token, 400, %{"reason" => reason} = body) when reason in @prunable_400_reasons do
+    Logger.info("[apns] 400 #{reason} — pruning #{mask(token)}: #{inspect(body)}")
     Push.delete_device_token(token)
   end
 

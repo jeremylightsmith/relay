@@ -64,7 +64,7 @@ Two scope decisions (2026-10-25):
 | 3 | [RE480 Make hamaca.app the main address] (done, see Phase 3) | RE476, RE477 |
 | 4 | [RE481 Rename the code to Hamaca (modules, app, docs, repo)], done 2026-10-26 | RE476, RE477 |
 | 5 | [RE478 Rename the runner to ./hamaca with a compatibility window], done | RE481 |
-| 5 | [RE479 Mobile app as Hamaca: new bundle IDs, name, icons] | RE480 |
+| 5 | [RE479 Mobile app as Hamaca: new bundle IDs, name, icons], done 2026-10-26 | RE480 |
 | 6 | [RE482 End the relay → hamaca compatibility window] | RE478 |
 
 The GitHub repo rename was **dropped** from RE481: the repo stays `jeremylightsmith/relay`, so
@@ -96,11 +96,12 @@ After [RE481 Rename the code to Hamaca], every line printed by
 `grep -rnE "\bRelay\b|RelayWeb|:relay\b|relay_web|_relay_key" lib test config mix.exs` is one of
 these, on purpose. Anything else it prints is a missed rename.
 
-**Bundle IDs, owned by [RE479 Mobile app as Hamaca: new bundle IDs, name, icons]:**
-- `config/config.exs` — `"com.jeremylightsmith.Relay"`, the Apple client id an iOS identity
-  token must carry as `aud`.
-- `test/hamaca/config_test.exs:7` and `test/support/apple_token_fixtures.ex:67` — the same id,
-  asserted and signed into the test tokens.
+**Legacy Apple client ID, kept until the old Relay iOS build is retired (cleanup card):**
+- `config/config.exs` — `"com.jeremylightsmith.Relay"`, the legacy app's Apple client id, still
+  in the `:apple_client_ids` allowlist after `app.hamaca.Hamaca` ([RE479 Mobile app as Hamaca:
+  new bundle IDs, name, icons]).
+- `test/hamaca/config_test.exs:7` and the "still accepts the legacy Relay app's audience" case in
+  `test/hamaca/accounts/apple_token_validator_test.exs` — the same id, pinned while it is accepted.
 
 **Design artboard file names** — `docs/designs/Relay *.dc.html` are real file names (the Claude
 Design project's), so a reference to one keeps the name until the artboards are renamed:

@@ -64,7 +64,7 @@ defmodule Hamaca.AppleTokenFixtures do
   def claims(overrides \\ %{}) do
     defaults = %{
       "iss" => "https://appleid.apple.com",
-      "aud" => "com.jeremylightsmith.Relay",
+      "aud" => "app.hamaca.Hamaca",
       "sub" => "apple-sub-1",
       "email" => "alice@example.com",
       "email_verified" => "true",

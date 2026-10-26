@@ -4,11 +4,12 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme.dart';
 
 /// AUTH-01: the signed-out root. A brand splash whose only job is "show what
-/// Relay is, go to sign-in" — deliberately auth-unaware, since the router's gate
-/// guarantees it is only ever reachable while signed out.
+/// Hamaca is, go to sign-in" — deliberately auth-unaware, since the router's
+/// gate guarantees it is only ever reachable while signed out.
 ///
 /// Matches `docs/designs/Relay Mobile.dc.html` artboard AUTH-01 (lines ~54–70),
-/// minus its "Create account" button: signing in with Google *is* signing up.
+/// minus its "Create account" button (signing in with Google *is* signing up),
+/// with RE479's card mockup "First run" for the Hamaca mark and headline.
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
 
@@ -20,6 +21,16 @@ class WelcomeScreen extends StatelessWidget {
     end: Alignment(0.26, 0.97),
     colors: [Color(0xFF23375C), Color(0xFF0D1624)],
   );
+
+  /// The Hamaca colour mark, a copy of
+  /// `docs/brand/exports/brand/mark-color-1024.png`.
+  static const markAsset = 'assets/branding/hamaca_mark.png';
+
+  static const _markSize = 112.0; // mockup `w-28`
+  // The mark's artwork is padded on its canvas, so it hangs 12px into the
+  // 26px inset to line its drawing up with the text edge.
+  static const _markOffset = -12.0; // mockup `-ml-3`
+  static const _markGap = 20.0; // mockup `mb-5`
 
   static const _headlineInk = Color(0xFFFCFCFC); // oklch(0.99 0 0)
   static const _subheadInk = Color(0xFFCAD1DF); // oklch(0.86 0.02 262)
@@ -38,24 +49,19 @@ class WelcomeScreen extends StatelessWidget {
               children: [
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: Container(
-                    width: 52,
-                    height: 52,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: RelayTheme.relayHumanLight,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Icon(
-                      Icons.circle,
-                      color: Colors.white,
-                      size: 18,
+                  child: Transform.translate(
+                    offset: const Offset(_markOffset, 0),
+                    child: Image.asset(
+                      markAsset,
+                      key: const Key('welcome_mark'),
+                      width: _markSize,
+                      height: _markSize,
                     ),
                   ),
                 ),
-                const SizedBox(height: 26),
+                const SizedBox(height: _markGap),
                 const Text(
-                  'Pass work between people and AI.',
+                  'Welcome to hammock driven development.',
                   style: TextStyle(
                     fontSize: 26,
                     fontWeight: FontWeight.w600,

@@ -135,6 +135,20 @@ defmodule Hamaca.Push.Delivery.APNSTest do
     assert Repo.aggregate(DeviceToken, :count) == 0
   end
 
+  test "a 400 DeviceTokenNotForTopic prunes the device row", %{apns: apns} do
+    user = insert(:user)
+    {:ok, _} = Push.register_device(user, "tok-topic")
+
+    Req.Test.stub(APNS, fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.send_resp(400, Jason.encode!(%{"reason" => "DeviceTokenNotForTopic"}))
+    end)
+
+    assert {:error, {:apns, 400}} = APNS.deliver("tok-topic", @payload, apns)
+    assert Repo.aggregate(DeviceToken, :count) == 0
+  end
+
   test "a 400 for another reason does not prune", %{apns: apns} do
     user = insert(:user)
     {:ok, _} = Push.register_device(user, "tok-keep")

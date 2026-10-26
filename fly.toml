@@ -18,7 +18,7 @@ kill_signal = 'SIGTERM'
   ECTO_IPV6 = 'true'
   APNS_KEY_ID = 'QY9JD4QAK7'
   APNS_TEAM_ID = 'CR8KT24FBH'
-  APNS_TOPIC = 'com.jeremylightsmith.Relay'
+  APNS_TOPIC = 'app.hamaca.Hamaca'
   APNS_ENV = 'production'
 
 [http_service]

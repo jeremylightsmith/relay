@@ -22,7 +22,7 @@ require 'base64'
 require 'net/http'
 require 'uri'
 
-BUNDLE_ID = 'com.jeremylightsmith.Relay'
+BUNDLE_ID = 'app.hamaca.Hamaca'
 KEY_JSON = File.expand_path(
   ENV.fetch('ASC_KEY_JSON',
             '~/.appstoreconnect/private_keys/spicytimer_asc_api_key.json'))

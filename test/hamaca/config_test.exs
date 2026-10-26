@@ -4,7 +4,7 @@ defmodule Hamaca.ConfigTest do
   describe "get/2" do
     test "falls back to the application env when nothing overrides the key" do
       assert Hamaca.Config.get(:apple_client_ids) == Application.get_env(:hamaca, :apple_client_ids)
-      assert Hamaca.Config.get(:apple_client_ids) == ["com.jeremylightsmith.Relay"]
+      assert Hamaca.Config.get(:apple_client_ids) == ["app.hamaca.Hamaca", "com.jeremylightsmith.Relay"]
     end
 
     test "returns the default when neither an override nor an app-env entry exists" do

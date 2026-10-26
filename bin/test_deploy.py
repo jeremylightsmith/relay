@@ -23,6 +23,9 @@ BIN = os.path.join(REPO_ROOT, "bin")
 SHIP = os.path.join(BIN, "ship_to_main.sh")
 TOUCHED = os.path.join(BIN, "card_touched_flutter.sh")
 
+# The App Store listing lives here; deploy_ios.sh uploads it only when a card changed it.
+LISTING_PATHSPECS = ("flutter/ios/fastlane/metadata", "flutter/ios/fastlane/screenshots")
+
 TITLE = "let’s move Deploying off of CI"
 TRAILER = "Co-Authored-By: Claude <noreply@anthropic.com>"
 NOTHING_TO_SHIP = "ship_to_main: nothing to ship — origin/main..HEAD is empty"
@@ -325,6 +328,27 @@ class CardTouchedFlutterTest(ScriptCase):
         result = self.run_in_work(TOUCHED, "RE408")
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
+    def test_a_card_changing_a_listing_file_matches_the_listing_pathspecs(self):
+        commit(self.work, {"flutter/ios/fastlane/metadata/en-US/name.txt": "Hamaca\n"},
+               "RE408 listing")
+        self.push_main()
+        result = self.run_in_work(TOUCHED, "RE408", *LISTING_PATHSPECS)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_a_card_changing_only_dart_does_not_match_the_listing_pathspecs(self):
+        commit(self.work, {"flutter/lib/a.dart": "void a() {}\n"}, "RE408 dart")
+        self.push_main()
+        result = self.run_in_work(TOUCHED, "RE408", *LISTING_PATHSPECS)
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertIn(" did not touch " + " ".join(LISTING_PATHSPECS), result.stderr)
+
+    def test_no_pathspec_still_means_flutter(self):
+        commit(self.work, {"flutter/lib/a.dart": "void a() {}\n"}, "RE408 dart")
+        self.push_main()
+        result = self.run_in_work(TOUCHED, "RE408")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertRegex(result.stderr, r"card_touched_flutter: RE408 \(\w+\) touched flutter/\n")
+
     def test_no_argument_exits_2_with_usage(self):
         result = self.run_in_work(TOUCHED)
         self.assertEqual(result.returncode, 2)
@@ -567,8 +591,10 @@ class DeployCase(ScriptCase):
         self.scratch = os.path.join(self.tmp, "scratch")
         os.makedirs(self.scratch)
 
-    def ship_card(self, flutter):
-        files = {"flutter/lib/a.dart": "void a() {}\n"} if flutter else {"lib/a.ex": "a\n"}
+    def ship_card(self, flutter=True, files=None):
+        """Push a `RE408 …` card commit: a flutter/lib or lib/ file, or exactly `files`."""
+        if files is None:
+            files = {"flutter/lib/a.dart": "void a() {}\n"} if flutter else {"lib/a.ex": "a\n"}
         commit(self.work, files, "RE408 the card")
         git(self.work, "push", "-q", "origin", "main")
         git(self.work, "fetch", "-q", "origin")
@@ -785,6 +811,53 @@ class DeployIosTest(DeployCase):
         self.assertFalse(any(c.startswith("fastlane") for c in self.commands()))
         self.assertEqual(os.listdir(self.scratch), [])
 
+    LISTING_UPLOAD = "deploy_ios: uploading the App Store listing (metadata + screenshots)"
+    LISTING_SKIP = "deploy_ios: listing unchanged for RE408 — skipping the App Store listing"
+
+    def test_a_card_changing_the_listing_uploads_it_after_testflight(self):
+        self.ship_card(files={"flutter/ios/fastlane/metadata/en-US/description.txt": "Hi\n"})
+        result = self.run_ios(**self.full_env())
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(
+            self.commands(),
+            VALIDATION
+            + [
+                "fastlane ios next_build_number",
+                "fastlane deploy",
+                "fastlane ios distribute_external",
+                "fastlane ios upload_listing",
+            ],
+        )
+        self.assert_cwd("fastlane ios upload_listing", "/flutter/ios")
+        self.assertIn("APP_VERSION=1.2.3 ", self.line_for("fastlane ios upload_listing"))
+        self.assertIn("keyfile_exists=1", self.line_for("fastlane ios upload_listing"))
+        self.assertIn(self.LISTING_UPLOAD, result.stdout)
+
+    def test_a_card_not_changing_the_listing_skips_it(self):
+        self.ship_card(flutter=True)
+        result = self.run_ios(**self.full_env())
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertFalse(any("upload_listing" in c for c in self.commands()))
+        self.assertIn(self.LISTING_SKIP, result.stdout)
+
+    def test_the_listing_uploads_without_external_distribution(self):
+        self.ship_card(files={"flutter/ios/fastlane/screenshots/en-US/01_needs_you.png": "png\n"})
+        result = self.run_ios(**self.full_env(TESTFLIGHT_EXTERNAL="false"))
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        commands = self.commands()
+        self.assertFalse(any("distribute_external" in c for c in commands))
+        self.assertIn("fastlane ios upload_listing", commands)
+        self.assertLess(commands.index("fastlane deploy"),
+                        commands.index("fastlane ios upload_listing"))
+
+    def test_head_uploads_the_listing_last(self):
+        self.ship_card(flutter=False)
+        result = self.run_deploy(DEPLOY_IOS, ["--head"], self.full_env())
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(self.commands()[-1], "fastlane ios upload_listing")
+        self.assertIn(self.LISTING_UPLOAD, result.stdout)
+
+
 class DeployAndroidTest(DeployCase):
     """deploy_android.sh: skip web-only cards, skip cleanly (exit 0) until the RLY-103
     credentials exist, otherwise validate → build number → Play internal upload, removing the
@@ -984,11 +1057,49 @@ class FastfileTest(unittest.TestCase):
     def test_ios_fastfile_gates_match_on_relay_deploy(self):
         self.assertIn("RELAY_DEPLOY", self.read(IOS_FASTFILE))
 
+    def test_ios_fastfile_uploads_the_listing_without_submitting(self):
+        text = self.read(IOS_FASTFILE)
+        for needle in ("lane :upload_listing", "skip_binary_upload: true",
+                       "submit_for_review: false", "automatic_release: false"):
+            self.assertIn(needle, text)
+        self.assertNotIn("submit_for_review: true", text)
+
     @unittest.skipUnless(shutil.which("ruby"), "ruby not on PATH")
     def test_both_fastfiles_are_valid_ruby(self):
         for path in (IOS_FASTFILE, ANDROID_FASTFILE):
             result = subprocess.run(["ruby", "-c", path], capture_output=True, text=True)
             self.assertIn("Syntax OK", result.stdout, path + result.stderr)
+
+
+LISTING_DIR = os.path.join(REPO_ROOT, "flutter", "ios", "fastlane", "metadata", "en-US")
+
+
+class StoreListingTest(unittest.TestCase):
+    """The committed App Store listing (fastlane `deliver` metadata) is the Hamaca listing and
+    fits App Store Connect's field limits, so `upload_listing` never fails on a too-long field."""
+
+    # App Store Connect's character limits per metadata field.
+    STORE_LIMITS = {"subtitle.txt": 30, "description.txt": 4000, "keywords.txt": 100,
+                    "promotional_text.txt": 170}
+
+    def field(self, name):
+        with open(os.path.join(LISTING_DIR, name), encoding="utf-8") as f:
+            return f.read().strip()
+
+    def test_name_and_subtitle(self):
+        self.assertEqual(self.field("name.txt"), "Hamaca")
+        self.assertEqual(self.field("subtitle.txt"), "Hammock Driven Development")
+
+    def test_fields_are_filled_and_within_the_store_limits(self):
+        for name, limit in self.STORE_LIMITS.items():
+            value = self.field(name)
+            self.assertTrue(value, name)
+            self.assertLessEqual(len(value), limit, name)
+
+    def test_urls(self):
+        self.assertEqual(self.field("support_url.txt"), "https://hamaca.app")
+        self.assertEqual(self.field("marketing_url.txt"), "https://hamaca.app")
+        self.assertEqual(self.field("privacy_url.txt"), "https://hamaca.app/privacy")
 
 
 if __name__ == "__main__":

@@ -72,6 +72,16 @@ defmodule Hamaca.Accounts.AppleTokenValidatorTest do
     assert AppleTokenValidator.validate_token(token, @raw_nonce) == {:error, :invalid_issuer}
   end
 
+  test "accepts the Hamaca app's audience app.hamaca.Hamaca", %{key: key} do
+    token = apple_token(key, @kid, %{aud: "app.hamaca.Hamaca"})
+    assert {:ok, _claims} = AppleTokenValidator.validate_token(token, @raw_nonce)
+  end
+
+  test "still accepts the legacy Relay app's audience com.jeremylightsmith.Relay", %{key: key} do
+    token = apple_token(key, @kid, %{aud: "com.jeremylightsmith.Relay"})
+    assert {:ok, _claims} = AppleTokenValidator.validate_token(token, @raw_nonce)
+  end
+
   test "rejects an audience outside the allowlist", %{key: key} do
     token = apple_token(key, @kid, %{aud: "com.attacker.App"})
     assert AppleTokenValidator.validate_token(token, @raw_nonce) == {:error, :invalid_audience}

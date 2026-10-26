@@ -1,6 +1,6 @@
 default_platform(:ios)
 
-APP_IDENTIFIER = "com.jeremylightsmith.Relay"
+APP_IDENTIFIER = "app.hamaca.Hamaca"
 TEAM_ID = "CR8KT24FBH"
 
 # App Store Connect API key from FASTLANE_API_KEY_PATH (the raw .p8) plus the
@@ -219,6 +219,39 @@ platform :ios do
     latest = latest_testflight_build_number(api_key: api_key, app_identifier: APP_IDENTIFIER, initial_build_number: 0)
     File.write(out, "#{latest + 1}\n")
     UI.success("🔢 Next TestFlight build number: #{latest + 1}")
+  end
+
+  desc "Upload the App Store listing (metadata + screenshots) only — never a binary, never a submission"
+  lane :upload_listing do
+    app_version = ENV["APP_VERSION"].to_s
+    UI.user_error!("❌ APP_VERSION environment variable is required. Set it like: APP_VERSION=1.0.0 fastlane ios upload_listing") if app_version.empty?
+
+    api_key = asc_api_key
+    if api_key.nil?
+      UI.user_error!("❌ An App Store Connect API key is required. Set FASTLANE_API_KEY_PATH, APP_STORE_CONNECT_KEY_ID and APP_STORE_CONNECT_ISSUER_ID.")
+    end
+
+    # Fills in the editable App Store version's listing. submit_for_review / automatic_release
+    # stay false: submitting for review is a human step in App Store Connect. force skips
+    # deliver's HTML preview, which waits for a keypress (an unattended runner would hang).
+    # skip_app_version_update: false renames the editable version to APP_VERSION.
+    deliver(
+      app_identifier: APP_IDENTIFIER,
+      api_key: api_key,
+      app_version: app_version,
+      metadata_path: "./fastlane/metadata",
+      screenshots_path: "./fastlane/screenshots",
+      skip_binary_upload: true,
+      skip_app_version_update: false,
+      overwrite_screenshots: true,
+      submit_for_review: false,
+      automatic_release: false,
+      precheck_include_in_app_purchases: false,
+      run_precheck_before_submit: false,
+      primary_category: "DEVELOPER_TOOLS",
+      force: true
+    )
+    UI.success("✅ App Store listing uploaded for #{app_version} (not submitted for review)")
   end
 
   desc "Build and upload to TestFlight"

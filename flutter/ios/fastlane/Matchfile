@@ -6,7 +6,7 @@ git_branch("main")
 
 storage_mode("git")
 type(ENV["MATCH_TYPE"] || "appstore")
-app_identifier(["com.jeremylightsmith.Relay"])
+app_identifier(["app.hamaca.Hamaca"])
 team_id("CR8KT24FBH")
 shallow_clone(true)
 skip_confirmation(true)

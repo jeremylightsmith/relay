@@ -11,7 +11,7 @@ import 'package:relay_mobile/features/voice/whisper_kit_transcriber.dart';
 /// app on the first captured buffer.
 ///
 /// Needs a booted simulator with the mic pre-granted:
-///   xcrun simctl privacy booted grant microphone com.jeremylightsmith.Relay
+///   xcrun simctl privacy booted grant microphone app.hamaca.Hamaca
 /// Run with:
 ///   flutter test integration_test/voice_recording_test.dart -d `<simulator>`
 void main() {
@@ -28,7 +28,7 @@ void main() {
         reason:
             'Pre-grant the simulator mic first:\n'
             '  xcrun simctl privacy booted grant microphone '
-            'com.jeremylightsmith.Relay',
+            'app.hamaca.Hamaca',
       );
 
       await transcriber.startRecording();

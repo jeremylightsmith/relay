@@ -81,18 +81,23 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.1
   flutter_native_splash: ^2.4.1
 
-# App icon: the light Relay logo composited on white (iOS icons can't have alpha).
+# App icon: the Hamaca icon exports (docs/brand/exports/ios) — light, iOS 18
+# dark and iOS 18 tinted. iOS only; Android is RE485.
 flutter_launcher_icons:
   ios: true
   android: false
-  image_path: "assets/branding/logo_light_512.png"
-  background_color_ios: "#ffffff"
+  image_path_ios: "assets/branding/app_icon_1024.png"
+  image_path_ios_dark_transparent: "assets/branding/app_icon_1024_dark.png"
+  image_path_ios_tinted_grayscale: "assets/branding/app_icon_1024_tinted.png"
   remove_alpha_ios: true
 
-# Launch screen: centered light logo on white.
+# Launch screen: the Hamaca colour mark alone, centred, on White (#FFFFFF) in
+# light and Ink (#1E252E) in dark — docs/brand/README.md.
 flutter_native_splash:
   color: "#ffffff"
-  image: "assets/branding/logo_light_512.png"
+  image: "assets/branding/hamaca_mark.png"
+  color_dark: "#1E252E"
+  image_dark: "assets/branding/hamaca_mark.png"
   ios: true
   android: false
   web: false
@@ -108,10 +113,9 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  # The Hamaca colour mark, shown on Welcome (AUTH-01).
+  assets:
+    - assets/branding/hamaca_mark.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

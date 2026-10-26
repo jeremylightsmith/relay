@@ -41,13 +41,61 @@ void main() {
   ) async {
     await pumpSignedOutApp(tester);
 
-    expect(find.text('Pass work between people and AI.'), findsOneWidget);
+    expect(find.text('Welcome to hammock driven development.'), findsOneWidget);
+    expect(find.text('Pass work between people and AI.'), findsNothing);
     expect(
       find.text('One board, one thread. Hamaca keeps the handoff clear.'),
       findsOneWidget,
     );
     // Decision 2: signing in with Google *is* signing up.
     expect(find.text('Create account'), findsNothing);
+  });
+
+  testWidgets('shows the Hamaca colour mark from the branding asset', (
+    tester,
+  ) async {
+    await pumpSignedOutApp(tester);
+
+    final mark = find.byKey(const Key('welcome_mark'));
+    expect(mark, findsOneWidget);
+    final image = tester.widget<Image>(mark).image;
+    expect(image, isA<AssetImage>());
+    expect((image as AssetImage).assetName, WelcomeScreen.markAsset);
+    expect(WelcomeScreen.markAsset, 'assets/branding/hamaca_mark.png');
+  });
+
+  testWidgets('the mark renders at the mockup\'s 112×112 (w-28)', (
+    tester,
+  ) async {
+    await pumpSignedOutApp(tester);
+
+    expect(
+      tester.getSize(find.byKey(const Key('welcome_mark'))),
+      const Size(112, 112),
+    );
+  });
+
+  testWidgets('the blue placeholder tile is gone', (tester) async {
+    await pumpSignedOutApp(tester);
+
+    expect(find.byIcon(Icons.circle), findsNothing);
+  });
+
+  testWidgets('the mark sits 20px above the headline, 12px left of it', (
+    tester,
+  ) async {
+    await pumpSignedOutApp(tester);
+
+    final mark = find.byKey(const Key('welcome_mark'));
+    final headline = find.text('Welcome to hammock driven development.');
+    expect(
+      tester.getBottomLeft(mark).dy + 20,
+      moreOrLessEquals(tester.getTopLeft(headline).dy, epsilon: 0.5),
+    );
+    expect(
+      tester.getTopLeft(mark).dx,
+      moreOrLessEquals(tester.getTopLeft(headline).dx - 12, epsilon: 0.5),
+    );
   });
 
   testWidgets('AUTH-01 gradient · #23375C → #0D1624 at 165°', (tester) async {

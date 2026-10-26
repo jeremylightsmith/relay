@@ -71,10 +71,11 @@ config :hamaca, HamacaWeb.Endpoint,
   pubsub_server: Hamaca.PubSub,
   live_view: [signing_salt: "c7EFJnnN"]
 
-# Sign in with Apple (RE106): the identity-token `aud` allowlist — the iOS bundle id.
-# This is the one definition of the default; config/runtime.exs overrides it only
-# when APPLE_CLIENT_IDS is set (comma-separated).
-config :hamaca, :apple_client_ids, ["com.jeremylightsmith.Relay"]
+# Sign in with Apple (RE106): the identity-token `aud` allowlist — the iOS bundle ids.
+# `app.hamaca.Hamaca` is the Hamaca app (RE479); `com.jeremylightsmith.Relay` is the legacy
+# Relay build, still accepted until it is retired. This is the one definition of the default;
+# config/runtime.exs overrides it only when APPLE_CLIENT_IDS is set (comma-separated).
+config :hamaca, :apple_client_ids, ["app.hamaca.Hamaca", "com.jeremylightsmith.Relay"]
 config :hamaca, :runs_dispatcher, Hamaca.Runs.NoopDispatcher
 
 # Billing (RE460, ADR 0012): off unless switched on — a self-hosted install never bills.

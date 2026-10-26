@@ -1,0 +1,67 @@
+<!doctype html>
+<!--
+  Forkful recipe page, layout A — photo header, two columns. A seed mockup for the App Store
+  screenshots (priv/repo/store_screenshot_seeds.exs inlines recipe_photo.jpg as a data URI when
+  it uploads this file, so the attachment is self-contained). Opens as-is from this directory.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weeknight lemon pasta · Forkful</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Helvetica Neue", Helvetica, -apple-system, system-ui, sans-serif; color: #1E252E; background: #FFFFFF; }
+  .bar { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid rgba(30, 37, 46, 0.12); }
+  .logo { width: 16px; height: 16px; border-radius: 4px; background: rgba(30, 37, 46, 0.85); }
+  .brand { font-weight: 600; font-size: 15px; }
+  .spacer { flex: 1; }
+  .nav { font-size: 13px; color: rgba(30, 37, 46, 0.55); }
+  .signin { background: #1E252E; color: #FFFFFF; font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 7px; }
+  .photo { display: block; width: 100%; height: 220px; object-fit: cover; }
+  main { padding: 24px 22px 32px; }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 4px; }
+  .meta { font-size: 13px; color: rgba(30, 37, 46, 0.6); margin-bottom: 20px; }
+  .cols { display: grid; grid-template-columns: 2fr 3fr; gap: 20px; }
+  h2 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+  ul, ol { list-style: none; font-size: 13px; color: rgba(30, 37, 46, 0.7); }
+  li { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 7px; line-height: 1.35; }
+  .box { flex-shrink: 0; width: 11px; height: 11px; margin-top: 2px; border: 1px solid rgba(30, 37, 46, 0.25); border-radius: 3px; }
+  .num { flex-shrink: 0; background: #1E252E; color: #FFFFFF; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <header class="bar">
+    <span class="logo"></span>
+    <span class="brand">Forkful</span>
+    <span class="spacer"></span>
+    <span class="nav">Recipes</span>
+    <span class="nav">Saved</span>
+    <span class="signin">Sign in</span>
+  </header>
+  <img class="photo" src="recipe_photo.jpg" alt="A bowl of spaghetti with parmesan and herbs">
+  <main>
+    <h1>Weeknight lemon pasta</h1>
+    <p class="meta">25 min · Serves 4 · Easy</p>
+    <div class="cols">
+      <section>
+        <h2>Ingredients</h2>
+        <ul>
+          <li><span class="box"></span>200g spaghetti</li>
+          <li><span class="box"></span>2 lemons, zested</li>
+          <li><span class="box"></span>3 cloves garlic</li>
+          <li><span class="box"></span>40g parmesan</li>
+        </ul>
+      </section>
+      <section>
+        <h2>Method</h2>
+        <ol>
+          <li><span class="num">1</span><span>Boil the pasta in well-salted water.</span></li>
+          <li><span class="num">2</span><span>Warm garlic in olive oil; add zest and juice.</span></li>
+          <li><span class="num">3</span><span>Toss with pasta, parmesan and basil.</span></li>
+        </ol>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

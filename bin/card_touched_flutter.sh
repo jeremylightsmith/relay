@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Did a card's commit on main touch flutter/? Shared by the Deploy flow's mobile deploy steps.
 #
-#   bin/card_touched_flutter.sh <REF>
+#   bin/card_touched_flutter.sh <REF> [PATHSPEC ...]
 #
-# Exit 0: the card's NEWEST origin/main commit (subject `<REF> …`) changes a path under flutter/.
+# PATHSPEC defaults to flutter/; deploy_ios.sh passes the App Store listing paths to ask whether
+# the card changed the listing.
+#
+# Exit 0: the card's NEWEST origin/main commit (subject `<REF> …`) changes a path under any
+#         PATHSPEC.
 # Exit 1: it doesn't, or no such commit exists on origin/main.
 # Exit 2: usage error (no ref).
 #
@@ -24,9 +28,11 @@ say() { echo "card_touched_flutter: $*" >&2; }
 
 ref="${1:-}"
 if [ -z "$ref" ]; then
-  echo "usage: bin/card_touched_flutter.sh <REF>" >&2
+  echo "usage: bin/card_touched_flutter.sh <REF> [PATHSPEC ...]" >&2
   exit 2
 fi
+shift
+[ "$#" -gt 0 ] || set -- flutter/
 
 sha=""
 while IFS=$'\t' read -r candidate subject; do
@@ -42,10 +48,10 @@ if [ -z "$sha" ]; then
   exit 1
 fi
 
-if ! git diff --quiet "$sha^" "$sha" -- flutter/; then
-  say "$ref ($(git rev-parse --short "$sha")) touched flutter/"
+if ! git diff --quiet "$sha^" "$sha" -- "$@"; then
+  say "$ref ($(git rev-parse --short "$sha")) touched $*"
   exit 0
 fi
 
-say "$ref ($(git rev-parse --short "$sha")) did not touch flutter/"
+say "$ref ($(git rev-parse --short "$sha")) did not touch $*"
 exit 1

@@ -11,6 +11,9 @@
 # 3. bin/flutter_validate.sh, then in flutter/ios: `fastlane ios next_build_number` (the next
 #    TestFlight build number), `fastlane deploy` (build, sign via read-only match, upload), and,
 #    unless TESTFLIGHT_EXTERNAL is the literal `false`, `fastlane ios distribute_external`.
+# 4. Only when the card changed the App Store listing ($listing_paths) — or always with --head —
+#    `fastlane ios upload_listing`: metadata + screenshots, never a binary, never a review
+#    submission. It runs after TestFlight, so a listing problem never holds back testers.
 #
 # APP_STORE_CONNECT_PRIVATE_KEY may be the raw .p8 PEM or its base64. It is written to a temp
 # file for FASTLANE_API_KEY_PATH; every temp file is removed on every exit path. No internal
@@ -35,11 +38,16 @@ if [ -z "$ref" ]; then
   exit 2
 fi
 
+bin_dir="$(cd "$(dirname "$0")" && pwd)"
+repo_root="$PWD" # absolute: the listing check runs after the cd below, and pathspecs are cwd-relative
+# The App Store listing (fastlane deliver's metadata + screenshots); see step 4.
+listing_paths="flutter/ios/fastlane/metadata flutter/ios/fastlane/screenshots"
+
 touched=0
 if [ "$ref" = --head ]; then
   ref=HEAD
 else
-  "$(dirname "$0")/card_touched_flutter.sh" "$ref" || touched=$?
+  "$bin_dir/card_touched_flutter.sh" "$ref" || touched=$?
 fi
 case "$touched" in
   0) ;;
@@ -63,7 +71,7 @@ key_file=""
 number_file=""
 snapshot=""
 stamped_files="Runner.xcodeproj/project.pbxproj Runner/Info.plist fastlane/README.md"
-ios_dir="$PWD/flutter/ios" # absolute: the trap runs after the cd below
+ios_dir="$repo_root/flutter/ios" # absolute: the trap runs after the cd below
 cleanup() {
   [ -z "$key_file" ] || rm -f "$key_file"
   [ -z "$number_file" ] || rm -f "$number_file"
@@ -92,7 +100,7 @@ APP_VERSION="$(grep -E '^version:' flutter/pubspec.yaml | sed -E 's/^version:[[:
 [ -n "$APP_VERSION" ] || fail "no version: in flutter/pubspec.yaml"
 export APP_VERSION FASTLANE_API_KEY_PATH="$key_file" RELAY_DEPLOY=1
 
-"$(dirname "$0")/flutter_validate.sh"
+"$bin_dir/flutter_validate.sh"
 
 cd flutter/ios
 
@@ -113,5 +121,19 @@ else
   say "distributing $APP_VERSION ($BUILD_NUMBER) to the external TestFlight group"
   fastlane ios distribute_external
 fi
+
+listing=0
+if [ "$ref" != HEAD ]; then
+  # $listing_paths unquoted on purpose: one pathspec per word
+  (cd "$repo_root" && "$bin_dir/card_touched_flutter.sh" "$ref" $listing_paths) || listing=$?
+fi
+case "$listing" in
+  0)
+    say "uploading the App Store listing (metadata + screenshots)"
+    fastlane ios upload_listing
+    ;;
+  1) say "listing unchanged for $ref — skipping the App Store listing" ;;
+  *) fail "could not tell whether $ref changed the App Store listing (card_touched_flutter exited $listing)" ;;
+esac
 
 say "shipped $ref to TestFlight as $APP_VERSION ($BUILD_NUMBER)"
