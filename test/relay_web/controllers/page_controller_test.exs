@@ -54,7 +54,122 @@ defmodule RelayWeb.PageControllerTest do
           end
         end)
 
-      assert ids == ["top", "review", "problem", "built", "how", "stakes", "transformation", "pricing", "cta", "footer"]
+      assert ids == [
+               "top",
+               "review",
+               "problem",
+               "built",
+               "how",
+               "stakes",
+               "transformation",
+               "under-the-hood",
+               "pricing",
+               "cta",
+               "footer"
+             ]
+    end
+  end
+
+  describe "GET / under the hood (RE483)" do
+    defp hood_doc(conn), do: conn |> get(~p"/") |> html_response(200) |> LazyHTML.from_document()
+
+    defp hood_text(doc), do: doc |> LazyHTML.query("section#under-the-hood") |> squish()
+
+    test "sits between the transformation and pricing sections", %{conn: conn} do
+      doc = hood_doc(conn)
+
+      assert doc |> LazyHTML.query("section#under-the-hood") |> Enum.count() == 1
+
+      ids =
+        doc
+        |> LazyHTML.query("div.overflow-x-clip > section")
+        |> Enum.flat_map(&LazyHTML.attribute(&1, "id"))
+
+      hood = Enum.find_index(ids, &(&1 == "under-the-hood"))
+      assert hood == Enum.find_index(ids, &(&1 == "transformation")) + 1
+      assert hood == Enum.find_index(ids, &(&1 == "pricing")) - 1
+    end
+
+    test "carries the eyebrow, headline and the stays-on-your-machine sentence", %{conn: conn} do
+      doc = hood_doc(conn)
+      text = hood_text(doc)
+
+      assert text =~ "UNDER THE HOOD"
+
+      assert doc |> LazyHTML.query("section#under-the-hood h2") |> squish() ==
+               "The agents run on your machine. The board just keeps score."
+
+      assert text =~
+               "Your code, keys and AI access stay on your machine. The board sees cards, comments and status."
+    end
+
+    test "lists the setup-time and bring-your-own-subscription checks", %{conn: conn} do
+      text = conn |> hood_doc() |> hood_text()
+
+      assert text =~ "Up and running in about 20 minutes."
+      assert text =~ "Create a board, paste one install command, and your first card is moving."
+      assert text =~ "Use the Claude, Codex, … subscription you already pay for."
+      assert text =~ "No per-token bill from us."
+      refute text =~ "never leaves"
+      refute text =~ ~r/\bPro\b/
+      refute text =~ ~r/\bMax\b/
+    end
+
+    test "links to the introduction docs", %{conn: conn} do
+      link = conn |> hood_doc() |> LazyHTML.query(~s(section#under-the-hood a[href="/docs/introduction"]))
+
+      assert Enum.count(link) == 1
+      assert squish(link) == "How it works, in detail →"
+    end
+
+    test "pictures the board above the laptop", %{conn: conn} do
+      doc = hood_doc(conn)
+      board = doc |> LazyHTML.query("section#under-the-hood #under-the-hood-board") |> squish()
+      laptop = doc |> LazyHTML.query("section#under-the-hood #under-the-hood-laptop") |> squish()
+
+      for copy <- [
+            "Hamaca",
+            "THE BOARD",
+            "Whose move it is, on every card",
+            "Push to your phone when it's yours",
+            "Approve, send back, answer"
+          ] do
+        assert board =~ copy
+      end
+
+      assert hood_text(doc) =~ "cards, comments & status"
+
+      for copy <- [
+            "Your laptop",
+            "STAYS HERE",
+            "RUNNER",
+            "YOUR CODE",
+            "~/recipes",
+            "AI ACCESS",
+            "Claude Code, Codex… on your plan",
+            "SECRETS",
+            ".env, API tokens, deploy keys"
+          ] do
+        assert laptop =~ copy
+      end
+    end
+
+    test "the RUNNER tile names the ./relay start command", %{conn: conn} do
+      doc = hood_doc(conn)
+
+      assert doc |> LazyHTML.query("section#under-the-hood #under-the-hood-runner") |> squish() ==
+               "./relay start"
+
+      refute hood_text(doc) =~ "./hamaca start"
+    end
+
+    test "is not linked from the nav, which keeps its How it works anchor", %{conn: conn} do
+      doc = hood_doc(conn)
+
+      assert doc |> LazyHTML.query(~s(header nav a[href="#under-the-hood"])) |> Enum.count() == 0
+      assert doc |> LazyHTML.query(~s(a[href="/#under-the-hood"])) |> Enum.count() == 0
+      assert doc |> LazyHTML.query(~s(header nav a[href="#how"])) |> Enum.count() == 1
+      assert doc |> LazyHTML.query("section#how") |> squish() =~ "HOW IT WORKS"
     end
   end
 
