@@ -69,6 +69,27 @@ defmodule HamacaWeb.Plugs.CanonicalHostTest do
     assert call(:get, "/authors", "relayboard.fly.dev").status == 301
   end
 
+  # The shipped app (pre-RE479) still loads its webviews from relayboard.fly.dev, where its
+  # session cookie lives; a 301 to the canonical host would land it signed out.
+  test "an embedded-webview GET (?embed=1) on an extra host answers in place" do
+    assert_untouched(call(:get, "/board/relay?embed=1", "relayboard.fly.dev"))
+  end
+
+  test "a GET from an already-embedded session on an extra host answers in place" do
+    conn =
+      :get
+      |> Phoenix.ConnTest.build_conn("/cards/RE1?board=relay")
+      |> Map.put(:host, "relayboard.fly.dev")
+      |> Plug.Test.init_test_session(%{embed: true})
+      |> CanonicalHost.call(CanonicalHost.init([]))
+
+    assert_untouched(conn)
+  end
+
+  test "?embed=0 on an extra host still redirects" do
+    assert call(:get, "/board/relay?embed=0", "relayboard.fly.dev").status == 301
+  end
+
   test "with no extra hosts configured the plug is a no-op" do
     Process.put(:extra_hosts, [])
 

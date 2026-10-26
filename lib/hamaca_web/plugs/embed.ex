@@ -35,15 +35,34 @@ defmodule HamacaWeb.Plugs.Embed do
     assign(conn, :embed, get_session(conn, :embed) == true)
   end
 
+  @doc """
+  Whether `conn` comes from the native app's webview, by the same precedence as `call/2`
+  (query param, then cookie, then an already-promoted session flag) — without writing
+  anything. Safe to call before `:fetch_session`: it reads the session only when one is
+  configured. `HamacaWeb.Plugs.CanonicalHost` uses it to keep the app on its own host.
+  """
+  def embedded?(conn) do
+    conn = conn |> fetch_query_params() |> fetch_cookies()
+
+    case override(conn.query_params["embed"]) do
+      :unset -> cookie_embed?(conn) or session_embed?(conn)
+      value -> value
+    end
+  end
+
+  defp session_embed?(%{private: %{plug_session_fetch: _}} = conn),
+    do: conn |> fetch_session() |> get_session(:embed) == true
+
+  defp session_embed?(%{private: %{plug_session: session}}), do: session["embed"] == true
+  defp session_embed?(_conn), do: false
+
   defp override(value) when value in ["1", "true"], do: true
   defp override(value) when value in ["0", "false"], do: false
   defp override(_value), do: :unset
 
   defp maybe_from_cookie(conn) do
-    if conn.cookies["relay_embed"] in ["1", "true"] do
-      put_session(conn, :embed, true)
-    else
-      conn
-    end
+    if cookie_embed?(conn), do: put_session(conn, :embed, true), else: conn
   end
+
+  defp cookie_embed?(conn), do: override(conn.cookies["relay_embed"]) == true
 end

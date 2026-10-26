@@ -19,6 +19,23 @@ defmodule HamacaWeb.CanonicalHostRoutingTest do
     assert get_resp_header(conn, "location") == [HamacaWeb.Endpoint.url() <> "/board"]
   end
 
+  test "the shipped app's embedded page loads signed in on an extra host", %{old_host: conn} do
+    conn = conn |> log_in_user() |> get("/boards?embed=1")
+
+    assert html_response(conn, 200)
+  end
+
+  test "a later embedded page with no ?embed=1 still loads on an extra host", %{old_host: conn} do
+    user = insert(:user)
+
+    conn =
+      conn
+      |> Plug.Test.init_test_session(user_id: user.id, embed: true)
+      |> get("/boards")
+
+    assert html_response(conn, 200)
+  end
+
   test "the board-key API answers in place on an extra host", %{old_host: conn} do
     board = insert(:board)
     {:ok, %{token: token}} = Hamaca.ApiKeys.create_key(board, board.owner)

@@ -72,6 +72,7 @@ What never redirects, and why:
 | `/webhooks/*` | Stripe posts to the URL it was configured with (`:webhook` pipeline) |
 | `/auth/*` | an OAuth flow in flight must finish on the host it started on (plug's `@pass_through`) |
 | `/attachments/*` | links embedded in card markdown keep loading (plug's `@pass_through`) |
+| the native app's webview | old app builds load LiveViews from the host they signed in on, where their session cookie lives; `HamacaWeb.Plugs.Embed.embedded?/1` (`?embed=1`, the `relay_embed` cookie, or an embedded session) |
 | non-`GET` | a 301 turns a POST into a GET and drops its body (`HEAD` is already `GET` via `Plug.Head`) |
 | `/live`, `/live/longpoll` | the socket never passes the router — open tabs keep their connection |
 

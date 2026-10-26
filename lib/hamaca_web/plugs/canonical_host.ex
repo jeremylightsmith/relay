@@ -12,7 +12,10 @@ defmodule HamacaWeb.Plugs.CanonicalHost do
     * its first path segment is not in `@pass_through`: `/auth/*` must finish on the host the
       OAuth dance started on (the provider's callback and the session cookie live there), and
       `/attachments/*` links are embedded in card markdown and should keep loading where they
-      are.
+      are;
+    * it is not from the native app's webview (`HamacaWeb.Plugs.Embed.embedded?/1`): the
+      shipped app loads its LiveViews from the host it signed in on, where its session
+      cookie lives, so a redirect would land it signed out.
 
   Everything else is returned untouched. Sits **first** in the `:browser` pipeline, before
   `:fetch_session` and `Embed`, so a redirect never sets a cookie on the old host; being in
@@ -34,7 +37,8 @@ defmodule HamacaWeb.Plugs.CanonicalHost do
   defp redirect?(conn) do
     conn.method == "GET" and
       String.downcase(conn.host) in Hamaca.Config.get(:extra_hosts, []) and
-      List.first(conn.path_info) not in @pass_through
+      List.first(conn.path_info) not in @pass_through and
+      not HamacaWeb.Plugs.Embed.embedded?(conn)
   end
 
   defp redirect(conn) do
