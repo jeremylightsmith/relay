@@ -1,192 +1,104 @@
 # Getting started
 
-**From nothing to a card being worked by agents.** Follow the steps in order — each one
-is a board URL, a click in the UI, or a command you already have. Nothing here needs
-access to Hamaca's own source repository.
+When you create a board, a setup checklist opens beside it. Follow it, and by the end an agent
+will be working your first card. This page walks through the same steps, so
+you know what's coming.
 
-This page is written so an **agent** can follow it. Where you need a human to decide
-something, it is called out **as a question**.
+You'll need:
+
+- a git repository on your computer that you're happy to let agents create branches in;
+- Claude Code (recommended) or Codex.
+
+You don't need the Hamaca source code. Everything comes from your board.
 
 ## 1. Create a board
 
-Sign in at your board host and create a board. **That is the whole of setup.** Creating a
-board seeds:
+Sign in at [hamaca.app](https://hamaca.app), or at your own server if you self-host, and create
+a board from a template. The setup checklist opens beside it and ticks off each step as you go.
 
-- its **stages** (columns) and their human/AI ownership;
-- the **Spec:Review**, **Spec:Done** and **Plan:Done** lanes;
-- the **default flows** — Spec, Plan and Code.
+## 2. Pick your LLM
 
-A board created from a template also opens a **setup wizard** beside it, which walks you
-through the steps below and ticks each one as the board sees it happen. Nothing needs
-importing. The seeded flows arrive **disabled**; step 5 is where you turn one on.
+Choose the coding agent that will work your cards. Claude Code is the best tested. You can
+change it later in Board settings → Agents.
 
-Note your board's URL — it looks like `https://<board-host>/board/<slug>`. The `<slug>`
-appears in every board URL below.
+## 3. Copy your key
 
-## 2. Get a board API key
-
-Open **Settings → API keys** on your board (`/board/<slug>/settings`) and click **+ Create
-new key**. It is shown **once** — copy it now. If a key already exists, **Regenerate**
-replaces it.
-
-Point your shell at the board with two environment variables:
+The checklist shows a line with your board's key in it:
 
 ```bash
-export RELAY_URL="https://<board-host>"
-export RELAY_API_KEY="relay_xxxxxxxxxxxx_…"
+export RELAY_API_KEY=relay_xxxxxxxxxxxx_…
 ```
 
-Put them somewhere your agent's shell will load them — a gitignored `.envrc.local`, your
-shell profile, or your process manager's environment. Every command below reads them.
+Copy it now, because it's only shown once. Put it where your shell will load it, such as your
+shell profile or a gitignored `.envrc.local`.
 
-See [Authentication & API access](/docs/authentication) for what the key authorises and
-the error you get without it.
+## 4. Install in your repo
 
-## 3. Get the CLI and scaffold your project
-
-Everything the CLI needs is served by **your board** — **no access to the Hamaca repository is
-needed**, there is no repository to clone, and nothing comes from a third party.
-
-Create the board from a template and follow its **setup wizard**, docked beside the board.
-**Step 4 of the wizard gives you the install command** for your board — run it once, from the
-root of your project's git checkout:
+The checklist gives you an install command for your board. Run it from your repo's root
+folder:
 
 ```bash
-curl -fsSL "https://<board-host>/b/<slug>/install" | sh
+curl -fsSL "https://<your-board-host>/b/<board>/install" | sh
 ```
 
-The script checks your project first and writes nothing until those checks pass. Then it
-fetches `./relay` from `$RELAY_URL/api/scaffold/relay` **with your board's URL already baked
-in**, so the CLI finds its board without `RELAY_URL` (an exported `RELAY_URL` still overrides
-it, and `./relay update` keeps it). It also installs the Hamaca-owned skills and `relay.md`, and
-lays down a starter `.relay/runner.json` and `.relay/prepare-worktree.sh` with
-`./relay update --starter-only` — that is where step 4's capacity configuration comes from.
-Your board API key is never written to disk.
+It checks your repo before writing anything. Then it adds `./relay`, the tool that runs agents
+on your machine, and a few files that tell your agent how to work with Hamaca. It doesn't commit
+anything.
 
-Then start Claude Code in the project and run `/relay-onboard`, which
-wires this repo to your board's flows and reviews the starter `.relay/runner.json` with you. It
-works sub-steps 5.1–5.8 of the board's setup checklist, one at a time, reporting each one to
-the board's setup wizard as it goes: pull the flows, confirm what it found in the repo, ask the
-questions the repo can't answer (saved to a committed `.relay/project.md`), agree each proposed
-change with you before writing anything, push the flows back enabled, get Hamaca's files onto
-your base branch, file any follow-ups as `#setup` cards, and create your first card. Interrupt
-it any time; running it again picks up where it stopped. On a board created before guided
-setup it says so and points you at `/relay-doctor`.
+## 5. Onboard with your agent
 
-Hamaca owns exactly five files in your project and updates them as a set:
+Open Claude Code in your repo and run:
 
-| Item | Path |
-|---|---|
-| the runner | `./relay` |
-| the agent guide | `relay.md` |
-| updater skill | `.claude/skills/relay-update/SKILL.md` |
-| doctor skill | `.claude/skills/relay-doctor/SKILL.md` |
-| onboarding skill | `.claude/skills/relay-onboard/SKILL.md` |
+```
+/relay-onboard
+```
 
-Everything else in `.claude/` is yours; Hamaca never writes it.
+It asks a few questions about your project, shows you each change before making it, turns on
+your board's flows (the steps an agent follows in each stage) and creates your first card. The checklist ticks off each part as it goes.
+If you stop partway, run it again and it picks up where it left off.
 
-Already have `./relay`? Run `/relay-update` (or `./relay update --check` to see what would
-change first). It compares the board's scaffold manifest against what is on disk, refetches only
-what actually differs, and restores anything that has been deleted or edited.
+## 6. Start the runner
 
-**Question for a human:** which project directory should agents work in? It must be a git
-repository, and it should be one you are willing to let agents create branches in.
-
-## 4. Start the runner
-
-From that project directory:
+Open a new terminal in your repo and run:
 
 ```bash
-relay start
+./relay start
 ```
 
-The runner claims work from your board and runs it. It knows nothing about your board's
-particular columns or agents — the server tells it what to do, so it stays generic. It
-long-polls when idle, so leaving it running is cheap.
+Leave it running. The runner is what picks up cards and starts agents on them. Within a few
+seconds the checklist shows your machine as online.
 
-**Confirm it is advertising capacity** before moving on. Open the **Runners** view at
-`/board/<slug>/runners`. Your machine should appear with a **FRESH** pill and capacity
-chips showing its configured totals. If it does not appear at all, `relay start` is not
-reaching the board — re-check `RELAY_URL` and `RELAY_API_KEY` from step 2.
+## 7. Watch your first card
 
-Capacity comes from `.relay/runner.json`'s `capacity` and is advertised on a heartbeat
-every few seconds. Two classes matter:
+The runner picks up the card that onboarding created, and the card turns violet: an agent has
+it. Open the card and select the **Run** tab to watch the agent work.
 
-- `shared_clean` — jobs that can share one clean worktree;
-- `exclusive` — jobs that need a worktree to themselves. The Code flow needs this one.
+If the agent hits a decision it can't make, it asks you on the card. Answer there and it
+carries on. When it's done, the card moves to the next stage by itself.
 
-**If your trunk is not `main`,** set `base` in the same file — it is the ref every worktree is
-created at and reset to, and it defaults to `origin/main`:
+That's setup. From here, add cards to your board and move them into a stage that has a flow.
 
-```json
-{ "capacity": { "shared_clean": 1, "exclusive": 1 }, "base": "origin/master" }
-```
+## When a card doesn't move
 
-Note that `base` governs *worktrees*, not branches: where a card's branch starts is written into
-the flow's `branch` node, and changing it is a flow edit.
+If a card sits in a stage's *Next up* lane, it's almost always one of these. Check them in
+order.
 
-**Usage limits.** Add `"limits": {"max_five_hour": 0.9, "max_seven_day": 0.9}` to the same file
-to stop the runner claiming new work once Claude usage passes 90% of the five-hour or seven-day
-window. Jobs already running finish, the Runners view marks the machine **RATE LIMITED**, and it
-resumes on its own when the window resets. Leave a key out for no limit on that window.
+1. **The stage has no flow turned on.** Open Settings › Stages and check that the stage's flow
+   is on.
+2. **The runner isn't running.** Open the board's Runners page. Your machine should show
+   FRESH. If it shows STALE or GONE, or isn't listed, restart `./relay start` in a terminal
+   where `RELAY_API_KEY` is set.
+3. **The runner can't take this kind of work.** Code cards need a runner with `exclusive`
+   capacity. The Runners page shows what each machine can take, and
+   [Runner config](/docs/cli#runner-config) shows how to change it.
+4. **The card is waiting on you.** If an agent asked a question, the card shows it. Answer it
+   on the card.
 
-## 5. Enable a flow
-
-Flows are seeded **disabled**, so nothing dispatches until you turn one on. Open
-**Settings › Stages** on your board and turn on the **Spec** flow in the Spec stage's FLOW
-band — it is the cheapest one to start with, and it is the first stage a new card meets.
-
-The confirm dialog reminds you that a runner must be connected and advertising capacity
-before cards will move — it does not check for you, so confirm that yourself on the
-**Runners** view (step 4).
-
-Read [Enabling a flow safely](/docs/runbook-flow-cutover) before you enable a flow on a
-board that already has cards moving through it — the ordering there is what keeps two
-dispatchers off the same cards.
-
-**Question for a human:** which stages do you want agents to own? Enabling a flow hands
-that stage's cards to agents. Start with one.
-
-## 6. Move a card into *Next up* and watch it work
-
-Create a card on the board and drag it into the Spec stage's **Next up** lane. Within a
-few seconds the card should pick up a **Run**: open the card's drawer and select the
-**Run** tab to watch the agent work, live.
-
-When the flow finishes, the card moves itself to the next stage. If the agent hits a
-decision it cannot make, it sets the card to **needs input** and asks you a question in the
-drawer — answer it there and the run resumes.
-
-See [Statuses & outcomes](/docs/statuses-and-outcomes) for what each state means.
-
-## 7. When a card does not move
-
-A card that just sits in *Next up* is almost always one of four things. Check them in this
-order:
-
-1. **No flow is enabled for that stage.** Open **Settings › Stages** and confirm the FLOW
-   band on that card's stage is on. This is the most common cause on a new board.
-2. **No runner is advertising capacity.** Open `/board/<slug>/runners`. If the roster is
-   empty, or your machine shows **STALE** or **GONE** rather than **FRESH**, `relay start`
-   has stopped or lost the board — restart it and re-check.
-3. **The runner has capacity, but not the right class.** A Code-flow card needs
-   `exclusive` capacity. Check the capacity chips on the Runners view against what the flow
-   needs.
-4. **The card is blocked on you.** A card in **needs input** is waiting for a human answer,
-   not for an agent. Open its drawer and answer the question.
-
-If none of those explain it, open the card's drawer **Run** tab: a run that started and
-failed shows the node that failed and its outcome there.
-
-> [!TIP]
-> There is a dedicated diagnosis surface for exactly this question: run `./relay why <ref>`,
-> or read `GET /api/cards/:ref/diagnosis`. It answers "why isn't this card moving?" in one call
-> instead of four checks by hand.
+Still stuck? Run `./relay why <card>` and it tells you why that card isn't moving.
 
 ## Where to go next
 
-- New to the model? [Boards & stages](/docs/boards-and-stages) and
-  [Cards & handoffs](/docs/cards-and-handoffs).
-- Driving a card by hand? The [CLI](/docs/cli).
-- Building your own runner or agents? [The runner](/docs/architecture-runner) and the
-  [REST API reference](/docs/api).
+- [Boards & stages](/docs/boards-and-stages) and [Cards & handoffs](/docs/cards-and-handoffs)
+  explain how work moves between you and your agents.
+- [CLI](/docs/cli) lists every `./relay` command.
+- [REST API](/docs/api) is for building your own tools on Hamaca.

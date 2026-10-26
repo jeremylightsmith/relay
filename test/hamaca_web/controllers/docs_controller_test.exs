@@ -22,32 +22,36 @@ defmodule HamacaWeb.DocsControllerTest do
 
     for needle <- [
           "Create a board",
-          "RELAY_URL",
           "RELAY_API_KEY",
           "/install",
-          "relay start",
+          "/relay-onboard",
+          "./relay start",
           "Settings",
           "Next up"
         ] do
       assert html =~ needle, "the getting-started page never mentions #{inspect(needle)}"
     end
+
+    # The install bakes the board URL into ./relay, and /relay-onboard turns the flows on.
+    refute html =~ "RELAY_URL"
+    refute html =~ "Enable a flow"
   end
 
   # Order is asserted on the step HEADINGS only. Non-heading needles are unreliable for
   # ordering because the "on this page" TOC renders every heading ahead of the article
   # body, so a word that appears in a late heading precedes body text from an early step.
   # The headings themselves are monotonic in both the TOC and the body.
-  test "the seven steps are numbered and rendered in order", %{conn: conn} do
+  test "the seven steps follow the setup checklist, in order", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
     headings = [
       "1. Create a board",
-      "2. Get a board API key",
-      "3. Get the CLI and scaffold your project",
-      "4. Start the runner",
-      "5. Enable a flow",
-      "6. Move a card into",
-      "7. When a card does not move"
+      "2. Pick your LLM",
+      "3. Copy your key",
+      "4. Install in your repo",
+      "5. Onboard with your agent",
+      "6. Start the runner",
+      "7. Watch your first card"
     ]
 
     offsets =
@@ -67,7 +71,7 @@ defmodule HamacaWeb.DocsControllerTest do
 
     refute html =~ "RLY-181"
     refute html =~ "not available yet"
-    assert html =~ "/api/scaffold"
+    refute html =~ "/api/scaffold"
     assert html =~ "/install"
     refute html =~ "/relay-setup"
     refute html =~ "relay-config"
@@ -94,12 +98,11 @@ defmodule HamacaWeb.DocsControllerTest do
     refute html =~ "published.json"
   end
 
-  test "the getting-started page needs no repo access and links the runbook", %{conn: conn} do
+  test "the getting-started page needs no repo access", %{conn: conn} do
     html = conn |> get(~p"/docs") |> html_response(200)
 
-    assert html =~ ~s(href="/docs/runbook-flow-cutover")
     # The sentence the whole scaffold-over-HTTP design exists to make true (plan goal).
-    assert html =~ "no access to the Hamaca repository"
+    assert html =~ ~r/You don\S{1,6}t need the Hamaca source code/
     refute html =~ "git clone"
     refute html =~ "copy this file"
   end
@@ -271,15 +274,13 @@ defmodule HamacaWeb.DocsControllerTest do
   end
 
   # RE443: the install command lays down the starter runner.json (`./relay update
-  # --starter-only`); /relay-onboard then wires the repo to the flows and reviews that file.
-  test "the getting-started page says the install lays down runner.json and /relay-onboard reviews it",
-       %{conn: conn} do
-    html = conn |> get(~p"/docs") |> html_response(200)
+  # --starter-only`). Getting started only says to run the install; the CLI page has the detail.
+  test "the CLI page says the install lays down runner.json and relay.md", %{conn: conn} do
+    html = conn |> get(~p"/docs/cli") |> html_response(200)
 
     assert html =~ "./relay update --starter-only"
     assert html =~ "relay.md"
     assert html =~ ".relay/runner.json"
-    assert html =~ "wires this repo to your board"
   end
 
   test "an unknown slug is a 404", %{conn: conn} do
