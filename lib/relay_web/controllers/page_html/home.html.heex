@@ -4,18 +4,14 @@
   <%!-- NAV --%>
   <header class="sticky top-0 z-20 border-b border-base-300 bg-base-100/85 backdrop-blur-md">
     <nav class="mx-auto flex h-[62px] max-w-[1120px] items-center gap-4 px-4 sm:gap-7 sm:px-8">
-      <a href="#top" class="flex items-center gap-2.5">
-        <span class="relative flex size-[25px] items-center justify-center rounded-lg bg-primary">
-          <span class="size-[9px] rounded-full bg-primary-content"></span>
-          <span class="absolute right-1 top-1 size-1 rounded-full bg-primary ring-[1.5px] ring-primary-content">
-          </span>
-        </span>
-        <span class="text-base font-semibold tracking-[-0.02em]">{Relay.Brand.name()}</span>
+      <a href="#top" class="flex items-center gap-2">
+        <.hamaca_mark class="h-[22px]" />
+        <span class="hidden text-base font-semibold tracking-[-0.02em] sm:inline">Hamaca</span>
       </a>
       <div class="hidden items-center gap-[22px] text-[13.5px] text-base-content/70 md:flex">
+        <a href="#review" class="hover:text-primary">Review by looking</a>
         <a href="#how" class="hover:text-primary">How it works</a>
-        <a href="#flow" class="hover:text-primary">The flow</a>
-        <a href="#stages" class="hover:text-primary">Stages</a>
+        <a href="#built" class="hover:text-primary">Built by Hamaca</a>
         <a href="/#pricing" class="hover:text-primary">Pricing</a>
       </div>
       <span class="flex-1"></span>
@@ -35,164 +31,258 @@
       >
         Sign in
       </a>
-      <a href={~p"/auth/google"} class="btn btn-primary btn-sm rounded-lg">Open the board</a>
+      <a id="nav-start" href={~p"/auth/google"} class="btn btn-primary btn-sm rounded-lg">
+        Start your board
+      </a>
     </nav>
   </header>
 
   <%!-- HERO --%>
   <section
     id="top"
-    class="mx-auto max-w-[1120px] px-4 pb-10 pt-16 text-center sm:px-8 sm:pt-[76px]"
+    class="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-6 px-4 pb-6 pt-12 sm:px-8 md:grid-cols-[1fr_1.05fr] md:gap-4 md:pt-16"
   >
-    <div class="mb-6 inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-secondary/25 bg-secondary/10 px-3 py-1.5 font-mono text-xs font-semibold text-secondary">
-      <span
-        class="size-[7px] rounded-full bg-secondary"
-        style="animation:relaypulse 1.4s ease-in-out infinite;"
-      >
+    <div class="text-center md:text-left">
+      <h1 class="mb-5 text-[44px] font-semibold leading-[1.02] tracking-[-0.035em] md:text-[60px]">
+        <span class="mb-1 flex items-center justify-center gap-3 text-secondary md:justify-start">
+          <.hamaca_mark class="h-[40px] md:h-[52px]" />Hamaca:
+        </span>
+        Hammock Driven Development.
+      </h1>
+      <p class="mx-auto mb-8 max-w-[520px] text-lg leading-relaxed text-base-content/70 md:mx-0">
+        Your agents become a factory you can see at a glance. Your phone lights up only when a
+        decision is yours, and what you approve is design docs, mockups and screenshots. Ship
+        more ideas than you have hours, from anywhere.
+      </p>
+      <div class="mb-4 flex flex-wrap items-center justify-center gap-3 md:justify-start">
+        <a href={~p"/auth/google"} id="google-signin" class="btn btn-primary">
+          Start your board
+        </a>
+        <a id="hero-watch" href={~p"/board/relay/public"} class="btn btn-outline gap-2">
+          <span
+            class="size-2 rounded-full bg-secondary"
+            style="animation:relaypulse 1.4s ease-in-out infinite;"
+          >
+          </span>
+          Watch Hamaca build itself
+        </a>
+      </div>
+      <p class="mb-2 text-xs text-base-content/55">
+        Free for one board. Open source (MIT). Works with Claude Code.
+      </p>
+      <p class="text-xs text-base-content/55">
+        By continuing you agree to our <.link navigate={~p"/terms"} class="link">Terms</.link>
+        and <.link navigate={~p"/privacy"} class="link">Privacy Policy</.link>.
+      </p>
+    </div>
+
+    <%!-- The picture slot: swappable for a raster image without touching this template --%>
+    <.landing_hero_visual />
+  </section>
+
+  <%!-- REVIEW BY LOOKING — the board, then the two screens its lit cards open --%>
+  <section id="review" class="mx-auto max-w-[1120px] px-4 pb-16 pt-8 sm:px-8">
+    <div class="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between md:gap-10">
+      <div>
+        <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-success">
+          REVIEW BY LOOKING
+        </div>
+        <h2 class="max-w-[640px] text-[32px] font-semibold leading-tight tracking-[-0.025em] md:text-[38px]">
+          Make your life easier. Approve design docs, mockups and screenshots, not code.
+        </h2>
+      </div>
+      <p class="max-w-[420px] text-base leading-relaxed text-base-content/70">
+        The board shows every card and whose move it is. When a card comes back to you, open it.
+        A design card opens with its mockups. A built card opens with screenshots of the running app.
+      </p>
+    </div>
+
+    <.landing_board />
+
+    <%!-- The arrows (lg+): each lit card drops into the screen it opens. Same grid as the board. --%>
+    <div
+      class="hidden h-[78px] grid-cols-[1fr_1.6fr_1fr_1fr_0.8fr] gap-2.5 px-4 lg:grid"
+      aria-hidden="true"
+    >
+      <span></span>
+      <span class="grid grid-cols-2">
+        <span></span>
+        <span class="relative flex flex-col items-center">
+          <span class="w-0 flex-1 border-l-2 border-dashed border-warning"></span>
+          <svg viewBox="0 0 16 10" class="h-2.5 w-4 shrink-0 fill-warning">
+            <path d="M0 0 L16 0 L8 10 Z" />
+          </svg>
+          <span class="absolute right-[calc(50%+14px)] top-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border border-warning/40 bg-base-100 px-3 py-1 text-[12px] font-medium shadow-sm">
+            Opens with the mockups
+          </span>
+        </span>
       </span>
-      HUMAN + AI, ONE BOARD
-    </div>
-    <h1 class="mx-auto mb-5 max-w-[820px] text-4xl font-semibold leading-[1.02] tracking-[-0.035em] text-base-content md:text-6xl">
-      Pass work between people and AI — without losing the thread.
-    </h1>
-    <p class="mx-auto mb-8 max-w-[560px] text-lg leading-relaxed text-base-content/70">
-      Hamaca is a kanban board built for handoffs. Some stages are yours, some belong to the AI.
-      It works in the open, asks when it's unsure, and waits for your call.
-    </p>
-    <div class="mb-4 flex flex-wrap items-center justify-center gap-3">
-      <a href={~p"/auth/google"} id="google-signin" class="btn btn-primary">
-        <svg viewBox="0 0 48 48" class="size-5" aria-hidden="true">
-          <path
-            fill="#EA4335"
-            d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-          />
-          <path
-            fill="#4285F4"
-            d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-          />
-          <path
-            fill="#FBBC05"
-            d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-          />
-          <path
-            fill="#34A853"
-            d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-          />
+      <span></span>
+      <span class="relative flex flex-col items-center">
+        <span class="w-0 flex-1 border-l-2 border-dashed border-warning"></span>
+        <svg viewBox="0 0 16 10" class="h-2.5 w-4 shrink-0 fill-warning">
+          <path d="M0 0 L16 0 L8 10 Z" />
         </svg>
-        Sign in with Google
-      </a>
-      <a href="#how" class="btn btn-outline">See how it works</a>
+        <span class="absolute right-[calc(50%+14px)] top-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border border-warning/40 bg-base-100 px-3 py-1 text-[12px] font-medium shadow-sm">
+          Opens with screenshots
+        </span>
+      </span>
+      <span></span>
     </div>
-    <p class="mb-14 text-xs text-base-content/55">
-      By continuing you agree to our <.link navigate={~p"/terms"} class="link">Terms</.link>
-      and <.link navigate={~p"/privacy"} class="link">Privacy Policy</.link>.
-    </p>
 
-    <%!-- Hero board visual --%>
-    <div class="relative overflow-hidden rounded-[18px] border border-base-300 bg-base-200 p-5 text-left shadow-2xl">
-      <div class="flex min-w-0 items-start gap-3.5">
-        <%!-- Spec / HUMAN column --%>
-        <div class="min-w-0 flex-1">
-          <div class="mb-3 flex items-center gap-[7px] px-0.5">
-            <span class="size-2 rounded-[3px] bg-primary"></span>
-            <span class="text-[13px] font-semibold">Spec</span>
-            <span class="rounded-[5px] bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
-              HUMAN
-            </span>
+    <div class="grid grid-cols-1 gap-2.5 lg:grid-cols-[1fr_1.6fr_1fr_1fr_0.8fr] lg:px-4">
+      <%!-- Below lg the arrows become labels above each screen --%>
+      <div class="mt-6 flex items-center gap-2 lg:hidden">
+        <svg viewBox="0 0 16 10" class="h-2.5 w-4 shrink-0 fill-warning" aria-hidden="true">
+          <path d="M0 0 L16 0 L8 10 Z" />
+        </svg>
+        <span class="rounded-full border border-warning/40 bg-base-100 px-3 py-1 text-[12px] font-medium shadow-sm">
+          The Design card opens with the mockups
+        </span>
+      </div>
+
+      <.landing_browser />
+
+      <div class="mt-6 flex items-center gap-2 lg:hidden">
+        <svg viewBox="0 0 16 10" class="h-2.5 w-4 shrink-0 fill-warning" aria-hidden="true">
+          <path d="M0 0 L16 0 L8 10 Z" />
+        </svg>
+        <span class="rounded-full border border-warning/40 bg-base-100 px-3 py-1 text-[12px] font-medium shadow-sm">
+          The Review card opens with screenshots
+        </span>
+      </div>
+
+      <.landing_phone />
+    </div>
+
+    <div class="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div class="rounded-[14px] border border-base-300 p-4">
+        <div class="mb-1 font-mono text-[11px] font-semibold tracking-wider text-secondary">
+          DESIGN REVIEW
+        </div>
+        <div class="text-[14px] font-medium">
+          Mockups land on the card before a line of code is written.
+        </div>
+      </div>
+      <div class="rounded-[14px] border border-base-300 p-4">
+        <div class="mb-1 font-mono text-[11px] font-semibold tracking-wider text-secondary">
+          REVIEW
+        </div>
+        <div class="text-[14px] font-medium">
+          Screenshots of the running app and a short summary, not a diff.
+        </div>
+      </div>
+      <div class="rounded-[14px] border border-base-300 p-4">
+        <div class="mb-1 font-mono text-[11px] font-semibold tracking-wider text-primary">
+          YOUR CALL
+        </div>
+        <div class="text-[14px] font-medium">
+          Approve, or send it back with a note. The next round starts from what you said.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- THE SILENT STALL --%>
+  <section
+    id="problem"
+    class="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-8 px-4 py-16 sm:px-8 md:grid-cols-2 md:gap-14"
+  >
+    <div>
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-warning">
+        THE SILENT STALL
+      </div>
+      <h2 class="mb-3.5 text-[30px] font-semibold leading-tight tracking-[-0.02em]">
+        It finished an hour ago. Nothing told you.
+      </h2>
+      <p class="mb-4 text-base leading-relaxed text-base-content/70">
+        Agents are cheap now. Coordinating them isn't. Five terminals, five worktrees, and the only
+        way to know where each one is: read it all again. Ten minutes to rebuild context, every switch.
+      </p>
+      <p class="text-base leading-relaxed text-base-content/70">
+        So you can't step away. And when you do, you feel guilty about the agents sitting idle.
+        You wanted to be a builder. You became a babysitter.
+      </p>
+    </div>
+    <.landing_terminals />
+  </section>
+
+  <%!-- GUIDE: built by Hamaca --%>
+  <section id="built" class="border-y border-base-300 bg-base-200">
+    <div class="mx-auto max-w-[1120px] px-4 py-16 sm:px-8">
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-secondary">
+        WE'VE BEEN THERE
+      </div>
+      <h2 class="mb-3.5 max-w-[700px] text-[32px] font-semibold leading-tight tracking-[-0.025em]">
+        We got tired of pacing between terminals too.
+      </h2>
+      <p class="mb-10 max-w-[600px] text-base leading-relaxed text-base-content/70">
+        Asking each one "are you done yet?" So we built the board we wanted, and then let it build itself.
+      </p>
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div class="rounded-[14px] border border-base-300 bg-base-100 p-6">
+          <div class="mb-3 font-mono text-[11px] font-semibold tracking-wider text-secondary">
+            BUILT BY HAMACA
           </div>
-          <div class="flex flex-col gap-2.5 rounded-[9px] border border-base-300 border-l-[3px] border-l-primary bg-base-100 p-[11px]">
-            <span class="text-[12.5px] font-medium text-base-content">
-              Define CSV export criteria
+          <h3 class="mb-2 text-base font-semibold">Its own board ships it.</h3>
+          <p class="mb-4 text-[13.5px] leading-relaxed text-base-content/70">
+            Hamaca's board plans, codes, reviews, tests and ships Hamaca. This page was a card on it.
+          </p>
+          <div class="flex items-center gap-2 rounded-[9px] border border-base-300 border-l-[3px] border-l-success bg-base-200 p-2.5">
+            <span class="font-mono text-[11px] text-base-content/60">RE476</span>
+            <span class="truncate text-[12px] font-medium">Hamaca landing page</span>
+            <span class="ml-auto font-mono text-[10px] text-success">SHIPPED</span>
+          </div>
+          <a
+            id="built-watch"
+            href={~p"/board/relay/public"}
+            class="link link-primary mt-4 inline-block text-[13px]"
+          >
+            Watch it build itself →
+          </a>
+        </div>
+        <div class="rounded-[14px] border border-base-300 bg-base-100 p-6">
+          <div class="mb-3 font-mono text-[11px] font-semibold tracking-wider text-warning">
+            JIDOKA · ANDON
+          </div>
+          <h3 class="mb-2 text-base font-semibold">The light comes on when it needs you.</h3>
+          <p class="mb-4 text-[13.5px] leading-relaxed text-base-content/70">
+            Borrowed from Toyota: machines that stop and call a person (<i>jidoka</i>), and the light on the line that says "I need you" (<i>andon</i>).
+          </p>
+          <div class="flex items-center gap-3 rounded-[9px] border border-base-300 bg-base-200 p-2.5">
+            <span class="size-2 rounded-full bg-secondary/40"></span>
+            <span class="size-2 rounded-full bg-secondary/40"></span>
+            <span class="size-2.5 rounded-full bg-warning" style={andon_glow_style()}></span>
+            <span class="size-2 rounded-full bg-secondary/40"></span>
+            <span class="size-2 rounded-full bg-secondary/40"></span>
+            <span class="ml-auto font-mono text-[10.5px] text-base-content/60">
+              1 of 5 needs you
             </span>
-            <div class="flex items-center justify-between">
-              <span class="font-mono text-[11px] text-base-content/65">#product</span>
-              <span class="flex size-[22px] items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-content">
-                DK
-              </span>
-            </div>
           </div>
         </div>
-
-        <%!-- Handoff divider --%>
-        <div class="flex flex-none flex-col items-center gap-1.5 self-center pt-5">
-          <span class="font-mono text-[10px] tracking-wider text-base-content/65">HANDOFF</span>
-          <span class="text-xl text-secondary">→</span>
-        </div>
-
-        <%!-- Code / AI column --%>
-        <div class="min-w-0 flex-[1.4]">
-          <div class="mb-3 flex items-center gap-[7px] px-0.5">
-            <span class="size-2 rounded-[3px] bg-secondary"></span>
-            <span class="text-[13px] font-semibold">Code</span>
-            <span class="rounded-[5px] bg-secondary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-secondary">
-              AI
-            </span>
-            <span class="rounded-[5px] bg-base-200 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-base-content/70">
-              wip 2/3
-            </span>
+        <div class="rounded-[14px] border border-base-300 bg-base-100 p-6">
+          <div class="mb-3 font-mono text-[11px] font-semibold tracking-wider text-primary">
+            FLOW METRICS
           </div>
-          <div class="flex flex-col gap-2.5">
-            <div class="flex flex-col gap-2.5 rounded-[9px] border border-base-300 border-l-[3px] border-l-secondary bg-base-100 p-[11px]">
-              <span class="text-[12.5px] font-medium text-base-content">
-                Migrate 40 blog posts to the new CMS
-              </span>
-              <progress class="progress progress-secondary h-[5px]" value="62" max="100">
-              </progress>
-              <div class="flex items-center justify-between">
-                <span class="flex items-center gap-1.5 font-mono text-[11px] text-secondary">
-                  <span
-                    class="size-1.5 rounded-full bg-secondary"
-                    style="animation:relaypulse 1.4s ease-in-out infinite;"
-                  >
-                  </span>
-                  working · 62%
-                </span>
-                <span class="flex size-[22px] items-center justify-center rounded-full bg-secondary">
-                  <span class="size-2 rounded-full border-[1.5px] border-secondary-content">
-                  </span>
-                </span>
-              </div>
+          <h3 class="mb-2 text-base font-semibold">Proof the factory gets better.</h3>
+          <p class="mb-4 text-[13.5px] leading-relaxed text-base-content/70">
+            Lead time, flow efficiency and rework, on every board. Tune the line, then watch the numbers move.
+          </p>
+          <div class="rounded-[9px] border border-base-300 bg-base-200 p-2.5">
+            <div class="mb-1.5 flex items-baseline justify-between font-mono text-[10.5px] text-base-content/60">
+              <span>EXAMPLE BOARD · LEAD TIME · 8 WKS</span>
+              <span class="text-success">↓ 61%</span>
             </div>
-            <div class="flex flex-col gap-2 rounded-[9px] border border-base-300 border-l-[3px] border-l-warning bg-base-100 p-[11px]">
-              <span class="text-[12.5px] font-medium text-base-content">
-                Rewrite the onboarding tooltips
+            <div class="flex h-10 items-end gap-1">
+              <span
+                :for={height <- [100, 88, 92, 70, 62, 55, 44, 39]}
+                class={[
+                  "flex-1 rounded-sm",
+                  if(height == 39, do: "bg-primary", else: "bg-primary/70")
+                ]}
+                style={"height:#{height}%"}
+              >
               </span>
-              <div class="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1.5">
-                <span class="size-1.5 rounded-full bg-warning"></span>
-                <span class="font-mono text-[10px] font-semibold tracking-wider text-warning">
-                  NEEDS YOUR INPUT
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <%!-- Review / HUMAN column --%>
-        <div class="min-w-0 flex-1">
-          <div class="mb-3 flex items-center gap-[7px] px-0.5">
-            <span class="size-2 rounded-[3px] bg-primary"></span>
-            <span class="text-[13px] font-semibold">Review</span>
-            <span class="rounded-[5px] bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
-              HUMAN
-            </span>
-          </div>
-          <div class="rounded-[10px] bg-success/10 p-1.5">
-            <div class="px-1 pb-2 pt-0.5 font-mono text-[10px] font-semibold tracking-wider text-success">
-              DONE
-            </div>
-            <div class="flex flex-col gap-2.5 rounded-[9px] border border-base-300 border-l-[3px] border-l-success bg-base-100 p-[11px]">
-              <span class="text-[12.5px] font-medium text-base-content">
-                Add keyboard shortcuts
-              </span>
-              <div class="flex items-center justify-between">
-                <span class="flex items-center gap-1.5 font-mono text-[11px] text-success">
-                  <span class="size-1.5 rounded-full bg-success"></span>ready
-                </span>
-                <span class="flex size-[22px] items-center justify-center rounded-full bg-secondary">
-                  <span class="size-2 rounded-full border-[1.5px] border-secondary-content">
-                  </span>
-                </span>
-              </div>
             </div>
           </div>
         </div>
@@ -202,394 +292,161 @@
 
   <%!-- HOW IT WORKS --%>
   <section id="how" class="mx-auto max-w-[1120px] px-4 pb-6 pt-16 sm:px-8">
-    <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-secondary">
+    <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-primary">
       HOW IT WORKS
     </div>
-    <h2 class="mb-3.5 max-w-[640px] text-[34px] font-semibold leading-tight tracking-[-0.025em] text-base-content">
-      Every stage has an owner. The work moves between them.
+    <h2 class="mb-8 max-w-[680px] text-[32px] font-semibold leading-tight tracking-[-0.025em]">
+      Stop babysitting agents. Start running a factory.
     </h2>
-    <p class="mb-11 max-w-[560px] text-base leading-relaxed text-base-content/70">
-      You decide which stages people run and which the AI runs. Finished work lands in a Done
-      column, ready for the next owner to pull it forward.
-    </p>
     <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-      <div class="rounded-[14px] border border-base-300 bg-base-200 p-6">
-        <div class="mb-4 flex size-[34px] items-center justify-center rounded-[10px] bg-primary/10">
-          <span class="size-3 rounded-[4px] bg-primary"></span>
+      <div class="flex flex-col rounded-[14px] border border-base-300 bg-base-200 p-6">
+        <div class="mb-4 flex size-8 items-center justify-center rounded-full bg-primary font-mono text-sm font-semibold text-primary-content">
+          1
         </div>
-        <h3 class="mb-2 text-base font-semibold tracking-[-0.01em]">You stay in control</h3>
-        <p class="text-[13.5px] leading-relaxed text-base-content/70">
-          Human stages are yours. Queue work, review AI output, approve or send it back —
-          nothing ships without a person.
+        <h3 class="mb-2 text-base font-semibold">Connect your repo.</h3>
+        <p class="mb-5 text-[13.5px] leading-relaxed text-base-content/70">
+          Install Hamaca, and Claude Code wires the board to your project.
         </p>
-      </div>
-      <div class="rounded-[14px] border border-base-300 bg-base-200 p-6">
-        <div class="mb-4 flex size-[34px] items-center justify-center rounded-[10px] bg-secondary/10">
-          <span class="flex size-3.5 items-center justify-center rounded-full bg-secondary">
-            <span class="size-[5px] rounded-full border-[1.5px] border-secondary-content"></span>
-          </span>
+        <div
+          class="mt-auto rounded-[9px] p-3 font-mono text-[11.5px] text-neutral-content/85"
+          style="background:var(--color-neutral);"
+        >
+          <span class="text-neutral-content/50">$</span>
+          curl -fsSL hamaca.app/b/recipes/install | sh<br />
+          <span class="text-success">✓</span>
+          board wired to ~/recipes
         </div>
-        <h3 class="mb-2 text-base font-semibold tracking-[-0.01em]">The AI does the work</h3>
-        <p class="text-[13.5px] leading-relaxed text-base-content/70">
-          AI stages pull ready work automatically, show live progress, and hand finished cards
-          forward — you watch it happen.
-        </p>
       </div>
-      <div class="rounded-[14px] border border-base-300 bg-base-200 p-6">
-        <div class="mb-4 flex size-[34px] items-center justify-center rounded-[10px] bg-warning/10">
-          <span class="size-3 rounded-full bg-warning"></span>
+      <div class="flex flex-col rounded-[14px] border border-base-300 bg-base-200 p-6">
+        <div class="mb-4 flex size-8 items-center justify-center rounded-full bg-primary font-mono text-sm font-semibold text-primary-content">
+          2
         </div>
-        <h3 class="mb-2 text-base font-semibold tracking-[-0.01em]">It asks before it guesses</h3>
-        <p class="text-[13.5px] leading-relaxed text-base-content/70">
-          When the AI hits a decision it can't make, the card blocks and waits. You answer
-          inline; it picks up where it left off.
+        <h3 class="mb-2 text-base font-semibold">Draw your line.</h3>
+        <p class="mb-5 text-[13.5px] leading-relaxed text-base-content/70">
+          Decide which stages are yours (approve, answer) and which belong to agents (plan, build, review, test).
         </p>
+        <.landing_stage_strip />
       </div>
-    </div>
-  </section>
-
-  <%!-- WHEN IT'S UNSURE (blocked feature) --%>
-  <section class="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-8 px-4 py-14 sm:px-8 md:grid-cols-2 md:gap-14">
-    <div>
-      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-warning">
-        WHEN IT'S UNSURE
-      </div>
-      <h2 class="mb-3.5 text-[30px] font-semibold leading-tight tracking-[-0.02em] text-base-content">
-        A question, not a wrong guess.
-      </h2>
-      <p class="text-base leading-relaxed text-base-content/70">
-        The AI would rather ask than assume. Blocked cards surface right on the board with a
-        clear prompt — the whole team can see what's waiting on a human, and for how long.
-      </p>
-    </div>
-    <div class="rounded-[14px] border border-base-300 bg-base-200 p-[22px] shadow-xl">
-      <div class="flex flex-col gap-[11px] rounded-[10px] border border-base-300 border-l-[3px] border-l-warning bg-base-100 p-3.5">
-        <span class="text-sm font-semibold text-base-content">
-          Rewrite the onboarding tooltips
-        </span>
-        <div class="flex flex-col gap-2.5 rounded-[9px] border border-warning/40 bg-warning/10 p-3">
+      <div class="flex flex-col rounded-[14px] border border-base-300 bg-base-200 p-6">
+        <div class="mb-4 flex size-8 items-center justify-center rounded-full bg-primary font-mono text-sm font-semibold text-primary-content">
+          3
+        </div>
+        <h3 class="mb-2 text-base font-semibold">
+          Drop in ideas. Answer when the light comes on.
+        </h3>
+        <p class="mb-5 text-[13.5px] leading-relaxed text-base-content/70">
+          Approve, send it back with a note, or answer a question, from your phone.
+        </p>
+        <div class="mt-auto flex flex-col gap-2 rounded-[9px] border border-warning/40 bg-warning/10 p-3">
           <span class="font-mono text-[10px] font-semibold tracking-[0.05em] text-warning">
-            AI ASKED A QUESTION
+            AGENT ASKED
           </span>
-          <span class="text-[13px] leading-normal text-base-content/80">
-            Should I keep the original playful CTA wording, or match the more formal new brand
-            voice?
+          <span class="text-[12.5px] leading-snug text-base-content/80">
+            Cache map tiles or vectors for offline mode?
           </span>
-          <div class="mt-0.5 flex gap-2">
-            <span class="rounded-[7px] bg-warning px-3.5 py-1.5 text-[12.5px] font-semibold text-warning-content">
-              Answer →
+          <div class="flex gap-1.5">
+            <span class="rounded-md bg-base-100 px-2 py-1 text-[11.5px] font-medium">Tiles</span>
+            <span class="rounded-md bg-base-100 px-2 py-1 text-[11.5px] font-medium">
+              Vectors
             </span>
           </div>
         </div>
       </div>
     </div>
-  </section>
-
-  <%!-- DESIGN, BUILT IN — a static, inert replica of the mockup viewer (card_mockup_viewer/1)
-       at the approval moment. Transcribed, not called: the real components bring a fixed
-       overlay, phx-* bindings, an iframe and fixed ids. No ids, buttons or bindings in here. --%>
-  <section id="design" class="mx-auto max-w-[1120px] px-4 pb-16 pt-6 sm:px-8">
-    <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-success">
-      DESIGN, BUILT IN
-    </div>
-    <h2 class="mb-3.5 max-w-[640px] text-[30px] font-semibold leading-tight tracking-[-0.02em] text-base-content">
-      See it before anyone builds it.
-    </h2>
-    <p class="mb-10 max-w-[600px] text-base leading-relaxed text-base-content/70">
-      Cards can start in a Design stage. The AI drafts real mockups right onto the card, and you
-      flip through the options and pick one. Approve sends it on to spec. Request changes sends
-      it back with your note, and the next round starts from what you said.
-    </p>
-
-    <div class="overflow-hidden rounded-[18px] border border-base-300 bg-base-200 text-left shadow-2xl">
-      <div class="flex flex-col md:flex-row">
-        <%!-- Left sheet --%>
-        <aside class="order-2 flex w-full shrink-0 flex-col border-t border-base-300 bg-base-100 md:order-1 md:w-[320px] md:border-t-0">
-          <div class="hidden border-b border-base-300 px-3 py-2.5 md:block">
-            <span class="btn btn-ghost btn-sm gap-1.5 px-2">
-              <span aria-hidden="true">←</span>Back to card
-            </span>
-          </div>
-          <div class="flex flex-col gap-1.5 border-b border-base-300 px-4 py-3">
-            <div class="flex items-center gap-2">
-              <span class="badge badge-sm badge-primary h-5 rounded-[4px] border-none text-[12px]">
-                Design · Review
-              </span>
-              <span class="font-mono text-xs text-base-content/65">RE142</span>
-            </div>
-            <h3 class="text-base font-semibold leading-[1.3]">Redesign the recipe page</h3>
-          </div>
-          <div class="flex flex-1 flex-col gap-5 p-4">
-            <%!-- card_review_panel, compact --%>
-            <section
-              class="flex flex-col gap-3 rounded-[10px] p-3.5"
-              style="background:color-mix(in oklab, var(--color-success) 5%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-success) 30%, var(--color-base-100));"
-            >
-              <span
-                class="font-mono text-[10px] font-semibold tracking-[0.05em]"
-                style="color:color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));"
-              >
-                READY FOR YOUR REVIEW
-              </span>
-              <p
-                class="text-[13px] leading-normal"
-                style="color:color-mix(in oklab, var(--color-success) 30%, var(--color-base-content));"
-              >
-                {Relay.Brand.agent_name()} finished this. Approve to move it forward, or send it back with a note.
-              </p>
-              <div class="flex gap-2">
-                <span class="relative flex-1">
-                  <span
-                    class="btn btn-sm w-full rounded-lg border-none font-semibold text-success-content"
-                    style="background:var(--color-success);box-shadow:0 0 0 4px color-mix(in oklab, var(--color-success) 22%, transparent);"
-                  >
-                    Approve
-                  </span>
-                  <svg
-                    viewBox="0 0 24 24"
-                    class="pointer-events-none absolute -bottom-4 right-6 size-6 text-base-content drop-shadow"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M5 3l14 8-6.5 1.5L9 19z"
-                      fill="currentColor"
-                      stroke="var(--color-base-100)"
-                      stroke-width="1.5"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                </span>
-                <span
-                  class="btn btn-sm flex-1 rounded-lg bg-base-100 font-semibold"
-                  style="border:1px solid color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 85%, transparent);"
-                >
-                  Request changes
-                </span>
-              </div>
-            </section>
-            <%!-- card_mockups_section with a current mockup --%>
-            <section class="space-y-2">
-              <span class="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-base-content/60">
-                Mockups
-              </span>
-              <div class="flex flex-wrap gap-3 p-0.5">
-                <span
-                  class="relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 ring-2 ring-primary ring-offset-2 ring-offset-base-100"
-                  title="A — photo header, two columns"
-                >
-                  <span class="absolute inset-x-2 top-2 h-1 rounded-full bg-base-content/20">
-                  </span>
-                  <span class="absolute inset-x-2 top-[14px] h-4 rounded-sm bg-base-content/10">
-                  </span>
-                  <span class="absolute inset-x-2 bottom-2 top-8 flex gap-1">
-                    <span class="w-1/3 rounded-sm border border-base-300"></span>
-                    <span class="flex-1 rounded-sm border border-primary bg-primary/10"></span>
-                  </span>
-                </span>
-                <span
-                  class="relative block size-20 shrink-0 overflow-hidden rounded-md border border-base-300 bg-base-100 opacity-80"
-                  title="B — one step at a time"
-                >
-                  <span class="absolute inset-x-2 top-2 h-1 rounded-full bg-base-content/20">
-                  </span>
-                  <span class="absolute inset-x-3 bottom-4 top-6 rounded-sm border border-base-300">
-                  </span>
-                  <span class="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1">
-                    <span class="size-1.5 rounded-full bg-primary"></span>
-                    <span class="size-1.5 rounded-full bg-base-content/20"></span>
-                    <span class="size-1.5 rounded-full bg-base-content/20"></span>
-                  </span>
-                </span>
-              </div>
-              <p class="text-xs text-base-content/60">
-                Viewing
-                <b class="font-semibold text-base-content/80">A — photo header, two columns</b>
-                · 1 of 2
-              </p>
-              <p class="hidden items-center gap-1 text-xs text-base-content/50 md:flex">
-                <kbd class="kbd kbd-xs">←</kbd><kbd class="kbd kbd-xs">→</kbd>
-                switch · <kbd class="kbd kbd-xs">Esc</kbd>
-                back to card
-              </p>
-            </section>
-          </div>
-        </aside>
-
-        <%!-- Framed mockup (a div, not <main>: the landing page has no main landmark) --%>
-        <div class="order-1 flex min-w-0 flex-1 flex-col md:order-2 md:border-l md:border-base-300">
-          <%!-- phone bar (mockup_viewer_bar), mobile only --%>
-          <div class="flex items-center gap-1 border-b border-base-300 bg-base-100 px-1.5 py-1.5 md:hidden">
-            <span class="btn btn-ghost btn-sm btn-square text-base">←</span>
-            <div class="flex min-w-0 flex-1 flex-col px-1 leading-tight">
-              <span class="truncate text-sm font-semibold">A — photo header, two columns</span>
-              <span class="font-mono text-[11px] text-base-content/55">1 / 2</span>
-            </div>
-            <span class="btn btn-ghost btn-sm btn-square btn-disabled text-2xl leading-none">
-              ‹
-            </span>
-            <span class="btn btn-ghost btn-sm btn-square text-2xl leading-none">›</span>
-          </div>
-          <div class="p-3 md:p-4">
-            <div class="max-h-[300px] overflow-hidden rounded-lg border border-base-300 bg-base-100 shadow-sm md:max-h-none">
-              <%!-- the AI's mockup: a recipe page --%>
-              <div class="flex items-center gap-2 border-b border-base-300 px-4 py-2.5">
-                <span class="size-3.5 rounded bg-base-content/80"></span>
-                <span class="text-[12px] font-semibold">Forkful</span>
-                <span class="flex-1"></span>
-                <span class="hidden text-[11px] text-base-content/55 sm:inline">Recipes</span>
-                <span class="hidden text-[11px] text-base-content/55 sm:inline">Saved</span>
-                <span class="rounded-md bg-base-content px-2 py-1 text-[10.5px] font-semibold text-base-100">
-                  Sign in
-                </span>
-              </div>
-              <div class="flex h-24 items-center justify-center bg-base-content/10 text-2xl text-base-content/40 sm:h-32">
-                <span aria-hidden="true">◐</span>
-              </div>
-              <div class="px-5 pb-6 pt-5 sm:px-8">
-                <div class="mb-1 text-[20px] font-semibold tracking-[-0.02em] sm:text-[24px]">
-                  Weeknight lemon pasta
-                </div>
-                <div class="mb-4 text-[12px] text-base-content/60">25 min · Serves 4 · Easy</div>
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-[2fr_3fr]">
-                  <div>
-                    <div class="mb-1.5 text-[12px] font-semibold">Ingredients</div>
-                    <ul class="space-y-1 text-[11px] text-base-content/65">
-                      <li
-                        :for={
-                          item <- [
-                            "200g spaghetti",
-                            "2 lemons, zested",
-                            "3 cloves garlic",
-                            "40g parmesan",
-                            "Handful of basil"
-                          ]
-                        }
-                        class="flex items-center gap-1.5"
-                      >
-                        <span class="size-2.5 shrink-0 rounded-sm border border-base-300"></span>
-                        {item}
-                      </li>
-                    </ul>
-                  </div>
-                  <div>
-                    <div class="mb-1.5 text-[12px] font-semibold">Method</div>
-                    <ol class="space-y-1.5 text-[11px] text-base-content/65">
-                      <li
-                        :for={
-                          {step, n} <-
-                            Enum.with_index(
-                              [
-                                "Boil the pasta in well-salted water.",
-                                "Warm garlic in olive oil; add zest and juice.",
-                                "Toss with pasta, parmesan and basil."
-                              ],
-                              1
-                            )
-                        }
-                        class="flex items-start gap-1.5"
-                      >
-                        <span class="rounded bg-base-content px-1.5 py-0.5 text-[9px] font-semibold text-base-100">
-                          {n}
-                        </span>
-                        <span>{step}</span>
-                      </li>
-                    </ol>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+    <div class="mt-6 grid grid-cols-1 gap-3 rounded-[14px] border border-base-300 p-5 sm:grid-cols-3">
+      <div
+        :for={
+          promise <- [
+            "Nothing ships without a person saying so.",
+            "Agents ask instead of guessing.",
+            "You can always see whose move it is."
+          ]
+        }
+        class="flex items-start gap-2.5"
+      >
+        <span class="mt-0.5 text-success">✓</span>
+        <span class="text-[14px] font-medium">{promise}</span>
       </div>
     </div>
   </section>
 
-  <%!-- THE FLOW --%>
-  <section id="flow" class="border-y border-base-300 bg-base-200">
-    <div class="mx-auto max-w-[1120px] px-4 py-16 sm:px-8">
-      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-secondary">
-        THE FLOW
-      </div>
-      <h2 class="mb-2 text-[32px] font-semibold leading-tight tracking-[-0.025em] text-base-content">
-        Watch a card relay across the board.
-      </h2>
-      <p class="mb-10 max-w-[560px] text-base leading-relaxed text-base-content/70">
-        Handoffs alternate between people and AI. WIP limits keep any one stage from piling up.
-      </p>
-      <div class="flex items-stretch gap-2.5 overflow-x-auto pb-1.5">
-        <%= for {name, owner, border_cls, label_cls} <- [
-          {"Backlog", "HUMAN", "border-t-primary", "text-base-content/70"},
-          {"Design", "AI", "border-t-secondary", "text-secondary"},
-          {"Spec", "HUMAN", "border-t-primary", "text-base-content/70"},
-          {"Plan", "AI", "border-t-secondary", "text-secondary"},
-          {"Code", "AI", "border-t-secondary", "text-secondary"},
-          {"Review", "HUMAN", "border-t-primary", "text-base-content/70"},
-          {"Deploy", "AI", "border-t-secondary", "text-secondary"},
-          {"Complete", "DONE", "border-t-success", "text-success"}
-        ] do %>
-          <div class={[
-            "min-w-[112px] flex-1 rounded-[11px] border border-base-300 border-t-[3px] bg-base-100 p-3.5",
-            border_cls
-          ]}>
-            <div class={["mb-1.5 font-mono text-[10px]", label_cls]}>{owner}</div>
-            <div class="text-sm font-semibold">{name}</div>
-          </div>
-        <% end %>
-      </div>
-    </div>
-  </section>
-
-  <%!-- YOUR WORKFLOW / CONFIGURABLE STAGES --%>
+  <%!-- STAKES / SUCCESS --%>
   <section
-    id="stages"
-    class="mx-auto grid max-w-[1120px] grid-cols-1 items-center gap-8 px-4 py-14 sm:px-8 md:grid-cols-2 md:gap-14"
+    id="stakes"
+    class="mx-auto grid max-w-[1120px] grid-cols-1 gap-4 px-4 py-14 sm:px-8 md:grid-cols-2"
   >
-    <div class="rounded-[14px] border border-base-300 bg-base-200 p-5 shadow-xl">
-      <div class="flex flex-col gap-2.5">
-        <div class="flex items-center gap-3 rounded-[11px] border border-base-300 bg-base-100 p-3.5">
-          <span class="size-[9px] rounded-[3px] bg-secondary"></span>
-          <span class="flex-1 text-sm font-semibold">Code</span>
-          <div class="inline-flex gap-0.5 rounded-lg border border-base-300 bg-base-200 p-[3px]">
-            <span class="rounded-md px-2.5 py-1 text-[11px] font-semibold text-base-content/65">
-              Human
-            </span>
-            <span class="rounded-md bg-base-100 px-2.5 py-1 text-[11px] font-semibold text-base-content shadow-sm">
-              AI
-            </span>
-          </div>
-        </div>
-        <div class="flex items-center gap-4 rounded-[11px] border border-base-300 bg-base-100 p-3.5">
-          <div class="flex items-center gap-2">
-            <span class="font-mono text-[11px] text-base-content/65">WIP</span>
-            <div class="inline-flex items-center overflow-hidden rounded-lg border border-base-300">
-              <span class="flex h-7 w-6 items-center justify-center text-base-content/65">−</span>
-              <span class="w-[30px] text-center font-mono text-[13px]">3</span>
-              <span class="flex h-7 w-6 items-center justify-center text-base-content/65">+</span>
-            </div>
-          </div>
-          <span class="flex-1"></span>
-          <div class="flex items-center gap-2.5">
-            <span class="font-mono text-[11px] text-base-content/65">DONE COLUMN</span>
-            <span class="relative block h-[22px] w-[38px] rounded-full bg-primary">
-              <span class="absolute right-0.5 top-0.5 size-[18px] rounded-full bg-primary-content">
-              </span>
-            </span>
-          </div>
-        </div>
+    <div class="rounded-[14px] border border-base-300 bg-base-100 p-7">
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-base-content/55">
+        WITHOUT A LINE
       </div>
-    </div>
-    <div>
-      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-primary">
-        YOUR WORKFLOW
-      </div>
-      <h2 class="mb-3.5 text-[30px] font-semibold leading-tight tracking-[-0.02em] text-base-content">
-        Shape the stages around how you actually work.
+      <h2 class="mb-5 text-[24px] font-semibold leading-tight tracking-[-0.02em]">
+        What babysitting costs.
       </h2>
-      <p class="text-base leading-relaxed text-base-content/70">
-        Rename stages, reorder them, set who owns each, cap the WIP, and add a Done sub-column
-        wherever finished work needs to wait for a handoff. No two teams relay the same way.
-      </p>
+      <ul class="flex flex-col gap-3.5 text-[14.5px] leading-snug text-base-content/75">
+        <li
+          :for={
+            cost <- [
+              "Agents finish at 9pm and sit idle until morning.",
+              "Code merges that no human really looked at.",
+              "Burnout from juggling terminals and context.",
+              "Your best ideas die in the backlog."
+            ]
+          }
+          class="flex gap-3"
+        >
+          <span class="mt-1.5 size-2 shrink-0 rounded-full bg-base-content/30"></span>{cost}
+        </li>
+      </ul>
     </div>
+    <div class="rounded-[14px] border border-success/40 bg-success/10 p-7">
+      <div class="mb-3.5 font-mono text-xs font-semibold tracking-[0.08em] text-success">
+        FROM THE HAMMOCK
+      </div>
+      <h2 class="mb-5 text-[24px] font-semibold leading-tight tracking-[-0.02em]">
+        Ship from anywhere. Decide from your phone.
+      </h2>
+      <ul class="flex flex-col gap-3.5 text-[14.5px] leading-snug text-base-content/80">
+        <li
+          :for={
+            win <- [
+              "Ideas get built about as fast as you can describe them.",
+              "Five projects at once, because context is one glance.",
+              "Ship from the hammock, the trail, or the school pickup line.",
+              "The factory needs you less every week, and you can prove it."
+            ]
+          }
+          class="flex gap-3"
+        >
+          <span class="mt-0.5 text-success">✓</span>{win}
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <%!-- TRANSFORMATION --%>
+  <section
+    id="transformation"
+    class="mx-auto max-w-[1120px] px-4 pb-10 pt-4 text-center sm:px-8"
+  >
+    <div class="mx-auto flex max-w-[760px] flex-col items-center gap-5 sm:flex-row sm:justify-center sm:gap-8">
+      <div class="flex flex-col items-center gap-1.5">
+        <span class="font-mono text-[11px] tracking-wider text-base-content/50">BEFORE</span>
+        <span class="text-[22px] font-semibold text-base-content/45 line-through decoration-base-content/30">
+          the babysitter
+        </span>
+      </div>
+      <span class="text-2xl text-secondary">→</span>
+      <div class="flex flex-col items-center gap-1.5">
+        <span class="font-mono text-[11px] tracking-wider text-primary">AFTER</span>
+        <span class="flex items-center gap-2 text-[22px] font-semibold">
+          the one in the hammock <.hamaca_mark class="h-[22px]" />
+        </span>
+      </div>
+    </div>
+    <p class="mx-auto mt-5 max-w-[520px] text-base leading-relaxed text-base-content/70">
+      You stop watching the work and start directing it, calmly, from wherever you are.
+      Making things is fun again, and what comes out is real software.
+    </p>
   </section>
 
   <%!-- PRICING --%>
@@ -627,9 +484,7 @@
         </div>
         <div id="pricing-free" class="card border-2 border-primary bg-base-100 p-6">
           <div class="flex items-center justify-between">
-            <span class="font-mono text-[11px] text-primary">
-              {String.upcase(Relay.Brand.name())} CLOUD · FREE
-            </span>
+            <span class="font-mono text-[11px] text-primary">HAMACA CLOUD · FREE</span>
             <span class="badge badge-primary badge-sm">No card</span>
           </div>
           <div class="mt-2 flex items-baseline gap-1">
@@ -644,13 +499,11 @@
           </ul>
           <span class="flex-1"></span>
           <a id="pricing-free-cta" class="btn btn-primary mt-6" href={~p"/auth/google"}>
-            Start free, no card →
+            Start your board, no card →
           </a>
         </div>
         <div id="pricing-cloud" class="card border border-base-300 bg-base-100 p-6">
-          <div class="font-mono text-[11px] text-base-content/65">
-            {String.upcase(Relay.Brand.name())} CLOUD
-          </div>
+          <div class="font-mono text-[11px] text-base-content/65">HAMACA CLOUD</div>
           <div class="mt-2 flex items-baseline gap-1">
             <span class="text-4xl font-semibold">$20</span>
             <span class="text-sm text-base-content/65">/ month</span>
@@ -673,21 +526,33 @@
     </div>
   </section>
 
-  <%!-- CTA BAND (deliberately fixed-dark in both themes) --%>
-  <section class="mx-auto max-w-[1120px] px-4 pb-20 pt-8 sm:px-8">
+  <%!-- FINAL CTA (deliberately fixed-dark in both themes) --%>
+  <section id="cta" class="mx-auto max-w-[1120px] px-4 pb-20 pt-8 sm:px-8">
     <div
       class="relative overflow-hidden rounded-[20px] px-6 py-14 text-center sm:px-10"
       style="background:var(--color-neutral);"
     >
+      <div class="mb-5 flex justify-center">
+        <.hamaca_mark class="h-[44px]" />
+      </div>
       <h2 class="mx-auto mb-3.5 max-w-[560px] text-[34px] font-semibold leading-tight tracking-[-0.025em] text-neutral-content">
-        Give the AI a lane. Keep your hand on the board.
+        Get in the hammock.
       </h2>
       <p class="mx-auto mb-7 max-w-[480px] text-base leading-relaxed text-neutral-content/70">
-        Start with the default workflow, then bend it to fit. It takes about a minute.
+        Connect a repo, draw your line, drop in an idea. The light comes on when it needs you.
       </p>
-      <a href={~p"/auth/google"} class="btn btn-primary">Open the board →</a>
+      <div class="flex flex-wrap justify-center gap-3">
+        <a id="cta-start" href={~p"/auth/google"} class="btn btn-primary">Start your board →</a>
+        <a
+          id="cta-watch"
+          href={~p"/board/relay/public"}
+          class="btn btn-ghost text-neutral-content hover:bg-neutral-content/10"
+        >
+          Watch Hamaca build itself
+        </a>
+      </div>
       <p class="mx-auto mt-6 max-w-[600px] text-[13px] leading-relaxed text-neutral-content/60">
-        Hamaca is open source under the MIT license. Rather run it yourself?
+        Open source under the MIT license. Rather run it yourself?
         <a
           href={github_url() <> "#readme"}
           class="link text-neutral-content/85 hover:text-neutral-content"
@@ -701,13 +566,11 @@
   <%!-- FOOTER --%>
   <footer class="border-t border-base-300">
     <div class="mx-auto flex max-w-[1120px] flex-wrap items-center gap-3 px-4 py-7 sm:px-8">
-      <span class="flex size-[21px] items-center justify-center rounded-md bg-primary">
-        <span class="size-2 rounded-full bg-primary-content"></span>
-      </span>
-      <span class="text-sm font-semibold tracking-[-0.01em]">{Relay.Brand.name()}</span>
+      <.hamaca_mark class="h-[18px]" />
+      <span class="text-sm font-semibold tracking-[-0.01em]">Hamaca</span>
       <span class="flex-1"></span>
       <span class="font-mono text-xs text-base-content/65">
-        humans + AI, one board · open source (MIT) · © 2026
+        hammock driven development · open source (MIT) · © 2026
       </span>
       <nav class="flex items-center gap-4 text-xs text-base-content/65">
         <.link navigate={~p"/terms"} class="link link-hover">Terms</.link>
@@ -718,6 +581,17 @@
           <.github_mark class="size-3.5" /> GitHub
         </a>
       </nav>
+    </div>
+    <div class="mx-auto max-w-[1120px] px-4 pb-7 sm:px-8">
+      <p id="photo-credit" class="text-xs text-base-content/55">
+        Recipe photo: “<a
+          href="https://commons.wikimedia.org/wiki/File:Lemon_Spaghetti_(14179778117).jpg"
+          class="link link-hover"
+        >Lemon Spaghetti</a>” by Luca Nebuloni,
+        <a href="https://creativecommons.org/licenses/by/2.0/" class="link link-hover">
+          CC BY 2.0
+        </a>
+      </p>
     </div>
   </footer>
 </div>

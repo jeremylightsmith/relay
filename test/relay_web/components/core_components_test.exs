@@ -6347,4 +6347,56 @@ defmodule RelayWeb.CoreComponentsTest do
   defp chip(html, id) do
     html |> LazyHTML.from_fragment() |> LazyHTML.query("##{id}")
   end
+
+  describe "hamaca_mark/1 (RE476)" do
+    defp mark_doc(assigns), do: (&CoreComponents.hamaca_mark/1) |> render_component(assigns) |> LazyHTML.from_fragment()
+
+    # classes/1 is the shared helper defined in the notification_toast/1 describe above.
+
+    test "renders one decorative svg with the sizing class, w-auto shrink-0 and the cropped viewBox" do
+      svg = %{class: "h-[22px]"} |> mark_doc() |> LazyHTML.query(~s(svg[aria-hidden="true"]))
+
+      assert Enum.count(svg) == 1
+      assert "h-[22px]" in classes(svg)
+      assert "w-auto" in classes(svg)
+      assert "shrink-0" in classes(svg)
+      assert LazyHTML.attribute(svg, "viewBox") == ["30 120 450 290"]
+    end
+
+    test "fills with theme-token classes, never color literals" do
+      html = render_component(&CoreComponents.hamaca_mark/1, class: "h-[22px]")
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query("path.fill-primary") |> Enum.count() == 2
+      assert doc |> LazyHTML.query("path.fill-secondary") |> Enum.count() == 3
+      assert doc |> LazyHTML.query("path.stroke-secondary") |> Enum.count() == 1
+      refute html =~ ~r/#[0-9a-fA-F]{3,8}\b/
+      refute html =~ "rgb("
+      refute html =~ "oklch("
+    end
+
+    test "cuts the seams with one mask the shape group references" do
+      doc = mark_doc(%{})
+      mask = LazyHTML.query(doc, "mask")
+
+      assert Enum.count(mask) == 1
+      [id] = LazyHTML.attribute(mask, "id")
+      assert doc |> LazyHTML.query("g[mask]") |> LazyHTML.attribute("mask") == ["url(##{id})"]
+    end
+
+    test "gives each render its own mask id" do
+      assigns = %{}
+
+      html =
+        rendered_to_string(~H"""
+        <CoreComponents.hamaca_mark />
+        <CoreComponents.hamaca_mark />
+        """)
+
+      ids = html |> LazyHTML.from_fragment() |> LazyHTML.query("mask") |> LazyHTML.attribute("id")
+
+      assert [a, b] = ids
+      assert a != b
+    end
+  end
 end

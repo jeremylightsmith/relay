@@ -20,6 +20,7 @@ defmodule Storybook.CoreComponents do
   def entry("dependency_list"), do: [icon: {:fa, "link", :thin}]
   def entry("error"), do: [icon: {:fa, "circle-exclamation", :thin}]
   def entry("flash"), do: [icon: {:fa, "bolt", :thin}]
+  def entry("hamaca_mark"), do: [icon: {:fa, "umbrella-beach", :thin}]
   def entry("header"), do: [icon: {:fa, "heading", :thin}]
   def entry("icon"), do: [icon: {:fa, "icons", :thin}]
   def entry("image_attach_box"), do: [icon: {:fa, "paperclip", :thin}]

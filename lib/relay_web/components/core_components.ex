@@ -2035,6 +2035,68 @@ defmodule RelayWeb.CoreComponents do
   end
 
   @doc """
+  The Hamaca hammock mark as inline SVG (RE476) — the geometry of
+  `docs/brand/source/hamaca-icon.svg` (512-unit space), cropped to the mark.
+
+  Purely decorative (`aria-hidden`), with no id or bindings. The belly is `fill-primary`, the
+  folds and rope are the secondary token, so it flips with the theme. The seams are cut
+  *through* the shapes with a mask rather than drawn in white, so they read on any
+  background. The mask id is unique per render because a page may show the mark many times.
+
+  Size it with a height class; the width follows the aspect ratio.
+
+  ## Examples
+
+      <.hamaca_mark class="h-[22px]" />
+  """
+  attr :class, :any, default: nil, doc: "sizing classes, e.g. \"h-[22px]\""
+  attr :rest, :global
+
+  def hamaca_mark(assigns) do
+    assigns = assign(assigns, :mask_id, "hamaca-mark-seams-#{System.unique_integer([:positive])}")
+
+    ~H"""
+    <svg
+      viewBox="30 120 450 290"
+      aria-hidden="true"
+      class={["hamaca-mark w-auto shrink-0", @class]}
+      {@rest}
+    >
+      <defs>
+        <%!-- Luminance-mask channels (white keeps, black cuts), not colors. --%>
+        <mask id={@mask_id} maskUnits="userSpaceOnUse" x="30" y="120" width="450" height="290">
+          <rect x="30" y="120" width="450" height="290" fill="white" />
+          <path
+            d="M436 194 L386.4 301 M436 194 L315 269.1 M84 166 L420 316 M84 166 L356 350"
+            stroke="black"
+            stroke-width="3"
+            stroke-linecap="round"
+            fill="none"
+          />
+        </mask>
+      </defs>
+      <g mask={"url(##{@mask_id})"}>
+        <path
+          class="stroke-secondary"
+          d="M36 130 L84 166 M476 150 L436 194"
+          stroke-width="12"
+          stroke-linecap="round"
+          fill="none"
+        />
+        <path class="fill-primary" d="M84 166 C120 310 250 400 356 350 Z" />
+        <path class="fill-secondary" d="M84 166 L356 350 L420 316 Z" />
+        <path class="fill-primary" d="M315 269.1 L436 194 L386.4 301 Z" />
+        <path class="fill-secondary" d="M292.3 259 L436 194 L315 269.1 Z" />
+        <path
+          class="fill-secondary"
+          d="M436 194 C437.4 198.6 437.1 207.9 437.1 217.5 C437.1 249.5 429.2 304.6 420 316 L386.4 301 Z"
+        />
+      </g>
+    </svg>
+    """
+  end
+
+  @doc """
   One mockup or screenshot as a small square tile (RE370, RE374, RE380, RE390). An HTML item
   (`kind: :html`) is a live miniature of the mockup
   that is itself a same-tab `patch` link to the mockup viewer (`view_href` — on the board, the

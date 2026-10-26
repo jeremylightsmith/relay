@@ -6,6 +6,8 @@ defmodule RelayWeb.PageHTML do
   """
   use RelayWeb, :html
 
+  import RelayWeb.PageHTML.Landing
+
   embed_templates "page_html/*"
 
   @github_url "https://github.com/jeremylightsmith/relay"

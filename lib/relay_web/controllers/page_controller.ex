@@ -12,13 +12,24 @@ defmodule RelayWeb.PageController do
 
   @max_code_bytes 64
 
+  # The landing page's one meta description (RE476) — ≤155 chars so search results show it whole.
+  @meta_description "Hamaca turns your AI agents into a factory you can see at a glance. Your phone lights up only when a decision is yours."
+
   def home(conn, params) do
     if conn.assigns.current_scope do
       redirect(conn, to: ~p"/board")
     else
       conn
       |> put_signup_promo_code(params["code"])
-      |> render(:home, page_title: "AI-first kanban board")
+      |> render(:home,
+        page_title: "Hammock Driven Development",
+        meta: %{
+          title: "Hamaca: Hammock Driven Development",
+          description: @meta_description,
+          url: url(~p"/"),
+          image: url(~p"/images/og-image.png")
+        }
+      )
     end
   end
 

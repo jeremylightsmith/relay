@@ -34,8 +34,8 @@ defmodule RelayWeb.ThemeTokensTest do
   **The marker only works in `.ex`.** It has to survive to the scanner as text on the offending
   line, which rules out `.heex` (`<%!-- … --%>` is blanked by `strip_comments/2` before the scan,
   and HEEx has no `#` comment) and `.css` (`/* … */`, blanked for the same reason). Use an
-  `@allowlist` entry there — that is why the four Google-brand hexes in `home.html.heex` and the
-  two `#000` mask channels in the stylesheets are listed rather than marked.
+  `@allowlist` entry there — that is why the two `#000` mask channels in the stylesheets are
+  listed rather than marked.
   """
   use ExUnit.Case, async: true
 
@@ -52,11 +52,6 @@ defmodule RelayWeb.ThemeTokensTest do
 
   # Genuine exceptions. {repo-relative path, exact matched literal, why}.
   @allowlist [
-    # The Google "G" mark is a brand asset — its four colors are fixed by Google, not by us.
-    {"lib/relay_web/controllers/page_html/home.html.heex", "#EA4335", "Google brand mark"},
-    {"lib/relay_web/controllers/page_html/home.html.heex", "#4285F4", "Google brand mark"},
-    {"lib/relay_web/controllers/page_html/home.html.heex", "#FBBC05", "Google brand mark"},
-    {"lib/relay_web/controllers/page_html/home.html.heex", "#34A853", "Google brand mark"},
     # A mask channel, not a color: only the alpha of this gradient is read.
     {"assets/css/app.css", "#000", "mask-image channel, not a color"},
     {"assets/css/storybook.css", "#000", "mask-image channel, not a color"},
