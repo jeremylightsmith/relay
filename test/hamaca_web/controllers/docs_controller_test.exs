@@ -137,16 +137,16 @@ defmodule HamacaWeb.DocsControllerTest do
     assert html =~ ~s(href="/docs/billing")
   end
 
-  test "the billing page has the six customer FAQ headings", %{conn: conn} do
+  test "the billing page has the customer FAQ headings", %{conn: conn} do
     html = conn |> get(~p"/docs/billing") |> html_response(200)
 
     for heading <- [
-          "Self-host or Hamaca Cloud",
-          "Your free trial",
-          "What you pay",
+          "Which one is for you",
+          "Free: one board",
+          "Upgrading",
           "If a payment fails",
           "Cancelling",
-          "On iOS"
+          "In the mobile app"
         ] do
       assert html =~ heading, "expected /docs/billing to have the heading #{inspect(heading)}"
     end
@@ -157,16 +157,19 @@ defmodule HamacaWeb.DocsControllerTest do
 
     for needle <- [
           "MIT",
-          "30 days",
-          "$20",
+          "free for one board",
+          "$20 a month",
           "unlimited boards",
-          "invited members are free",
+          "read-only",
+          "nothing is deleted",
+          "Members never pay",
           ~s(href="https://github.com/jeremylightsmith/relay#readme")
         ] do
       assert html =~ needle, "expected /docs/billing to mention #{inspect(needle)}"
     end
 
     assert html =~ ~r/no refunds/i
+    refute html =~ ~r/trial|30 days/i, "Free replaced the trial (RE469); the page must not offer one"
   end
 
   test "the billing page leaves out promo codes and developer details", %{conn: conn} do
@@ -189,7 +192,7 @@ defmodule HamacaWeb.DocsControllerTest do
   test "the billing page drops the old headings", %{conn: conn} do
     html = conn |> get(~p"/docs/billing") |> html_response(200)
 
-    for heading <- ["Paused means read-only", "If a card fails", "Promo codes"] do
+    for heading <- ["Paused means read-only", "If a card fails", "Promo codes", "Your free trial"] do
       refute html =~ heading, "expected /docs/billing not to have the heading #{inspect(heading)}"
     end
   end

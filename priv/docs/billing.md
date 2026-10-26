@@ -1,39 +1,54 @@
 # Billing & self-hosting
 
-Hamaca is **open source**, and it's free to run yourself. **Hamaca Cloud** is the same Hamaca,
-run by us, for **$20/month**.
+Hamaca Cloud is free for one board. If you want more boards, it's $20 a month. You can also run
+Hamaca on your own server, free, with no limits.
 
-## Self-host or Hamaca Cloud
+## Which one is for you
 
-It's **the same software** either way: open source under the **MIT license**, with every
-feature and no "enterprise edition".
+| | Self-host | Free | Cloud |
+| --- | --- | --- | --- |
+| Price | Free | $0 | $20 a month |
+| Boards | Unlimited | One | Unlimited |
+| Who runs it | You | Us | Us |
 
-- **Self-hosting is free forever.** You run the upgrades, backups and push certificates
-  yourself. See the [README](https://github.com/jeremylightsmith/relay#readme) for how.
-- **The name is protected.** You can fork Hamaca, but a fork can't be called "Hamaca".
-- **Hamaca Cloud** is us running it for you, for $20/month.
+Every option has every feature. Hamaca is open source under the MIT license, and there's no
+"enterprise edition".
 
-## Your free trial
+If you self-host, you run the upgrades, backups and push certificates yourself. The
+[README](https://github.com/jeremylightsmith/relay#readme) shows you how. You can fork Hamaca,
+but a fork can't be called "Hamaca".
 
-Hamaca Cloud starts with **30 days free**, and you don't need a card to start. Add a card in
-[Billing](/account/billing) to keep going after the trial.
+## Free: one board
 
-## What you pay
+You don't need a card to start. Free gives you one board with every feature, including agent
+runs, flows and push notifications on iOS and Android. Invite as many people as you like.
+Members never pay.
 
-**$20/month for unlimited boards.** The board owner pays, and invited members are free.
-It's **monthly only**, for now.
+Example boards and archived boards don't count toward your one board.
+
+If you own more than one board on Free, one stays editable and the rest are read-only. You can
+still open a read-only board and see everything on it, and nothing is deleted. Hamaca asks you
+which board to keep the first time. To switch later, click **Make editable…** next to a board
+in [Billing](/account/billing).
+
+## Upgrading
+
+Upgrade in [Billing](/account/billing), or when you create a board past your limit. The $20 a
+month gets you unlimited boards and is billed from the day you upgrade. Only the board's owner
+pays. Plans are monthly only, for now.
 
 ## If a payment fails
 
 We email you and show a banner on your boards. Update your card in
-[Billing](/account/billing). If it isn't fixed, your boards become **read-only** until you
-pay. **Nothing is deleted.**
+[Billing](/account/billing) within a day to keep everything editable. After that you move to
+Free: one board stays editable and the rest become read-only. Nothing is deleted, and paying
+again unlocks them all.
 
 ## Cancelling
 
-Cancel anytime. You keep access through the date you've paid up to. There are
-**no refunds**, and your data is kept.
+Cancel any time in [Billing](/account/billing). You keep unlimited boards until the end of the
+month you've paid for, then you move to Free. There are no refunds, and nothing is deleted.
 
-## On iOS
+## In the mobile app
 
-The app shows your plan's status. **You pay on the web.**
+The app shows which plan you're on. To upgrade or change your card, use the web.
