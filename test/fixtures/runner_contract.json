@@ -320,7 +320,8 @@
     "cli_names": [
       "hamaca",
       "relay"
-    ]
+    ],
+    "first_hamaca_version": 94
   },
   "scaffold": {
     "board_url_line_example": "BOARD_URL = \"http://board.test\"",

@@ -219,6 +219,23 @@ defmodule Hamaca.Runs.RunnerStatusTest do
     end
   end
 
+  describe "pre_rename (RE486)" do
+    test "each entry carries cli and pre_rename; an outdated runner keeps its treatment", %{board: board} do
+      insert(:runner, board: board, name: "old", version: 94, cli: "relay")
+      insert(:runner, board: board, name: "new", version: 94, cli: "hamaca")
+      insert(:runner, board: board, name: "ancient", version: Runs.min_runner_version() - 1, cli: "relay")
+
+      statuses = Map.new(Runs.list_runner_status(board), &{&1.name, &1})
+
+      assert statuses["old"].pre_rename == true
+      assert statuses["new"].pre_rename == false
+      assert statuses["ancient"].pre_rename == false
+      assert statuses["old"].cli == "relay"
+      assert statuses["ancient"].outdated == true
+      assert statuses["ancient"].display_state == :outdated
+    end
+  end
+
   describe "held occupancy (RE311)" do
     test "the exclusive chip counts DECLARED HOLDINGS, not active jobs", %{board: board} do
       # The incident's Bug 3 at the operator's level: a bound-but-idle worktree holds an

@@ -15,4 +15,5 @@ defmodule Storybook.RunComponents do
   def entry("held_worktree_row"), do: [icon: {:fa, "folder-tree", :thin}]
   def entry("starvation_banner"), do: [icon: {:fa, "hourglass-half", :thin}]
   def entry("rate_limit_note"), do: [icon: {:fa, "gauge-high", :thin}]
+  def entry("pre_rename_hint"), do: [icon: {:fa, "arrow-up", :thin}]
 end

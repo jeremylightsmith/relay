@@ -443,14 +443,20 @@ defmodule HamacaWeb.Api.RunnerContractTest do
       },
       "setup" => setup,
       # RE478 — owned by ./hamaca, not the app: the env prefixes it reads in precedence order, the
-      # suffixes it reads and the ones it exports to every node and hook under both prefixes,
-      # and the names it may run as. Pinned here so a drift on either side breaks CI.
+      # suffixes it reads and the ones it exports to every node and hook under both prefixes.
+      # Pinned here so a drift on either side breaks CI.
       "env" => %{
         "prefixes" => ["HAMACA_", "RELAY_"],
         "read" => ~w(URL API_KEY STATE_DIR RUNNER_LOCK_DIR UPDATED_FROM UPDATE_ATTEMPTS NODE_OUTCOME),
         "exported" => ~w(NODE_SCRATCH NODE_OUTCOME PLAN REF BRANCH BASE WORKTREE CACHE_DIR)
       },
-      "runner" => %{"cli_names" => ["hamaca", "relay"]},
+      # RE486 — the names a runner may run as (`Schemas.Runner.cli_names/0`, mirrored by
+      # ./hamaca's CLI_NAMES) and the first RUNNER_VERSION that shipped as ./hamaca, below which a
+      # runner reporting no `cli` reads as pre-rename (`Hamaca.Runs.pre_rename_runner?/1`).
+      "runner" => %{
+        "cli_names" => Schemas.Runner.cli_names(),
+        "first_hamaca_version" => Runs.first_hamaca_runner_version()
+      },
       "tasks" => %{
         "create_request" => tasks_create_request,
         "create_response" => task_placeholders(tasks_create_response),
@@ -559,13 +565,15 @@ defmodule HamacaWeb.Api.RunnerContractTest do
     assert document["setup"]["llm_keys"] == ~w(cli harness label pointer_file skill_dir skill_path)
     assert document["setup"]["pointer_line"] == "Working Hamaca cards from this repo: see [hamaca.md](hamaca.md)."
 
-    # RE478 — the runner names its CLI on every claim and heartbeat (the server ignores it until
-    # RE486), and the env twins + CLI names ./hamaca defines are pinned here.
+    # RE478 — the runner names its CLI on every claim and heartbeat (RE486 stores it on
+    # `runners.cli`), and the env twins + CLI names ./hamaca defines are pinned here.
     assert document["claim_request"]["runner"]["cli"] == "hamaca"
     assert document["heartbeat"]["request"]["runner"]["cli"] == "hamaca"
     assert document["env"]["prefixes"] == ["HAMACA_", "RELAY_"]
     assert "API_KEY" in document["env"]["read"] and "NODE_SCRATCH" in document["env"]["exported"]
     assert document["runner"]["cli_names"] == ["hamaca", "relay"]
+    assert document["runner"]["first_hamaca_version"] == 94
+    assert document["runner"] == %{"cli_names" => ["hamaca", "relay"], "first_hamaca_version" => 94}
 
     assert document["setup"]["runner_config_defaults"] == %{
              "pointer_file" => "CLAUDE.md",
@@ -581,8 +589,8 @@ defmodule HamacaWeb.Api.RunnerContractTest do
   # also makes the fixture talk-capable: it claims a talk job, which `Hamaca.Runs.talk_capable?/1`
   # hides from a runner below that same floor.
   #
-  # `cli` (RE478) is the name the runner runs as — `"hamaca"` or `"relay"`; the server ignores it
-  # until RE486 reads it.
+  # `cli` (RE478) is the name the runner runs as — `"hamaca"` or `"relay"`; the server stores it
+  # on `runners.cli` through `Schemas.Runner.normalize_cli/1` (RE486).
   defp runner_ident do
     %{
       "name" => "fixture",

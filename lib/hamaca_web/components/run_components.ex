@@ -1128,6 +1128,46 @@ defmodule HamacaWeb.RunComponents do
     """
   end
 
+  # ---------- pre_rename_hint ----------
+
+  @relay_update_command "./relay update"
+
+  @doc ~S"""
+  The Runners page's calm nudge for a runner still installed as `./relay` during the relay →
+  hamaca compatibility window (RE486): a base-200 strip under the panel header with the restart
+  note and a copyable `./relay update`. The page renders it when the roster entry's `pre_rename`
+  (`Hamaca.Runs.pre_rename_runner?/1`) is true — never re-derived here. Deliberately neutral —
+  no warning/error tokens and never the word OUTDATED: the runner keeps working. The copy control
+  is the shared `CoreComponents.copy_button/1` (the card mockup draws a text "Copy" button).
+  """
+  attr :id, :string, required: true
+
+  def pre_rename_hint(assigns) do
+    assigns = assign(assigns, :command, @relay_update_command)
+
+    ~H"""
+    <div
+      id={@id}
+      class="flex flex-wrap items-center gap-x-3 gap-y-2 px-[18px] py-2.5 bg-base-200 border-b border-base-300"
+      style="font-size:12.5px;"
+    >
+      <span style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
+        ↑
+      </span>
+      <span
+        class="flex-1 min-w-[220px]"
+        style="color:color-mix(in oklab, var(--color-base-content) 75%, transparent);"
+      >
+        Still installed as <code class="font-mono">./relay</code>. It keeps working. To switch it to <code class="font-mono">./hamaca</code>, run this in its checkout and then restart the runner:
+      </span>
+      <span class="flex items-center gap-2 rounded-lg bg-base-100 border border-base-300 pl-2.5 pr-1 py-1">
+        <code class="font-mono" style="font-size:12px;">{@command}</code>
+        <CoreComponents.copy_button id={"#{@id}-copy"} text={@command} label="Copy update command" />
+      </span>
+    </div>
+    """
+  end
+
   # ---------- runner rows (RE337) ----------
 
   @doc """

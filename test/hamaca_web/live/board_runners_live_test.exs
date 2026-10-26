@@ -590,6 +590,107 @@ defmodule HamacaWeb.BoardRunnersLiveTest do
     end
   end
 
+  describe "a runner still on ./relay (RE486)" do
+    defp runners_page(conn, board) do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/runners")
+      view
+    end
+
+    defp panel_style_of(view, selector) do
+      view |> element(selector) |> render() |> LazyHTML.from_fragment() |> LazyHTML.attribute("style") |> List.first()
+    end
+
+    # Scenario 2
+    test "keeps FRESH and adds the UPDATE AVAILABLE badge, a ./relay label and a copyable update",
+         %{conn: conn, board: board} do
+      runner(board, "laptop", version: 94, cli: "relay")
+      view = runners_page(conn, board)
+
+      assert has_element?(view, "#runner-laptop .badge-success", "FRESH")
+      assert has_element?(view, "#runner-laptop-update-available.badge-ghost", "UPDATE AVAILABLE")
+      assert has_element?(view, "#runner-laptop-version", "v94 · ./relay")
+      assert has_element?(view, "#runner-laptop-relay-hint-copy[data-copy-text='./relay update']")
+    end
+
+    # Scenario 3
+    test "an old runner that predates cli gets the hint too", %{conn: conn, board: board} do
+      runner(board, "laptop", version: Hamaca.Runs.first_hamaca_runner_version() - 1, cli: nil)
+      view = runners_page(conn, board)
+
+      assert has_element?(view, "#runner-laptop-update-available")
+      assert has_element?(view, "#runner-laptop-relay-hint")
+      assert has_element?(view, "#runner-laptop-version", "v93 · ./relay")
+    end
+
+    # Scenario 4
+    test "a ./hamaca runner shows no hint and a plain version", %{conn: conn, board: board} do
+      runner(board, "studio", version: 94, cli: "hamaca")
+      view = runners_page(conn, board)
+
+      refute has_element?(view, "#runner-studio-update-available")
+      refute has_element?(view, "#runner-studio-relay-hint")
+      label = view |> element("#runner-studio-version") |> render() |> LazyHTML.from_fragment() |> LazyHTML.text()
+      assert String.trim(label) == "v94"
+      refute label =~ "./relay"
+      assert has_element?(view, "#runner-studio .badge-success", "FRESH")
+    end
+
+    # Scenario 5
+    test "stays calm: no outdated chip, no warning or error badge", %{conn: conn, board: board} do
+      runner(board, "laptop", version: 94, cli: "relay")
+      view = runners_page(conn, board)
+
+      refute has_element?(view, "#summary-outdated")
+      summary = view |> element("#runners-summary") |> render() |> LazyHTML.from_fragment()
+      assert summary |> LazyHTML.query("#runners-summary > *") |> LazyHTML.attribute("id") == ["summary-fresh"]
+      assert has_element?(view, "#summary-fresh", "1 online")
+      refute has_element?(view, "#runner-laptop .badge-warning")
+      refute has_element?(view, "#runner-laptop .badge-error")
+
+      hint = view |> element("#runner-laptop-relay-hint") |> render()
+      refute hint =~ "warning"
+      refute hint =~ "error"
+      refute hint =~ "OUTDATED"
+    end
+
+    # Scenario 5
+    test "its panel wears the same fresh border as a ./hamaca runner's", %{conn: conn, board: board} do
+      runner(board, "laptop", version: 94, cli: "relay")
+      runner(board, "studio", version: 94, cli: "hamaca")
+      view = runners_page(conn, board)
+
+      assert panel_style_of(view, "#runner-laptop") == panel_style_of(view, "#runner-studio")
+    end
+
+    # Scenario 6
+    test "the hint clears on the tick once the runner restarts as ./hamaca", %{conn: conn, board: board} do
+      runner(board, "laptop", version: 94, cli: "relay")
+      view = runners_page(conn, board)
+      assert has_element?(view, "#runner-laptop-relay-hint")
+
+      Hamaca.Repo.update_all(Schemas.Runner, set: [cli: "hamaca"])
+      send(view.pid, :tick)
+
+      refute has_element?(view, "#runner-laptop-update-available")
+      refute has_element?(view, "#runner-laptop-relay-hint")
+      assert has_element?(view, "#runner-laptop-version", "v94")
+      refute has_element?(view, "#runner-laptop-version", "./relay")
+    end
+
+    # Scenario 7
+    test "an OUTDATED ./relay runner keeps today's treatment and no hint", %{conn: conn, board: board} do
+      runner(board, "old", version: Hamaca.Runs.min_runner_version() - 1, cli: "relay")
+      view = runners_page(conn, board)
+
+      assert has_element?(view, "#runner-old .badge-error", "OUTDATED")
+      refute has_element?(view, "#runner-old-update-available")
+      refute has_element?(view, "#runner-old-relay-hint")
+      label = view |> element("#runner-old-version") |> render()
+      assert label =~ "requires v#{Hamaca.Runs.min_runner_version()}"
+      refute label =~ "./relay"
+    end
+  end
+
   describe "HARNESSES (RE436)" do
     defp harness_text(view, selector),
       do: view |> element(selector) |> render() |> LazyHTML.from_fragment() |> LazyHTML.text() |> squish()

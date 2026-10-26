@@ -960,6 +960,66 @@ defmodule Hamaca.RunsTest do
       assert e2.id == e1.id
       assert e2.held == [%{"ref" => "TH77", "state" => "bound"}]
     end
+
+    # RE486: `cli` describes the running process, like `version` — stored on every beat and
+    # always replaced, never absent-means-untouched.
+    test "stores the reported cli and replaces it on the next beat", %{board: board} do
+      {:ok, e1} = Runs.upsert_runner(board, %{"name" => "r", "version" => 94, "cli" => "relay"})
+      assert e1.cli == "relay"
+
+      {:ok, e2} = Runs.upsert_runner(board, %{"name" => "r", "version" => 94, "cli" => "hamaca"})
+      assert e2.id == e1.id
+      assert e2.cli == "hamaca"
+    end
+
+    test "a beat without cli writes nil over a stored cli", %{board: board} do
+      {:ok, e1} = Runs.upsert_runner(board, %{"name" => "r", "version" => 94, "cli" => "relay"})
+      assert e1.cli == "relay"
+
+      {:ok, e2} = Runs.upsert_runner(board, %{"name" => "r", "version" => 90})
+      assert e2.id == e1.id
+      assert e2.cli == nil
+    end
+
+    test "an unknown cli is stored as nil", %{board: board} do
+      assert {:ok, runner} = Runs.upsert_runner(board, %{"name" => "r", "cli" => "bogus"})
+      assert runner.cli == nil
+    end
+  end
+
+  # RE486 — the relay→hamaca CLI rename (RE478), NOT NodeJobController's RE319 wire rename.
+  describe "pre_rename_runner?/1 (RE486)" do
+    test "a current runner reporting cli relay is pre-rename" do
+      assert Runs.pre_rename_runner?(%Schemas.Runner{version: 94, cli: "relay"})
+    end
+
+    test "a current runner reporting cli hamaca is not pre-rename" do
+      refute Runs.pre_rename_runner?(%Schemas.Runner{version: 94, cli: "hamaca"})
+    end
+
+    test "a runner below the first hamaca version reporting no cli is pre-rename" do
+      version = Runs.first_hamaca_runner_version() - 1
+      assert version >= Runs.min_runner_version()
+      assert Runs.pre_rename_runner?(%Schemas.Runner{version: version, cli: nil})
+    end
+
+    test "a runner at the first hamaca version reporting no cli is not pre-rename" do
+      refute Runs.pre_rename_runner?(%Schemas.Runner{version: Runs.first_hamaca_runner_version(), cli: nil})
+    end
+
+    test "an outdated runner is never pre-rename, even reporting cli relay" do
+      refute Runs.pre_rename_runner?(%Schemas.Runner{version: Runs.min_runner_version() - 1, cli: "relay"})
+    end
+
+    test "a runner reporting no version is never pre-rename" do
+      refute Runs.pre_rename_runner?(%Schemas.Runner{version: nil, cli: nil})
+      refute Runs.pre_rename_runner?(%Schemas.Runner{version: nil, cli: "relay"})
+    end
+
+    test "the cutoff is 94, above the minimum runner version" do
+      assert Runs.first_hamaca_runner_version() == 94
+      assert Runs.first_hamaca_runner_version() > Runs.min_runner_version()
+    end
   end
 
   describe "claim_next_job/1" do

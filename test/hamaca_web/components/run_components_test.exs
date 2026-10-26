@@ -1026,6 +1026,37 @@ defmodule HamacaWeb.RunComponentsTest do
     end
   end
 
+  describe "pre_rename_hint/1 (RE486)" do
+    # Scenario 1
+    setup do
+      html = render_component(&RunComponents.pre_rename_hint/1, id: "hint")
+      %{html: html, doc: LazyHTML.from_fragment(html)}
+    end
+
+    test "the strip sits on base-200 with a base-300 rule", %{doc: doc} do
+      classes = classes_of(doc, "#hint")
+      assert "bg-base-200" in classes
+      assert "border-base-300" in classes
+    end
+
+    test "it shows ./relay update in code and copies exactly that", %{doc: doc} do
+      assert "./relay update" in (doc |> LazyHTML.query("code") |> Enum.map(&LazyHTML.text/1))
+      assert doc |> LazyHTML.query(~s(#hint-copy[data-copy-text="./relay update"])) |> Enum.count() == 1
+    end
+
+    test "it explains the runner keeps working and needs a restart", %{doc: doc} do
+      text = doc |> LazyHTML.query("#hint") |> LazyHTML.text()
+      assert text =~ "Still installed as"
+      assert text =~ "restart the runner"
+    end
+
+    test "it never wears a warning, error or OUTDATED", %{html: html} do
+      refute html =~ "warning"
+      refute html =~ "error"
+      refute html =~ "OUTDATED"
+    end
+  end
+
   defp classes_of(doc, selector) do
     doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") |> List.first() |> String.split()
   end

@@ -359,6 +359,15 @@ defmodule HamacaWeb.BoardRunnersLive do
                   >
                     {pill_label(runner.display_state)}
                   </span>
+                  <%!-- RE486 — a runner still installed as ./relay: neutral, never a warning. --%>
+                  <span
+                    :if={runner.pre_rename}
+                    id={"runner-#{dom_id(runner)}-update-available"}
+                    class="badge badge-sm badge-ghost font-mono font-bold"
+                    style="font-size:9.5px;letter-spacing:0.06em;"
+                  >
+                    UPDATE AVAILABLE
+                  </span>
                   <RunComponents.rate_limit_note
                     :if={runner.rate_limit}
                     id={"runner-#{dom_id(runner)}-rate-limit"}
@@ -385,6 +394,10 @@ defmodule HamacaWeb.BoardRunnersLive do
                     {last_seen_label(runner, @now)}
                   </span>
                 </div>
+                <RunComponents.pre_rename_hint
+                  :if={runner.pre_rename}
+                  id={"runner-#{dom_id(runner)}-relay-hint"}
+                />
                 <div style={"display:flex;align-items:stretch;#{if runner.freshness != :fresh, do: "opacity:0.92;"}"}>
                   <div style="flex:1;min-width:0;padding:15px 18px;display:flex;flex-direction:column;gap:16px;">
                     <%!-- Capacity chips — artboard capChip, lines ~84-97 / 176-187. --%>
@@ -739,6 +752,10 @@ defmodule HamacaWeb.BoardRunnersLive do
   defp version_label(%{version: nil, outdated: true}), do: "unversioned · requires v#{Runs.min_runner_version()}"
 
   defp version_label(%{version: version, outdated: true}), do: "v#{version} · requires v#{Runs.min_runner_version()}"
+
+  # RE486 — `pre_rename` is `Runs.pre_rename_runner?/1`'s answer, never re-derived here; it is
+  # never true for an outdated runner, but the outdated clauses stay first regardless.
+  defp version_label(%{pre_rename: true, version: version}), do: "v#{version} · ./relay"
 
   defp version_label(%{version: nil}), do: "unversioned"
   defp version_label(%{version: version}), do: "v#{version}"

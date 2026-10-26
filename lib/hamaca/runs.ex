@@ -1927,6 +1927,16 @@ defmodule Hamaca.Runs do
   @doc "The minimum `./relay` RUNNER_VERSION this server will claim jobs to."
   def min_runner_version, do: @min_runner_version
 
+  # RE486: the RUNNER_VERSION RE478 shipped `./hamaca` at — the first runner that runs as
+  # `./hamaca` and reports `runner.cli`. A fixed historical fact, NOT a floor to raise: below it, a
+  # runner reporting no `cli` can only be a `./relay` install (`pre_rename_runner?/1`). Pinned in
+  # the runner contract fixture (`runner.first_hamaca_version`).
+  @first_hamaca_runner_version 94
+
+  @doc "The first RUNNER_VERSION that shipped as `./hamaca` (RE478) — a historical fact, not a floor."
+  @spec first_hamaca_runner_version() :: pos_integer()
+  def first_hamaca_runner_version, do: @first_hamaca_runner_version
+
   @doc """
   Whether this runner is new enough to RUN a talk turn, not merely new enough to claim
   flow work (RE268). `claim_next_job/4` narrows a runner below `min_runner_version/0` to
@@ -1973,6 +1983,25 @@ defmodule Hamaca.Runs do
   def runner_outdated?(%Runner{version: version}) when is_integer(version), do: version < @min_runner_version
 
   def runner_outdated?(%Runner{}), do: true
+
+  @doc """
+  Whether this runner is still installed as `./relay` during the relay → hamaca CLI rename's
+  compatibility window (RE478) — the Runners page's neutral UPDATE AVAILABLE hint (RE486).
+  Unrelated to `HamacaWeb.Api.NodeJobController`'s RE319 `executor` → `runner` wire rename.
+
+  An outdated runner (`runner_outdated?/1`, which includes a nil version) is never pre-rename: it
+  keeps the outdated treatment instead. Otherwise the reported `cli` decides, and a runner
+  reporting none is pre-rename when it predates `first_hamaca_runner_version/0`.
+  """
+  @spec pre_rename_runner?(Runner.t()) :: boolean()
+  def pre_rename_runner?(%Runner{version: version, cli: cli} = runner) do
+    cond do
+      runner_outdated?(runner) -> false
+      cli == "relay" -> true
+      cli == "hamaca" -> false
+      true -> version < @first_hamaca_runner_version
+    end
+  end
 
   @doc """
   One harness's live usage pause at `now` (RE436), from one `Schemas.Runner.normalize_harnesses/1`
@@ -2170,7 +2199,7 @@ defmodule Hamaca.Runs do
   Upserts the durable runner row keyed `{board_id, name}`, refreshing host,
   interval, and `last_heartbeat`. Called by the claim endpoint (claim
   doubles as a liveness touch) and by the extended heartbeat. `attrs` is a
-  STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"version"`, and optionally
+  STRING-keyed map (`"name"`, `"host"`, `"interval"`, `"version"`, `"cli"`, and optionally
   `"capacity"` / `"capabilities"` / `"held"` / `"harnesses"`). RE436: a runner's usage pauses ride
   its `harnesses` entries — a beat whose harness reports `usage.paused: null` clears that pause.
 
@@ -2192,11 +2221,14 @@ defmodule Hamaca.Runs do
       host: to_string(attrs["host"] || ""),
       interval: normalize_interval(attrs["interval"]),
       version: normalize_version(attrs["version"]),
+      # RE486: like `version`, `cli` describes the running process — always replaced, so a beat
+      # without it (an old runner restarted) writes nil.
+      cli: Runner.normalize_cli(attrs["cli"]),
       last_heartbeat: now()
     }
 
     {params, replace} =
-      {base, [:host, :interval, :version, :last_heartbeat, :updated_at]}
+      {base, [:host, :interval, :version, :cli, :last_heartbeat, :updated_at]}
       |> put_reported(:capacity, normalize_capacity(attrs["capacity"]))
       |> put_reported(:capabilities, normalize_capabilities(attrs["capabilities"]))
       |> put_reported(:held, held)
@@ -2997,6 +3029,10 @@ defmodule Hamaca.Runs do
         # Orthogonal to `freshness` on purpose (RLY-184): a refused runner is perfectly
         # healthy and beating normally — it is just running old code.
         outdated: outdated,
+        # RE486: the CLI name it runs as, and whether it is still a `./relay` install during the
+        # rename's window — the Runners page's neutral hint, never set for an outdated runner.
+        cli: runner.cli,
+        pre_rename: pre_rename_runner?(runner),
         # RE320: the live usage pause, nil once it resets. RE436: set only while EVERY installed
         # harness is paused — the earliest-lifting harness pause (`active_rate_limit/2`).
         rate_limit: rate_limit,

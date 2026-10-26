@@ -13912,6 +13912,11 @@ class CliNameTest(unittest.TestCase):
         self.assertEqual(relay.CLI_NAMES, tuple(CONTRACT["runner"]["cli_names"]))
         self.assertEqual(relay.CLI_NAMES, ("hamaca", "relay"))
 
+    def test_the_shipped_runner_is_at_or_past_the_first_hamaca_version(self):
+        # RE486: the server reads a runner reporting no `cli` below this cutoff as pre-rename, so
+        # the runner it serves must never sit below it.
+        self.assertGreaterEqual(relay.RUNNER_VERSION, CONTRACT["runner"]["first_hamaca_version"])
+
 
 class EnvTwinTest(unittest.TestCase):
     """RE478: the runner reads HAMACA_<X> before RELAY_<X> and exports both names to children."""

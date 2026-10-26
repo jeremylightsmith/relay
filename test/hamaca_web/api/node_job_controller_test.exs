@@ -177,6 +177,23 @@ defmodule HamacaWeb.Api.NodeJobControllerTest do
       assert micros < 5_000_000
     end
 
+    test "a heartbeat persists the runner's reported cli, an unknown one as nil (RE486)", %{conn: conn} do
+      beat = fn cli ->
+        %{
+          "runner" => %{"name" => "exec-cli", "version" => 94, "cli" => cli},
+          "capacity" => %{"shared_clean" => 1},
+          "running" => [],
+          "held" => []
+        }
+      end
+
+      conn |> post(~p"/api/node-jobs/heartbeat", beat.("relay")) |> json_response(200)
+      assert Hamaca.Repo.get_by!(Schemas.Runner, name: "exec-cli").cli == "relay"
+
+      conn |> post(~p"/api/node-jobs/heartbeat", beat.("zzz")) |> json_response(200)
+      assert Hamaca.Repo.get_by!(Schemas.Runner, name: "exec-cli").cli == nil
+    end
+
     test "a human-requested release rides release_held with a remove disposition (RE337)",
          %{conn: conn, board: board} do
       flow = four_outcome_flow(board)

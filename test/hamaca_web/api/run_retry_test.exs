@@ -6,6 +6,11 @@ defmodule HamacaWeb.Api.RunRetryTest do
   alias Hamaca.Runs.FakeDispatcher
   alias Schemas.NodeJob
 
+  # A dispatch lands only after a full outcome round-trip through the RunServer; under a loaded
+  # `mix precommit` (36 cases, other gates running) 2s was not always enough and the test flaked.
+  # Generous because a passing run never waits for it.
+  @dispatch_timeout 10_000
+
   setup %{conn: conn} do
     FakeDispatcher.register(self())
 
@@ -46,9 +51,9 @@ defmodule HamacaWeb.Api.RunRetryTest do
 
   defp failed_run(card, flow) do
     {:ok, _run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{} = first}, 2_000
+    assert_receive {:dispatched, %NodeJob{} = first}, @dispatch_timeout
     {:ok, _run} = Runs.report_outcome(first, %{outcome: :failed, detail: "first boom"})
-    assert_receive {:dispatched, %NodeJob{} = second}, 2_000
+    assert_receive {:dispatched, %NodeJob{} = second}, @dispatch_timeout
     {:ok, run} = Runs.report_outcome(second, %{outcome: :failed, detail: "final boom"})
     Runs.get_run!(run.id)
   end
@@ -115,7 +120,7 @@ defmodule HamacaWeb.Api.RunRetryTest do
 
   test "a running run is 422 naming its status", ctx do
     {:ok, run} = Runs.start_run(ctx.card, ctx.flow)
-    assert_receive {:dispatched, %NodeJob{}}, 2_000
+    assert_receive {:dispatched, %NodeJob{}}, @dispatch_timeout
 
     body = ctx.conn |> post(~p"/api/runs/#{run.id}/retry", %{}) |> json_response(422) |> Map.fetch!("error")
     assert body["code"] == "not_failed"

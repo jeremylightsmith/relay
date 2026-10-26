@@ -184,8 +184,9 @@ double-booking (YAGNI: no multi-board reservation yet).
   landing in `Activity.LogSink` → the card timeline, and `AgentLog` → the live log sheet.
 - **Runner heartbeat**: `RunnerHeartbeat` posts `{runner, capacity,
   running: [job-ids], held: [{ref, state}], harnesses, sessions}` (`runner` =
-  `{name, host, version, cli}` — `cli` is `"hamaca"` or `"relay"`, RE478, ignored server-side
-  until RE486) to `POST /api/node-jobs/heartbeat` every
+  `{name, host, version, cli}` — `cli` is `"hamaca"` or `"relay"`, RE478, stored on
+  `runners.cli` via `Schemas.Runner.normalize_cli/1` (unknown → nil) and read by
+  `Hamaca.Runs.pre_rename_runner?/1`, RE486) to `POST /api/node-jobs/heartbeat` every
   `heartbeat_interval`s (RLY-164) and reads back `{revoked: [job-ids],
   release_held: [{ref, status}], want_capabilities, runner_outdated,
   required_version, latest_runner_version, harnesses_digest}` (the digest since RE433 — see
@@ -273,6 +274,10 @@ never 403s):
   per refresh): one row per board harness the runner reported, with its version, signed-in state,
   one usage bar per window the harness's USAGE setting defines and its own paused line. A harness
   removed from the board stops showing, and a harness the runner has not reported yet is not shown.
+  A runner whose roster entry has `pre_rename` true (`Hamaca.Runs.pre_rename_runner?/1`, RE486 —
+  still installed as `./relay`) keeps its healthy treatment and adds a neutral UPDATE AVAILABLE
+  badge, a `vN · ./relay` version label and the `./relay update` strip
+  (`HamacaWeb.RunComponents.pre_rename_hint/1`), and never counts toward a summary chip.
 - **Rate-limited roster (RE320, per harness since RE436).** A runner pauses per harness, and the
   server derives "rate limited" from the readings stored in `runners.harnesses`.
   `Hamaca.Runs.harness_pause/2` reads one entry's live pause: the entry is `installed`, its
@@ -1200,8 +1205,15 @@ compatibility window (until RE482).
 - **CLI name.** `cli_name()` is the basename of the file the process runs as when it is one of
   `CLI_NAMES = ("hamaca", "relay")`, else `"hamaca"` — read at call time. An unmigrated repo runs
   the full runner as `./relay`; a migrated one has `./hamaca` plus a `./relay` shim that execs it.
-  Every claim and heartbeat carries it as **`runner.cli`** (`runner_ident/1`); the server
-  ignores it today (RE486 reads it). The full runner running as `./relay` prints one dim
+  Every claim and heartbeat carries it as **`runner.cli`** (`runner_ident/1`). The server
+  (RE486) stores it on `runners.cli` through `Schemas.Runner.normalize_cli/1` — the closed set is
+  `Schemas.Runner.cli_names/0`, an unknown value is nil, and it is always replaced, so a beat
+  without it writes nil. `Hamaca.Runs.pre_rename_runner?/1` reads it: an outdated runner
+  (`runner_outdated?/1`, nil version included) is never pre-rename; otherwise `cli == "relay"` is,
+  `cli == "hamaca"` is not, and a runner reporting no `cli` is pre-rename when its version is
+  below `Hamaca.Runs.first_hamaca_runner_version/0` (94, the version RE478 shipped `./hamaca` at —
+  a fixed fact, not a floor). `list_runner_status/2` exposes it per runner as `pre_rename` (with
+  `cli`), and the contract fixture pins both as `runner.cli_names` / `runner.first_hamaca_version`. The full runner running as `./relay` prints one dim
   stderr line before dispatch — ``note: ./relay is now ./hamaca. Run `./relay update` to
   switch this repo.`` — only when stderr is a TTY and never with `--json`/`--field`, in
   `start`, or inside a node (`should_note/3`, the same rule as the shim's own note).

@@ -20,6 +20,11 @@ defmodule Schemas.Runner do
 
   `version` is the `RUNNER_VERSION` the running `./relay` declares (RLY-184); `nil` means
   a runner predating that card, which `Hamaca.Runs.runner_outdated?/1` treats as behind.
+
+  `cli` is the name the runner runs as — `"hamaca"` or `"relay"` (`cli_names/0`) — reported on
+  every claim and heartbeat since RE478 and stored through `normalize_cli/1` (RE486): an unknown
+  value, or none, is nil. `Hamaca.Runs.pre_rename_runner?/1` reads it to tell a runner still
+  installed as `./relay` during the rename's compatibility window.
   """
   use Ecto.Schema
 
@@ -49,6 +54,9 @@ defmodule Schemas.Runner do
     # can never overwrite each other.
     field :release_requests, {:array, :string}, default: []
     field :version, :integer
+    # RE486: the CLI name the runner runs as, via `normalize_cli/1`. No default: nil means it
+    # never reported one (pre-v94) or reported a name outside `cli_names/0`.
+    field :cli, :string
     # RE433: the harness inventory the runner last reported on a heartbeat — see
     # `normalize_harnesses/1`. No default: nil means "never reported", which claims read as
     # "only the legacy harness" (`installed_harness_keys/1`). RE436: each entry carries that
@@ -76,6 +84,7 @@ defmodule Schemas.Runner do
       :held,
       :harnesses,
       :version,
+      :cli,
       :last_heartbeat
     ])
     |> validate_required([:board_id, :name, :last_heartbeat])
@@ -171,6 +180,23 @@ defmodule Schemas.Runner do
   end
 
   def normalize_held(_held), do: []
+
+  # RE486 — the closed set of names a runner may run as, defined exactly once on this side and
+  # mirrored in `./hamaca`'s CLI_NAMES, which the runner contract fixture (`runner.cli_names`)
+  # pins to this function. Strings for the same reason as `@holding_states`: wire-only values.
+  @cli_names ["hamaca", "relay"]
+
+  @doc "Every name a runner may report as `runner.cli` — the current one first."
+  @spec cli_names() :: [String.t()]
+  def cli_names, do: @cli_names
+
+  @doc """
+  The one normalizer for the `runner.cli` wire field (RE486): the value when it is in
+  `cli_names/0`, else nil. Total — untrusted input degrades, never raises.
+  """
+  @spec normalize_cli(term()) :: String.t() | nil
+  def normalize_cli(cli) when cli in @cli_names, do: cli
+  def normalize_cli(_cli), do: nil
 
   # RE320 — the closed set of reasons a harness pauses on a usage limit, defined once here and
   # mirrored in `./relay`'s USAGE_PAUSE_REASONS, which the runner contract fixture

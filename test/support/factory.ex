@@ -325,6 +325,10 @@ defmodule Hamaca.Factory do
       interval: 30,
       capacity: %{"shared_clean" => 3, "exclusive" => 1},
       version: Hamaca.Runs.min_runner_version(),
+      # RE486: a runner installed as ./hamaca, so the default reads as NOT pre-rename even though
+      # min_runner_version/0 sits below Hamaca.Runs.first_hamaca_runner_version/0. Pass
+      # `cli: "relay"` (or `cli: nil`) to exercise a pre-rename runner.
+      cli: "hamaca",
       last_heartbeat: DateTime.truncate(DateTime.utc_now(), :second)
     }
 
