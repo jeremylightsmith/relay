@@ -15,6 +15,11 @@
 # APP_STORE_CONNECT_PRIVATE_KEY may be the raw .p8 PEM or its base64. It is written to a temp
 # file for FASTLANE_API_KEY_PATH; every temp file is removed on every exit path. No internal
 # retry: the flow node's max_retries does that.
+#
+# The build rewrites tracked files (increment_build_number stamps the build number into the
+# project and Info.plist; fastlane regenerates its README). They are snapshotted first and put
+# back on every exit path, so a deploy leaves the checkout as it found it and the next
+# `prod deploy_ios` isn't refused as dirty.
 
 set -euo pipefail
 
@@ -56,9 +61,18 @@ done
 
 key_file=""
 number_file=""
+snapshot=""
+stamped_files="Runner.xcodeproj/project.pbxproj Runner/Info.plist fastlane/README.md"
+ios_dir="$PWD/flutter/ios" # absolute: the trap runs after the cd below
 cleanup() {
   [ -z "$key_file" ] || rm -f "$key_file"
   [ -z "$number_file" ] || rm -f "$number_file"
+  if [ -n "$snapshot" ]; then
+    for f in $stamped_files; do
+      [ ! -f "$snapshot/$f" ] || cp "$snapshot/$f" "$ios_dir/$f"
+    done
+    rm -rf "$snapshot"
+  fi
 }
 trap cleanup EXIT
 
@@ -69,6 +83,10 @@ case "$APP_STORE_CONNECT_PRIVATE_KEY" in
   *) printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" | base64 --decode >"$key_file" ;;
 esac
 number_file="$(mktemp)"
+snapshot="$(mktemp -d)"
+for f in $stamped_files; do
+  [ ! -f "$ios_dir/$f" ] || { mkdir -p "$snapshot/$(dirname "$f")" && cp "$ios_dir/$f" "$snapshot/$f"; }
+done
 
 APP_VERSION="$(grep -E '^version:' flutter/pubspec.yaml | sed -E 's/^version:[[:space:]]*//' | cut -d+ -f1)"
 [ -n "$APP_VERSION" ] || fail "no version: in flutter/pubspec.yaml"

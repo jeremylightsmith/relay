@@ -374,6 +374,10 @@ FASTLANE_EXTRA = """
 case "$*" in
   *next_build_number) printf '%s\\n' "${{STUB_BUILD_NUMBER:-1}}" > "$RELAY_BUILD_NUMBER_FILE" ;;
   deploy)
+    # Like the real build: increment_build_number and the README regeneration rewrite these.
+    for f in Runner.xcodeproj/project.pbxproj Runner/Info.plist fastlane/README.md; do
+      [ -f "$f" ] && echo stamped >> "$f"
+    done
     if [ -n "${{FASTLANE_API_KEY_PATH:-}}" ]; then
       echo "$FASTLANE_API_KEY_PATH" > "{cap}/keypath"
       [ -f "$FASTLANE_API_KEY_PATH" ] && cp "$FASTLANE_API_KEY_PATH" "{cap}/key.p8"
@@ -699,6 +703,19 @@ class DeployIosTest(DeployCase):
         self.assertNotIn("skipping iOS", result.stdout)
         self.assertIn("fastlane deploy", self.commands())
         self.assertIn("deploy_ios: shipped HEAD to TestFlight as 1.2.3 (42)", result.stdout)
+
+    def test_files_the_build_stamps_are_restored(self):
+        stamped = {
+            "flutter/ios/Runner.xcodeproj/project.pbxproj": "pbxproj\n",
+            "flutter/ios/Runner/Info.plist": "plist\n",
+            "flutter/ios/fastlane/README.md": "readme\n",
+        }
+        commit(self.work, stamped, "ios project")
+        self.ship_card(flutter=True)
+        result = self.run_ios(**self.full_env())
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(git(self.work, "status", "--porcelain"), "")
+        self.assertEqual(os.listdir(self.scratch), [])
 
     def test_missing_and_empty_variables_are_all_named(self):
         self.ship_card(flutter=True)
