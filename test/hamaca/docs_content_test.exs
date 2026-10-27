@@ -23,6 +23,26 @@ defmodule Hamaca.DocsContentTest do
     assert html =~ "markdown-alert-note"
   end
 
+  # The CLI's own `-h` table (COMMANDS in ./hamaca) is the list of commands; the page lists each
+  # one under the same group heading, so a new command fails here until it is on the page.
+  test "the CLI page lists every command ./hamaca has, under its -h group" do
+    cli = read("cli.md")
+    runner = File.read!(Path.join(File.cwd!(), "hamaca"))
+    [_, table] = String.split(runner, "\nCOMMANDS = (\n", parts: 2)
+    [table | _] = String.split(table, "\n)\n", parts: 2)
+    commands = Regex.scan(~r/^\s*\("([^"]+)", "([^"]+)",/m, table, capture: :all_but_first)
+
+    assert length(commands) > 40, "couldn't read COMMANDS from ./hamaca"
+
+    for group <- commands |> Enum.map(&hd/1) |> Enum.uniq() do
+      assert cli =~ "\n## #{group}\n", "cli.md should have a `## #{group}` section"
+    end
+
+    for [_group, name] <- commands do
+      assert cli =~ "`./hamaca #{name}", "cli.md should list `./hamaca #{name}`"
+    end
+  end
+
   test "the CLI page documents the ./hamaca command table" do
     html = read("cli.md")
 
@@ -190,7 +210,7 @@ defmodule Hamaca.DocsContentTest do
     cli = read("cli.md")
 
     assert String.starts_with?(cli, "# CLI (`./hamaca`)")
-    [note | _] = String.split(cli, "## Commands")
+    [note | _] = String.split(cli, "\n## ")
     assert note =~ "`HAMACA_URL`"
     assert note =~ "`HAMACA_API_KEY`"
 
