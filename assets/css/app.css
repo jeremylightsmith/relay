@@ -516,7 +516,11 @@
 details.run-entry > summary::-webkit-details-marker { display: none; }
 details.run-entry[open] > summary .run-entry-chev { display: inline-block; transform: rotate(90deg); }
 
-.docs-sidebar { align-self: start; position: sticky; top: 80px; }
+.docs-sidebar {
+  align-self: start; position: sticky; top: 80px;
+  /* Taller than the window (the API page's nav is): scroll it on its own, not off-screen. */
+  max-height: calc(100vh - 96px); overflow-y: auto; overscroll-behavior: contain;
+}
 .docs-sidebar-section { margin-bottom: 20px; }
 .docs-sidebar-heading {
   font-family: var(--font-mono); font-size: 11px; font-weight: 600;
@@ -540,7 +544,11 @@ details.run-entry[open] > summary .run-entry-chev { display: inline-block; trans
   font-weight: 600;
 }
 
-.docs-toc { align-self: start; position: sticky; top: 80px; }
+.docs-toc {
+  align-self: start; position: sticky; top: 80px;
+  /* Taller than the window (the API page's nav is): scroll it on its own, not off-screen. */
+  max-height: calc(100vh - 96px); overflow-y: auto; overscroll-behavior: contain;
+}
 .docs-toc-heading {
   font-family: var(--font-mono); font-size: 11px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.08em;
@@ -727,6 +735,10 @@ details.run-entry[open] > summary .run-entry-chev { display: inline-block; trans
   /* Desktop: sidebar always open, no toggle. */
   .docs-menu > .docs-sidebar { display: block; }
   .docs-menu-summary { display: none !important; }
+  /* The sidebar sits inside <details>, which is only as tall as the sidebar, so the sticky box
+     has to be the <details> (the grid item) or it scrolls away with the page. */
+  .docs-menu { align-self: start; position: sticky; top: 80px; }
+  .docs-menu > .docs-sidebar { position: static; }
 }
 @media (max-width: 1023px) {
   .docs-body { grid-template-columns: minmax(0, 1fr); gap: 20px; }

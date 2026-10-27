@@ -5,7 +5,6 @@ defmodule Hamaca.DocsContentTest do
 
   @expected [
     {"introduction.md", "# Introduction"},
-    {"authentication.md", "# Authentication & API access"},
     {"cli.md", "# CLI (`./hamaca`)"},
     {"api.md", "# REST API reference"},
     {"billing.md", "# Billing & self-hosting"}
@@ -78,10 +77,35 @@ defmodule Hamaca.DocsContentTest do
     assert cli =~ "Refused (409, nothing written)"
   end
 
-  test "authentication.md still explains the API key + env vars" do
-    html = read("authentication.md")
-    assert html =~ "HAMACA_API_KEY"
-    assert html =~ "Authorization: Bearer"
+  test "the API reference says how to get a key and send it" do
+    api = read("api.md")
+    assert api =~ "## Get a key"
+    assert api =~ "Settings → API keys"
+    assert api =~ "HAMACA_API_KEY"
+    assert api =~ "Authorization: Bearer"
+  end
+
+  test "authentication.md is folded into the API reference" do
+    refute File.exists?(Application.app_dir(:hamaca, "priv/docs/authentication.md"))
+  end
+
+  # The router is the list of endpoints: every `/api` route a board key (or nobody) can call is
+  # on the page as "METHOD /path", so a new route fails here until it is documented. The native
+  # app's `/api/all` and `/api/auth` routes use a person's credential and aren't public.
+  test "api.md names every /api route in the router" do
+    api = read("api.md")
+
+    routes =
+      for %{verb: verb, path: "/api/" <> _ = path} <- Phoenix.Router.routes(HamacaWeb.Router),
+          not String.starts_with?(path, ["/api/all", "/api/auth"]),
+          uniq: true,
+          do: "#{verb |> Atom.to_string() |> String.upcase()} #{path}"
+
+    assert length(routes) > 40
+
+    for route <- routes do
+      assert api =~ route, "api.md should name `#{route}`"
+    end
   end
 
   test "the runner and CLI pages describe the current runner, not the retired one" do
@@ -237,8 +261,7 @@ defmodule Hamaca.DocsContentTest do
     for {name, doc} <- [
           {"cli.md", cli_before <> cli_after},
           {"getting-started.md", read("getting-started.md")},
-          {"api.md", read("api.md")},
-          {"authentication.md", read("authentication.md")}
+          {"api.md", read("api.md")}
         ] do
       refute doc =~ "./relay ", "#{name} still names a ./relay command"
       refute doc =~ "RELAY_API_KEY", "#{name} still names RELAY_API_KEY"

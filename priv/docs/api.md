@@ -1,28 +1,37 @@
 # REST API reference
 
-Hamaca exposes a small JSON REST API scoped to a single **board**. It is the same
-entry point the `./hamaca` CLI uses, so anything the CLI does you can do directly.
+Everything `./hamaca` does goes through this API, so you can do it from any language. This page
+lists every endpoint, with an example request and what comes back. Each one works on a single
+board: the one your key belongs to.
 
-## Base URL & authentication
+## Get a key
 
-All endpoints live under `/api` and require a **board API key** — except `GET /api/version`
-and the two scaffold endpoints (`GET /api/scaffold`, `GET /api/scaffold/*path`), which are
-intentionally public:
+1. On your board, open **Settings → API keys** and click **+ Create new key**. Copy it now; it's
+   only shown once. **Regenerate** replaces it.
+2. Send it as a bearer token on every request:
 
-```
-Authorization: Bearer <board API key>
-```
+   ```
+   Authorization: Bearer <your board API key>
+   ```
+3. Check that it works. This should print your board's stages and cards:
 
-Mint a key at **`/board/:slug/settings` → API keys** (each board has a single key;
-regenerating replaces it). Every write is attributed to **"Hamaca AI"** (the agent
-actor). Requests without a valid key get `401 unauthorized`.
+   ```bash
+   export HAMACA_API_KEY="relay_…"
+   curl -H "Authorization: Bearer $HAMACA_API_KEY" https://hamaca.app/api/board
+   ```
+
+A key opens one board and nothing else. It can't sign in to the web app. Keep it out of your
+repo, and regenerate it if it leaks. Whatever you change with it shows on the board as Hamaca AI.
+
+Every endpoint needs the key except `GET /api/version` and the two scaffold endpoints, which
+the install script calls before you have one.
 
 ## Conventions
 
-- **JSON in, JSON out.** Send `Content-Type: application/json`; responses are JSON.
-- **Card refs.** Cards are addressed by their human ref, e.g. `RLY-12` (the board key
-  plus the card number). Wherever a path says `:ref`, use that.
-- **Errors** use a consistent envelope:
+- Send and receive JSON (`Content-Type: application/json`).
+- A card is named by its ref, such as `RLY-12`. Wherever a path says `:ref`, use that.
+- The examples use `https://hamaca.app`. If you host your own board, use its address.
+- Every error has the same shape:
 
 ```json
 { "error": { "code": "not_found", "message": "Not found" } }
@@ -30,20 +39,19 @@ actor). Requests without a valid key get `401 unauthorized`.
 
 | HTTP | code | when |
 | --- | --- | --- |
-| 401 | `unauthorized` | missing/invalid `Authorization` bearer key |
-| 402 | `plan_paused` | the board's owner's plan is paused; reads and writes are refused until it is paid |
-| 404 | `not_found` | no card/stage matches the ref/id |
-| 400 | `invalid` | malformed body or unusable field values |
-| 422 | `not_gated` | approve/reject on a card whose stage is not an approval gate |
-| 422 | `missing_note` | reject without a non-empty `note` |
-| 422 | `invalid_target` | reject `to` a stage that isn't a valid main-lane target |
-| 422 | `unknown_refs` | `depends_on` names a ref this board does not have (nothing is written) |
-| 422 | `dependency_cycle` | `depends_on` would close a dependency cycle; the message names the path |
+| 401 | `unauthorized` | the key is missing or wrong |
+| 402 | `plan_paused` | the board owner's plan is unpaid; every request is refused until it's paid |
+| 404 | `not_found` | no card or stage with that ref or id |
+| 400 | `invalid` | the body is malformed or a field's value can't be used |
+| 422 | `not_gated` | approve or reject on a card that isn't at a review stage |
+| 422 | `missing_note` | reject without a note |
+| 422 | `invalid_target` | reject `to` a stage the card can't go back to |
+| 422 | `unknown_refs` | `depends_on` names a card this board doesn't have; nothing is written |
+| 422 | `dependency_cycle` | `depends_on` would make cards wait on each other in a loop; the message names them |
 
-## Card & stage shape
+## What a card looks like
 
-Cards are serialized by `CardJSON`. The **base shape** (returned in lists and as the
-`data` of every card response):
+Lists of cards, and every card response, use this shape:
 
 ```json
 {
@@ -54,7 +62,7 @@ Cards are serialized by `CardJSON`. The **base shape** (returned in lists and as
   "status": "working",
   "progress": 40,
   "branch": "rly-12-api-docs",
-  "pr_url": "https://github.com/acme/relay/pull/7",
+  "pr_url": "https://github.com/acme/app/pull/7",
   "stage_id": 5,
   "owners": [{ "type": "agent", "name": "Hamaca AI" }],
   "active_owner": "agent",
@@ -62,12 +70,11 @@ Cards are serialized by `CardJSON`. The **base shape** (returned in lists and as
 }
 ```
 
-`owners` entries are either `{ "type": "agent", "name": "Hamaca AI" }` or
-`{ "type": "user", "id": 3, "name": "Ada" }`. `rejection`, when present, is
-`{ "note", "from_stage", "to_stage", "rejected_by", "rejected_at" }`.
+An owner is `{ "type": "agent", "name": "Hamaca AI" }` or
+`{ "type": "user", "id": 3, "name": "Ada" }`. `rejection` is set after Request changes, with
+the note, the stages it moved between, and who sent it back and when.
 
-The **single-card** responses (`show`, and every write that returns a card) add the
-heavy fields:
+A single card (`GET /api/cards/:ref`, and every write that returns a card) adds the long fields:
 
 ```json
 {
@@ -79,20 +86,16 @@ heavy fields:
   "blocks": [{ "ref": "RLY-20", "title": "Backfill the index" }],
   "timeline": [
     { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" },
-    { "kind": "activity", "type": "moved", "meta": { "from_stage": "Spec", "to_stage": "Code" }, "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" },
-    { "kind": "activity", "type": "action", "text": "implement: starting", "meta": {}, "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" }
+    { "kind": "activity", "type": "moved", "meta": { "from_stage": "Spec", "to_stage": "Code" }, "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" }
   ]
 }
 ```
 
-`depends_on` is the card's blockers (`satisfied` is true once that blocker has reached a
-top-level Done column); `blocks` is the reverse edge. Both are **single-card only** — the list
-shape omits them. A card with an unsatisfied blocker is never *pulled* by a flow, and
-`GET /api/cards/:ref/diagnosis` reports the `blocked_by_dependencies` verdict. Work already in
-flight is unaffected: a running run is not cancelled by a dependency added mid-run, and a card
-sent back for changes re-enters its flow as usual.
+`depends_on` lists the cards this one waits for; `satisfied` turns true when that card reaches
+Done. `blocks` lists the cards waiting for this one. A flow won't pick up a card while it's
+waiting, but a run that's already going carries on.
 
-A **stage** (returned inside `GET /api/board`'s `stages` and by every `/api/stages` route):
+## What a stage looks like
 
 ```json
 {
@@ -103,25 +106,25 @@ A **stage** (returned inside `GET /api/board`'s `stages` and by every `/api/stag
 }
 ```
 
-`type` is one of `queue | work | planning | review | done`; `category` one of
-`unstarted | planning | in_progress | complete`. A substage (`parent_id` set) is a Review or
-Done lane of its main stage; its `name` is the composite `"<parent>:Review"` and its
-`display_name` the human `"<parent> · Review"` (a main stage's `display_name` is its `name`).
+`type` is one of `queue`, `work`, `planning`, `review` or `done`, and `category` one of
+`unstarted`, `planning`, `in_progress` or `complete`. [How Hamaca works](/docs/how-hamaca-works)
+shows what each one looks like on the board. A substage has a `parent_id`, and its `name` is
+`"<stage>:Review"` or `"<stage>:Done"`. `ai_enabled` is true when a flow works the stage; you
+can't set it.
 
-Every `/api/stages` response (not `GET /api/board`'s `stages`) also carries a read-only
-`"problem"`: `null`, or — on the stage of an **enabled** flow paused by a broken board shape —
-the same problem object `GET /api/flows/:key` returns (see `GET /api/flows` below).
+Responses from `/api/stages` also carry `problem`. It's `null` unless the stage's flow is
+paused, and then it's the same explanation `GET /api/flows/:key` gives.
 
 ---
 
-## Endpoints
+## Cards
 
 ### GET /api/board
 
-The whole board: its identity, stages, and cards (base shape).
+The board's name and key, its stages, and its cards.
 
 ```
-curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/board
+curl -H "Authorization: Bearer $HAMACA_API_KEY" https://hamaca.app/api/board
 ```
 
 ```json
@@ -134,218 +137,340 @@ curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/board
 
 ### GET /api/cards
 
-All cards on the board (base shape).
+The board's cards, leaving out the ones in Done. Add `q` to search instead.
+
+| param | effect |
+|---|---|
+| `include_done=1` | Include cards in Done |
+| `q=<text>` | Search by ref or title. A ref or number (`RLY-12`, `12`) comes first; otherwise every word must be in the title. Includes Done cards |
+| `limit=<n>` | Return at most this many |
+| `archived=1` | Include archived cards |
+
+`./hamaca search "words"` calls this with `q`.
+
+```
+curl -H "Authorization: Bearer $HAMACA_API_KEY" "https://hamaca.app/api/cards?q=login&limit=10"
+```
 
 ```json
 { "data": [ { "id": 42, "ref": "RLY-12", "…": "…" } ] }
 ```
 
-| param | effect |
-|---|---|
-| *(none)* | The board's cards, top-level Done stages excluded. |
-| `include_done=1` | Include the top-level Done stages. Ignored when `q` is present. |
-| `q=<text>` | **Search** by ref or title. A ref or bare number (`RLY-12`, `12`) is an exact hit ranked first, then title matches in board order; every whitespace-separated word must appear in the title, in any order; case-insensitive; `%` and `_` are literals, not wildcards. Done cards are always in scope. A present-but-blank `q` returns `[]`, never the whole board. |
-| `limit=<n>` | Cap the number of results (the exact-ref hit counts toward it). |
-| `archived=1` | Widen the corpus so archived cards join the results. |
-
-`./hamaca search "words"` is the CLI wrapper for `q`.
-
-```
-curl -H "Authorization: Bearer $HAMACA_API_KEY" "https://relay.example/api/cards?q=login&limit=10"
-```
-
 ### POST /api/cards
 
-Create a card. Optional `stage` (a stage **id**; defaults to the board's first stage).
-Accepts `title`, `description`, `acceptance_criteria`, `spec`, `tag`, `branch`, `plan`,
-`pr_url`, and `depends_on` (a list of card refs this card is blocked by). Returns `201` with
-the single-card shape. A `depends_on` that names an unknown ref is refused with `unknown_refs`
-**before** the card is created, so a refused create leaves no card behind.
+Create a card. Send a `title`, and optionally `stage` (a stage id; the first stage if you leave
+it out), `description`, `acceptance_criteria`, `spec`, `tag`, `branch`, `plan`, `pr_url` and
+`depends_on` (a list of refs). Returns `201` and the card. If `depends_on` names a card that
+doesn't exist, nothing is created.
 
 ```
 curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"title":"New card","stage":5}' https://relay.example/api/cards
-```
-
-```json
-{ "data": { "id": 43, "ref": "RLY-13", "title": "New card", "…": "…" } }
+  -d '{"title":"New card","stage":5}' https://hamaca.app/api/cards
 ```
 
 ### GET /api/cards/:ref
 
-One card, single-card shape (with `description`, `acceptance_criteria`, `plan`, `spec`, `timeline`).
+One card, with its description, spec, plan and timeline.
 
 ```
-curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/cards/RLY-12
+curl -H "Authorization: Bearer $HAMACA_API_KEY" https://hamaca.app/api/cards/RLY-12
 ```
 
 ### PATCH /api/cards/:ref
 
-Update a card. Any of `title`, `description`, `acceptance_criteria`, `spec`, `tag`, `branch`,
-`plan`, `pr_url`; plus `status` (with optional `progress`); plus `owners` (a list of
-`"agent"` or `"user:<id>"`); plus `depends_on`, a list of card refs that **replaces** the
-card's blocker set (`[]` clears it). Returns the single-card shape. `depends_on` is refused
-with `unknown_refs` or `dependency_cycle` and writes nothing.
+Change a card. Send any of `title`, `description`, `acceptance_criteria`, `spec`, `tag`,
+`branch`, `plan`, `pr_url`, `status` (with an optional `progress`), `owners` (a list of
+`"agent"` or `"user:<id>"`) and `depends_on`. `depends_on` replaces the whole list; `[]` clears
+it. Returns the card.
 
 ```
 curl -X PATCH -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"status":"working","progress":40}' https://relay.example/api/cards/RLY-12
+  -d '{"status":"working","progress":40}' https://hamaca.app/api/cards/RLY-12
 ```
 
-`ai_result` is also set here (this is what `./hamaca result` calls), and it is the one field
-whose **shape is enforced**. Three optional keys, nothing else:
+Two fields have a fixed shape, and anything else in them is refused with nothing written.
+
+`ai_result` is what the card shows when the work is done (`./hamaca result` sets it). It takes
+three keys:
 
 ```json
 { "ai_result": {
-    "summary": "- **One door** for everyone…",
-    "changes": ["Adds a summary to the card drawer"],
+    "summary": "Sign-in is one email field now.",
+    "changes": ["Merges the two sign-in forms"],
     "screens": [{ "url": "/attachments/135e5539-…", "caption": "Sign in" }]
 } }
 ```
 
-`summary` is a markdown string, `changes` a list of strings, `screens` a list of objects with
-`url` (required) and an optional `caption`. A screen's `url` is **the image**, not the page it
-shows — upload the file to `POST /api/cards/:ref/attachments` (`./hamaca attach`) and use the
-`/attachments/<id>` path it returns. Any other key, at either level, is refused with
-`422 invalid_ai_result` and a message naming the key you used and the keys that exist; nothing
-is written.
+A screen's `url` is the screenshot itself, not the page it shows. Upload it with
+`POST /api/cards/:ref/attachments` (or `./hamaca attach`) and use the `/attachments/<id>` path
+that returns. Any other key is refused with `422 invalid_ai_result`, naming the key.
 
-`mockups` is also set here (this is what `./hamaca mockups` calls). It **replaces** the card's
-whole list; `[]` or `null` clears it:
+`mockups` replaces the card's list of mockups; `[]` clears it. Each entry is a `url` and an
+optional `caption`:
 
 ```json
 { "mockups": [{ "url": "/attachments/135e5539-…", "caption": "Empty state" }] }
 ```
 
-Each entry takes only `url` (required) and `caption` (optional string). The `url` must be the
-`/attachments/<id>` path of an **HTML or image attachment on this same card** — upload it
-first with `POST /api/cards/:ref/attachments` (`content_type` `text/html`, `image/png`,
-`image/jpeg`, `image/webp` or `image/gif`; `./hamaca mockups` takes `.html .png .jpg .jpeg .webp
-.gif` files). Anything else is refused with
-`422 invalid_mockups` naming the entry's index; nothing is written. `GET /api/cards/:ref`
-returns the list as `mockups` (`[]` when none). HTML mockups are served under a sandbox CSP:
-inline JS/CSS and `data:` assets, plus **Google Fonts** as the only network exception —
-stylesheets from `https://fonts.googleapis.com` and font files from `https://fonts.gstatic.com`.
-Every other request (remote scripts and images, fetch/XHR/WebSocket/EventSource, frames, form
-submission) is blocked. Opening a mockup that
-links Google Fonts sends a request to Google, which sees the viewer's IP and the font URL
-(mockups are served with `Referrer-Policy: no-referrer` and run in an opaque origin, so no
-Hamaca host, path or cookie goes with it).
+The `url` must be an HTML or image file already attached to this card; anything else is
+`422 invalid_mockups`. An HTML mockup runs in a sandbox. It can use inline scripts, styles and
+`data:` images, and load fonts from Google Fonts (`fonts.googleapis.com` and
+`fonts.gstatic.com`). Every other request is blocked. Opening a mockup that uses Google Fonts
+sends a request to Google, which sees the viewer's IP address, but nothing about Hamaca.
 
-### POST /api/cards/:ref/attachments
+### POST /api/cards/:ref/move
 
-Upload a file to the card — an image (png/jpeg/webp/gif) or, for a mockup, a
-self-contained `text/html` page (5 MB cap). Requires `filename`, `content_type` and `data_base64`. Returns `201`
-with `{"data": {"id": …, "url": "/attachments/<id>", "markdown": "![…](/attachments/<id>)"}}` —
-that `url` is what a screenshot's `screens[].url` should be.
-
-### GET /api/attachments/:id
-
-Download an attachment's raw bytes with the board API key — how `./hamaca mockups REF --pull`
-reads a card's mockups back (it names each file by the returned `Content-Type`, so a PNG
-mockup lands as `NN-<slug>.png`). `:id` is the last segment of the `/attachments/<id>` url the
-upload returned (and that a card's `mockups[].url` / `screens[].url` carry). Returns `200` with
-the stored bytes byte-for-byte and the stored `Content-Type` (HTML keeps its sandbox
-`Content-Security-Policy` and `X-Content-Type-Options: nosniff`), plus
-`Content-Disposition: attachment; filename="…"` and `Cache-Control: private, …`. Scoped to the
-key's board: an unknown or malformed id, or an attachment on **another board**, is `404`
-`not_found` — never `403`, so an id on another board is not revealed. Serves any attachment on
-the board (screenshots too), not only mockups.
-
-```
-curl -H "Authorization: Bearer $HAMACA_API_KEY" -o mock.html https://relay.example/api/attachments/135e5539-…
-```
-
-### Stages
-
-Any board key may manage the board's stages. Guard rails live in the domain, so Board Settings
-refuses the same things with the same sentence. A stage refusal carries extra keys in the
-`error` object where noted:
-
-| HTTP | code | when |
-| --- | --- | --- |
-| 404 | `not_found` | the path `:id` is unknown, not an integer, or another board's stage |
-| 409 | `last_stage` | deleting the board's only main stage |
-| 409 | `not_empty` | the stage (or a substage) holds cards, **archived included** — a stage delete adds `"live": n, "archived": m`; a lane disable carries no counts |
-| 409 | `holds_flow` | `PATCH` changes the `type` of a stage that holds a flow to one that isn't `work`/`planning` — adds `"flow": key` |
-| 409 | `public_intake` | it is the board's public intake stage |
-| 422 | `invalid_anchor` | `before` / `after` doesn't name another main stage on this board (unknown, foreign or non-integer anchors included) |
-| 422 | `not_a_main_stage` | the route needs a main stage and `:id` is a substage |
-| 422 | `invalid` | the stage itself is invalid (blank name, unknown type, bad `reject_to_stage_id`, …) |
-| 422 | `invalid_request` | the body is malformed — the message says how |
-
-```json
-{ "error": { "code": "not_empty", "message": "That stage still holds 0 live and 1 archived card(s) — move them out first.", "live": 0, "archived": 1 } }
-```
-
-#### GET /api/stages
-
-The board's stages, each main stage followed by its substages (Review, then Done). A stage
-whose enabled flow is paused by a broken board shape carries that flow's `problem`; every other
-stage has `"problem": null`.
-
-```json
-{ "data": [ { "id": 1, "name": "Backlog", "…": "…" } ] }
-```
-
-#### POST /api/stages
-
-Create a main stage. Body: `name`, and either `category` (appends at the end of that category)
-or ONE of `before` / `after` (a main-stage id — the new stage lands beside it and adopts its
-category); optionally `type` (defaults from the category), `description`, `wip_limit`,
-`collapsed_by_default`. **201** `{"data": stage}`. Both anchors →
-`422 invalid_request` (`"send before or after, not both"`).
+Move a card. `stage` is a stage id or name. `position` starts at 1; leave it out to put the card
+at the bottom. Returns the card.
 
 ```
 curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"name":"Triage","after":3,"type":"queue"}' https://relay.example/api/stages
+  -d '{"stage":"Plan","position":1}' https://hamaca.app/api/cards/RLY-12/move
 ```
 
-#### PATCH /api/stages/:id
+A card with a run going can't leave the stage it's being worked in: `409 would_strand_run`. Cancel the run first.
 
-Configure a stage: any of `name`, `description`, `type`, `wip_limit`,
-`collapsed_by_default`, `reject_to_stage_id` (a main stage). `"wip_limit": null` and
-`"reject_to_stage_id": null` clear. A type change re-snaps the statuses of the cards in it.
-Renaming a main stage renames its substages. **200** `{"data": stage}`. No recognised field →
-`422 invalid_request`.
+### POST /api/cards/:ref/comments
 
-`ai_enabled` in a stage response is read-only, derived from flows (a stage is AI-enabled iff
-a flow is on it); sending it to `POST` or `PATCH` — any value — is
-`422 invalid_request` and nothing is written.
+Comment on a card. Send `body`. Returns `201` and the comment:
 
-#### POST /api/stages/:id/place
+```json
+{ "data": { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" } }
+```
 
-Move a main stage beside another: exactly one of `before` / `after` (a main-stage id). The
-stage adopts the anchor's category (its `type` is unchanged). **200** `{"data": stage}`.
-Neither or both → `422 invalid_request` (`"send exactly one of before or after"`).
+### POST /api/cards/:ref/attachments
 
-#### PUT /api/stages/:id/substages/:lane
+Upload a file to a card: an image (PNG, JPEG, WebP or GIF), or an HTML mockup, up to 5 MB. Send
+`filename`, `content_type` and `data_base64`. Returns `201`:
 
-Enable the `review` or `done` lane on a main stage — idempotent. **200** `{"data": substage}`.
-Any other `:lane` → `422 invalid_request` (`"lane must be one of: review, done"`).
+```json
+{ "data": { "id": "135e5539-…", "url": "/attachments/135e5539-…", "markdown": "![shot.png](/attachments/135e5539-…)" } }
+```
 
-#### DELETE /api/stages/:id/substages/:lane
+### GET /api/attachments/:id
 
-Disable a lane. **200** `{"data": {"lane": "review", "disabled": true}}` — `disabled: false`
-when the lane wasn't enabled. Refused with `not_empty` or `public_intake`.
+Download an attachment's file. `:id` is the end of its `/attachments/<id>` path. An attachment
+on another board is a `404`.
 
-#### DELETE /api/stages/:id
+```
+curl -H "Authorization: Bearer $HAMACA_API_KEY" -o mock.html https://hamaca.app/api/attachments/135e5539-…
+```
 
-Delete a main stage and its substages. **200** `{"data": stage}` (the deleted stage). Refused,
-in order, with `last_stage`, `not_empty` (with counts), `public_intake`. The flow on the stage,
-enabled or not, is deleted with it (its runs keep their `flow_key`); another stage's reject-to
-pointing here is cleared.
+### POST /api/cards/:ref/needs-input
+
+Ask a person a question. Send `question`. The card waits until someone answers. Returns the
+card.
+
+```
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"question":"Which auth provider?"}' https://hamaca.app/api/cards/RLY-12/needs-input
+```
+
+### POST /api/cards/:ref/approve
+
+Approve a card at a review stage. It moves on to the next stage or substage. Returns the card,
+or `422 not_gated` if the card isn't at a review stage.
+
+### POST /api/cards/:ref/reject
+
+Request changes. Send a `note` (required), and optionally `to`, a stage id or name to send the
+card back to. Without `to`, it goes back the way the review stage is set up. Returns the card.
+
+```
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"note":"needs a test","to":"Plan"}' https://hamaca.app/api/cards/RLY-12/reject
+```
+
+### POST /api/cards/:ref/archive
+
+Take a card off the board. Send `{}`. Returns the card with `"archived": true`. Any cards
+waiting on it stop waiting. Archiving an archived card does nothing.
+
+A card with a run going is refused with `409 active_run`, and nothing changes. Cancel the run
+first.
+
+### POST /api/cards/:ref/unarchive
+
+Put an archived card back in its stage. Send `{}`. Returns the card with `"archived": false`.
+Cards that stopped waiting on it when it was archived don't start waiting again.
+
+## Tasks
+
+A card's plan is a header (the card's `plan` field) and a list of tasks. Each task has a title
+and a body, and an id that doesn't change.
+
+### GET /api/cards/:ref/tasks
+
+The card's tasks, without their bodies:
+
+```json
+{ "data": [ { "id": 42, "title": "Add the endpoint", "done": false, "position": 1 } ] }
+```
+
+### GET /api/cards/:ref/tasks/:id
+
+One task, with its body.
+
+### POST /api/cards/:ref/tasks
+
+Add tasks after the last one, all at once. Returns `201` and the new tasks.
+
+```
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"tasks":[{"title":"Add the endpoint","body":"…markdown…"}]}' https://hamaca.app/api/cards/RLY-12/tasks
+```
+
+### PATCH /api/cards/:ref/tasks/:id
+
+Change a task's `title` or `body`.
+
+### DELETE /api/cards/:ref/tasks/:id
+
+Remove a task. The ones after it move up; their ids stay the same.
+
+### PATCH /api/cards/:ref/sub-tasks/:id
+
+Tick a task off or untick it: `{"done": true}` or `{"done": false}`. Returns the card.
+
+## Runs
+
+A run is one trip through a flow for one card.
+
+### GET /api/cards/:ref/diagnosis
+
+Why isn't this card moving? One answer, with the evidence for it. It's safe to call while a run
+is going. `./hamaca why` prints it.
+
+```
+curl -H "Authorization: Bearer $HAMACA_API_KEY" https://hamaca.app/api/cards/RLY-12/diagnosis
+```
+
+```json
+{ "data": { "verdict": "awaiting_capacity",
+  "detail": "The code flow would dispatch this card, but no runner is advertising a free shared_clean slot.",
+  "evidence": { "card_ref": "RLY-12", "card_status": "ready", "flow_key": "code", "run_id": null } } }
+```
+
+| verdict | means |
+| --- | --- |
+| `dispatchable` | it will start shortly |
+| `blocked_by_dependencies` | it's waiting for other cards to reach Done; `evidence.blocked_by` names them |
+| `no_enabled_flow` | no flow works this stage |
+| `flow_paused` | the flow is paused because the board around it is set up wrong; `evidence.problem` says how to fix it |
+| `awaiting_capacity` | no runner has a free slot |
+| `resume_refused` | a paused run can't resume; `evidence.resume_refused_reason` says why |
+| `wip_full` | the stage it would move into is at its WIP limit |
+| `owned_by_human` | a person has the card |
+| `blocked_on_input` | it's waiting for an answer to a question |
+| `run_active` | a run is going; `evidence.current_node` names the step |
+| `not_eligible` | its status isn't one a flow picks up |
+| `run_failed` | its last run failed; `evidence.last_execution.detail` has the error in full |
+| `job_stranded` | a job has been waiting too long and no runner is answering |
+| `job_awaiting_slot` | a job is waiting for a runner with a free slot; `evidence.runners` shows who has what |
+| `runner_outdated` | every connected runner is too old and is being turned away; run `./hamaca update` |
+| `no_runner` | no runner is connected |
+
+### GET /api/cards/:ref/runs
+
+The card's runs, newest first, each step with its outcome. Error details are never cut short.
+
+```json
+{ "data": [ { "id": 7, "flow_key": "code", "status": "failed", "current_node": null,
+  "failure_detail": "…", "node_executions": [
+    { "node_key": "final_review", "visit": 1, "attempt": 2, "outcome": "failed", "detail": "…" }
+  ] } ] }
+```
+
+### POST /api/cards/:ref/retry
+
+Rerun the card's failed run from the step that failed, or send `at` with the step to start
+from. `POST /api/runs/:id/retry` does the same by run id.
+
+### POST /api/cards/:ref/cancel
+
+Stop the card's run. Optionally send a `reason`. The card stays where it is.
+`POST /api/runs/:id/cancel` does the same by run id.
+
+```json
+{ "data": { "status": "ok", "run_id": 7, "ref": "RLY-12", "previous_status": "running", "node": "implement" } }
+```
+
+### POST /api/cards/:ref/advance
+
+The task the run is on is already done: tick it off and go on to the next one.
+`POST /api/runs/:id/advance` does the same by run id.
+
+### POST /api/board/restart-stalled
+
+Restart every run on the board that stopped because of something outside it, such as a network
+outage. Returns how many restarted and how many were refused.
+
+## Stages
+
+These do what **Settings › Stages** does, and refuse the same things. A refusal can carry extra
+fields in `error`:
+
+| HTTP | code | when |
+| --- | --- | --- |
+| 404 | `not_found` | no such stage on this board |
+| 409 | `last_stage` | deleting the board's only stage |
+| 409 | `not_empty` | the stage still holds cards, archived ones included; adds `live` and `archived` counts |
+| 409 | `holds_flow` | changing the type of a flow's stage to one a flow can't work; adds `flow` |
+| 409 | `public_intake` | it's the stage new cards from the public form land in |
+| 422 | `invalid_anchor` | `before` or `after` isn't another stage on this board |
+| 422 | `not_a_main_stage` | the route needs a stage and `:id` is a substage |
+| 422 | `invalid` | the stage itself is invalid, such as a blank name |
+| 422 | `invalid_request` | the body is malformed; the message says how |
+
+### GET /api/stages
+
+Every stage in board order, each followed by its substages.
+
+### POST /api/stages
+
+Add a stage. Send `name`, and either `category` (to add it at the end of that category) or one
+of `before` or `after` (a stage id; it goes beside that stage and takes its category).
+Optionally send `type`, `description`, `wip_limit` and `collapsed_by_default`. Returns `201` and
+the stage.
+
+```
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"name":"Triage","after":3,"type":"queue"}' https://hamaca.app/api/stages
+```
+
+### PATCH /api/stages/:id
+
+Change a stage: any of `name`, `description`, `type`, `wip_limit`, `collapsed_by_default` and
+`reject_to_stage_id`. `null` clears `wip_limit` and `reject_to_stage_id`. Renaming a stage
+renames its substages.
+
+### POST /api/stages/:id/place
+
+Move a stage beside another: send one of `before` or `after`. It takes that stage's category.
+
+### PUT /api/stages/:id/substages/:lane
+
+Turn on a stage's `review` or `done` substage.
+
+### DELETE /api/stages/:id/substages/:lane
+
+Turn it off. Refused while it holds cards.
+
+### DELETE /api/stages/:id
+
+Delete a stage, its substages, and the flow on it. Refused while it holds cards.
+
+## Flows
 
 ### GET /api/flows
 
-`GET /api/flows` (every flow) and `GET /api/flows/:key` (one) return each flow as its canonical
-document, plus two read-only blocks: `derived` (`pulls_from` / `lands_on`, the stage names
-worked out from board order) and `problem`. `PUT /api/flows/:key` returns the same shape and
-accepts a pulled document back unchanged — both read-only keys are ignored on push.
+Every flow on the board. `GET /api/flows/:key` returns one. Each flow is the document you can
+edit and push back, plus two fields you can't set: `derived` (the stages it takes cards from
+and puts them in) and `problem`.
 
-`problem` is `null` when the flow's board shape works. When it doesn't — nothing before the
-flow's stage, a Review column or another flow's working stage right before it, or nothing after
-it — it explains why, in words the API owns (render them verbatim):
+`problem` is `null` when the board around the flow works. When it doesn't, the flow is paused:
+no new runs start until the board is fixed. `problem` explains why, in words to show as they
+are:
 
 ```json
 {
@@ -361,164 +486,27 @@ it — it explains why, in words the API owns (render them verbatim):
 }
 ```
 
-`kind` is one of `no_upstream | upstream_review | upstream_working | no_downstream`; a fix's
-`action` one of `enable_lane | insert_queue_stage | add_stage_after`; a column's `mark` is
-`self`, `offending` or `null`. An **enabled** flow with a problem is *paused*: no new runs start
-until the board is fixed (runs already going finish and land). A disabled flow still reports its
-problem but is not paused.
+### PUT /api/flows/:key
 
-### POST /api/cards/:ref/move
+Replace a flow with an edited copy of what `GET /api/flows/:key` returned. Keep its `version`:
+if someone changed the flow since you pulled it, you get a `409`, so pull again and redo your
+edit. Leave `version` out to overwrite whatever is there.
 
-Move a card. `stage` is a stage **id or name**; `position` is **1-based** (omit to
-append). Returns the single-card shape.
+### GET /api/flows/:key/metrics
 
-```
-curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"stage":"Plan","position":1}' https://relay.example/api/cards/RLY-12/move
-```
+How each step of the flow has done: how long it takes, what it costs, how often it retries.
+`window` is `7d`, `30d` (the default) or `all`; `card=RLY-12` narrows it to one card.
 
-### POST /api/cards/:ref/comments
+### GET /api/flows/:key/audit
 
-Add an agent comment. Requires `body`. Returns `201` with the new timeline entry:
+Warning signs in the flow's recent runs, such as a review whose verdict keeps flipping, or attempts that ended without an outcome. Takes `window` too.
 
-```json
-{ "data": { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" } }
-```
-
-### POST /api/cards/:ref/needs-input
-
-Flag the card as needing human input. Requires `question`. Returns the single-card
-shape.
-
-```
-curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"question":"Which auth provider?"}' https://relay.example/api/cards/RLY-12/needs-input
-```
-
-### POST /api/cards/:ref/approve
-
-Approve a card sitting on an approval-gate stage (advances it). `422 not_gated` if the
-card's stage is not a gate. Returns the single-card shape.
-
-### POST /api/cards/:ref/reject
-
-Send a card back. Requires a non-empty `note` (else `422 missing_note`). Optional `to`
-(a stage id or name) routes to a specific earlier main-lane stage; an unresolvable
-target is `422 invalid_target`. Without `to`, uses the gate's reject flow. Returns the
-single-card shape.
-
-```
-curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"note":"needs a test","to":"Plan"}' https://relay.example/api/cards/RLY-12/reject
-```
-
-### POST /api/cards/:ref/archive
-
-Archive a card: it leaves the board (open boards drop it live), an `archived` timeline entry is
-recorded against Hamaca AI, and any dependency rows that name it as a blocker are removed. Body
-`{}`. Returns the single-card shape with `"archived": true`. Archiving an already-archived card
-is a `200` that records nothing new.
-
-A card with a live run is refused with **`409 active_run`** and nothing is written — cancel the
-run first (`POST /api/cards/:ref/cancel`, or `./hamaca cancel REF`), then archive. The board's
-own Archive button is not guarded this way.
-
-```
-curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
-  -d '{}' https://relay.example/api/cards/RLY-12/archive
-```
-
-```json
-{ "error": { "code": "active_run", "message": "This card has a live run — cancel it (`relay cancel RLY-12`) before archiving" } }
-```
-
-### POST /api/cards/:ref/unarchive
-
-Restore an archived card to its stage (open boards re-insert it live) and record an `unarchived`
-timeline entry against Hamaca AI. Body `{}`. Returns the single-card shape with
-`"archived": false`. Unarchiving a card that is not archived is a `200` no-op. There is no
-live-run guard. Blockers removed when the card was archived are not restored.
-
-```
-curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
-  -d '{}' https://relay.example/api/cards/RLY-12/unarchive
-```
-
-### GET /api/cards/:ref/diagnosis
-
-**Why isn't this card moving?** — one call, one plain-language verdict, plus the evidence
-behind it. Read-only and safe to hit while a run is live. The verdict is produced by
-replaying the real dispatch decision (`Hamaca.Runs.Scheduler.explain/2`, which shares its
-predicates with `plan/1`), not by a separate reimplementation, so it cannot drift from what
-actually dispatches.
-
-```
-curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/cards/RLY-12/diagnosis
-```
-
-```json
-{ "data": { "verdict": "awaiting_capacity",
-  "detail": "The code flow would dispatch this card, but no runner is advertising a free shared_clean slot.",
-  "evidence": { "card_ref": "RLY-12", "card_status": "ready", "flow_key": "code", "run_id": null } } }
-```
-
-| verdict | means |
-| --- | --- |
-| `dispatchable` | would dispatch on the scheduler's next tick |
-| `blocked_by_dependencies` | the card declares blockers that have not reached a top-level Done column; `evidence.blocked_by` names their refs |
-| `no_enabled_flow` | no enabled flow pulls from this card's stage |
-| `flow_paused` | the enabled flow that pulls from this card's stage is paused by a broken board shape; `evidence.problem` carries `what`, `why` and `fixes`. Runs already going finish and land; fix the board and the next reconcile un-pauses it |
-| `awaiting_capacity` | a flow would dispatch; no runner advertises a free slot of the needed class |
-| `resume_refused` | a parked run's resume is being refused on every scheduler tick; `evidence.resume_refused_reason` names why (`no_isolation` · `pin_unresolved` · `pinned_runner_absent` · `no_free_slot`) and `evidence.resume_refused_since` when it started. After 30 minutes the reaper fails the run so `./hamaca retry` applies |
-| `wip_full` | the works-in column (plus its sub-lanes) is at its WIP limit |
-| `owned_by_human` | a human holds the baton (ADR 0004) |
-| `blocked_on_input` | card status `needs_input`, or the run is parked `needs_input` |
-| `run_active` | a run is live; `evidence.current_node` names the node |
-| `not_eligible` | a flow pulls from this stage, but the card's status is not `ready`/`queued` |
-| `run_failed` | the card's last run failed; `evidence.last_execution.detail` carries the **full** failure text |
-| `job_stranded` | a job has sat `queued`/`claimed` past the grace with no live runner, **and the board has at least one runner row**. An EMPTY roster is the more fundamental fact and diagnoses `no_runner` instead (RE311) |
-| `job_awaiting_slot` | a live run's job has sat `queued` unclaimed past the grace and no connected runner has a free slot in its class; `evidence.queued_age_s`, `evidence.isolation` and `evidence.runners` (each `%{name, used, total, held}`) name the job's age, class, and who holds the slots |
-| `runner_outdated` | every connected runner is running code below the required minimum and is being refused at claim; `evidence.required_version` and `evidence.running_versions` name the mismatch |
-| `no_runner` | no runner is connected (or every one has gone silent), so nothing is running this board's node-jobs. Also the verdict for an aged unclaimed job when the roster is empty — nothing was ever holding it to go quiet on it (RE311) |
-
-CLI: `./hamaca why RLY-12`.
-
-### GET /api/cards/:ref/runs
-
-The card's runs, newest first, each with its node-execution history. `detail` and
-`failure_detail` are emitted **in full — never truncated**: this is the surface an
-operator reaches for instead of hand-writing an Ecto query over `fly ssh console`.
-
-```
-curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/cards/RLY-12/runs
-```
-
-```json
-{ "data": [ { "id": 7, "flow_key": "code", "status": "failed", "current_node": null,
-  "failure_detail": "…", "node_executions": [
-    { "node_key": "final_review", "visit": 1, "attempt": 2, "outcome": "failed", "detail": "…" }
-  ] } ] }
-```
-
-CLI: `./hamaca runs RLY-12`.
+## Runners
 
 ### GET /api/runners
 
-The board's connected runners: advertised capacity per isolation class, last
-heartbeat, freshness, version, and the jobs each is currently holding.
-
-`freshness` is `"fresh"`, `"stale"` (missed a beat), or `"gone"` (reclaimed by the reaper);
-`stale?` is a `freshness != "fresh"` convenience flag — check `freshness` when the
-distinction between "late" and "reclaimed" matters. `outdated` is **orthogonal to
-freshness**: a runner can be beating normally and still be running code below the
-server's minimum version, in which case it is refused work (409 `runner_outdated`) with
-no other visible symptom — this is the field that explains a healthy-looking runner that
-picks up nothing. A runner process that predates the rename to *runner* is refused with the
-same 409 `runner_outdated` and told to update the runner and restart it.
-
-```
-curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/runners
-```
+The runners connected to this board: how many jobs each can take, when it last checked in, its
+version, and what it's running.
 
 ```json
 { "data": [ { "name": "mac", "host": "mac.local", "capacity": { "shared_clean": 3, "exclusive": 1 },
@@ -528,204 +516,38 @@ curl -H "Authorization: Bearer $HAMACA_API_KEY" https://relay.example/api/runner
   ] } ] }
 ```
 
-CLI: `./hamaca runners`.
+`freshness` is `fresh`, `stale` (it missed a check-in) or `gone`. If `outdated` is true, the
+runner is too old and gets no work (a `409 runner_outdated` when it asks), even though it looks
+healthy. Run `./hamaca update` and restart it.
 
 ### GET /api/version
 
-The git SHA the running app was built from. **Unauthenticated** — it leaks nothing a
-deploy does not. `sha` is `"unknown"` for any build made without the `GIT_SHA` build arg
-(a local `mix phx.server`, for instance): an honest "unknown" beats a misleading value.
-
-```
-curl https://relay.example/api/version
-```
+Which build of Hamaca the board is running. No key needed.
 
 ```json
 { "sha": "0123456789abcdef0123456789abcdef01234567", "built_at": "2026-07-19T10:00:00Z", "version": "0.1.0" }
 ```
 
-CLI: `./hamaca version`.
+## Used by `./hamaca` and the install script
 
-### GET /api/scaffold
+You won't need these yourself. They're listed so you know what they are.
 
-The manifest of the Hamaca-owned files this board serves (`Hamaca.Scaffold`). **Unauthenticated**,
-on purpose and on the same pipeline as `GET /api/version` — the board's install script
-(`/b/<slug>/install`) fetches them before anything has authenticated, so this has to be reachable
-with no `Authorization` header at all. `503 scaffold_unavailable` if the board has not built its
-scaffold (`mix hamaca.build_scaffold`, which `mix setup` runs automatically); a deployed board
-never returns it.
+| Endpoint | Used for |
+| --- | --- |
+| `GET /api/scaffold` | The list of files `./hamaca update` keeps current. No key needed. `503 scaffold_unavailable` on a board that hasn't built them |
+| `GET /api/scaffold/*path` | One of those files. No key needed |
+| `POST /api/setup/preflight` | The install script's checks of your repo, before it writes anything |
+| `POST /api/setup/installed` | The install script reporting that it finished |
+| `GET /api/setup` | The setup checklist (`./hamaca setup status`) |
+| `POST /api/setup/steps/:step` | Reporting one setup step (`./hamaca setup report`) |
+| `GET /api/board/version` | A number that goes up whenever the board changes, so a client knows when to reload |
+| `POST /api/board/heartbeat` | The runner checking in |
+| `POST /api/board/logs` | The runner sending its log to the board |
+| `GET /api/harnesses` | The runner reading which agent tools the board's flows use |
+| `POST /api/node-jobs/claim` | The runner taking a job |
+| `POST /api/node-jobs/heartbeat` | The runner saying a job is still going |
+| `POST /api/node-jobs/:id/outcome` | The runner reporting how a job went |
+| `POST /api/talk/turns/:id/events` | The runner sending an agent conversation to the board as it happens |
+| `POST /api/talk/turns/:id/outcome` | The runner reporting how that conversation turn ended |
 
-The board serves two layouts (RE478), picked by the `layout` query param on both scaffold routes:
-
-- **`?layout=hamaca`** — what `./hamaca` and the install script ask for: `hamaca` (the runner),
-  `hamaca.md`, the three `hamaca-*` skills, plus a small `relay` shim that runs `./hamaca` and
-  three thin `relay-*` alias skills, kept for the [upgrade window](/docs/cli#upgrading-from-relay).
-- **No param** — the older layout, still served unchanged to runners installed before the rename:
-  the full runner at `relay`, `relay.md` and the three `relay-*` skills.
-
-Any other `layout` value is `400 unknown_layout`. Each layout has its own `version`, so a client
-only ever compares versions within one layout.
-
-```
-curl "https://relay.example/api/scaffold?layout=hamaca"
-```
-
-```json
-{ "version": "0123456789ab", "items": [
-  { "path": "hamaca", "sha256": "…", "bytes": 12345 }
-] }
-```
-
-`version` is derived, never stored: the first 12 hex characters of the sha256 of the sorted
-`"<path>:<sha256>"` lines, so it changes exactly when content changes.
-
-### GET /api/scaffold/\*path
-
-One file's raw bytes. `path` is checked against the requested layout's manifest `items` — a
-static allowlist — before it ever reaches the filesystem, so this is not a general file server:
-any path outside that layout's Hamaca-owned files is `404 not_found`. **Unauthenticated**, same
-reasoning as above.
-
-The runner is served with this board's URL baked into its `BOARD_URL = "<url>"` line (RE443), so
-a project needs no `HAMACA_URL`. The URL is the board's configured one, never the request's
-`Host`. The manifest's `sha256` for the runner is that of the placeholder copy
-(`BOARD_URL = ""`), and `./hamaca update` resets the line before comparing.
-
-```
-curl "https://relay.example/api/scaffold/hamaca?layout=hamaca"
-curl "https://relay.example/api/scaffold/.claude/skills/hamaca-update/SKILL.md?layout=hamaca"
-```
-
-CLI: `./hamaca update` fetches the manifest, hashes each file against it, and re-downloads only
-the ones whose content differs — which covers a file that is missing, and one that has been
-edited. `.hamaca/scaffold.json` records what was installed; it is not the trigger.
-
-### POST /api/setup/preflight
-
-The board's install script (`curl -fsSL <host>/b/<slug>/install | sh`, RE443) calls this before it
-writes anything; you rarely call it by hand. Board key required — it is the key's first authed
-call, which ticks setup step 3. It then records the preflight on step 4 (`waiting` when every
-check passed, `failed` with the fix text otherwise). Steps already past are left alone, so a re-run
-answers 200 and changes nothing. A board with no setup checklist answers the same way and records
-nothing.
-
-```
-curl -X POST https://relay.example/api/setup/preflight \
-  -H "Authorization: Bearer $HAMACA_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"slug": "streaks", "machine": "jl-mbp", "repo_dir": "~/src/streaks",
-       "remote": "git@github.com:jl/streaks.git", "branch": "main",
-       "checks": [{"id": "git_repo", "ok": true, "detail": "~/src/streaks"},
-                  {"id": "remote", "ok": true, "detail": "origin → git@github.com:jl/streaks.git"},
-                  {"id": "default_branch", "ok": true, "detail": "main"},
-                  {"id": "python3", "ok": true, "detail": "/usr/bin/python3"}],
-       "clis": {"claude": "/usr/local/bin/claude", "codex": null, "gemini": null}}'
-```
-
-`checks` must carry each local check id exactly once (`git_repo`, `remote`, `default_branch`,
-`python3`); `clis` maps each onboarding CLI to its path, or `null` when it isn't on `PATH`.
-
-```json
-{ "ok": true, "board": "Streaks",
-  "llm": { "harness": "claude-code", "label": "Claude Code", "cli": "claude",
-           "skill_path": ".claude/skills/hamaca-onboard/SKILL.md", "pointer_file": "CLAUDE.md" },
-  "checks": [
-    { "id": "git_repo", "label": "git repo", "ok": true, "detail": "~/src/streaks", "fix": null },
-    { "id": "remote", "label": "remote", "ok": true, "detail": "origin → git@github.com:jl/streaks.git", "fix": null },
-    { "id": "default_branch", "label": "default branch", "ok": true, "detail": "main", "fix": null },
-    { "id": "python3", "label": "python3", "ok": true, "detail": "/usr/bin/python3", "fix": null },
-    { "id": "cli", "label": "claude on PATH", "ok": true, "detail": "/usr/local/bin/claude", "fix": null },
-    { "id": "key", "label": "HAMACA_API_KEY", "ok": true, "detail": "accepted by the board (…Wm7x)", "fix": null }
-  ],
-  "headline": null, "fix": null, "fix_command": null }
-```
-
-On a failed check `ok` is `false`, the check carries its `fix`, and `headline` / `fix` /
-`fix_command` describe the first failure (e.g. `"Preflight stopped: Claude Code isn't on your
-PATH"`, `"npm install -g @anthropic-ai/claude-code"`). Errors: `403 wrong_board` ("this key belongs
-to a different board") when `slug` is not the key's board; `409 step_2_pending` when the board's
-setup hasn't picked a default LLM yet; `422 invalid` for a malformed body or an unknown check id.
-
-### POST /api/setup/installed
-
-The install script's success report, after it wrote the Hamaca files. Board key required.
-Finishes setup step 4 (activating step 5) when it is the current step; otherwise changes nothing.
-
-```
-curl -X POST https://relay.example/api/setup/installed \
-  -H "Authorization: Bearer $HAMACA_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"slug": "streaks", "machine": "jl-mbp", "repo_dir": "~/src/streaks", "branch": "main",
-       "files": ["hamaca", ".claude/skills/hamaca-onboard/SKILL.md", "hamaca.md", "CLAUDE.md",
-                 ".hamaca/runner.json", ".hamaca/prepare-worktree.sh", ".gitignore"]}'
-```
-
-```json
-{ "ok": true }
-```
-
-Errors: `403 wrong_board`, `422 invalid`.
-
-### GET /api/setup
-
-The board's setup checklist, as the `/hamaca-onboard` skill reads it (RE445). Board key required.
-`current` is the one step a report may move — the current sub-step of step 5 while onboarding.
-`referenced_files` lists the `.claude/` agent and skill files the board's flows name (a skill is
-present when either of its `paths` exists) — `[]` when they name none, as on every template
-board; a board copied from another board can name files its repo doesn't have yet.
-`missing_file_resolutions` are the ways step 5.4 resolves a missing one.
-
-```
-curl https://relay.example/api/setup -H "Authorization: Bearer $HAMACA_API_KEY"
-```
-
-```json
-{ "data": {
-    "board": "Streaks", "template": "Bare minimum",
-    "llm": { "harness": "claude-code", "label": "Claude Code", "cli": "claude",
-             "skill_path": ".claude/skills/hamaca-onboard/SKILL.md" },
-    "current_id": "5", "current_sub_id": "5.1", "current": "5.1",
-    "first_flow_stage": "Plan", "first_card_stage": "Backlog", "position": 5, "done_count": 4, "finished": false,
-    "interview": [{ "id": "done", "label": "Done means", "question": "What does \"done\" mean for a card: …" }, …],
-    "change_decisions": ["pending", "asking", "accepted", "rejected", "edited"],
-    "missing_file_resolutions": ["stub", "inline", "drop", "path"],
-    "referenced_files": [
-      { "kind": "agent", "name": "plan-implementer", "paths": [".claude/agents/plan-implementer.md"],
-        "used_by": [{ "flow": "code", "node": "implement" }] }
-    ],
-    "steps": [
-      { "id": "5", "parent": null, "title": "Onboard, in Claude Code", "actor": "ai_terminal",
-        "status": "active", "evidence": null, "error": null, "data": {},
-        "reached_at": "2026-10-12T14:11:00Z", "completed_at": null,
-        "children": [{ "id": "5.1", "parent": "5", "status": "active", …, "children": [] }, …] },
-      …
-    ] } }
-```
-
-Errors: `404 no_checklist` ("no guided setup on this board") for a board created without a
-template.
-
-### POST /api/setup/steps/:step
-
-Reports progress on the current step (RE445). Board key required. `status` is one of `waiting`,
-`done`, `failed`, `skipped`; `evidence` and `error` are optional strings (`error` is kept only for
-`failed`); `data` is an optional object merged at the top level into the step's data (5.3 sends
-every `answers` so far, 5.4 the whole `changes` list). `done` / `skipped` move on to the next
-step. Answers the same body as `GET /api/setup`. Repeating the report that just finished a step
-answers 200 and changes nothing.
-
-```
-curl -X POST https://relay.example/api/setup/steps/5.3 \
-  -H "Authorization: Bearer $HAMACA_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"status": "waiting", "data": {"answers": {"done": "PR merged"}}}'
-```
-
-Errors: `404 no_checklist`; `409 not_current` ("step 5.1 isn't current; the current step is
-5.3", with the current step in `error.current`); `422 invalid` for an unknown status, a
-non-string `evidence` / `error`, or a non-object `data`.
-
----
-
-## CLI
-
-Most of the time you'll drive this API through the `./hamaca` CLI rather than raw
-HTTP — it wraps pull/work/hand-back into a few commands. See `hamaca.md`
-in the repository for the full agent workflow.
+How the runner uses these is on the [Runner](/docs/architecture-runner) page.

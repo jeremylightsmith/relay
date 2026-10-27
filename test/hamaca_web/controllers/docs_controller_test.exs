@@ -117,7 +117,6 @@ defmodule HamacaWeb.DocsControllerTest do
       {"/docs/statuses-and-outcomes", "Statuses &amp; outcomes"},
       {"/docs/cli", "relay"},
       {"/docs/api", "REST API reference"},
-      {"/docs/authentication", "Authentication &amp; API access"},
       {"/docs/runbook-flow-cutover", "Enabling a flow safely"},
       {"/docs/billing", "Billing &amp; self-hosting"}
     ]
@@ -201,14 +200,14 @@ defmodule HamacaWeb.DocsControllerTest do
     end
   end
 
-  test "the Setup page is gone: it is now /docs/authentication and /docs/setup is a 404",
-       %{conn: conn} do
-    html = conn |> get(~p"/docs/authentication") |> html_response(200)
-    assert html =~ "Authentication &amp; API access"
+  test "the Setup and Authentication pages are gone: getting a key is on /docs/api", %{conn: conn} do
+    html = conn |> get(~p"/docs/api") |> html_response(200)
+    assert html =~ "Get a key"
     assert html =~ "Authorization: Bearer"
 
-    # The rename is deliberate and there is no redirect map.
+    # Retired pages 404: the docs site has no redirect map.
     assert_error_sent 404, fn -> get(conn, "/docs/setup") end
+    assert_error_sent 404, fn -> get(conn, "/docs/authentication") end
   end
 
   test "no page in the sidebar is titled Setup", %{conn: conn} do
@@ -223,7 +222,7 @@ defmodule HamacaWeb.DocsControllerTest do
     refute sidebar =~ "Setup"
     refute html =~ ~s(href="/docs/setup")
     assert sidebar =~ "Getting started"
-    assert sidebar =~ "Authentication & API access"
+    refute sidebar =~ "Authentication & API access"
     assert sidebar =~ "Enabling a flow safely"
   end
 
@@ -486,7 +485,6 @@ defmodule HamacaWeb.DocsControllerTest do
           "Statuses &amp; outcomes",
           "CLI (./hamaca)",
           "REST API reference",
-          "Authentication &amp; API access",
           "Enabling a flow safely"
         ] do
       assert html =~ title, "sidebar missing #{title}"
@@ -494,7 +492,7 @@ defmodule HamacaWeb.DocsControllerTest do
   end
 
   test "the current page is highlighted in the sidebar", %{conn: conn} do
-    html = conn |> get(~p"/docs/authentication") |> html_response(200)
+    html = conn |> get(~p"/docs/api") |> html_response(200)
 
     active =
       html
@@ -502,7 +500,7 @@ defmodule HamacaWeb.DocsControllerTest do
       |> LazyHTML.query("a.docs-sidebar-link.is-active")
       |> LazyHTML.text()
 
-    assert active =~ "Authentication"
+    assert active =~ "REST API reference"
     refute active =~ "Getting started"
   end
 
@@ -517,11 +515,11 @@ defmodule HamacaWeb.DocsControllerTest do
   end
 
   test "the on-this-page TOC anchors match the rendered heading ids", %{conn: conn} do
-    html = conn |> get(~p"/docs/authentication") |> html_response(200)
+    html = conn |> get(~p"/docs/api") |> html_response(200)
 
-    # authentication.md has `## Authentication`
-    assert html =~ ~s(href="#authentication")
-    assert html =~ ~s(id="authentication")
+    # api.md has `## Get a key`
+    assert html =~ ~s(href="#get-a-key")
+    assert html =~ ~s(id="get-a-key")
   end
 
   test "the sign-in page points builders at the docs", %{conn: conn} do
@@ -530,13 +528,13 @@ defmodule HamacaWeb.DocsControllerTest do
   end
 
   test "a middle page gets both a previous and a next pager link", %{conn: conn} do
-    html = conn |> get(~p"/docs/authentication") |> html_response(200)
+    html = conn |> get(~p"/docs/api") |> html_response(200)
 
     assert html =~ ~s(class="docs-pager")
     assert html =~ ~s(docs-pager-prev)
     assert html =~ ~s(docs-pager-next)
-    # authentication's neighbours in registry order are api and runbook-flow-cutover
-    assert html =~ "REST API reference"
+    # api's neighbours in registry order are cli and runbook-flow-cutover
+    assert html =~ "CLI (./hamaca)"
     assert html =~ "Enabling a flow safely"
   end
 
@@ -551,7 +549,7 @@ defmodule HamacaWeb.DocsControllerTest do
   end
 
   test "each page carries a breadcrumb and a section eyebrow above the article", %{conn: conn} do
-    html = conn |> get(~p"/docs/authentication") |> html_response(200)
+    html = conn |> get(~p"/docs/api") |> html_response(200)
 
     assert html =~ ~s(class="docs-breadcrumb")
     assert html =~ ~s(class="docs-eyebrow")
@@ -564,7 +562,7 @@ defmodule HamacaWeb.DocsControllerTest do
 
     assert breadcrumb =~ "Docs"
     assert breadcrumb =~ "Build with Hamaca"
-    assert breadcrumb =~ "Authentication"
+    assert breadcrumb =~ "REST API reference"
 
     eyebrow =
       html
@@ -612,7 +610,7 @@ defmodule HamacaWeb.DocsControllerTest do
   # RE477 task 3: the docs prose names the product Hamaca; commands, URLs, env vars and
   # module references stay verbatim (they're renamed by RE478/RE480/RE481).
   @top_level_slugs ~w(introduction getting-started
-                      statuses-and-outcomes billing cli authentication api)
+                      statuses-and-outcomes billing cli api)
 
   # The rendered article's prose, with <pre> and <code> blocks removed and the tags stripped.
   defp article_prose(html) do

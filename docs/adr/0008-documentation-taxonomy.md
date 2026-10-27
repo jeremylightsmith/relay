@@ -152,7 +152,7 @@ from the canonical source.
 | "What Relay is" in `vision.md`, `README.md`, `introduction.md` | ~ 3 copies | `vision.md` canonical; others may restate (README internal, introduction user-facing) but must not drift |
 | Card status: 4 values in `cards-and-handoffs`, 5 in `statuses-and-outcomes` | ✗ **drift** (not mere dup) | reconcile to the glossary's set; both pages link the glossary |
 | `category` enum: prose `unstarted` vs API `started` | ✗ **drift** | reconcile prose to the schema's set |
-| `authentication.md` (~50% dup of getting-started + api) | ✓ dup allowed (site carve-out) | keep as a clear standalone page; only ensure the mint/bearer details don't drift from api.md |
+| How to get and send an API key | ✓ one home | the "Get a key" section of `api.md`; getting-started shows only the export line |
 | `agent-integration.md` (thin over `runner.md`; stale board-runner warning) | ✗ stale + redundant | rescue its unique bits into `runner.md`, then retire; repoint links to `/docs/architecture-runner` |
 | `runner.md` (496 lines; contributor internals + runner-author contract) | ~ over the ~2-page cap, dual purpose | candidate split; heavily deep-linked, so move carefully |
 | Stale lines: `domain.md` "nothing executes yet", getting-started "RLY-177 planned", `runtime.md` "empty until W9" | ✗ stale | sweep |
