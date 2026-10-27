@@ -23,6 +23,8 @@ v0.1) and `docs/designs/Relay Mobile.dc.html` (tappable Inbox & Board prototype)
   `7a81c9d6`).
 - Per-board mute (RE406, `Membership.muted` in `lib/schemas/membership.ex`) is a partial version of
   the skipped notification settings.
+- RE489: muted boards are excluded from the app-icon badge (`Push.needs_you_count/1`); the in-app
+  inbox and counts still include them. This refines "badge = count of items in Needs you" below.
 
 ## Context
 

@@ -28,7 +28,8 @@ class BoardSummary {
   final bool starred;
 
   /// The signed-in user's personal mute (RE406). It suppresses this board's
-  /// phone pushes only; the needs-you count and badge are unchanged.
+  /// phone pushes; the in-app needs-you count is unchanged, but the app-icon
+  /// badge excludes muted boards (RE489).
   final bool muted;
 
   factory BoardSummary.fromJson(Map<String, dynamic> json) => BoardSummary(

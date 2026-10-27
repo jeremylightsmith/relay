@@ -5,7 +5,8 @@ defmodule Hamaca.Push do
   Owns registered devices (`Schemas.DeviceToken`), the recipient fan-out, the
   APNs payload, the app-icon badge count, and the delivery adapter seam
   (`Hamaca.Push.Delivery`). A member who muted a board (RE406, `Membership.muted`)
-  gets no APNs push for it but still gets the browser broadcast and the badge count.
+  gets no APNs push for it but still gets the browser broadcast; the board's cards are
+  left out of their app-icon badge (RE489).
 
   **Depends on `Hamaca.Members`/`Hamaca.Repo`, never on `Hamaca.Cards`** — `Cards`
   calls `Push` from `set_status/3`, so a back-dependency would be a boundary
@@ -115,29 +116,37 @@ defmodule Hamaca.Push do
 
   @doc """
   How many cards need `user`: unarchived cards in `:needs_input` or `:in_review`
-  on any non-archived board `user` is a resolved member of, across boards.
-  Stamped onto every push as `aps.badge`.
+  on any non-archived board `user` is a resolved member of **and has not muted**
+  (`Membership.muted == false`), across boards. Stamped onto every push as `aps.badge`.
 
-  **Must agree with `Cards.needs_you_feed/1`.** That function is the documented
-  single source of truth for this two-status set (ADR 0005) — the F4 feed, the
-  F5 badge (this function, RLY-81), and the inbox (RLY-85) all have to return
-  the same cards. `Push` cannot call `Cards` (that would be a Boundary cycle:
-  `Cards.set_status/3` calls `Push`), so this mirrors `Cards.needs_you_feed/1`'s
-  scoping by hand instead of sharing it. Keep the two in sync by hand too.
+  Muted boards are left out (RE489, which reverses RE406's original badge rule).
+  Cards are counted **distinctly**: `board_members` has
+  no unique `(board_id, user_id)` index, so a user can hold several rows on one board and a
+  plain join count would count a card once per row. `Boards.set_muted/3` writes every row a
+  user has on the board, so the rows agree on `muted` and the filter holds for all of them.
+
+  **Differs from `Cards.needs_you_feed/1` only by mute.** Both use the same two-status set
+  (ADR 0005) and the same scoping (resolved membership, unarchived card, non-archived
+  board), **except** the in-app feed (and the inbox and switcher counts built on it)
+  includes muted boards and this badge does not. `Push` cannot call `Cards` (that would be
+  a Boundary cycle: `Cards.set_status/3` calls `Push`), so this mirrors
+  `Cards.needs_you_feed/1`'s scoping by hand instead of sharing it. Keep the shared
+  scoping in sync by hand too.
   """
   def needs_you_count(%User{id: user_id}) do
-    Repo.aggregate(
+    Repo.one(
       from(c in Card,
         join: m in Membership,
         on: m.board_id == c.board_id,
         join: b in Board,
         on: b.id == c.board_id,
         where: m.user_id == ^user_id,
+        where: m.muted == false,
         where: c.status in @notification_statuses,
         where: is_nil(c.archived_at),
-        where: is_nil(b.archived_at)
-      ),
-      :count
+        where: is_nil(b.archived_at),
+        select: count(c.id, :distinct)
+      )
     )
   end
 
@@ -148,8 +157,8 @@ defmodule Hamaca.Push do
   `needs_you_count/1` as the badge.
 
   A member who muted the board (RE406, `Membership.muted`) still gets the browser
-  broadcast but no APNs push for it; their badge count is unaffected, so a muted
-  board's cards still count toward the badge carried by another board's push.
+  broadcast but no APNs push for it, and the muted board's cards are excluded from the
+  badge carried by any other board's push (RE489).
 
   **Fire-and-forget.** Always returns `:ok` immediately and never raises into the
   caller: the recipient query and the network call run under

@@ -16,7 +16,8 @@ defmodule Schemas.Membership do
   `Hamaca.Boards.set_starred/3`.
 
   `muted` is the member's per-board mute (RE406): it stops APNs pushes for this member on this
-  board (browser notifications and badges are unaffected). Never cast — written only by
+  board and removes the board's cards from their app-icon badge (RE489); browser notifications
+  and the in-app needs-you counts are unaffected. Never cast — written only by
   `Hamaca.Boards.set_muted/3`.
   """
 

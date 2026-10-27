@@ -145,6 +145,16 @@ defmodule Hamaca.PushTest do
 
       assert Push.needs_you_count(user) == 0
     end
+
+    test "a card counts once even when the user has duplicate membership rows on its board" do
+      user = insert(:user)
+      board = insert(:board)
+      insert(:membership, board: board, user: user)
+      insert(:membership, board: board, user: user)
+      insert(:card, stage: insert(:stage, board: board), status: :needs_input)
+
+      assert Push.needs_you_count(user) == 1
+    end
   end
 
   describe "muted boards (RE406)" do
@@ -205,7 +215,7 @@ defmodule Hamaca.PushTest do
       assert payload["kind"] == "in_review"
     end
 
-    test "a muted board's cards still count toward the badge of an unmuted board's push" do
+    test "a muted board's cards don't count toward the badge of an unmuted board's push" do
       %{board: board_a, users: [alice]} = board_with_members(1)
       with_device(alice, "tok-alice")
       insert(:card, stage: insert(:stage, board: board_a), status: :needs_input)
@@ -217,16 +227,29 @@ defmodule Hamaca.PushTest do
 
       {:ok, _} = Cards.set_status(card_b, %{status: :needs_input}, :agent)
 
-      assert_received {:push_delivered, "tok-alice", %{"aps" => %{"badge" => 2}}}
+      assert_received {:push_delivered, "tok-alice", %{"aps" => %{"badge" => 1}}}
     end
 
-    test "muting a board leaves needs_you_count/1 unchanged" do
+    test "muting drops the board from needs_you_count/1; unmuting restores it" do
       %{board: board_a, users: [alice]} = board_with_members(1)
       insert(:card, stage: insert(:stage, board: board_a), status: :needs_input)
 
       assert Push.needs_you_count(alice) == 1
       mute(alice, board_a)
+      assert Push.needs_you_count(alice) == 0
+      mute(alice, board_a, false)
       assert Push.needs_you_count(alice) == 1
+    end
+
+    test "muting with duplicate membership rows still drops the board from the count" do
+      user = insert(:user)
+      board = insert(:board)
+      insert(:membership, board: board, user: user)
+      insert(:membership, board: board, user: user)
+      insert(:card, stage: insert(:stage, board: board), status: :needs_input)
+
+      assert {:ok, true} = Boards.set_muted(user, board.slug, true)
+      assert Push.needs_you_count(user) == 0
     end
 
     test "unmuting a board resumes APNs pushes" do
