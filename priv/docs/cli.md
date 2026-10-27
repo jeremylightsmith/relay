@@ -156,8 +156,10 @@ until each one reaches Done.
 restarts between jobs, so nothing running is cut off.
 
 `./hamaca update` refreshes everything Hamaca puts in your repo: `./hamaca`, `hamaca.md` and
-the three `hamaca-*` skills. Those files belong to Hamaca, so an update overwrites any edits
-you made to them. It never touches anything else.
+the three `hamaca-*` skills, plus the old-name `./relay` shim and its three `relay-*` alias
+skills. Those files belong to Hamaca, so an update overwrites any edits you made to them. It
+also creates `.hamaca/runner.json` if you don't have one, but never overwrites it. In a repo
+still set up under the old `./relay` names, it moves you over to the new ones.
 
 ```bash
 ./hamaca update --check    # what would change; writes nothing

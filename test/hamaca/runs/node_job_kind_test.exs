@@ -1,7 +1,7 @@
 defmodule Hamaca.Runs.NodeJobKindTest do
   @moduledoc """
   RE268 — the regression that matters when two dispatchers share one table: a talk job is never
-  returned to a flow claim, and a node job is never returned to a talk claim (ADR 0009).
+  returned to a flow claim, and a node job is never returned to a talk claim (ADR 0014).
   """
   use Hamaca.DataCase, async: true
 

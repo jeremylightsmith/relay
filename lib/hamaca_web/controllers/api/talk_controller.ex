@@ -1,6 +1,6 @@
 defmodule HamacaWeb.Api.TalkController do
   @moduledoc """
-  The runner's transcript transport (RE268 / ADR 0009). Two routes, both board-scoped by the
+  The runner's transcript transport (RE268 / ADR 0014). Two routes, both board-scoped by the
   same board-key auth as the rest of `/api`: the runner streams a turn's lines here as it
   produces them, then reports the turn's end state.
 

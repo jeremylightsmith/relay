@@ -1,6 +1,6 @@
 defmodule Schemas.TalkSession do
   @moduledoc """
-  One Talk session per card (ADR 0009). `claude_session_id` is the durable half of the
+  One Talk session per card (ADR 0014). `claude_session_id` is the durable half of the
   conversation — the runner holds the actual session on its own disk, the server holds only
   the id, and passing it as `--resume` is what makes turn *n+1* a continuation. It is nil until
   the first turn FINISHES, so a stopped or failed first turn correctly starts fresh rather than

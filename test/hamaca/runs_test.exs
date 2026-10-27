@@ -1956,7 +1956,7 @@ defmodule Hamaca.RunsTest do
     end
 
     test "never names a ref whose card has no run at all (a talk-only worktree)", %{board: board} do
-      # ADR 0009 §2: a talk session's worktree spans runs and must outlive them. Naming it for
+      # ADR 0014 §2: a talk session's worktree spans runs and must outlive them. Naming it for
       # release would tear down a live conversation's tree.
       card = card_in(board, "Next up", "talk only")
 

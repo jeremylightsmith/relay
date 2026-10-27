@@ -2,23 +2,17 @@
 
 ## Status
 
-Proposed (YYYY-MM-DD)
+Proposed
 
-<!-- One of: Proposed (date) | Accepted (date) | Superseded by NNNN (date).
-     An ADR is immutable once Accepted — to change the decision, write a new ADR that
-     supersedes this one and set this line to `Superseded by NNNN`. A later ADR that only
-     narrows this one adds a `Refined by [ADR NNNN](...)` line below the status line instead. -->
-
-<!-- Optional, once work ships: the next line after the status line may be
-     `**Implementation:** complete.` or `**Implementation:** partial — remaining: <items>.`
-     An optional `## As built (YYYY-MM-DD)` section goes directly after this Status section and
-     records where the shipped design differs — it reports on the decision, never amends it, so
-     it is allowed on an Accepted ADR. -->
+<!-- Proposed or Accepted. An ADR says what is decided today. When the decision changes, edit
+     this file so it says what's true now; when it no longer applies, delete the file and its
+     row in README.md. Git history is the record, so there are no dated "as built",
+     "amendment" or "superseded" sections. -->
 
 ## Context
 
-The forces at play: what is true today, what pressure prompted the decision, and what
-constraints bound it. State the problem, not the answer.
+The forces that make this decision necessary today: what is true, and what constraints bound
+the choice. State the problem, not the answer.
 
 ## Decision
 
@@ -26,9 +20,14 @@ What we chose, stated plainly and in the present tense.
 
 ## Consequences
 
-What follows — the good and the bad. Include what this makes harder, and what now has to be
-kept in sync.
+What follows, good and bad. Include what this makes harder, and what now has to be kept in
+sync.
 
 ## Alternatives considered
 
 (Optional.) What else was on the table and why it lost. One short paragraph each.
+
+## Open questions
+
+(Optional.) Questions about this decision that are still open today. Delete each one when it's
+answered, and fold the answer into the Decision.

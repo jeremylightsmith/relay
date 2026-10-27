@@ -847,7 +847,7 @@ defmodule HamacaWeb.BoardRunnersLive do
   defp queue_pill_label(:claimed), do: "CLAIMED"
   defp queue_pill_label(_queued), do: "QUEUED"
 
-  # Every row is tagged with its dispatcher (ADR 0009). A TALK row carries no flow key and no
+  # Every row is tagged with its dispatcher (ADR 0014). A TALK row carries no flow key and no
   # isolation class, so without the tag it reads as a broken NODE row rather than a talk turn.
   defp kind_label(:talk), do: "TALK"
   defp kind_label(_node), do: "NODE"

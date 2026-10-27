@@ -1,86 +1,80 @@
-# ADR 0001 — Client architecture: LiveView-first with a thin native wrapper
+# ADR 0001 — Client architecture: LiveView-first, with a hybrid mobile app
 
 ## Status
 
-Accepted (2026-07-06)
-
-Refined by [ADR 0005](0005-mobile-app-scope-and-architecture.md) (2026-07-12): the "no separate mobile client / no separate API" stance now holds for content surfaces only; ADR 0005 scopes a small native decision layer and the /api/all API that feeds it.
+Accepted
 
 ## Context
 
-Relay needs a web app and mobile apps (iOS + Android). Two goals shape the client
-architecture, stated by the project owner:
+Hamaca needs a web app and a mobile app. Two goals shape the client architecture:
 
 1. **Minimize duplicated code between web and native.**
 2. **Minimize duplicated code between iOS and Android.**
 
-Relay is also intrinsically real-time — the "baton" passes between humans and AI agents and
-the board must update live for everyone watching. Phoenix LiveView is an excellent fit for
-that: UI state and real-time push already live on the server.
+Hamaca is intrinsically real-time: the baton passes between humans and AI agents, and the
+board must update live for everyone watching. Phoenix LiveView fits that well, because UI
+state and real-time push already live on the server.
 
-The tension: the two goals can pull in different directions. A cross-platform native
-framework (e.g. Flutter) unifies iOS and Android but forces a *second* full UI plus an API
-layer, duplicating everything the LiveView app already does. Conversely, keeping everything
-in LiveView minimizes web↔native duplication but needs a strategy to reach the app stores.
+The two goals pull apart. A cross-platform native framework unifies iOS and Android but, used
+for everything, forces a second full UI plus an API, duplicating what LiveView already does.
+Keeping everything in LiveView avoids that, but a pure webview wrapper can't do what a phone
+is for here: push, voice, and one-tap decisions that feel native.
 
-### State of LiveView Native (researched 2026-07)
-
-LiveView Native is attractive because it reuses the LiveView server and would let us render
-*truly* native views. But as of mid-2026 it is **not ready to bet both platforms on**:
-
-- The framework is still pre-1.0 (core `~0.4.0-rc`).
-- The **SwiftUI** client is the most mature, but still a release candidate.
-- The **Jetpack/Android** client is **explicitly not production-ready** — the maintainers say
-  the API is still being finalized and it has not been announced for general use.
-
-Shipping native SwiftUI on iOS while Android lags would directly violate goal #2 (it splits
-the platforms). So LiveView Native is a *future* option, not a *now* option.
+LiveView Native would reuse the LiveView server and render truly native views, but it is
+pre-1.0 and its Android (Jetpack) client is not production-ready. Adopting it for iOS alone
+would split the platforms, against goal 2.
 
 ## Decision
 
-**The Phoenix LiveView web app is the single source of truth for UI and real-time logic.**
-Mobile ships as a **thin native wrapper** (Hotwire/Turbo-Native-style shell) around that same
-LiveView UI:
+**The Phoenix LiveView app is the single source of truth for UI and real-time logic.** Every
+content surface (board, card body, spec/plan, comments, mockups) is built once, in LiveView,
+and serves both web and mobile.
 
-- **One UI codebase** (LiveView/HEEx) for web and mobile.
-- **One shared mobile shell** covering iOS and Android — a small native host providing app
-  navigation, push notifications, and store presence around the web content.
-- **No separate mobile client and no separate API** are maintained today.
+**The mobile app is a hybrid.** It is a Flutter app (iOS-first) with two layers:
 
-**LiveView Native is the documented upgrade path.** Because it reuses the same LiveView
-server, adopting it later is *additive* (add SwiftUI/Compose render targets to templates we
-already have), not a rewrite. We will adopt it **for iOS and Android together**, only once
-the Jetpack client is stable — never one platform ahead of the other.
+- **Native decision surfaces** — the small, stable screens where a human makes a quick decision
+  that unblocks the baton, or that need a device capability (push, voice, biometrics, OS
+  share/launch). They are fed by a human-authed JSON API, `/api/all` + `/api/auth/native`.
+- **Embedded LiveView** — every content surface, loaded chromeless in a webview with the same
+  session, so it stays real-time for free.
+
+[ADR 0005](0005-mobile-app-scope-and-architecture.md) fixes the mobile app's scope: which
+surfaces are native, and the native API that feeds them.
+
+**Placement rule:** default to LiveView. Go native only for a decision surface or a device
+capability. Never re-implement a content surface natively, never extend the agent board-key
+`/api` for the app, and never add a mobile-only endpoint for something an embedded LiveView
+already does.
+
+**LiveView Native is the documented future path.** Because it reuses the same LiveView
+server, adopting it is additive (new render targets for templates we already have), not a
+rewrite. It is adopted for iOS and Android together, only once the Jetpack client is stable,
+never one platform ahead of the other.
 
 ## Consequences
 
 **Positive**
 
-- Near-zero duplication across web↔native and iOS↔Android — both goals satisfied.
-- Real-time works on mobile for free (it's the same LiveView socket).
-- Features are built once, in LiveView. Product velocity stays high.
-- A clean, non-rewrite path to true-native rendering when Android is ready.
+- Content is built once and is identical on web and mobile; iOS and Android share one Flutter
+  codebase.
+- Real-time works on mobile with no extra work: the embedded pages use the same LiveView socket.
+- Native effort goes only where it pays: push, voice, and the decision surfaces.
+- A non-rewrite path to fully native rendering stays open.
 
 **Negative / accepted trade-offs**
 
-- The mobile experience is web-rendered inside a native shell, not fully native widgets.
-  Acceptable for a board-centric, connection-oriented product; revisited via LiveView Native.
-- Heavy offline use is not a first-class capability of this approach. If Relay later needs
-  rich offline/sync, that is the trigger to re-open this decision (a new ADR).
-- We depend on a wrapper toolkit's LiveView compatibility for native navigation/hand-off.
-
-**Implications for contributors (see also `AGENTS.md`)**
-
-- Build features in LiveView. Do **not** stand up a parallel mobile UI or a bespoke API
-  "for the app" — the app *is* the LiveView UI.
-- Keep UI logic in the server/LiveView layer so it is inherited by every client.
+- There is a second codebase (Flutter) and a second, human-authed API to maintain, kept small
+  by the placement rule.
+- Embedded LiveView pages must work chromeless and at phone width, or the seams show.
+- Heavy offline use is not supported. If Hamaca needs rich offline sync, that reopens this
+  decision.
 
 ## Alternatives considered
 
-- **LiveView Native now** — shares the server, but Android isn't production-ready and you
-  still maintain separate SwiftUI + Compose templates (three UI layers). Deferred to roadmap.
-- **Flutter + Phoenix API** — unifies iOS/Android, but duplicates the entire web UI in Dart
-  and requires a parallel API/Channels surface. Highest total duplication; rejected against
-  goal #1.
-- **PWA only** — lightest possible, single codebase, but weak native integration and no real
-  app-store story. Kept as a fallback but insufficient as the mobile plan.
+- **LiveView Native now.** Shares the server, but Android isn't production-ready, and it still
+  means separate SwiftUI and Compose templates. Kept as the future path.
+- **Flutter for everything, over a Phoenix API.** Unifies iOS and Android, but duplicates the
+  whole web UI in Dart and needs an API for every surface. Rejected against goal 1.
+- **Pure webview wrapper.** One codebase, but weak push and voice, and decisions feel like a
+  web page. Rejected because the phone's job is the fast decision.
+- **PWA only.** Lightest, but weak native integration and no real app-store presence.

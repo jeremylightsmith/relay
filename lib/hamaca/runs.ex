@@ -170,7 +170,7 @@ defmodule Hamaca.Runs do
   end
 
   # `run_id == ^run_id` already excludes talk jobs (always run_id: nil), but the kind clause is
-  # explicit per ADR 0009 so the filter survives a future refactor. The one query behind
+  # explicit per ADR 0014 so the filter survives a future refactor. The one query behind
   # `active_jobs/1` and `revoke_active_jobs/1`.
   defp active_jobs_query(run_id) do
     from j in NodeJob,
@@ -2340,7 +2340,7 @@ defmodule Hamaca.Runs do
     * it is **pinned** to this runner (`runner_name` = its name), or
     * this runner **declares it holds that card's worktree** — the ref appears in `held` with
       a state in `Schemas.Runner.active_holding_states/0` — and the job is `exclusive`, or
-    * it fits **advertised free capacity** (`free_capacity`), or it is a talk job (ADR 0009 §3).
+    * it fits **advertised free capacity** (`free_capacity`), or it is a talk job (ADR 0014 §3).
 
   The middle clause is the fix for the deadlock. The pin is the escape hatch for "the runner
   already holds that slot", but the pin can be legitimately absent: `settle_retry_pin/3`'s
@@ -2416,7 +2416,7 @@ defmodule Hamaca.Runs do
         # go missing (a retry that released a dead pin) while the holding never does. That
         # bypass is EXCLUSIVE-only: a `shared_clean` job runs in the shared worktree and must
         # still respect shared capacity, or the bypass would oversubscribe the shared pool.
-        # An unpinned TALK job also bypasses (ADR 0009 §3): a turn runs in the card's own
+        # An unpinned TALK job also bypasses (ADR 0014 §3): a turn runs in the card's own
         # worktree and advertises no isolation class, and the FIRST turn on a card is what
         # CREATES the runner pin, so refusing it for want of an advertised slot would mean a
         # card nobody has talked to can never be talked to on a busy runner. The exemption is
@@ -2597,7 +2597,7 @@ defmodule Hamaca.Runs do
             on: r.id == j.run_id,
             join: c in Card,
             on: c.id == r.card_id,
-            # A talk turn is not the agent working the card (ADR 0009 §6: the baton does not
+            # A talk turn is not the agent working the card (ADR 0014 §6: the baton does not
             # move), so it must never stamp agent_heartbeat_at — the inner join on Run already
             # excludes it (a talk job's run_id is nil), and this filter makes that exclusion
             # explicit rather than incidental.
@@ -2692,7 +2692,7 @@ defmodule Hamaca.Runs do
       `Schemas.Run.active_statuses/0`**, carrying the LATEST run's status.
 
   The "at least one run" clause is load-bearing: a card with zero runs is a **talk-only**
-  worktree, which ADR 0009 §2 says must outlive runs — naming it would tear down a live
+  worktree, which ADR 0014 §2 says must outlive runs — naming it would tear down a live
   conversation's tree. Talk-only trees are retired by the runner's own
   `_retire_talk_only_locked`.
 
@@ -3071,7 +3071,7 @@ defmodule Hamaca.Runs do
   Deliberately NOT filtered by `runner_name`: an unclaimed job having no holder is the whole
   point, and that filter is exactly why `active_jobs_by_runner/1` cannot answer this. Both
   reads share `board_jobs_query/1`, whose LEFT join on `Run` is what lets a talk turn (no run —
-  ADR 0009) appear here at all.
+  ADR 0014) appear here at all.
 
   **Ordering is load-bearing, not cosmetic.** Queued rows come first in `asc: j.id` — the same
   order `do_claim_next_job/4` claims in under `FOR UPDATE SKIP LOCKED` — so this list literally IS
@@ -3870,7 +3870,7 @@ defmodule Hamaca.Runs do
   # still live" means. Each caller adds its own filters, order and select.
   #
   # `Card` is joined on `j.card_id` — the board-scoping join for BOTH kinds, since `card_id` is
-  # required on every row while `run_id` is nil on a talk turn (ADR 0009). `insert_job!/3` writes
+  # required on every row while `run_id` is nil on a talk turn (ADR 0014). `insert_job!/3` writes
   # `card_id: run.card_id`, so a flow job resolves the same card it always did.
   #
   # `Run` is **LEFT**-joined, and only for `flow_key`: an inner join here is the exact bug that
@@ -4098,7 +4098,7 @@ defmodule Hamaca.Runs do
       the pinned-claim path (RLY-135), which bypasses the advertised-capacity filter. Only
       `shared_clean` jobs are unpinned, since any runner can pick those up.
 
-  **Known step-1 limitation (RE268 / ADR 0009):** a TALK turn is never requeued here — the
+  **Known step-1 limitation (RE268 / ADR 0014):** a TALK turn is never requeued here — the
   query below is explicitly `kind in NodeJob.flow_kinds()`. Requeueing a talk job would hand a
   resumed `claude` session to a machine that does not hold it, so a turn whose runner dies
   stays `claimed` until a human presses Stop (`Hamaca.Runs.revoke_talk_job/1` revokes
@@ -5017,7 +5017,7 @@ defmodule Hamaca.Runs do
   end
 
   @doc ~S"""
-  Inserts one **talk** turn's dispatch row (ADR 0009): `kind: :talk`, no run, no node
+  Inserts one **talk** turn's dispatch row (ADR 0014): `kind: :talk`, no run, no node
   execution, `card_id` set. `runner_name` is the session's pin — nil for the first turn on a
   card, which is what lets ANY runner take it and become the holder. Mirrors
   `exclusive_holder/2`'s pin-on-the-job-row shape exactly, so `claim_next_job/1` needs no Talk
@@ -5041,7 +5041,7 @@ defmodule Hamaca.Runs do
 
   @doc ~S"""
   Withdraws a live **talk** job so the heartbeat's `revoked_among/2` tells its runner to kill
-  the running `claude -p` — the Stop button (ADR 0009 §1). Unconditional server-side: a turn
+  the running `claude -p` — the Stop button (ADR 0014 §1). Unconditional server-side: a turn
   whose runner is already gone still ends, which is the only thing that stops such a turn.
   Flow jobs have no clause here on purpose: they are revoked through the run lifecycle
   (`revoke_active_jobs/1`), and a second path into `:revoked` is exactly the duplicated-fact

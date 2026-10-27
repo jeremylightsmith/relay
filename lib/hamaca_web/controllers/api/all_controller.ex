@@ -43,7 +43,7 @@ defmodule HamacaWeb.Api.AllController do
   end
 
   # RE376 — the native board switcher's list: the user's boards with the same summary
-  # facts the web boards home shows. A narrow addition to this ADR-0001-scoped surface.
+  # facts the web boards home shows. A narrow addition to ADR 0005's native API.
   def boards(conn, _params) do
     summaries = Cards.list_board_summaries(conn.assigns.current_user)
 
@@ -65,7 +65,7 @@ defmodule HamacaWeb.Api.AllController do
   end
 
   # RE406 — the native switcher's mute: sets (never toggles) the caller's per-board APNs mute via
-  # Boards.set_muted/3. A narrow addition to this ADR-0001-scoped surface. The body is validated
+  # Boards.set_muted/3. A narrow addition to ADR 0005's native API. The body is validated
   # before the membership lookup.
   def mute(conn, %{"slug" => slug} = params) do
     with {:ok, muted} <- muted_param(params),

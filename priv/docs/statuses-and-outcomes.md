@@ -11,14 +11,16 @@ and four words and the board reads itself.
 | Status | Colour of the situation | What you do |
 | --- | --- | --- |
 | **Ready** | Nothing is running. The card is available. | Move it, or let the board pick it up. |
-| **Queued** | The board has picked the card but work hasn't started. | Nothing — it starts on its own. |
+| **Queued** | A flow wants to work the card, but no runner has a free slot yet. | Nothing — it starts on its own. |
 | **Working** | An agent holds the baton and is working the card. | Nothing. Watch the live output on the card if you like. |
 | **Needs input** | The agent has a question. The baton is back with **you**. | Open the card and answer in the drawer. Work resumes where it stopped. |
 | **In review** | The card is at a review gate. | Approve it to the next stage or substage, or send it back with a note. |
 | **Failed** | A step gave up for good. The card stopped, with the reason on it. | Read the failure on the card, fix what caused it, and retry the run — answering can't revive a dead step. |
 
 **Needs input**, **In review** and **Failed** are the three that actually want something from
-you — those are what show up in your "needs you" rollup.
+you. The "needs you" count on your boards page adds up Needs input and In review cards, plus
+ready cards waiting on a person and agents that have gone quiet. Failed cards aren't in that
+count, so look for them on the board.
 
 ## What an agent declares when it finishes
 

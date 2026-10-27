@@ -188,7 +188,7 @@ sharing behavior.
   `Schemas.Flow` rows directly, because `Hamaca.Flows` depends on it. Humans edit both lists in
   Board Settings → **Agents** (`?section=agents`, `HamacaWeb.AgentsSettingsComponents` rendered by
   `BoardSettingsLive`, which formats the structured delete refusals into copy).
-- **Flows** — workflow definitions as declarative graph data (ADR 0006 / RLY-131): per-board
+- **Flows** — workflow definitions as declarative graph data ([ADR 0006](../adr/0006-workflow-orchestration.md)): per-board
   rows in the `flows` table (`key`, `enabled`, `isolation`, `version`, and the one stage the flow
   works in, `stage_id`) with the node/edge graph embedded as jsonb.
   **One stage (RE429):** a flow belongs to exactly one **main** stage of a work type
@@ -358,7 +358,7 @@ sharing behavior.
   shares `node_requirements/1`'s extraction (a skill only from an agent node's leading slash
   command) and is the ONE place those path shapes live: the template picker's copy warning
   (via `Boards.copy_sources/1`) and `GET /api/setup` both read it.
-- **Runs** — the workflow execution engine (ADR 0006 card 02 / RLY-132): a run executes a
+- **Runs** — the workflow execution engine ([ADR 0006](../adr/0006-workflow-orchestration.md)): a run executes a
   `Schemas.Flow` graph against a card as a supervised, Postgres-backed state machine. This
   boundary owns five things.
   **The engine** (`Hamaca.Runs.Engine` / `RunServer`): outcome routing, per-node `max_retries`,
@@ -469,7 +469,7 @@ sharing behavior.
   attachment. Hamaca's UI never links to a raw HTML attachment as a top-level page.
   Archive and restore (`Cards.archive_card/2` / `Cards.unarchive_card/2`) are reachable from the
   board-key API as `POST /api/cards/:ref/archive` and `POST /api/cards/:ref/unarchive` (RE318,
-  `./relay archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with
+  `./hamaca archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with
   an active run (`Hamaca.Runs.active_run/1`) with **409 `active_run`** and writes nothing; that
   guard lives in `HamacaWeb.Api.CardController`, **not** in `Cards.archive_card/2`, so the board
   UI's Archive button stays unguarded as shipped. Instead of refusing, a board
@@ -510,7 +510,7 @@ sharing behavior.
   authorization check `get_card_by_ref/2` is), Done included, archived opt-in via `:archived`,
   capped by `:limit`, and carrying `list_cards/1`'s trimmed projection. Three surfaces call it and
   none re-implements it: `GET /api/cards?q=` (with `limit`/`archived`; **no `q` leaves that
-  listing exactly as it was**), `./relay search`, and the board header's results popover.
+  listing exactly as it was**), `./hamaca search`, and the board header's results popover.
 - **Members** — board membership; who can see and act on a board. `member_user_id?/2` is the
   one membership query (also the card-owner rule `Hamaca.Cards` enforces).
 - **Presence** (`Hamaca.Presence`) — who is looking at a board's **story map** right now, and
@@ -539,11 +539,11 @@ sharing behavior.
   purchase UI; `free` reads "Free", RE469). `through` is `paid_through` while active or past due,
   `access_until` once cancelled, and `null` on Free, comped or paused. An app build older than
   RE469 doesn't know `"free"`, parses it to null and hides the Plan row — no server shim
-  ([ADR 0013](../adr/0013-free-plan-replaces-the-trial.md)). Billing disabled sends
+  ([ADR 0013](../adr/0013-the-free-plan.md)). Billing disabled sends
   `{"enabled": false, "standing": null, "through": null}`. A 401/422/500 body has no `billing`. Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
   user up by `provider_uid` first, then by normalized verified email (signing in that existing
   user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
-  nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, the board list, and the board star).
+  nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, the board list, and the board star and mute).
   `get_user_by_email/1` is a case-insensitive lookup (the example-board seeders, RE444).
   The superadmin-only `/admin/users` page (RE353) reads `Hamaca.Billing.list_admin_users/1`
   (RE463 moved its row query out of Accounts, which no longer has an admin user list).
@@ -557,8 +557,8 @@ sharing behavior.
   RE462; a refusal is ignored, so sign-up never fails over a code, and a returning user never
   redeems one) — so Accounts depends on Billing, never the reverse.
   `upsert_user_from_google/2` passes `:promo_code` through.
-- **Billing** (`Hamaca.Billing`, RE460, [ADR 0012](../adr/0012-board-owners-pay-up-front.md) as
-  amended by [ADR 0013](../adr/0013-free-plan-replaces-the-trial.md)) — every owner is on
+- **Billing** (`Hamaca.Billing`, RE460, [ADR 0012](../adr/0012-board-owners-pay-up-front.md) and
+  [ADR 0013](../adr/0013-the-free-plan.md)) — every owner is on
   **Free** (RE469: one editable board, every feature) until they pay one monthly price
   (`price_cents/0`, `:billing_price_cents`, default 2000) up front from their own billing date for
   unlimited boards; a lapsed or cancelled-out paid plan drops back to Free. **A board's standing
@@ -874,7 +874,7 @@ sharing behavior.
   mockups; 5 MB cap), served same-origin by `AttachmentController` at `/attachments/:id`
   (`Schemas.Attachment.path/1` is the one definition of that path — domain-side so
   `Hamaca.Cards` can parse it). `Schemas.Attachment` also owns `image_types/0` and
-  `mockup_types/0` (RE390 — what a mockup may be; `./relay`'s `MOCKUP_TYPES` is pinned to it by
+  `mockup_types/0` (RE390 — what a mockup may be; `./hamaca`'s `MOCKUP_TYPES` is pinned to it by
   `runner_contract.json`'s `mockups.content_types`). `Hamaca.Attachments.content_types/1` maps
   every attachment on a card to its content type in one query — the web layer's only way to
   learn content types (to render an image mockup differently from an HTML one).
@@ -882,7 +882,7 @@ sharing behavior.
   (`HamacaWeb.Api.AttachmentController`, RE373; path `Schemas.Attachment.api_path/1`), scoped by
   `Hamaca.Attachments.get_attachment_for_board/2` to the key's board — 404 for anything off-board —
   sharing `AttachmentController.put_content_headers/2` and served `private` as a download. It is
-  how `./relay mockups REF --pull` hands mockups to the next agent on a card.
+  how `./hamaca mockups REF --pull` hands mockups to the next agent on a card.
   **Note images (RE427):** an image may belong to a Note — `attachments.comment_id` (nullable FK,
   `on_delete: :nilify_all`) and `attachments.position` (its index in the note; upload timestamps
   are second-precision, so they can't order it) link it to the comment, and `Schemas.Comment`
@@ -925,7 +925,7 @@ sharing behavior.
   `/api/attachments/<id>`; `[]` when none) and (RE428) `origin` — `null` |
   `{"kind": "answer", "question": n}` | `{"kind": "rejection"}`, always present — the key sets
   and the origin kinds (`origin_kinds`) are pinned under `runner_contract.json`'s `note_images`;
-  `./relay card` prints the origin after the author (`· from answer Q2` / `· from rejection`). Images are served under the app-wide CSP. **HTML** gets its own
+  `./hamaca card` prints the origin after the author (`· from answer Q2` / `· from rejection`). Images are served under the app-wide CSP. **HTML** gets its own
   branch: the response's CSP is *replaced* with `AttachmentController.html_csp/0` —
   `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src
   'unsafe-inline' https://fonts.googleapis.com; img-src data:; font-src data:
@@ -1131,7 +1131,7 @@ sharing behavior.
   everyone else does, so viewers cannot disagree. `story_map_draft` / `story_map_draft_name` /
   `story_map_compose` stay **per-tab** (RE263) — sharing them would hand one person the ability
   to clear another's in-progress input.
-- **Talk** (`Hamaca.Talk`, RE268 / ADR 0009 — not yet merged to `main`) —
+- **Talk** (`Hamaca.Talk`, RE268 / ADR 0014) —
   a person-driven execution lane, orthogonal to the flow engine: a person types in a card's
   terminal pane, one turn becomes a `node_jobs` row with `kind: :talk` and no run, claimed
   through the same long-poll every flow node uses. Three tables: `Schemas.TalkSession` (one per
@@ -1173,9 +1173,9 @@ sharing behavior.
   `onboarding_llm/1`: `harness` / `label` read from `Hamaca.Agents.seed_harnesses/0`, plus `cli`,
   `blurb`, `install`, `skill_dir`, `skill_path`, `pointer_file`, `recommended?`, `enabled?` — Gemini
   CLI is disabled; `skill_path` is derived from `skill_dir`, and Claude Code's `skill_dir` is
-  `Hamaca.Scaffold.skill_dir/0`). It is also the ONE Elixir definition of the `relay.md` pointer
+  `Hamaca.Scaffold.skill_dir/0`). It is also the ONE Elixir definition of the `hamaca.md` pointer
   line (`pointer_line/0`) and of the default-LLM switch flash (`llm_switch_notice/2`, RE457: the
-  `./relay update --skill-dir … --pointer-file …` command, or nil when the skill dir is unchanged). Storage is one `Schemas.BoardSetupStep` row per `(board, step)`; `start/2` inserts
+  `./hamaca update --skill-dir … --pointer-file …` command, or nil when the skill dir is unchanged). Storage is one `Schemas.BoardSetupStep` row per `(board, step)`; `start/2` inserts
   all 15 (step 1 done with `"<N> stages · <M> flows · HH:MM"` and the template's name and
   `warning`, step 2 active) from `Boards.create_board/2` on the template path only, so a board
   created without a template — or before RE443 — has no checklist (`checklist/1` is nil).

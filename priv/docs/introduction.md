@@ -9,9 +9,10 @@ holding it* and *whose move is next*.
 
 ## Passing the baton
 
-Each stage (column) of a board is owned by either **humans** or **AI**. A card's current
-holder is simply whoever owns the stage it sits in, so the baton passes every time a card
-crosses a hand-off between a human stage and an AI stage.
+Every card has owners: the people and agents who can work it. Whoever is acting on it right
+now holds the baton. A stage (column) belongs to the AI when a flow is set up to work the cards
+in it; every other stage is yours. So the baton passes when a card moves between the two, and
+also when an agent stops to ask you something.
 
 - **In a human stage**, a person is doing the work, or the card is waiting on a human decision.
 - **In an AI stage**, an agent works the card and streams live progress. If it hits a decision

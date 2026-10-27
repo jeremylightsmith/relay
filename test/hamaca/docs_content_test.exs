@@ -61,7 +61,7 @@ defmodule Hamaca.DocsContentTest do
     assert guide =~ "./hamaca search"
     assert api =~ "./hamaca search"
     assert api =~ "q=<text>"
-    assert domain =~ "./relay search"
+    assert domain =~ "./hamaca search"
     assert domain =~ "Cards.search/3"
   end
 

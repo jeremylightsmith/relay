@@ -1,6 +1,6 @@
-# Relay documentation — the map
+# Hamaca documentation — the map
 
-Relay's prose lives in **nine homes**. Each home has one reader, one kind of content, and one
+Hamaca's prose lives in **nine homes**. Each home has one reader, one kind of content, and one
 lifecycle. The rule is **one fact, one home; everywhere else links** — the *why* behind that, and
 the full rationale for each row below, is
 [ADR 0008 — Documentation taxonomy](adr/0008-documentation-taxonomy.md). This page is only the
@@ -10,10 +10,10 @@ map: where to look, and where to put something new.
 
 | Home | Who it's for | What belongs there | Lifecycle | Published |
 | --- | --- | --- | --- | --- |
-| [`relay.md`](../relay.md) | a driver agent in **another repo's** context | how to drive a card with `./relay` | current; tiny; authored into a consuming repo by `/relay-onboard` | in every consuming repo |
+| [`hamaca.md`](../hamaca.md) | a driver agent in **another repo's** context | how to drive a card with `./hamaca` | current; tiny; served by the board and installed by `./hamaca update` | in every consuming repo |
 | `priv/docs/` | an integrator or operator **browsing a URL** | product + integration reference and onboarding | current | **public site** (`/docs`) |
 | [`docs/architecture/`](architecture/README.md) | a **contributor editing this repo** | how the system works **today** | current; freshness-gated | **public site** (symlinked) |
-| [`docs/adr/`](adr/README.md) | anyone weighing or reviewing a **structural change** | a decision and its rationale — the *why* | durable; immutable once Accepted | internal |
+| [`docs/adr/`](adr/README.md) | anyone weighing or reviewing a **structural change** | a decision that holds today, and its *why* | current; edited in place when the decision changes, deleted when it stops applying | internal |
 | [`docs/glossary.md`](glossary.md) | anyone — the **tiebreaker** | vocabulary bound to code | current | internal |
 | [`docs/vision.md`](vision.md) | product / anyone | the north-star narrative | aspirational | internal |
 | [`docs/designs/`](designs/README.md) | a **UI builder** | hi-fi mockups — the visual source of truth | current; re-pulled from Claude Design | internal |
@@ -46,8 +46,8 @@ Ask, in order:
 2. Is it a **term** everyone must use consistently? → the **glossary** (others link, never redefine).
 3. Does it describe **how the system works right now**, such that a code change could falsify it?
    → **`docs/architecture/`**, updated in the same branch as the change.
-4. Is it *"how do I, from outside, do X with Relay"*? → the hosted **`/docs` site** if the reader is
-   browsing; **`relay.md`** if it is context shipped into a driver agent.
+4. Is it *"how do I, from outside, do X with Hamaca"*? → the hosted **`/docs` site** if the reader is
+   browsing; **`hamaca.md`** if it is context shipped into a driver agent.
 5. Is it an **operational ritual** with steps and a rollback? → a **runbook**.
 6. Is it what we are **aiming at**, not what exists? → **vision**.
 7. Is it a **rule the in-repo agent** must follow while working? → **`AGENTS.md`** (a standing
@@ -57,7 +57,7 @@ Then the duplication check: if the fact already has a home, this instance **link
 it is a user-facing `/docs` concept page, which may restate it simply but must not drift from the
 canonical source. Values of a closed set are the one restatement that is machine-checked: tag the
 table with a `vocab:` HTML comment naming the accessor that owns the set, and
-`test/relay/docs_vocabulary_test.exs` holds the table to that function's values. See
+`test/hamaca/docs_vocabulary_test.exs` holds the table to that function's values. See
 `priv/docs/statuses-and-outcomes.md` for the exact marker syntax.
 
 ## Named sources of truth
@@ -70,5 +70,5 @@ table with a `vocab:` HTML comment naming the accessor that owns the set, and
 | REST endpoints | `priv/docs/api.md` |
 | CLI commands | `priv/docs/cli.md` |
 | PubSub topics and supervised processes | [`architecture/runtime.md`](architecture/runtime.md) |
-| "What Relay is" / the north star | [`vision.md`](vision.md) |
+| "What Hamaca is" / the north star | [`vision.md`](vision.md) |
 | How work physically runs (dispatch, runner, worktrees) | [`architecture/runner.md`](architecture/runner.md) |

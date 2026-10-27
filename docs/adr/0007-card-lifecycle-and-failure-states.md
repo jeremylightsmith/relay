@@ -1,132 +1,58 @@
 # ADR 0007 — Card lifecycle: the happy path and every failure mode
 
 ## Status
-Accepted (2026-07-31)
 
-**Implementation:** complete. The decision is one map, with the failure grid in
-`docs/architecture/failures.md`; the Known gaps are still live debt (see As built).
-
-## As built (2026-10-08)
-
-- [`../architecture/state.md`](../architecture/state.md) and
-  [`../architecture/failures.md`](../architecture/failures.md) are the current reference.
-- The machine table is stale. Node outcomes add `blocked` (RE308); node-job states are
-  `queued/claimed/done/revoked`, with no `running` (`lib/schemas/node_job.ex`). The code flow has
-  21 nodes, not 18 (`docs/designs/flows/code.json`): `branch`, `implement`, `spec_review`,
-  `quality_review`, `fix_findings`, `sync`, `sync_fix`, `precommit`, `browser`, `final_review`,
-  `final_fix`, `smoke`, `acceptance`, `resync`, `resync_fix`, `reverify`, `rebrowser`, `merge`,
-  `deploy`, `github_fix`, `post`. The RE board's own flow (`.relay/flows/code.json`) has `await_ci`
-  in place of `deploy`.
-- Gap 1 (non-atomic dispatch): resolved, as the gap itself records (RLY-233, RE239,
-  `Relay.Runs.leaked?/1`).
-- Gap 2 (outcome delivery): partly closed. The runner's outcome POST is idempotent-retryable
-  (RLY-202), a job the runner holds but no longer runs is requeued (RLY-170,
-  `Relay.Runs.requeue_orphaned_jobs/3`), and repeated outcome-less re-entry is capped (RE410). Left:
-  no operator action re-accepts a known-good outcome.
-- Gap 3 (overloaded `needs_input`): partly closed. An agent that could not run reports `blocked`
-  (RE308), a capacity shortage queues the card (`awaiting_capacity`) or reports a refused resume
-  (`resume_refused`, RE297) instead of asking, and `Relay.Runs.park_kind/1` names
-  question / escalation / infrastructure. Left: all three still share one park reason, and the kind
-  is still derived from the latest node outcome.
-- Gap 4 (capacity vs held worktrees): largely resolved. Every beat declares the runner's held trees
-  (RE311), and `Schemas.Runner.active_holding_states/0` decides that a retained failed-run tree does
-  not occupy an exclusive slot. Left: eviction of retained trees (`max_retained_failed`) is
-  runner-local and reaches the server only on the next beat.
-- Gap 5 (breaker counts infra failures): partly closed. A `blocked` outcome never counts toward
-  the breaker (RE308). Left: a branch mismatch (failures.md E1) still reports `failed` and can
-  trip it.
-- Gap 6 (runs leak past completion): resolved by `Relay.Runs.close_orphaned_runs/0` and the
-  Listener's terminal-close rule, which share the leak definition in `leaked?/1` (RE335).
-- Gap 7 (retry only on `:failed`): partly closed. `Relay.Runs.retry_run/2` also revives escalation
-  and infrastructure parks and takes `at:` to re-enter at a chosen node. Left: a run stranded
-  `:running` still has no resume path short of cancel and re-pull.
-- Gap 8 (lossy runner restart): partly closed. A server restart no longer revokes in-flight jobs
-  (RE410), auto-update re-execs only when the runner is idle, and SIGINT stops claiming and joins
-  in-flight jobs (`./relay`). Left: a SIGTERM or crash still drops an in-flight job, which is
-  recovered by requeue rather than checkpointed.
+Accepted
 
 ## Context
 
-A card moving through Relay is driven by **four coupled state machines** and a scheduler that
-places work on runners. When any one of them fails, the card can end up blocked, failed,
-parked, or — worse — silently stuck in a state no single document explains. Almost every engine
-incident we've hit reduces to *"two of the machines disagreed and nobody had written down how the
-disagreement is supposed to resolve."* Recent live examples, all from the same week:
+A card moving through a flow is driven by four state machines that live in different modules,
+plus a scheduler that places work on runners and a derived baton:
 
-- a plan whose task headings used an em-dash parsed to zero tasks and parked the card
-  `needs_input` with a machine string as the "question" (RLY-206 / RLY-209);
-- a restart bounced straight back to `needs_input` because no exclusive slot was free — a
-  capacity condition wearing a human-question costume (RLY-232);
-- an exclusive run was terminally `failed` by the circuit breaker after a **worktree collision**
-  repeated 8× — an infrastructure condition, not a code bug (RLY-231);
-- a `smoke` node **passed**, but the success outcome was lost when the runner restarted
-  mid-report, leaving the run wedged `:running` forever (RLY-230);
-- runs outlived their cards — zombie `:running` rows on Done cards, and a parked run holding an
-  exclusive slot it wasn't using (RLY-157 / RLY-233).
+| Machine | Vocabulary owner | Writer |
+| --- | --- | --- |
+| Card status | `Schemas.Card.statuses/0` | `Hamaca.Cards.set_status/3` |
+| Run status | `Schemas.Run.statuses/0` | `Hamaca.Runs.Transitions.transition/4` |
+| Node-job state | `Schemas.NodeJob.states/0` | `Hamaca.Runs` (dispatch, claim, report) |
+| Node outcome | `Schemas.NodeExecution.outcomes/0` | declared by the node, reported by the runner |
 
-This ADR writes down, in one place: the machines and their vocabularies, the **happy path**, and
-**how each known failure mode is handled** — with `file:line` anchors so it can be kept honest.
-It builds on [ADR 0003](0003-card-state-stage-type-validity.md) (card state × stage type),
-[ADR 0004](0004-card-ownership-and-the-claim-rule.md) (ownership / the baton), and
-[ADR 0006](0006-workflow-orchestration.md) (Relay owns the graph). The authoritative per-state
-tables live in [`docs/architecture/state.md`](../architecture/state.md); this ADR is the *why*
-and the failure-handling map that sits above them.
+Each machine is simple on its own. The failures happen at the seams: a run and its card
+disagree, a capacity shortage looks like a human question, an outcome is lost between runner
+and server, or a run outlives its card. Unless one document says how those seams are supposed to
+resolve, every incident gets debugged from scratch.
 
 ## Decision
 
-Adopt this document as the reference map for a card's life. It is **descriptive of current
-behavior** (with source anchors) plus a **Known gaps** section we commit to tracking and closing.
-Where behavior and this map diverge, the code is the truth and this ADR is a bug — fix one or the
-other.
+**Each machine has one vocabulary owner and one writer**, as in the table above. The values,
+what each one means, and the generated run-transition table live in
+[`../architecture/state.md`](../architecture/state.md), which `mix hamaca.gen_vocab` and
+`mix hamaca.gen_state` keep honest. Every known failure mode, grouped by the machine that
+detects it, lives in [`../architecture/failures.md`](../architecture/failures.md). This ADR
+fixes the shape that both pages describe: the happy path, the order the engine routes an
+outcome in, and how the machines are coupled.
 
-### The four coupled machines (+ the baton)
-
-| Machine | Values | Owner |
-| --- | --- | --- |
-| **Card status** | `ready` · `queued` · `working` · `needs_input` · `in_review` · `failed` | `Relay.Cards` (`lib/schemas/card.ex:41`) |
-| **Run status** | `running` · `parked` · `done` · `failed` · `cancelled` | `Relay.Runs.Transitions` (`lib/relay/runs/transitions.ex`) |
-| **Node-job state** | `queued` · `claimed` · `running` · `done` · `revoked` | `Relay.Runs.Dispatcher` |
-| **Node outcome** | `succeeded` · `failed` · `partial` · `needs_input` | reported by the runner |
-
-Two derived facts sit on top: **the baton** — `active_owner_type/1` is `:human`, `:ai`, or `nil`,
-derived from owners (`lib/relay/cards.ex:627`), and ADR 0004 makes it exclusive and permanent
-(provenance, never handed back); and **Done** — not a status but a *derivation*: a `:ready` card on
-the board's terminal stage reads as Done (`Cards.done?/2`, `lib/relay/cards.ex:704`). A `:ready`
-card in a mid-board `:done` sub-lane (Spec:Done, Plan:Done) is merely *parked waiting to be
-pulled* — **this distinction is load-bearing and is where Gap 1 lives.**
-
-Two nuances worth pinning down now, because they cause the most confusion:
-
-- **`queued` ≠ WIP-blocked.** `queued` means *capacity*-blocked: a flow would pull the card but no
-  runner slot is free. A WIP-blocked card stays `:ready`. Only the scheduler sets `queued`, and
-  only in stages a flow pulls from (`Relay.Runs.Policy`, ADR 0003 RLY-133 update).
-- **`failed` is a real card status**, set only by `Cards.mark_failed/3` (never by a human), and it
-  counts toward "needs you" even though it stamps no `blocked_since` and carries no question
-  (`lib/relay/cards.ex:737`).
-
-The authoritative per-state tables — card status, the run-status transition graph (generated from
-`Relay.Runs.Transitions` by `mix relay.gen_state`), and the three park reasons — live in
-[`docs/architecture/state.md`](../architecture/state.md). They are gated there and are not
-restated here.
+Two derived facts sit on top. **The baton** is `Hamaca.Cards.active_owner_type/1`, governed by
+[ADR 0004](0004-card-ownership-and-the-claim-rule.md). **Done** is not a status: a `ready` card
+at the board's terminal stage reads as Done ([ADR 0003](0003-card-state-stage-type-validity.md)).
 
 ### The happy path
 
-A card is *pulled* by the scheduler when it's `:ready`/`:queued`, agent-owned (baton ≠ human), has
-no active run, and sits in the stage an enabled flow pulls from (the stage before the flow's own
-in board order, `Relay.Flows.neighbours/2` — RE429) with WIP room and a free isolation
-slot (`fresh_eligible?`, `lib/relay/runs/scheduler.ex:152`; `Policy.pullable?/1`,
-`lib/relay/runs/policy.ex:24`). A run is inserted `:running`, the card moves to the flow's
-stage and goes `:working`, and the engine walks nodes until it reaches `done` (card lands on the
-stage after the flow's own, worked out when the run lands) or a review gate (card `:in_review`, waiting for a human).
+The scheduler pulls a card that is `ready` or `queued`, isn't human-owned, has no active run
+and no unfinished dependency, and sits in the stage an enabled flow pulls from: the stage just
+before the flow's own in board order (`Schemas.Stage.neighbours/2`). It also needs WIP room and
+a free runner slot for the flow's isolation class (`Hamaca.Runs.Policy.pullable?/1`,
+`Hamaca.Runs.Scheduler`). When WIP has room but no slot is free, the card goes `queued`.
 
-The three flows (`lib/relay/flows/default_library.ex`), each **loaded from**
-`docs/designs/flows/*.json`:
+Starting the run moves the card into the flow's stage, sets it `working`, and inserts the run,
+its first node execution and its first job. The engine then walks nodes until the flow reaches
+`done`. The card then moves to the stage just after the flow's own, which is the flow stage's
+first substage when it has one, and takes that stage's arrival status, for example `in_review`
+at a Review gate.
 
-- **spec** (`shared_clean`): `Next up → brainstorm → Spec:Review`.
-- **plan** (`shared_clean`): `Spec:Done → write_plan → Plan:Done`.
-- **code** (`exclusive`, 18 nodes): `Plan:Done → … → Review`.
-
-The code flow's happy path, with the `foreach` loop over the plan's tasks:
+The three default flows are loaded from `docs/designs/flows/*.json`: **spec**
+(`shared_clean`, works in Spec, pulls from Next up), **plan** (`shared_clean`, works in Plan,
+pulls from Spec:Done) and **code** (`exclusive`, works in Code, pulls from Plan:Done). The code
+flow's happy path, with its `foreach` over the card's tasks:
 
 ```mermaid
 flowchart LR
@@ -137,155 +63,112 @@ flowchart LR
     QR -->|foreach_remaining| IM
     QR -->|foreach_exhausted| SY[sync]
     SY --> PC[precommit]
-    PC --> FR[final_review]
+    PC --> BW[browser]
+    BW --> FR[final_review]
     FR --> SM[smoke]
     SM --> AC[acceptance]
-    AC --> PO[post]
-    PO --> RS[resync]
+    AC --> RS[resync]
     RS --> RV[reverify]
-    RV --> MG[merge]
-    MG --> R([Review<br/>in_review])
+    RV --> RB[rebrowser]
+    RB --> MG[merge]
+    MG --> DP[deploy]
+    DP --> PO[post]
+    PO --> R([Review<br/>in_review])
 ```
 
-`implement → spec_review → quality_review` repeats once per plan task; `quality_review` checks off
-the just-reviewed task, and the `:foreach_exhausted` guard (`remaining == 0`) advances to `sync`
-(`lib/relay/runs/run_server.ex:250`, `engine.ex:177`). Tasks come from
-`PlanTasks.parse/1` — `## Task N: <name>` headings, now tolerant of `:`, `—`, `–`, or `-`
-separators (`lib/relay/runs/plan_tasks.ex:23`, per the fix merged this week).
+Each failure edge leads to a fix node (`fix_findings`, `sync_fix`, `final_fix`, `resync_fix`,
+`github_fix`) that loops back into the path, or to `needs_input`. Each board holds its own copy
+of a flow and can change it. This repo's code flow (`.hamaca/flows/code.json`) adds a `flutter`
+gate and waits on CI (`await_ci`) instead of `deploy`.
 
-### How an outcome routes — the engine decision order
+### How the engine routes an outcome
 
-Every node outcome runs through `Engine.decide/4` (`lib/relay/runs/engine.ex:72`), a pure function.
-**Order matters** — the checks are a `cond`, and earlier rules win:
+`Hamaca.Runs.Engine.decide/4` is a pure function of the flow, the run's outcome-bearing
+history and the outcome just reported, so it's restart-safe. The rules are checked in order and
+the first match wins:
 
-```mermaid
-flowchart TD
-    O[node reports an outcome] --> NI{"outcome is<br/>needs_input?"}
-    NI -->|yes| PARK[park run :needs_input<br/>+ block card]
-    NI -->|no| CB{"failed AND same<br/>failure 3 times?"}
-    CB -->|yes| FAIL[fail run, mark card failed]
-    CB -->|no| RB{"failed AND retry<br/>budget left?"}
-    RB -->|yes| RETRY[re-enter same node]
-    RB -->|no| RT[select edge for this outcome]
-    RT --> HE{"matching<br/>edge?"}
-    HE -->|"no, failed outcome"| FAIL
-    HE -->|"no, other outcome"| DEG[degrade: follow the :failed edge]
-    HE -->|yes| FO{"edge.to?"}
-    DEG --> FO
-    FO -->|"loop / visit budget spent"| FAIL
-    FO -->|done| DONE[finish run, card lands on stage]
-    FO -->|needs_input| PARK
-    FO -->|a node| TRANS[transition to next node]
-```
+1. `needs_input` parks the run. No edge is consulted.
+2. `blocked` (runner-only: the agent couldn't run at all) requeues the same node while a known
+   usage-limit reset allows, up to three waits, and otherwise parks. It never spends retry
+   budget, never counts toward the breaker, and never consumes loop budget.
+3. A `failed` outcome whose failure signature has repeated the breaker threshold (3) times across
+   the whole run fails the run, even if budgets remain.
+4. A `failed` outcome with the node's `max_retries` left re-enters the same node.
+5. Otherwise the outcome follows its edge. An outcome with no edge degrades onto the node's
+   `failed` edge. Running out of loops on an edge, hitting the visit cap (20), or having no
+   `failed` edge to fall back to fails the run. A `done` target finishes the run, and a
+   `needs_input` target parks it.
 
-Caps and their defaults (all `+ run.retries` as a bonus — one human retry buys one extra of
-*everything*, `engine.ex:15`): circuit-breaker threshold **3** (`engine.ex:28`), `max_retries`
-per node (0 unless set), `max_loops` per edge (unlimited unless set), visit cap **20**
-(`engine.ex:29`). The breaker's signature is a SHA-1 of the normalized failure detail
-(`engine.ex:104`) and counts across the **full** history, so it catches same-error loops even when
-budgets remain.
-
-### Failure modes and how each is handled
-
-The full grid — every known failure, grouped by the machine that detects it, with its trigger,
-handling and resting state — is [`docs/architecture/failures.md`](../architecture/failures.md).
-It is a current-state reference and is freshness-gated there; this ADR keeps the decision, the
-happy path, the engine's decision order, and the known gaps below.
+Under a `foreach`, retry and loop budgets are counted per task, and the breaker counts the whole
+run. Each human retry adds one to every cap except the usage-limit waits, which buys exactly one more move and never resets a
+counter.
 
 ### Where the machines meet
 
-A `needs_input` outcome moves **two** machines in one step: the run parks and the card blocks, with
-self-healing reconciliation if they drift (`state.md:140`). A run reaching `failed` marks the card
-`failed` via `mark_failed/3`. A retry (`revive_run`, RLY-189) revives the **same** run row
-(`failed`/`parked → running`), never a new one, and raises every engine cap by one — buying exactly
-one more move, not a reset (`runs.ex:1886`). `retry_run` is deliberately narrow: it accepts a clean
-`:failed` run or a *died-agent* `needs_input` park (latest node outcome was `failed` — the RLY-179
-"masquerade"), and **refuses** a genuine question, a `runner_gone` park, or a `:running` run
-(`restartable?/1`, `runs.ex:1797`).
+These are the only places the machines are coupled:
+
+- **Dispatch.** Moving the card into the flow's stage and inserting the run happen in one
+  transaction, so no committed state pairs an active run with a card still in the stage it was
+  pulled from. On an unowned card the move hands the baton to the AI.
+- **Question.** A `needs_input` outcome parks the run and sets the card `needs_input` with the
+  question. When a human answers, the card leaves `needs_input` and the run listener resumes the
+  same node in the same agent session.
+- **Infrastructure park.** A `blocked` outcome that parks also sets the card `needs_input`, with
+  the cause as the question. The drawer offers Retry instead of an answer box.
+- **Finish.** A run that reaches `done` moves the card to the stage after the flow's own, through
+  `move_card/4`, so the arrival rule and the claim rule apply.
+- **Failure.** A run that fails marks the card `failed` (`Hamaca.Cards.mark_failed/3`) with the
+  detail. Answering can't revive it, and the scheduler never re-pulls a `failed` card.
+- **Retry.** `Hamaca.Runs.retry_run/2` revives the same run row, never a new one, and sets the
+  card back to `working`. It accepts a `failed` run or a park that came from a node failure or
+  from infrastructure. It refuses a genuine question (answer it instead), a run parked because its
+  runner went away (the scheduler resumes that one), and a run that's still running.
+- **Take-over.** A human taking a card mid-run parks the run and revokes its job. Handing the card
+  back to the AI resumes it.
+- **Runner gone.** The reaper requeues a gone runner's `shared_clean` jobs, and parks its
+  `exclusive` runs for the same runner to resume. A run whose resume stays refused too long is
+  failed, so it can be retried.
+- **Leak.** An active run whose card has reached a terminal-type stage or been archived is
+  cancelled, never relabelled `done`. The listener and the reaper's sweep judge this from one
+  run → card → stage snapshot (`Hamaca.Runs.leaked?/1`), so a dispatch landing between two reads
+  can't be mistaken for a leak.
+- **Lost outcome.** The runner retries its outcome report, and the server takes the first report
+  for a job. A job the runner no longer runs is requeued. A node that keeps re-entering without
+  reporting an outcome parks after `Hamaca.Runs.max_outcomeless_reentries/0` attempts.
+
+The card listener (`Hamaca.Runs.Listener`) reconciles card and run state on every card event
+and at boot. It's stateless, so a missed broadcast heals on the next event.
 
 ## Consequences
 
-- **One map.** Reviewers can check a change against the invariants here instead of re-deriving them;
-  "which of the four machines does this touch, and how does it fail?" becomes answerable.
-- **It must be kept in sync.** `state.md` is already gated by `mix relay.gen_state`; this ADR is
-  prose and can rot. Treat a contradiction between it and the code as a bug in whichever is wrong,
-  and supersede rather than silently drift (ADR discipline).
-- **The gaps below are now explicit debt**, not tribal knowledge rediscovered per incident.
-
-## Known gaps — what we might still be missing or have wrong
-
-These are hypotheses, ordered by how much they've already bitten us. Several are the *same* root
-cause wearing different costumes: **the run lifecycle and the card's stage transitions are not
-transactionally coupled.**
-
-1. **Dispatch is non-atomic — the "active run in a `:done` stage" window. → RESOLVED (RLY-233 /
-   #190 + RE239).** Dispatch is now atomic: `start_seeded_run/4` moves the card into the flow's
-   work lane *then* inserts the run in one transaction, so no *committed* state ever pairs an active
-   run with a card still at the (often `:done`-type) stage the flow pulls from. The residual was purely
-   observational — the `Listener`'s terminal-close rule read the card stage and the active run in
-   two separate queries and could straddle a concurrent `Spec:Done → Plan` dispatch, seeing the
-   stale done stage beside the fresh plan run and cancelling it (the live RE239 incident: a plan run
-   self-cancelled twice at that handoff). Closed by judging the leak from a single
-   `run → card → stage` snapshot (`Relay.Runs.leaked?/1`) — the same predicate `close_orphaned_runs/0`
-   sweeps with — instead of a card stage read apart from the run.
-
-2. **Outcome delivery is neither durable nor idempotent.** When an agent finishes a node it POSTs
-   the outcome via `./relay outcome`. If that report is lost — runner restarted mid-report
-   (seen live: RLY-230's `smoke` passed, runner went 19→24, outcome vanished) or a network blip —
-   the node execution keeps `outcome=nil` and the run stays `:running` **forever**. Nothing reclaims
-   it: the reaper only acts on a *gone* runner, but here the runner is *fresh*; it's the single
-   job's outcome that disappeared. Needed: (a) outcome reporting idempotent by execution id, so a
-   re-report after restart is accepted; (b) a reaper for "job `claimed`, outcome overdue, runner
-   fresh" that re-dispatches or parks; (c) operator tooling to re-accept a known-good outcome
-   (`retry_run` refuses a `:running` run — see Gap 7).
-
-3. **`needs_input` is overloaded across three unrelated meanings** — a genuine human question, an
-   engine escalation after a node `failed` (A4), and a *system precondition failure* (empty plan B1;
-   and RLY-232, where a capacity shortage bounces to `needs_input`). Retry/resume then has to *guess*
-   which it is by sniffing the latest node outcome (`restartable?`, the RLY-179 masquerade), and the
-   UI shows raw runner strings as "questions." Consider splitting the concept: reserve
-   `needs_input` for real questions and add a distinct blocked reason for system failures, so the
-   Listener, the UI, and retry stop disambiguating by heuristic. **RLY-232 is the concrete first
-   instance to fix.**
-
-4. **Server capacity accounting vs runner worktree-holding can diverge.** The scheduler debits a
-   slot only for `:running` runs (`reserve_active_runs`), but the runner *retains* an exclusive
-   worktree for a failed/parked exclusive run. So the server can think an exclusive slot is free
-   while the runner still holds the worktree — the source of the "blackrock over-committed"
-   confusion this week. Decide and document the single truth: does a parked/failed exclusive run
-   reserve its slot, and make both sides agree.
-
-5. **The circuit breaker counts environmental failures as code failures.** It trips on 3 identical
-   signatures regardless of cause, so a worktree collision (E1) or a capacity refusal repeated 3×
-   terminally `fail`s the run — conditions a retry-after-they-clear would fix, not code bugs. RLY-231
-   died exactly this way. Consider excluding infra/precondition signatures (branch-mismatch,
-   runner-unavailable, capacity) from the breaker, or giving them a park-and-wait path instead of
-   counting them toward terminal failure.
-
-6. **Runs leak past card completion.** A card reaching Done doesn't terminal-close its active run —
-   we saw zombie `:running` rows on Done cards and a parked run holding an exclusive slot (RLY-157).
-   RLY-233 is the fix (the `Listener`'s terminal-close rule + `close_orphaned_runs/0`, both closing a
-   run whose card sits in a terminal-type stage). Its Gap 1 blocker — the dispatch/observation race —
-   is now resolved (atomic dispatch + the single-snapshot `leaked?/1` leak test), so the leak-close
-   paths are no longer endangered by it; what remains is keeping lands-on/Done transitions and run
-   termination coupled tightly enough that no new leak reopens.
-
-7. **Retry only works on `:failed`.** A run stranded `:running` (Gap 2), or a card a human wants to
-   force-rerun, has no clean path except `cancel_run` + re-pull — which discards every node already
-   passed. Consider a status-independent "resume from the last good node" operator action.
-
-8. **Runner restart is a lossy event.** Restart revokes in-flight jobs and re-claims them; anything
-   mid-report is lost (Gap 2), and re-claimed jobs can sit `claimed` without being re-run (seen live:
-   RLY-230's re-claimed job never executed). A graceful drain (finish or checkpoint in-flight jobs
-   before exit) plus idempotent re-report would make restarts safe — and bumping `RUNNER_VERSION`
-   mid-flight (19→24) is precisely when this bites.
+- A change to the engine, the scheduler or a card writer can be checked against one map: which
+  machine does it touch, and which coupling point above does it change?
+- The details that change often, like vocabularies, transitions and the failure grid, live in
+  gated reference pages, not here, so this ADR states only the decisions and carries no line
+  numbers to rot.
+- A new failure mode gets a row in `failures.md`. A new coupling between machines changes this
+  ADR in the same branch.
 
 ## Alternatives considered
 
-- **Leave the vocabulary in `state.md` and skip an ADR.** Rejected: `state.md` documents *what each
-  state is*, not *how failures are handled* or *where the model is wrong*. The failure map and the
-  gap list have no home otherwise, and they're what reviews actually need.
-- **Encode every failure mode as a formal transition table and generate it.** Attractive, and partly
-  done for run status (`Transitions` → `gen_state`). But the cross-machine failures (Gaps 1, 2, 6)
-  are *interactions*, not single-machine transitions — a table per machine can't express "run + card
-  disagree during dispatch." Prose + the gap list is the right altitude until those are closed.
+- **Leave it all in `state.md` and skip an ADR.** Rejected: `state.md` says what each state is,
+  not how the machines are coupled or why the engine checks its rules in this order, and reviews
+  need that.
+- **Generate every failure mode from formal transition tables.** Done where a single machine
+  owns the transitions (`Hamaca.Runs.Transitions` generates the run table). Cross-machine
+  failures are interactions between two machines, which one machine's table can't express.
+
+## Open questions
+
+- **Should the three kinds of `needs_input` park get their own park reasons?** A genuine
+  question, an escalated node failure and an infrastructure stop all park with the same reason,
+  and `Hamaca.Runs.park_kind/1` tells them apart from the latest node outcome.
+- **Should infrastructure failures stop counting toward the circuit breaker?** A branch mismatch
+  in an exclusive worktree (failures.md E1) reports `failed`, so three in a row fail the run even
+  though it isn't a code problem.
+- **How should a human recover a run stranded in `running`?** `retry_run/2` refuses a running
+  run, so the only path today is cancel and re-pull, which throws away every node already passed.
+  There's also no operator action to accept a known-good outcome whose report was lost.
+- **Should a runner restart preserve in-flight work?** SIGINT stops claiming and waits for
+  in-flight jobs, but a SIGTERM or a crash drops them. They're recovered by requeue, which re-runs
+  the node from scratch, not from a checkpoint.

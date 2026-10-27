@@ -28,7 +28,7 @@ defmodule Hamaca.DocsTasksContractTest do
     glossary = File.read!("docs/glossary.md")
 
     assert glossary =~ "- **Task** —"
-    assert glossary =~ "relay task show"
+    assert glossary =~ "./hamaca task show"
     assert glossary =~ "`sub_task` / `SubTask` / `sub_tasks`"
   end
 end

@@ -1,48 +1,38 @@
 # Architecture Decision Records
 
-Short, durable records of significant, cross-cutting decisions — the *why* behind the
-structure. Read the relevant ADR before changing anything it governs; supersede rather than
-silently contradict.
+Short records of the significant, cross-cutting decisions that hold today, and why. Read the
+relevant ADR before changing anything it governs.
 
-Each ADR is numbered and immutable once **Accepted**. To change a decision, add a new ADR
-that supersedes the old one (update the old one's status to `Superseded by NNNN`).
+An ADR is current, not a history. When a decision changes, edit its ADR in place so it says
+what's true now, in the same branch as the change. When a decision no longer applies,
+delete the ADR and its row below. Git history is the record of how a decision got here, so an ADR
+never carries dated "as built", "amendment", "refined by" or "superseded" sections. Two ADRs
+must never contradict each other or the code; if they do, fix whichever is wrong.
 
 | # | Title | Status |
 | --- | --- | --- |
-| [0001](0001-client-architecture.md) | Client architecture: LiveView-first with a thin native wrapper | Accepted (2026-07-06), refined by 0005 |
-| [0002](0002-module-boundaries-and-schemas-peer.md) | Module boundaries (`boundary`) + a `Schemas` peer | Accepted (2026-07-07) |
-| [0003](0003-card-state-stage-type-validity.md) | Card state × stage type validity | Accepted (2026-07-11) |
-| [0004](0004-card-ownership-and-the-claim-rule.md) | Card ownership & the claim rule | Accepted (2026-07-11) |
-| [0005](0005-mobile-app-scope-and-architecture.md) | Mobile app: scope & hybrid native-shell architecture | Accepted (2026-07-16) |
-| [0006](0006-workflow-orchestration.md) | Workflow orchestration: Relay owns the graph, developers own the nodes | Accepted (2026-07-18) |
-| [0007](0007-card-lifecycle-and-failure-states.md) | Card lifecycle: the happy path and every failure mode | Accepted (2026-07-31) |
-| [0008](0008-documentation-taxonomy.md) | Documentation taxonomy: what lives where, and why | Accepted (2026-07-31) |
-| [0009](0009-test-isolation.md) | Test isolation: process-tree dependencies and explicit sandbox ownership | Accepted (2026-08-07) |
-| [0010](0010-serving-the-scaffold-from-the-app.md) | The board serves the scaffold | Accepted (2026-08-10) |
-| [0011](0011-simplifying-the-factory.md) | Simplifying the factory: the task is the unit of record | Proposed (2026-09-24) |
-| [0012](0012-board-owners-pay-up-front.md) | Board owners pay up front, on their own billing date | Accepted (2026-10-24), amended by 0013 |
-| [0013](0013-free-plan-replaces-the-trial.md) | The Free plan replaces the trial | Accepted (2026-10-25) |
+| [0001](0001-client-architecture.md) | Client architecture: LiveView-first, with a hybrid mobile app | Accepted |
+| [0002](0002-module-boundaries-and-schemas-peer.md) | Module boundaries (`boundary`) + a `Schemas` peer | Accepted |
+| [0003](0003-card-state-stage-type-validity.md) | Card state × stage type validity | Accepted |
+| [0004](0004-card-ownership-and-the-claim-rule.md) | Card ownership & the claim rule | Accepted |
+| [0005](0005-mobile-app-scope-and-architecture.md) | Mobile app: a decision companion, native where it decides | Accepted |
+| [0006](0006-workflow-orchestration.md) | Workflow orchestration: Hamaca owns the graph, developers own the nodes | Accepted |
+| [0007](0007-card-lifecycle-and-failure-states.md) | Card lifecycle: the happy path and every failure mode | Accepted |
+| [0008](0008-documentation-taxonomy.md) | Documentation taxonomy: what lives where, and why | Accepted |
+| [0009](0009-test-isolation.md) | Test isolation: process-tree dependencies and explicit sandbox ownership | Accepted |
+| [0010](0010-serving-the-scaffold-from-the-app.md) | The board serves the scaffold | Accepted |
+| [0011](0011-simplifying-the-factory.md) | Simplifying the factory: the task is the unit of record | Accepted |
+| [0012](0012-board-owners-pay-up-front.md) | Board owners pay up front, on their own billing date | Accepted |
+| [0013](0013-the-free-plan.md) | The Free plan | Accepted |
+| [0014](0014-talk-as-a-second-execution-lane.md) | Talk: a person-driven execution lane | Accepted |
 
 ## Format
 
-Start from [`TEMPLATE.md`](TEMPLATE.md). Keep ADRs short. A typical one has: **Status**,
-**Context** (the forces at play), **Decision** (what we chose, stated plainly), **Consequences**
-(what follows — good and bad), and optionally **Alternatives considered**. Use the `## Status`
-section form, never an inline `**Status:**` line. The index's Status cell mirrors the file's status line
-exactly, date included (`Accepted (2026-07-06)`). An Accepted ADR that a later ADR narrows without
-superseding keeps its status line and gains a `Refined by [ADR NNNN](...)` line under it; its index
-cell then appends `, refined by NNNN` (`Accepted (2026-07-06), refined by 0005`). An Accepted ADR
-some of whose numbered decisions a later ADR replaces, while the rest stand, likewise keeps its
-status line and gains an `Amended by [ADR NNNN](...)` line, with a one-line pointer under each
-replaced decision; its index cell appends `, amended by NNNN` (`Accepted (2026-10-24), amended by
-0013`).
+Start from [`TEMPLATE.md`](TEMPLATE.md). Keep ADRs short. Each has **Status**, **Context**
+(the forces at play), **Decision** (what we chose, stated plainly), **Consequences** (what
+follows, good and bad), and optionally **Alternatives considered** and **Open questions**. Use
+the `## Status` section form, never an inline `**Status:**` line. The status is `Proposed` or
+`Accepted`, and the index's Status cell matches it exactly.
 
-Under `## Status`, the status line may be followed by an `**Implementation:**` line —
-`**Implementation:** complete.` or `**Implementation:** partial — remaining: <items>.` — and an
-optional `## As built (YYYY-MM-DD)` section placed directly after Status records where the shipped
-design differs, without editing Context, Decision or Consequences. That section is allowed on an
-Accepted ADR because it reports on the decision rather than amending it.
-
-> **Known exception.** ADR 0003 was amended in place after being Accepted, against the
-> immutability rule above. It is recorded here rather than rewritten — rewriting it now would
-> compound the problem. Future changes to that decision supersede it with a new ADR.
+An ADR is a decision, not a reference: how the system works in detail belongs in
+`docs/architecture/`, and the ADR links to it.

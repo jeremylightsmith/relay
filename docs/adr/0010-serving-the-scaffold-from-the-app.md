@@ -2,152 +2,107 @@
 
 ## Status
 
-Accepted (2026-08-10)
-
-**Implementation:** complete ([RE304 Serve the Relay scaffold from the app: /relay-setup,
-/relay-update, retire init + relay-config], commit `20136b9e`).
-
-Supersedes the bootstrap decision recorded in RLY-208, which removed the scaffold-over-HTTP
-surface from the board server.
+Accepted
 
 ## Context
 
-Relay's tooling reached a project through an external **`relay-config`** GitHub repo:
-`mix relay.publish_config` wrote the tree, a human committed and pushed it, and `./relay init`
-pulled `manifest.json` over HTTPS. Three moving parts and two places to forget.
+A project that uses Hamaca needs a few files Hamaca owns, not the project: the runner
+(`./hamaca`), the agent guide (`hamaca.md`) and the `hamaca-*` skills. They change whenever
+Hamaca does, and a runner that falls behind the board either misbehaves or is refused work
+(409 `runner_outdated`). So the files have to reach every project quickly, the board has to be
+able to say truthfully which version is current, and installing or refreshing them has to work
+before the project has a board key.
 
-The `.relay/published.json` marker existed only to paper over the gap between "merged here" and
-"actually being served" — the board could not truthfully name a version a runner could
-download, so a second, hand-maintained number stood in for the real one. `mix precommit` carried
-a drift warning for the same reason.
+Flows are server-side data (ADR 0006) and every agent and repo-specific instruction belongs to
+the project, so the set of files Hamaca must distribute is small and nobody is meant to edit it.
+`hamaca.md` belongs in the set: it is generic (the CLI verbs, the node/outcome contract, the
+`HAMACA_NODE_SCRATCH` rule, nothing repo-specific) and it goes stale in lockstep with the runner
+it documents. `.hamaca/runner.json` does not: it holds per-project and per-machine values
+(`capacity`, `base`, `prepare`, `skill_dir`, `pointer_file`).
 
-RLY-208 chose that shape deliberately, to keep the board server out of the scaffolding path. In
-practice the cost landed elsewhere: every fix to `./relay` or a `relay-*` skill needed a
-separate publish + push before it reached anyone, and a forgotten publish was invisible until a
-card died on it.
-
-Separately, the surface being distributed had shrunk. Once flows became server-side data
-(ADR 0006) and `/relay-onboard` owned repo wiring, the only files Relay genuinely owns in a
-project are `./relay` and four `relay-*` skills — none of which a user ever edits.
+The product is mid-rename from Relay, so runners installed as `./relay` must keep updating
+during the compatibility window.
 
 ## Decision
 
-The Relay app builds and serves those five files itself.
+**The Hamaca app builds and serves the scaffold itself, and `./hamaca update` is the one way it
+gets onto disk.**
 
-`mix relay.build_scaffold` copies them into `priv/scaffold/` and writes a manifest whose
-`version` is **derived** from content — the first 12 hex characters of the sha256 of the sorted
-`"<path>:<sha256>"` lines. `GET /api/scaffold` returns that manifest and
-`GET /api/scaffold/*path` returns the bytes of any entry in it, both unauthenticated, because
-`/relay-setup` runs before a project has a board key.
+- **Built from the repo at deploy time.** `mix hamaca.build_scaffold` copies the sources into
+  `priv/scaffold/<layout>/` with a `manifest.json` per layout. Each layout's `version` is
+  derived from content: the first 12 hex characters of the sha256 of the sorted
+  `"<path>:<sha256>"` lines. Nobody maintains a version number.
+- **Served unauthenticated.** `GET /api/scaffold` returns a layout's manifest and
+  `GET /api/scaffold/*path` the bytes of one entry in it. The install script and `update` run
+  before a project has a board key. The glob route serves only entries in that layout's static
+  allowlist (`Hamaca.Scaffold.items/1`).
+- **Two layouts from one source, for the rename window.** The `layout` query param picks one of
+  `Hamaca.Scaffold.layouts/0`; anything else is 400 `unknown_layout`.
+  - `?layout=hamaca`: `hamaca`, `hamaca.md`, the three `.claude/skills/hamaca-{doctor,onboard,update}/SKILL.md`,
+    plus the compatibility items: the `relay` shim (it runs the `./hamaca` beside it) and three
+    thin `relay-*` alias skills.
+  - No param (legacy), what every installed `./relay` runner asks for: `relay` (the full
+    runner, same bytes as `hamaca`), `relay.md` and the three `relay-*` skills, generated from
+    the Hamaca sources by `Hamaca.Scaffold.to_legacy_names/1`.
+- **The served runner knows its board.** The committed runner has a placeholder
+  `BOARD_URL = ""` line, and the board bakes its configured URL (`HamacaWeb.Endpoint.url/0`,
+  never the request's `Host`) into the copy it serves, so a project needs no `HAMACA_URL`. The
+  manifest describes the served bytes: the runner item's `sha256` and `bytes` are the baked
+  copy's, and `unbaked_sha256` is the placeholder copy's. The version is derived from the
+  unbaked shas, so one build has one version on every board. `HAMACA_URL` overrides the baked
+  value, and `update` and auto-update keep a project's baked value.
+- **`./hamaca update` overwrites unconditionally.** Because these files are Hamaca's and never
+  user-edited, there is no provenance ledger and no per-file prompt. Every item is hashed against
+  the manifest on every run, and the work list is the verdict: a missing or edited file is
+  rewritten, and "current" means nothing needs writing. `.hamaca/scaffold.json` records what was
+  installed but never triggers anything, because auto-update moves the runner's bytes without
+  touching it.
+- **Skills land in the project's skill dir.** The manifest always uses the canonical
+  `.claude/skills/` (`Hamaca.Scaffold.skill_dir/0`). The runner maps those items to the
+  `skill_dir` recorded in `.hamaca/runner.json` (Codex uses `.agents/skills`) and points the
+  `pointer_file` (default `CLAUDE.md`) at `hamaca.md`. `./hamaca update --skill-dir DIR
+  --pointer-file FILE` switches an existing project.
+- **The install goes through the same path.** The board's install command
+  (`curl -fsSL <board>/b/<slug>/install | sh`) downloads only `./hamaca`, runs
+  `./hamaca update --starter-only` to write the user-owned starter files, then `./hamaca update`,
+  which installs everything else and verifies every body against the manifest. A failed install
+  is recovered by running it again.
+- **The board's advertised runner version is the served one.**
+  `Hamaca.Runs.latest_runner_version/0` reads `RUNNER_VERSION` from the runner the app serves.
 
-`./relay update` is the one mechanism for getting the files onto disk. Because the five are
-Relay-owned and never user-edited, it overwrites unconditionally: no provenance ledger, no
-per-file diff prompt. Every item is hashed against the manifest on every run and the work list is
-the verdict — a missing *or* edited file is rewritten, and "current" means nothing needs writing.
-The recorded version is a record of what was installed, never the trigger: RE185's auto-update
-moves `./relay`'s bytes without touching it, so gating on it would misreport the steady state.
-
-`./relay init`, `mix relay.publish_config`, `.relay/published.json`,
-`Relay.Runs.PublishMarker` and the precommit drift check are deleted.
-`Relay.Runs.latest_runner_version/0` now reports the `RUNNER_VERSION` of the `./relay` the
-app actually serves.
+The details (manifest shape, hashing, the rename migration `update` performs, auto-update) are in
+[`docs/architecture/runner.md`](../architecture/runner.md#bootstrap-surface-re304-adr-0010).
 
 ## Consequences
 
-- **Publishing is coupled to deploying.** A skill fix reaches projects only when the app ships.
-  This is the whole trade: accepted in exchange for deleting the publish/marker/drift apparatus
-  and making "what can a runner download?" answerable from the running system rather than
-  from a marker a human maintains.
-- **`latest_runner_version` cannot lie.** The advertised number and the served bytes come from
-  the same file.
-- **A new unauthenticated public surface.** Mitigated by construction: the glob route serves only
-  entries in a static six-item allowlist, and the same files were published openly before.
-- **`priv/scaffold/` must be built before `mix release`.** The `Dockerfile`, `mix setup` and the
-  `test` alias all run the task; a build that skips it serves a 503 and advertises
-  `latest_runner_version: null`.
-- **Runners already in the field need one manual cutover.** A runner running a pre-RE304
-  `./relay` resolves its update URL from `RELAY_CONFIG_URL` / the relay-config raw base, not
-  from the board. Once this deploys it keeps polling relay-config, gets `NOTHING_NEWER`, and is
-  permanently pinned — silently, because `min_runner_version/0` is unchanged so it still
-  claims work, and neither `./relay update` nor `/relay-update` exists in that checkout to
-  heal it. Each such checkout needs one hand-run:
-  `curl -fsSL "$RELAY_URL/api/scaffold/relay" -o ./relay` (equivalently, one final publish
-  to relay-config before retiring it).
-- **Rolling back to a project's old tooling means rolling back the app.** There is no
-  independent publish channel any more, by design.
-- `Relay.Runs.min_runner_version/0` and the 409 `runner_outdated` refusal are unchanged.
-
-## Amendment — `relay.md` joins the set (six files)
-
-The decision above scoped Relay-owned to `./relay` and the four `relay-*` skills, reasoning
-that flows had become server-side data and `/relay-onboard` owned repo wiring. That reasoning
-swept in `relay.md` by association, but it does not hold for that file:
-
-- `relay.md` is **generic**. It is the agent-facing guide to driving a card — the CLI verbs, the
-  mental model, the node/outcome contract, the `RELAY_NODE_SCRATCH` rule. Nothing in it is
-  repo-specific, so there is nothing for a project to own.
-- It describes the runner, so it goes **stale in lockstep** with `./relay`. Leaving it
-  undistributed meant each project's copy froze at whatever `/relay-onboard` first authored while
-  the tooling it documents kept moving — the same silent-drift failure this ADR exists to remove,
-  reintroduced one file over.
-
-So `relay.md` is served, and `/relay-onboard` no longer authors one. `.relay/runner.json` stays
-outside the set: it holds genuinely per-machine values (`capacity`, `base`, `prepare`), and
-overwriting it unconditionally would clobber real configuration.
-
-The Decision section above is left as written — it records what was decided at the time, and
-"five" there should be read as superseded by this amendment. (RE443's amendment below brings the
-count back to five.) Nothing else changes: same derived version, same unconditional overwrite, same
-manifest shape.
-
-## Amendment (2026-10-12) — `/relay-setup` retired; `relay` served with a baked `BOARD_URL` (five files)
-
-RE443 retires the `/relay-setup` skill. Its job — get `./relay` onto disk before a project has
-a key — moved to the board: a board created from a template opens a setup wizard whose step 4
-hands out `curl -fsSL <board>/b/<slug>/install | sh`. A skill that had to be downloaded by hand
-before it could download everything else is no longer needed, so it leaves the set, and the
-scaffold is back to **five** files: `./relay`, `relay.md`, and the three
-`.claude/skills/relay-{update,doctor,onboard}/SKILL.md`. The two count statements above ("five"
-in the Decision, "six" in the first amendment) are both superseded by this one.
-
-The served `relay` now carries the serving board's URL: the committed file has a placeholder
-`BOARD_URL = ""` line, and `GET /api/scaffold/relay` rewrites it to `BOARD_URL = "<url>"` using
-the endpoint's configured URL (never the request's `Host`). `GET /api/scaffold` describes those
-served bytes: the `relay` item's `sha256` and `bytes` are the **baked** copy's, because every
-runner up to v89 checks a download with a raw `sha256(body) == item["sha256"]` and would refuse
-anything else — leaving no installed runner able to `./relay update` itself. The item gains one
-key, `unbaked_sha256`, the sha of the built placeholder file (the build never bakes), which
-`./relay` v90+ compares against after resetting the line (`runner_sha256` / `manifest_sha`,
-falling back to `sha256` from a board without the key). The **version stays derived from the
-built (unbaked) shas**, so one build has one version on every board, whatever its URL.
-`RELAY_URL` overrides the baked value, `./relay update` and auto-update keep a project's baked
-value, and the line is masked out of the runner fingerprint. Everything else in this ADR — the
-derived version rule, the unconditional overwrite — is unchanged; the manifest shape changes
-only by that one additive key on the `relay` item.
-
-## Amendment (2026-10-16) — skills mapped to a project's `skill_dir`; the install runs `./relay update` (RE457)
-
-The manifest's skill paths stay `.claude/skills/relay-{update,doctor,onboard}/SKILL.md`: that is
-the **canonical** skill dir (`Relay.Scaffold.skill_dir/0`), and `GET /api/scaffold` serves the
-same manifest to every project. A project records its LLM's layout in `.relay/runner.json` —
-`skill_dir` (default `.claude/skills`; Codex uses `.agents/skills`) and `pointer_file` (default
-`CLAUDE.md`) — and the **runner** maps every `.claude/skills/…` item to `<skill_dir>/…` when it
-compares, installs and reports. `./relay update --skill-dir DIR --pointer-file FILE` switches an
-existing project's layout. The served bytes, the manifest shape and the derived version rule are
-unchanged.
-
-The board's install script no longer hand-fetches three files. It downloads only `./relay`, runs
-`./relay update --starter-only` with the board LLM's `--skill-dir` / `--pointer-file`, then
-`./relay update`, which installs all five files and `.relay/scaffold.json` through the one code
-path that already verifies every body against the manifest's sha256. A failed update is
-recovered by re-running the install.
+- **Publishing is coupled to deploying.** A fix to the runner or a skill reaches projects only
+  when the app ships, and rolling a project's tooling back means rolling back the app. That is
+  the trade for having no separate publish step to forget.
+- **`latest_runner_version` can't drift from what's served.** The advertised number and the
+  served bytes come from the same file.
+- **A public, unauthenticated surface.** It serves only allowlisted files that are open source
+  anyway, and checks the layout and path against static lists before touching the filesystem.
+- **`priv/scaffold/` must be built.** `mix setup`, the `test` alias and the `Dockerfile` (before
+  `mix release`) run `mix hamaca.build_scaffold`. A build that skips it answers 503 and
+  advertises `latest_runner_version: null`.
+- **`update` refuses to apply in the Hamaca app repo without `--force`.** There the scaffold
+  files are the source, and the deployed copy is behind any branch that changes them, so applying
+  would silently revert work in progress. `--check` is always allowed.
+- **The scaffold ships no agents and no flows.** Every agent is the project's own, and flows
+  live on the board.
+- **A skill is a single `SKILL.md`.** The allowlist names files, so a reference file beside a
+  served skill would never reach a project.
+- **The compatibility items go when the window closes.** Removing the legacy layout, the shim
+  and the `relay-*` aliases is a change to `Hamaca.Scaffold`'s layout table and to this ADR.
+- `Hamaca.Runs.min_runner_version/0` and the 409 `runner_outdated` refusal are independent of
+  this decision.
 
 ## Alternatives considered
 
-**Keep `relay-config`, automate the publish from CI.** Removes the forgotten-publish failure but
-keeps two systems, two histories, and the marker that reconciles them. The marker is the thing
-worth deleting.
+**An external config repo with a publish step (automated from CI or not).** Two systems, two
+histories, and a hand-maintained marker to say which version is actually published. A forgotten
+publish is invisible until a card fails on it.
 
 **Store the scaffold in the database with an admin upload surface.** Decouples publishing from
-deploying, at the cost of a new write surface, provenance questions, and a way for the served
-scaffold to disagree with the repo that produced it. Explicitly a non-goal.
+deploying, at the cost of a new write surface, provenance questions, and a served scaffold that
+can disagree with the repo that produced it.

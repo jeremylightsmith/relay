@@ -1,187 +1,103 @@
-# ADR 0005 — Mobile app: scope and hybrid native-shell architecture
+# ADR 0005 — Mobile app: a decision companion, native where it decides
 
 ## Status
 
-Accepted (2026-07-16)
-
-**Implementation:** partial — remaining: [RLY-91 Spec / plan sheet], [RLY-96 Comments thread (text
-reply)], [RLY-97 Screenshot viewer], [RLY-82 @mentions in comments] and its mention push, burst
-batching ("N cards need you"), Android ([RLY-103 Android client], parked in
-`bin/deploy_android.sh`), and the Later items (biometric gate, widgets, offline action queue).
-Open questions Q1 and Q2 stay open.
-
-**Related:** builds on / refines [ADR 0001](0001-client-architecture.md) (LiveView-first with
-a thin native wrapper). Source: `docs/designs/Relay Mobile Brief.dc.html` (platform brief
-v0.1) and `docs/designs/Relay Mobile.dc.html` (tappable Inbox & Board prototype).
-
-## As built (2026-10-08)
-
-- Layer 1 is **Flutter** (`flutter/`), not Swift/Kotlin.
-- Multi-board switching shipped in V1.1 ([RLY-95 Boards list / switch], commit `5d6e426d`), not
-  "Later".
-- A native new-card sheet exists (`flutter/lib/features/board/new_card_sheet.dart`, commit
-  `7a81c9d6`).
-- Per-board mute (RE406, `Membership.muted` in `lib/schemas/membership.ex`) is a partial version of
-  the skipped notification settings.
-- RE489: muted boards are excluded from the app-icon badge (`Push.needs_you_count/1`); the in-app
-  inbox and counts still include them. This refines "badge = count of items in Needs you" below.
+Accepted
 
 ## Context
 
-Relay's home is the desktop board. Mobile is **not** a second copy of it — it's a *companion*
-for keeping work moving when you're away from your desk: unblock the AI and clear the
-decisions only a human can make. The design question the brief answers is *what belongs on a
-phone* and *how much is native vs. reused web*.
+Hamaca's home is the desktop board. The phone is a companion for keeping work moving when
+you're away from your desk: unblock the AI and make the decisions only a human can make. The
+north-star metric is **median time-to-unblock**, how fast the AI gets its answer once it's
+stuck.
 
-This ADR interacts with ADR 0001. That ADR fixed "one UI codebase (LiveView/HEEx); mobile is
-a thin native wrapper providing navigation, push, and store presence; no separate mobile
-client." The brief **pushes past a pure wrapper**: it proposes building a handful of *decision
-surfaces natively* (inbox list, approve/reject bar, answer field) while reusing LiveView for
-the *content surfaces* (card body, spec/plan, board columns, comments). Whether that is a
-refinement of ADR 0001 or a partial supersede is an **open decision** (see below).
+[ADR 0001](0001-client-architecture.md) makes LiveView the single home for UI and real-time
+logic, with the mobile app as a hybrid of native decision surfaces and embedded LiveView. This
+ADR fixes what belongs on the phone and which parts of it are native. The design sources are
+`docs/designs/Relay Mobile Brief.dc.html` (the platform brief) and
+`docs/designs/Relay Mobile.dc.html` (the tappable Inbox and Board prototype).
 
-## Proposed decisions (from the brief — to confirm/refine)
+## Decision
 
-### 1. What mobile is / isn't
-- **Is:** respond to the AI's requests for input; review a finished card and approve/reject;
-  glance at status; get pushed the moment the AI is blocked on you.
-- **Isn't:** authoring specs/plans from scratch; building/restructuring boards; long-form
-  writing or heavy multi-card reorg; admin/billing/integrations.
-- **Rule of thumb:** more than a minute of typing or more than one screen of layout → it
-  belongs on the web board. Mobile is for the *decision*, not the *production*.
+### What mobile is, and isn't
 
-### 2. Surfaces
-- **Inbox — the front door (KEEP).** A single "Needs you" queue fed by push; where ~80% of
-  sessions start and end.
-- **Board — the map (KEEP).** Fuller picture, one stage at a time, swipe between stages, tap
-  into any card. Read-mostly, with review actions available inline.
-- **Stream — conversational feed (DROP).** Reframes structured work as chat and buries the
-  status model; the Inbox already delivers the "AI needs you" moment.
+- **Is:** answer the AI's questions; review a finished card and approve or reject it; glance at
+  status; get pushed the moment the AI is blocked on you.
+- **Isn't:** writing specs or plans from scratch, building or restructuring boards, long-form
+  writing, heavy multi-card reorganising, admin, billing or integrations.
+- **Rule of thumb:** more than a minute of typing or more than one screen of layout belongs on
+  the web board. The phone is for the decision, not the production.
 
-### 3. The two primary actions
-- **Respond to a request for input** — answer a paused AI's question (option / short reply /
-  direction); work resumes immediately.
-- **Review → approve or reject** — approve to advance, or reject with a reason. Neither is a
-  blind tap; both require supporting context first (§4).
-- **Text entry is voice-first** — tap-to-speak, transcribed on-device (Apple
-  SpeechTranscriber / Whisper); type if preferred.
-- **Secondary (supported, not the point):** hand a card to the AI, move a card between
-  stages, comment/reply, reply by voice, search, reassign.
+### The two primary actions
 
-### 4. Supplemental context (opens *over* the decision, dismisses back to it)
-- **Spec / plan** → web sheet.
-- **PR on GitHub** → deep-links into the GitHub app (don't rebuild the diff).
-- **Comments (soon with screenshots)** → web thread + a native image viewer (pinch-zoom,
-  full-screen).
-- **Principle:** you never lose the approve/reject bar by going to look at something.
+- **Answer a request for input:** a paused AI's question (pick an option, a short reply, a
+  direction); the work resumes at once. Structured questions render in a **native stepper**
+  that reads the same question format the web uses.
+- **Review, then approve or reject:** approve advances the card; reject takes a note. Neither is
+  a blind tap: you decide from the card screen, with the card in view, never from an inbox row.
+  After a decision the app **auto-advances** to the next item, ending on an empty state.
+- **Text entry is voice-first:** on-device dictation streams words into the field at the
+  cursor (Apple SpeechTranscriber on iOS 26+, WhisperKit as the fallback), with a slim toolbar
+  above the keyboard; typing works too.
+- Supporting context opens over the decision and dismisses back to it, so you never lose the
+  approve/reject bar. A card's PR opens in the GitHub app.
 
-### 5. Architecture — hybrid thin native shell + reused web views
-Neither extreme: a pure webview wrapper can't push or handle screenshots well; a full native
-rebuild duplicates the product and doubles every change.
-- **Layer 1 — Native shell (Flutter; iOS-first, Android parked, RLY-103):** push, tab bar & navigation, inbox list,
-  approve/reject bar, sheets & in-app browser, screenshot viewer, biometrics/share, voice
-  on-device (Apple SpeechTranscriber / Whisper).
-- **Layer 2 — Web content (reused LiveView):** card body, spec & plan docs, responsive board
-  columns, comment threads, live app preview.
-- **Layer 0 — Shared core:** one API & data model, same auth session, realtime sync (web ⇄
-  mobile).
-- **Rationale:** decision surfaces are small/stable (cheap to build native, worth the polish);
-  content surfaces are large/fast-changing (don't maintain twice). **Key risk:** the reused
-  web views must be genuinely mobile-responsive or the seams show.
+### Architecture: two layers over one backend
 
-### 6. Notification model (push is the product)
-- **Fires on:** card ready for review, AI asks a question, or an @mention. Progress/status
-  never push.
-- **Batching:** one card = one push; bursts collapse into "N cards need you."
-- **Quiet hours:** respected by default; wake to a batched digest.
-- **Badge:** app icon badge = count of items in "Needs you"; hits zero when caught up.
-- **Tap:** deep-links straight to the card, never a generic inbox.
+- **Layer 1 — Native (Flutter, iOS-first):** push and its onboarding, sign-in (Google and Sign
+  in with Apple), the tab bar and navigation, the Needs-you inbox, the review approve/reject bar
+  and the reject note, the answer stepper, voice dictation, the new-card sheet, the board
+  switcher (list, star, mute), and settings.
+- **Layer 2 — Embedded LiveView (chromeless):** the board (moves included), the card body
+  (`/cards/:ref`, the drawer alone), spec and plan, comments, and mockups. These are never
+  re-implemented natively.
+- **Shared:** one domain and data model, and one signed-in user. Native sign-in mints the
+  Phoenix session, whose cookie the webviews reuse, plus a user API token for `/api/all`.
 
-### 7. Ship plan
-North-star metric: **median time-to-unblock** (how fast the AI gets its answer once stuck).
-- **V1 · the loop:** login & push opt-in; push → card review; approve/reject + note;
-  needs-input answer; needs-you + empty state; basic notification settings.
-- **V1.1 · context:** board (read + move); boards list; comments + screenshots; spec sheet;
-  open in GitHub.
-- **Later · depth:** voice everywhere; biometric gate on approve; widgets / Live Activity;
-  offline action queue; multi-board switching.
+Decision surfaces are small and stable, so they're cheap to build natively and worth the
+polish. Content surfaces are large and fast-changing, so they're never maintained twice. A
+native surface not listed above is added by amending this ADR in the same branch; the
+placement rule is in [ADR 0001](0001-client-architecture.md) and `AGENTS.md`.
 
-## Resolved decisions (spike + planning, 2026-07-12)
+### The inbox and the count
 
-**Spike — the hybrid works.** A Flutter/iOS spike (`flutter/`, `flutter/SPIKE_FINDINGS.md`)
-embedded the LiveView board inside a native app: **native session** (cookie injection) +
-**live websocket inside `WKWebView`** + acceptable feel. The one seam — a **double header** —
-is the origin of the chromeless-embed work (RLY-79). This answers the **A0001-reconciliation**
-question: **ADR 0005 refines ADR 0001** — we build a few native decision surfaces + a
-session-authed JSON API to feed them, and reuse LiveView (chromeless) for content. The "one UI
-codebase / thin wrapper" stance holds for **content surfaces**, not for the small decision
-surfaces.
+- The **Needs-you inbox** is user-wide across boards and holds only the two decision types:
+  cards in `needs_input` and `in_review` (`Hamaca.Cards.needs_you_feed/1`). It leaves out the web
+  board's third, ready-awaiting-human flavor, so the mobile count deliberately differs from the
+  web board's `needs_you_rollup`.
+- The **app-icon badge** counts the same two types, minus boards you muted
+  (`Hamaca.Push.needs_you_count/1`). The in-app inbox still shows muted boards.
 
-**Scope decisions locked (→ card refs):**
-- **Auth:** Google **and Sign in with Apple** (App Store 4.8); native provider → Phoenix
-  session → cookie injection into the webviews. (RLY-78)
-- **Inbox:** **user-wide / cross-board**, and **only the two decision types** (needs-input +
-  in-review) — *not* the web board's third "awaiting-human" flavor. The **F4 feed and F5 badge
-  use this same two-type definition**, so the mobile count deliberately diverges from
-  `needs_you_rollup`. (RLY-80, RLY-85, RLY-81)
-- **Review context (V1):** approve/reject on the **embedded card body alone** is enough for V1;
-  spec sheet / comments / Open-in-GitHub arrive in V1.1. (RLY-87)
-- **Decision flow:** after a decision, **auto-advance to the next needs-you item**
-  (queue-clearing to zero → empty state). (RLY-88)
-- **Board:** the **embedded LiveView owns the board**, move included, for now — no native move
-  sheet yet; revisit by feel. (RLY-94)
-- **Comments:** **text-only reply** (resolves brief Q4); screenshot *upload* deferred; a
-  **native** pinch-zoom viewer handles *viewing* attachments. (RLY-96, RLY-97)
-- **Structured question options** ("pick an option") ride on **RLY-71** (Make questions
-  smoother), not a new mobile feature. (RLY-89)
-- **Structured-question rendering:** **native stepper**, consuming RLY-71's JSON wire
-  format — not the web stepper in a webview. §5 already assigns "an answer field" to
-  Layer 1; a webview could not tell Flutter the answer landed (no JS↔native bridge), and
-  F3's embed mode is board-scoped, so there is no standalone card-body URL to load.
-  (RLY-89, decided at Spec:Review.)
-- **Voice:** **voice-first entry is V1** (not Later) (RLY-99), as **on-device dictation
-  into the field, with Apple SpeechTranscriber on iOS 26+ and WhisperKit as the fallback,
-  still not OS keyboard dictation (RE467)**. Words stream in at the cursor while the
-  keyboard stays up; a slim toolbar above the keyboard carries the timer and a red stop.
-  RLY-99's record-then-transcribe voice sheet is retired.
-- **@mentions:** don't exist yet; comments-only @mentions is a **separate cross-cutting
-  feature** (RLY-82) that unblocks F5's deferred @mention push trigger.
-- **Notification settings:** **skipped for now** — quiet hours rely on **OS Do-Not-Disturb**;
-  re-enable push via OS settings until a dedicated settings card exists. (RLY-90)
-- **Platform:** **iOS-first**; Android is a parked epic (RLY-103), adopted per ADR 0001's
-  "iOS + Android together" rule for any true-native path.
+### Notifications: push is the product
 
-**Card breakdown** (on the board, tagged `mobile`; foundations first via `/brainstorm RLY-77`):
-Foundations **RLY-77–81** (+ @mentions **RLY-82**); V1 **RLY-83–90** + **RLY-99**;
-V1.1 **RLY-91, 94–98**; Later **RLY-100–103**.
+- A push fires when a card enters `needs_input` or `in_review`
+  (`Hamaca.Push.notification_statuses/0`). Progress and status never push. Muting a board stops
+  its pushes.
+- One card is one push. Tapping it opens that card, never a generic inbox.
+- Quiet hours rely on the OS's Do Not Disturb; there are no in-app notification settings
+  beyond per-board mute.
 
-## What shipped (2026-10-08)
+### Decided, not yet built
 
-The hybrid shipped as a Flutter app (`flutter/`, iOS-first). Current state:
+A native spec sheet, a native pinch-zoom screenshot viewer, @mentions in comments and their
+push, collapsing bursts into one "N cards need you" push, Android, and later a biometric gate
+on approve, widgets, and an offline action queue.
 
-**Native (Flutter) screens**
-- Sign-in / welcome (Google + Sign in with Apple).
-- Push onboarding (permission prompt + device registration).
-- Needs-you feed (the cross-board inbox).
-- Review queue + review bar (approve / reject).
-- Reject note.
-- Answer — the native structured-question stepper.
-- New-card sheet (RLY-126).
-- Board switcher (RE376 list, RE396 star, RE406 mute).
-- Settings.
-- Voice dictation into the field (keyboard toolbar; Apple SpeechTranscriber on iOS 26+, WhisperKit fallback — RE467).
+## The native API
 
-The board switcher, new-card sheet and settings were added after the card breakdown above;
-they are in-scope native surfaces under this ADR.
+Human-authed, and never the agent board-key `/api`. Full detail is in
+[`docs/architecture/domain.md`](../architecture/domain.md) and
+[`docs/architecture/runtime.md`](../architecture/runtime.md).
 
-**The API that feeds them** — human-authed, never the agent board-key `/api`:
+`/api/auth/native` (native sign-in to a Phoenix session):
 
-`/api/auth/native` (native sign-in → Phoenix session):
 - `POST /google`
 - `POST /apple`
 - `GET /me`
 
-`/api/all` (user session cookie for devices, `relayu_` user token for the rest):
+`/api/all` (the session cookie for device registration, the `relayu_` user API token for the
+rest):
+
 - `POST /devices`
 - `DELETE /devices/:token`
 - `POST /cards`
@@ -194,46 +110,33 @@ they are in-scope native surfaces under this ADR.
 - `POST /cards/:ref/reject`
 - `POST /cards/:ref/answer`
 
-**Embedded (chromeless) LiveView surfaces:** board, card body, spec/plan, comments, mockups.
-
-**Placement rule:** default to LiveView; go native only for a decision surface (one tap or a
-short answer that unblocks the baton) or a device capability (push, voice, biometrics, OS
-share/launch), feed it from `/api/all`, and amend this ADR in the same branch for any native
-surface not listed above — stated in full in [`AGENTS.md`](../../AGENTS.md) (Client strategy).
-
-## Open questions (still genuinely open)
-
-- **Q1 (brief).** Can you reject *from the inbox* without opening the card, or does reject
-  always force a look at context first? (Affects RLY-85 / RLY-87.)
-- **Q2 (brief).** Minimum viable "click around the app" preview on a phone — live build,
-  recorded walkthrough, or screenshots only?
-- **LiveView Native.** Does this hybrid make ADR 0001's LiveView-Native path more or less
-  likely — and could it later collapse the F4 API away? Revisit when the Jetpack client is
-  production-ready.
-- **Mobile-responsiveness of reused surfaces.** Which LiveView views already work at phone
-  width (RLY-62 board scroll) vs. need dedicated mobile design before embedding — per-surface
-  polish lives in RLY-87 / 91 / 94 / 96.
-
 ## Consequences
 
 **Positive**
-- Ships the decision loop fast on a **proven foundation** (spike: auth + realtime inside the
-  webview work today), reusing LiveView for the large, fast-changing content surfaces.
-- Near-zero duplication for content; native investment concentrated on the small, stable
-  decision surfaces.
+
+- The decision loop is fast and native where it counts, and content is shared with the web
+  rather than rebuilt.
+- One feed query backs the inbox, so the inbox and the native API can't drift.
 
 **Negative / accepted trade-offs**
-- Introduces a **native codebase** (Flutter) and a **session-authed JSON API** for the decision
-  surfaces — a deliberate refinement of ADR 0001's "no separate client / no separate API."
-- Reused LiveView surfaces need a **chromeless embed mode** (RLY-79) and genuine mobile
-  responsiveness, or the seams show.
-- The mobile "needs you" count **diverges** from the web board's `needs_you_rollup` — must be
-  kept consistent across F4 / F5 / inbox by design.
+
+- There is a Flutter codebase and a human-authed JSON API to maintain beside LiveView.
+- Embedded LiveView pages need the chromeless embed mode and must work at phone width, or the
+  seams show.
+- The mobile count differs from the web board's on purpose, and the badge differs from the
+  inbox for muted boards. Both definitions have to be kept in their one place each.
+- `/api/all` takes two credentials (session cookie for devices, user API token for the rest).
 
 ## Alternatives considered
 
-- **Pure webview wrapper** — cheapest, but can't push well or handle screenshots; feels cheap.
-- **Full native rebuild** — best feel, but duplicates the whole product and doubles every
-  future change; violates ADR 0001's duplication goals.
-- **Hybrid (chosen direction)** — native decision surfaces + reused web content. Captured
-  above; details open.
+- **Pure webview wrapper.** Cheapest, but weak at push, voice and screenshots, and decisions
+  feel like a web page.
+- **Full native rebuild.** Best feel, but duplicates the whole product and doubles every
+  change, against ADR 0001's goals.
+
+## Open questions
+
+- What is the minimum viable way to preview the app being built from a phone: a live build, a
+  recorded walkthrough, or screenshots only?
+- Once LiveView Native's Android client is production-ready, could it replace the native
+  decision layer and let the `/api/all` API go away?

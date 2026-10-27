@@ -2,278 +2,153 @@
 
 ## Status
 
-Accepted (2026-08-07)
-
-**Implementation:** partial — remaining: the global `Listener` firehose.
-`lib/relay/runs/listener.ex:63` still calls `Relay.Events.subscribe_firehose()`; there is no
-per-instance topic and no `start_engine!(listener: false)`, so `runner_reaper_test` and
-`board_settings_flow_preflight_test` stay `async: false`.
-
-## As built (2026-10-08)
-
-- The sync tail is still six non-browser modules, the six named under Consequences
-  (`grep -rlE '^(  )?use .*async: false' test --include='*_test.exs' | grep -v browser`, which
-  anchors at module indent; a looser `^\s*use` pattern reports seven because
-  `test/relay/test_isolation_test.exs` carries indented `use … async: false` lines in its
-  heredoc fixtures). The 29 `test/relay_web/browser/` modules also run serial.
-- No test writes the app or OS env any more. The interim `Application.put_env` calls in
-  `scheduler_presence_test` and `apple_token_validator_test` were replaced by `Relay.Config`
-  (ProcessTree), `resume_refusal_test` was flipped to `async: true`, and
-  `test/relay/test_isolation_test.exs` guards both rules (RE419, commit `9b68bcca`; see the
-  2026-10 Amendment).
-- The worked example's bare `apns.ex` / `apns_test.exs` are
-  `lib/relay/push/delivery/apns.ex` and `test/relay/push/delivery/apns_test.exs`; the path has
-  not moved since `babd789a`.
+Accepted
 
 ## Context
 
-19% of this suite's test modules (48 of 248) run `async: false`, serialising them against
-everything else. On the branch that produced this ADR, `mix test --exclude browser` measured:
+A test module that runs `async: false` is serialised against the whole suite, so every serial
+module adds directly to wall-clock time. The intuitive explanation for a serial test is "the
+code reads application env, so the test must `Application.put_env`, so it must be serial". When
+this suite was measured, that turned out to be almost never the real reason. Two things were:
 
-| | |
-|---|---|
-| Test modules | 248 |
-| `async: false` modules | 48 (43 non-browser + 5 `test/relay_web/browser/`) |
-| Baseline wall-clock | **24.8s = 18.6s async + 6.2s sync** |
+- **Spawned processes with no sandbox ownership.** `Hamaca.DataCase.setup_sandbox/1` starts the
+  sandbox owner with `shared: not tags[:async]`. Under `async: false` (shared mode) any process in
+  the VM may use the test's connection, which hides the fact that `RunServer`,
+  `Scheduler.Server`, `Activity.LogSink`, `Activity.Pruner` and LiveView processes touch the
+  database. Under `async: true` (manual mode) each of them needs explicit ownership or it raises
+  `DBConnection.OwnershipError`.
+- **Globally named singletons and global config.** An engine that names itself and its children
+  with fixed atoms can't be started twice, and a test helper that writes application env to steer
+  production code leaks that value into every concurrent test.
 
-The obvious hypothesis was that production code reads mutable application env
-(`Application.get_env`), so tests must `Application.put_env`, so they must be serial.
-**Measurement disproved it.** Flipping all 43 non-browser modules to `async: true` and changing
-nothing else produced 20.1s and 254 failures across 28 files:
-
-- 2615 × `DBConnection.OwnershipError`
-- 210 × `RuntimeError — {:already_started, Relay.Runs.Supervisor}`
-- 16 × exits
-- **0** caused by application-env collisions
-
-Only two files called `Application.put_env` at all, and both already passed as `async: true` with
-zero changes.
-
-The actual causes were two:
-
-**(a) No sandbox ownership for spawned processes.** `Relay.DataCase.setup_sandbox/1` starts the
-owner with `shared: not tags[:async]`. `async: false` ⇒ shared mode ⇒ *any* process in the VM may
-use the test's connection, which is what silently let `RunServer`, `Scheduler.Server`,
-`Activity.LogSink`, `Activity.Pruner` and LiveView processes reach the database. `async: true` ⇒
-manual mode ⇒ each such process needs explicit ownership. There was not one `Sandbox.allow/3` call
-in the entire suite.
-
-**(b) Globally-named singletons.** `Relay.Runs.Supervisor` named itself `__MODULE__` and hard-named
-its children `Relay.Runs.Registry` and `Relay.Runs.RunSupervisor`; `Relay.Runs` reached for both by
-literal atom. Two async tests both starting the engine raced the name. Alongside it,
-`Relay.Runs.FakeDispatcher.register/1` (test support) set `:runs_dispatcher` and
-`:runs_fake_dispatcher_pid` in application env — genuine global mutation, read back by
-`Relay.Runs.dispatcher/0`, so under async one test's dispatch notifications would be delivered to
-another test's pid.
-
-Dependency injection alone is demonstrably **not** sufficient. `test/relay/activity/pruner_test.exs`
-already used the injected-name + `start_supervised!` pattern and still failed under async; one
-test-only `Sandbox.allow/3` line fixed it with no production change.
+Dependency injection alone does not fix the first problem: a process with an injected name,
+started with `start_supervised!`, and reading no application env still fails under async if it
+has no sandbox ownership.
 
 ## Decision
 
-Two rules.
+Tests default to `async: true`. Two rules make that safe.
 
-**Rule 1 — no runtime mutation of global or application state to configure behaviour.**
-`Application` env is read at boot or in `config/*.exs`. After that, configuration and collaborators
-flow through the process tree: `start_link` options, function arguments, or a process-scoped
-context. A test never calls `Application.put_env/3` to steer production code.
+**Rule 1: no runtime mutation of global or application state to configure behaviour.**
+`Application` env is read at boot or in `config/*.exs`. After that, configuration and
+collaborators flow through the process tree, in this order of preference:
 
-*Sanctioned exception:* a boot-time-only read that no test mutates (e.g.
-`Relay.Runs.engine_opts/0`, `Relay.Push.config/0`), and a genuinely process-global singleton whose
-whole purpose is to be shared and which has no instance seam (e.g. `RelayWeb.ApiLog`, the app-wide
-in-memory API ring buffer read by `RelayWeb.Admin.ApiLive`). A test that must own such a singleton
-stays `async: false` **with a comment naming this exception**.
+- **An argument** (`start_link` option or function parameter) when the caller already has the
+  value. For example, `Hamaca.Push.Delivery.APNS.deliver/3` takes the APNs config as an argument,
+  `deliver/2` reads it once at the boundary through `Hamaca.Push.config/0`, and the test passes
+  its own config.
+- **`Hamaca.Config`**, a thin seam over the `process_tree` library, for a value read deep in a
+  call chain the test doesn't drive (for example `SchedulerSupervisor` reading
+  `:runs_auto_start` from the reaper's sweep). A test `Process.put/2`s the value under its key.
+  Production reads it with `Hamaca.Config.get/2` (app-env keys) or `Hamaca.Config.git_sha/0` (the
+  OS-env `GIT_SHA`), which look in the calling process, then its `$ancestors`, then its
+  `$callers`, and with nothing found fall back to `Application.get_env(:hamaca, key, default)` or
+  `System.get_env("GIT_SHA")`. Production behaviour is unchanged.
+  - **Always `cache: false`.** `ProcessTree`'s default caches a found value in every process it
+    walked through, so a long-lived process would keep one test's value for the rest of the run.
+    `Hamaca.Config` never reads without `cache: false`.
+  - **`nil` means absent.** `ProcessTree` treats a stored `nil` as not found. To make a value
+    explicitly unset, store `false`; `git_sha/0` turns a found `false` back into `nil`, while
+    `get/2` returns it as `false`.
+  - Only values tests actually vary go through the seam. Boot-time reads stay plain
+    `Application.get_env/3`.
 
-**Rule 2 — any process the code under test spawns must have explicit DB-sandbox ownership.**
-Shared mode (`async: false`) is the documented fallback, not the default. Two mechanisms, in this
-order of preference:
+A test never calls `Application.put_env/3`, `delete_env` or `System.put_env` to steer production
+code. The only place those may appear in `test/` is `test/test_helper.exs` (one-time suite setup).
 
-- **`Sandbox.allow/3` from the test**, when the test holds the pid. Use
-  `Relay.DataCase.allow!/1`:
+*Sanctioned exception:* a genuinely process-global singleton whose whole purpose is to be shared
+and which has no instance seam (for example the `HamacaWeb.ApiLog` ring buffer, the app-wide
+`Activity.LogSink`, Swoosh's Local mailbox). A test that must own such a singleton stays
+`async: false` with a comment naming the reason.
+
+**Rule 2: any process the code under test spawns has explicit DB-sandbox ownership.** Shared mode
+is the documented fallback, not the default. Two mechanisms, in this order:
+
+- **`Sandbox.allow/3` from the test**, when the test holds the pid, through
+  `Hamaca.DataCase.allow!/1`:
 
   ```elixir
   pruner = allow!(start_supervised!({Pruner, name: :"pruner_#{System.unique_integer([:positive])}"}))
   ```
 
-- **`$callers` propagation**, when a `DynamicSupervisor` (or any supervisor) severs the chain and
-  the test never sees the pid. The caller passes the chain down; the child re-seeds it:
+- **`$callers` propagation**, when a supervisor severs the chain and the test never sees the
+  pid. `DynamicSupervisor.start_child/2` gives the child the *supervisor's* `$callers`, not the
+  caller's, so the caller passes its chain down and the child re-seeds it:
 
   ```elixir
   # caller side
-  DynamicSupervisor.start_child(sup, {Child, callers: [self() | Process.get(:"$callers", [])], ...})
+  DynamicSupervisor.start_child(sup, {Child, callers: Hamaca.Runs.Instance.callers(), ...})
 
-  # child's init/1 — the entire seam
+  # the child's init/1
   def init(opts) do
-    Relay.Runs.Instance.adopt_callers(opts)
+    Hamaca.Runs.Instance.adopt_callers(opts)
     ...
   end
   ```
 
-  `$callers` is the standard OTP/Elixir caller-tracking convention — what `Task` sets
-  automatically and what `Mox`, `Req.Test` and `Ecto.Adapters.SQL.Sandbox` all honour — so
-  production code propagates *caller identity*, a legitimate OTP concern, rather than naming Ecto,
-  sandboxes or tests. In production the `:callers` option is absent and `adopt_callers/1` is a
-  no-op.
+  `$callers` is the standard OTP caller-tracking convention that `Task`, `Mox`, `Req.Test` and
+  `Ecto.Adapters.SQL.Sandbox` already honour, so production code propagates caller identity
+  rather than naming Ecto, sandboxes or tests. In production the `:callers` option is absent and
+  `adopt_callers/1` does nothing. `Hamaca.Runs.ensure_server/2` → `RunServer`,
+  `Hamaca.Runs.SchedulerSupervisor` → `Scheduler.Server`, and `Hamaca.Runs.Supervisor`'s
+  `Listener`, `RunnerReaper` and boot-resume `Task` all do this.
 
-**Rule 1 alone does not make a test async.** `pruner_test` is the cautionary case: it followed
-rule 1 to the letter — injected name, `start_supervised!`, no application env — and still failed
-under async, because the pruner process had no sandbox ownership. Rule 2 is the one that actually
-lifts the serial constraint; rule 1 is what keeps the suite from re-acquiring cross-test coupling
-by another route.
+One `$callers` / `$ancestors` chain carries both sandbox ownership and `Hamaca.Config` values, so
+a child started on a test's behalf sees that test's connection and that test's config, and no
+other test sees either.
 
-### The worked example for rule 1 — `Relay.Push`
+The same chain routes **which engine instance** a process belongs to
+(`Hamaca.Runs.Instance.current/0`). `Hamaca.DataCase.start_engine!/1` registers a per-test
+registry, run supervisor, listener, reaper and capacity table under unique names, and every
+process the engine spawns for that test finds them. With nothing registered (production),
+`current/0` returns the default instance and every name is the fixed one.
 
-*See [Amendment (2026-10)](#amendment-2026-10-processtree-for-per-test-config): threading an argument (below) is still preferred when the caller already has the value; `Relay.Config` / `ProcessTree` is for values read deep in a call chain the test doesn't drive.*
-
-Before: `Relay.Push.Delivery.APNS` read `Application.get_env(:relay, Relay.Push)` at call time, so
-`apns_test.exs` had to `Application.put_env/3` in `setup` and restore it in `on_exit`.
-
-```elixir
-# before — apns.ex
-def deliver(token, payload) do
-  config = apns_config()          # Application.get_env(:relay, Push)[:apns]
-  ...
-end
-
-# before — apns_test.exs
-setup do
-  previous = Application.get_env(:relay, Push)
-  Application.put_env(:relay, Push, Keyword.put(previous, :apns, key: test_key_pem(), ...))
-  on_exit(fn -> Application.put_env(:relay, Push, previous) end)
-end
-```
-
-After: the app-env read moves to one boundary function, and the value is threaded as an argument.
-The test passes its own config and mutates nothing.
-
-```elixir
-# after — apns.ex
-def deliver(token, payload), do: deliver(token, payload, Push.config().apns)
-def deliver(token, payload, apns_config) when is_list(apns_config), do: ...
-
-# after — apns_test.exs
-setup do
-  %{apns: [key: test_key_pem(), key_id: "ABC1234567", ...]}
-end
-
-test "...", %{apns: apns} do
-  assert :ok = APNS.deliver("device-token-xyz", @payload, apns)
-end
-```
-
-### The worked example for rule 2 — the runs engine
-
-`Relay.Runs.start_run/2` starts a `RunServer` through `DynamicSupervisor.start_child/2`. Verified
-empirically: the child's `$callers` contains the *supervisor's* pid, not the caller's, and any
-`Relay.Repo` call from it raises `DBConnection.OwnershipError`. `Relay.Runs.ensure_server/2` now
-passes `callers: Relay.Runs.Instance.callers()` into the child spec and `RunServer.init/1` calls
-`Relay.Runs.Instance.adopt_callers/1`. The same treatment applies to
-`Relay.Runs.SchedulerSupervisor.ensure_started/2` → `Relay.Runs.Scheduler.Server`, and to
-`Relay.Runs.Supervisor`'s own `Listener`, `RunnerReaper` and boot-resume `Task` children.
-
-The same `$callers` walk also routes *which engine instance* a process belongs to
-(`Relay.Runs.Instance.current/0`), so a test can `start_engine!/0` its own tree under unique names
-and every process the engine spawns on its behalf finds it. With nothing registered — production —
-`current/0` returns the default instance and every name is exactly what it was before.
+Rule 1 alone does not make a test async; rule 2 is what lifts the serial constraint. Rule 1 is
+what keeps the suite from re-acquiring cross-test coupling by another route.
 
 ## Consequences
 
-- Tests default to `async: true`. `async: false` becomes a documented exception carrying a
-  one-line reason.
-- `Relay.Runs` gained one indirection (`Instance.current/0`, a `Registry.lookup` per resolution)
-  on paths that previously used compile-time atoms. It resolves to the same atoms in production.
-- Every engine process that can be started on a caller's behalf now accepts `:callers`. New ones
-  must do the same or they will be invisible to the sandbox under async.
-- `Relay.Runs.Capacity`'s ETS table is resolved per instance rather than being a single named
-  table, so a test's capacity can no longer be read or wiped by a concurrent test. `reset/0` is
-  gone; a fresh instance starts with an empty table.
-- **`Sandbox.allow/3` binds a pid to exactly one connection, so it cannot make an app-wide
-  singleton async.** `Relay.DataCase.allow!/1` is rule 2's first mechanism, but it only isolates a
-  process *this test owns*. When two async tests both `allow!` the same global process, the second
-  gets `{:already, :allowed}` and that process stays on the **first** test's connection. This is a
-  silent failure, not a loud one: `Relay.Activity.LogSink` resolves its `ref -> card_id` lookup on
-  the wrong connection, finds nothing, and inserts and broadcasts nothing — no exception, no log
-  line, just a broadcast the test never receives (~4% of runs). `test/relay_web/api/board_logs_test.exs`
-  was flipped this way, raced, and is back to `async: false` under rule 1's singleton exception.
-  **A shared singleton needs an instance seam to go async; `allow!` is not a substitute for one.**
-- **Known limitation — the `Listener` firehose is still process-global.** Rule 2 gave every engine
-  its own names, but not its own event topic: `Relay.Runs.Listener.init/1` subscribes to
-  `Relay.Events.subscribe_firehose/0`, which has no per-instance variant. So the `Listener` that
-  `Relay.DataCase.start_engine!/1` hands a test receives **every concurrent test's** card events and
-  reconciles them on **its own** sandbox connection. 24 async modules call `start_engine!/1` and
-  carry this; they are green on the measured seed matrix because their cards are unique per test and
-  a reconcile for a foreign card is a no-op, but it is a latent cross-test coupling, not an isolated
-  one. Two modules provably lost that bet and stay `async: false` with in-file blocker comments —
-  `test/relay/runs/runner_reaper_test.exs` and
-  `test/relay_web/live/board_settings_flow_preflight_test.exs` — which is why this ADR's async
-  conversion is **partially unmet**: those two were flipped, raced, and reverted. Closing it needs
-  either a per-instance firehose topic or a `start_engine!(listener: false)` option; both are
-  follow-up work, not part of this change. **If a new engine test flakes with events it never
-  produced, this is why.**
-- Wall-clock, `mix test --exclude browser`:
-  - **before: 24.8s (18.6s async + 6.2s sync)**
-  - **after: 20.6s (20.5s async + 0.1s sync)** — median of three consecutive runs (20.5s / 20.6s /
-    20.9s), green on seeds 1, 424242 and 999. The **6.2s serial tail is gone**, which is the whole
-    point; the remaining spread between 19.9s and 21.6s across runs is machine noise, not signal.
-  - The 0.1s sync tail is six modules, each carrying its own ADR-0009-sanctioned reason comment:
-    `test/support/data_case_test.exs` (reaches `Sandbox.allow/3`'s `:not_found` branch on purpose),
-    `test/relay/runs/runner_reaper_test.exs` and
-    `test/relay_web/live/board_settings_flow_preflight_test.exs` (the still-open
-    global-firehose-vs-per-instance-`Listener` gap), `test/relay_web/api/board_logs_test.exs` (the
-    app-wide `LogSink` singleton, see the `Sandbox.allow/3` bullet above), and the two
-    `RelayWeb.ApiLog` modules.
-  - `test/relay_web/story_map_filter_test.exs` is **no longer** in that tail. It was serial for its
-    own reason — a no-atom-leak test reading `:erlang.system_info(:atom_count)`, a VM-global counter
-    every concurrently-loading module moves. Asserting instead on whether an atom with each forged
-    *text* exists, before and after, proves the same property and is async-safe. The general lesson:
-    when a test reads a global counter, look for the process-local question it was really asking.
+- `async: false` is an exception that carries its reason. `test/hamaca/test_isolation_test.exs`
+  enforces both rules statically: it fails on any app-env or OS-env write in `test/` outside
+  `test/test_helper.exs`, and on any non-browser module that runs `async: false` without a `#`
+  comment directly above the `use` line or an explanation in its `@moduledoc`. Browser tests
+  (`test/hamaca_web/browser/`) run serially by design and are outside that check.
+- Every engine process that can be started on a caller's behalf accepts `:callers`. A new one
+  must too, or it is invisible to the sandbox under async.
+- `Hamaca.Runs` resolves its process names through `Instance.current/0` (a `Registry` lookup)
+  instead of compile-time atoms. In production it resolves to the same names.
+- `Hamaca.Runs.Capacity`'s ETS table is per instance, so one test can't read or wipe another's
+  capacity.
+- **`Sandbox.allow/3` cannot make an app-wide singleton async.** It binds a pid to exactly one
+  connection. When two async tests `allow!` the same global process, the second gets
+  `{:already, :allowed}` and the process stays on the first test's connection, failing silently
+  (for `Activity.LogSink`, a missing broadcast). A shared singleton needs an instance seam to go
+  async; `allow!` is not a substitute for one.
+- **Known limitation: the `Listener` firehose is process-global.** Each engine instance has its
+  own names but not its own event topic: `Hamaca.Runs.Listener.init/1` subscribes to
+  `Hamaca.Events.subscribe_firehose/0`, which has no per-instance variant. The `Listener` that
+  `start_engine!/1` gives a test therefore receives every concurrent test's card events and
+  reconciles them on its own sandbox connection. That is harmless when a test's cards are its own
+  (a foreign reconcile is a no-op), but a test that counts how often the engine reacted, or stops
+  the tree mid-flight, races. `test/hamaca/runs/runner_reaper_test.exs` and
+  `test/hamaca_web/live/board_settings_flow_preflight_test.exs` stay `async: false` for this
+  reason. **If a new engine test flakes with events it never produced, this is why.**
+- When a test reads a VM-global counter or setting, look for the process-local question it was
+  really asking before making it serial.
 
 ## Alternatives considered
 
-**A `:sandbox_owner` option on each engine child.** Equivalent seam, but it names Ecto, sandboxes
-and tests inside production code. `$callers` expresses the same thing as caller identity — a
-legitimate OTP concern — and is already honoured by `DBConnection`, `Mox` and `Req.Test`, so it
-costs one line and buys three integrations.
+**A `:sandbox_owner` option on each engine child.** The same seam, but it names Ecto, sandboxes
+and tests inside production code. `$callers` expresses the same thing as caller identity, which
+is a legitimate OTP concern that `DBConnection`, `Mox` and `Req.Test` already honour.
 
-**Leaving the engine tests serial.** The measured ceiling is ~4.7s (19% of wall-clock), which is
-not on its own compelling. It was done anyway because the global-name and `put_env` coupling is a
-correctness hazard independent of speed: it is why two engine tests could never run together, and
-it is the shape most likely to produce a mysterious cross-test failure as the suite grows.
+**Leaving the engine tests serial.** The speed gain alone was modest, but the global-name and
+`put_env` coupling is a correctness hazard regardless of speed: it is why two engine tests could
+never run together, and it is the shape most likely to produce a mysterious cross-test failure as
+the suite grows.
 
-## Amendment (2026-10): ProcessTree for per-test config
+## Open questions
 
-Source: RE419. Rule 1's "process-scoped context" is now concrete: **`Relay.Config`**, a thin seam
-over the `process_tree` library.
-
-- **How a test varies config.** The test `Process.put/2`s the value under the config key
-  (`:apple_client_ids`, `:runs_auto_start`, or `:git_sha`). Production reads it through
-  `Relay.Config.get/2` (app-env keys) or `Relay.Config.git_sha/0` (the OS-env `GIT_SHA`).
-  `ProcessTree.get/2` looks in the calling process's dictionary, then up its `$ancestors`, then
-  its `$callers`. With nothing in any dictionary it falls back to
-  `Application.get_env(:relay, key, default)` / `System.get_env("GIT_SHA")`, so production
-  behaviour is unchanged. Only the values tests actually vary are routed through the seam;
-  boot-time reads stay plain `Application.get_env/3`, as rule 1's sanctioned exception already
-  allows.
-- **Why `cache: false`, always.** By default `ProcessTree` caches a found value in the caller
-  and in every intermediate process it walked through. A long-lived or app-wide process could
-  then keep one test's value for the rest of the run, which is exactly the cross-test leak rule 1
-  forbids. `Relay.Config` never calls `ProcessTree.get/2` without `cache: false`.
-- **`nil` means absent.** `ProcessTree` treats a `nil` value as "not found" and falls through to
-  the real source. To make a value "explicitly unset", store `false`. `git_sha/0` turns a found
-  `false` back into `nil`, while `get/2` returns a found `false` as `false`.
-- **It complements rule 2's `$callers`.** One `$callers`/`$ancestors` chain carries both
-  sandbox ownership and config. A child started with `callers: [self()]` (re-seeded by
-  `Relay.Runs.Instance.adopt_callers/1`), via `start_supervised!`, or as a `Task` sees the test's
-  DB connection and the test's config together, and no other test sees either.
-- **Arguments first, ProcessTree second.** The `Relay.Push` worked example still stands. When the
-  caller already has the value, pass it as an argument. `ProcessTree` is for values read deep in
-  a call chain the test doesn't drive, such as `SchedulerSupervisor.reconcile/1` being called
-  from the reaper's `:sweep`, where no test-facing function has a parameter to thread it through.
-- **Enforcement.** `test/relay/test_isolation_test.exs` scans the tree statically. It fails on any
-  app-env or OS-env write (`put_env` / `delete_env`) in `test/` outside `test/test_helper.exs`.
-  It also fails on any non-browser module that runs `async: false` without a stated reason: a `#`
-  comment directly above the `use` line, or an explanation in the module's `@moduledoc`.
-  The same audit flipped `test/relay/runs/resume_refusal_test.exs` and
-  `test/relay/migrations/backfill_activity_stage_ids_test.exs` to `async: true`. Both were green
-  across the seed matrix (`--seed 1`, `424242`, `999` and three unseeded runs).
+- How should the `Listener` be isolated per engine instance: a per-instance firehose topic, or a
+  `start_engine!(listener: false)` option for tests that don't need one? Until one exists, the two
+  modules above stay serial.

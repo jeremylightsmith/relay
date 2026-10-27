@@ -103,13 +103,13 @@ status a card takes on entry.
 
 Every arrow below is a status change, and each goes through one writer — `Hamaca.Cards.set_status/3`
 — **never as a silent side effect of a move**. A cross-stage move re-snaps status only when the
-carried value is *invalid* for the destination stage type (`snap_status/3`, `cards.ex:1174`); a
+carried value is *invalid* for the destination stage type (`snap_status/3`, `cards.ex:2167`); a
 status still valid for the new stage rides across unchanged. That **valid-but-stale** branch is the
 seam where a card arrives in a new stage still reading `working`, `needs_input`, or `failed` from
 the last one. Only three writers correct status around a move: `start_run` forces `working` on
-entering the work lane (`runs.ex:711`), `reject` forces `ready` on sending a card back
-(`cards.ex:1334`), and `approve_in_place` forces `ready` in place at the terminal stage
-(`cards.ex:1670`). The non-terminal `approve` and every plain drag trust the snap alone.
+entering the work lane (`runs.ex:1403`), `reject` forces `ready` on sending a card back
+(`cards.ex:2374`), and `approve_in_place` forces `ready` in place at the terminal stage
+(`cards.ex:2757`). The non-terminal `approve` and every plain drag trust the snap alone.
 
 Each box's second line is the **stage types** that status is valid on (`Stage.valid_status?/2`).
 
@@ -172,8 +172,8 @@ own writers.
 Two more triggers complete the set:
 
 - **Editing a stage's type** re-snaps every card already sitting in it (`snap_cards_in/1`,
-  `cards.ex:1230`) — the same rule fired by an admin change instead of a move.
-- **The untrusted API write** `PATCH /api/cards/:ref` (`set_status_snapped/3`, `cards.ex:536`)
+  `cards.ex:2244`) — the same rule fired by an admin change instead of a move.
+- **The untrusted API write** `PATCH /api/cards/:ref` (`set_status_snapped/3`, `cards.ex:1430`)
   coerces the requested status to one valid for the card's *current* stage type — so `failed` can
   be set directly on a card in a work/planning stage, making `failed` reachable from
   `ready`/`needs_input`, not only from `working`.
@@ -317,7 +317,7 @@ A revoked job never produces an outcome; a re-entry starts a fresh attempt of th
 
 ### Node-job kind
 
-RE268 / ADR 0009: `node_jobs` is the dispatch table for two dispatchers, distinguished by
+RE268 / ADR 0014: `node_jobs` is the dispatch table for two dispatchers, distinguished by
 `kind`. `:node` is written by the flow engine and always carries a `run_id` and
 `node_execution_id`. `:talk` is one turn of a person-driven Talk session — it carries neither,
 because a talk turn deliberately synthesises no `Run` (a `Run` would make every card with an
@@ -334,13 +334,13 @@ machine); it ends only when a human presses Stop or it reports an outcome.
 
 ## Talk turn status
 
-A talk turn is one human message and the work it caused (RE268 / ADR 0009), tracked separately
+A talk turn is one human message and the work it caused (RE268 / ADR 0014), tracked separately
 from the `node_jobs` row that carries it to a runner.
 
 | Status | Meaning | Next |
 | --- | --- | --- |
 | `queued` | Written when the person hits Enter; no runner holds the turn's job yet. | `claimed` (a runner takes it) or `stopped` (the person hits Stop before it is claimed). |
-| `claimed` | A runner is running `claude -p --resume` for this turn. | `done`, `stopped` or `failed`. |
+| `claimed` | A runner is running Claude Code for this turn, resuming the session when an earlier turn finished `done`. | `done`, `stopped` or `failed`. |
 | `done` | The turn finished normally; the runner's `claude_session_id` is persisted so the next turn resumes it. Terminal. | — |
 | `stopped` | The person hit Stop. A normal, **non-error** end state — the job is revoked and the turn's partial output stays in the transcript. Terminal. | — |
 | `failed` | The runner reported an error. Terminal. | — |

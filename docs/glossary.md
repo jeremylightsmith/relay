@@ -22,8 +22,8 @@ the MMF design specs).
 - **Card** — a unit of work (`Schemas.Card`) that lives in exactly one stage/substage at a time.
 - **Task** — one independently implementable unit of a card's plan, worked one at a time by the
   Code flow's `foreach` loop. Its **body is its spec**: read it with
-  `relay task show <ref> <id>` (`relay tasks list <ref>` lists titles only); write a card's tasks
-  with `relay tasks add`. In a flow it is the `tasks` contract field, the `card.tasks` foreach
+  `./hamaca task show <ref> <id>` (`./hamaca tasks list <ref>` lists titles only); write a card's tasks
+  with `./hamaca tasks add`. In a flow it is the `tasks` contract field, the `card.tasks` foreach
   source, and the `{task}` / `{task_id}` prompt placeholders. **This is the canonical name**:
   `sub_task` / `SubTask` / `sub_tasks` / `card.sub_tasks` / `{sub_task_id}` are legacy
   identifiers — the schema (`Schemas.SubTask`), table and `node_executions.sub_task_id` keep the
@@ -71,7 +71,7 @@ the MMF design specs).
   (`--color-secondary`). An **unowned** card claims an owner when it *enters* a work/planning
   stage (the mover decides); an already-owned card keeps its owners through every move.
 - **Runner** — the process on a developer machine that claims node-jobs from the board and runs
-  them (`./relay start`; `Schemas.Runner`, one row per machine per board; the Runners view at
+  them (`./hamaca start`; `Schemas.Runner`, one row per machine per board; the Runners view at
   `/board/:slug/runners`). Formerly *executor* — renamed in RE319; older mockups still use that word.
   Not the legacy board-runner (`relay watch`), which is deleted.
 - **Harness** — an agent CLI a board can run flow nodes on (`Schemas.Harness`, RE433): a command

@@ -31,7 +31,7 @@ criteria, plan + tasks, branch, PR, result, blockers. `describe` and `spec` are 
 **Stages and substages.** `*:Review` is a human checkpoint (`approve` → `*:Done`); `*:Done`
 auto-continues into the next AI stage.
 
-**Status** is `ready | working | needs_input | in_review`. There is no `done` status: a `ready` card
+**Status** is `ready | queued | working | needs_input | in_review | failed`. There is no `done` status: a `ready` card
 in the rightmost stage reports `done: true`.
 
 **Stuck cards** are blocked on a human (`needs_input`), waiting at a review gate, missing a flow or

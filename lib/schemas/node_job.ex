@@ -58,7 +58,7 @@ defmodule Schemas.NodeJob do
   def states, do: Ecto.Enum.values(__MODULE__, :state)
 
   @doc ~S"""
-  The closed set of dispatchers that write this table (ADR 0009). `:node` is a flow-dispatched
+  The closed set of dispatchers that write this table (ADR 0014). `:node` is a flow-dispatched
   node job; `:talk` is one turn of a person-driven Talk session, carrying no run. Defined ONCE
   here — no consumer re-types either literal.
   """
@@ -67,13 +67,13 @@ defmodule Schemas.NodeJob do
   @doc "The kinds a FLOW dispatches — every query that means \"the engine's jobs\" filters on this."
   def flow_kinds, do: [:node]
 
-  @doc "The single person-dispatched kind (ADR 0009). Deliberately scalar: there is one, and code that means \"this is a talk turn\" should read as a comparison, not a membership test."
+  @doc "The single person-dispatched kind (ADR 0014). Deliberately scalar: there is one, and code that means \"this is a talk turn\" should read as a comparison, not a membership test."
   def talk_kind, do: :talk
 
   @doc ~S"""
   Validates a programmatically-built job row. `run_id`/`node_execution_id` are required for a
   flow job and forbidden for a talk turn — a talk turn deliberately synthesises no `Run`
-  (ADR 0009), because a Run would make every card with an open conversation read as having an
+  (ADR 0014), because a Run would make every card with an open conversation read as having an
   active run. `card_id` is required for both: it is the board-scoping join for the whole table.
   """
   def changeset(job) do

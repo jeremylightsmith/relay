@@ -1,6 +1,6 @@
 defmodule Schemas.TalkTurn do
   @moduledoc """
-  One human message and the work it caused (ADR 0009 §1). The turn is the unit with a
+  One human message and the work it caused (ADR 0014 §1). The turn is the unit with a
   lifecycle: `queued` when the person hits Enter, `claimed` when a worker takes it, then
   `done`, `stopped` (the person hit Stop — a normal, NON-error end state whose partial output
   stays in the transcript) or `failed`.

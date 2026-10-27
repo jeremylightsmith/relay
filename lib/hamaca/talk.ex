@@ -1,6 +1,6 @@
 defmodule Hamaca.Talk do
   @moduledoc """
-  Talk (ADR 0009): a person-driven execution lane. A person types in a card's terminal pane, one
+  Talk (ADR 0014): a person-driven execution lane. A person types in a card's terminal pane, one
   turn becomes a `node_jobs` row with `kind: :talk` and no run, a runner claims it through
   the SAME long-poll claim every flow node uses, and its output streams back as durable,
   ordered transcript rows.
@@ -26,7 +26,7 @@ defmodule Hamaca.Talk do
 
   **Not here in step 1**: receipts and `:field_changed` ([AC16]), `awaiting` turns ([AC17]), the
   write lease and `./relay say` ([AC18]), card-level runner pinning ([AC12]). A talk turn
-  does **not** move the card's baton (ADR 0009 §6).
+  does **not** move the card's baton (ADR 0014 §6).
 
   PubSub: `card:<card_id>:talk`, carrying `{:talk_event, event}` and `{:talk_turn_changed, turn}`.
   Broadcast from this context only.
@@ -101,7 +101,7 @@ defmodule Hamaca.Talk do
 
   Refuses a blank message and refuses a second turn while one is in flight — a session is one
   conversation, and two concurrent `claude -p --resume` calls on one session id is exactly the
-  silent-corruption case ADR 0009 §3 exists to prevent.
+  silent-corruption case ADR 0014 §3 exists to prevent.
   """
   def post_message(%Card{} = card, %User{} = author, text) when is_binary(text) do
     prompt = String.trim(text)
@@ -129,7 +129,7 @@ defmodule Hamaca.Talk do
   # The "one turn in flight" guard has to live INSIDE the transaction, after the same session
   # row lock `insert_events!/3` takes — otherwise it is check-then-act: two near-simultaneous
   # posts can both see no active turn before either has committed one, and both insert a
-  # `:queued` turn against the same `resume_session` (ADR 0009 §3). Locking first serializes
+  # `:queued` turn against the same `resume_session` (ADR 0014 §3). Locking first serializes
   # the check against any other post's commit.
   defp do_post(card, session, author, prompt) do
     locked = lock_session!(session.id)
@@ -345,7 +345,7 @@ defmodule Hamaca.Talk do
   end
 
   @doc """
-  The Stop button (ADR 0009 §1). Revokes the job — the heartbeat's `Hamaca.Runs.revoked_among/2`
+  The Stop button (ADR 0014 §1). Revokes the job — the heartbeat's `Hamaca.Runs.revoked_among/2`
   then names it and the runner kills the running `claude -p` — and ends the turn `:stopped`,
   a normal non-error state whose partial output stays in the transcript. Server-side and
   unconditional, so a turn whose runner is already gone still ends.

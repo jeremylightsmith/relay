@@ -1,6 +1,6 @@
 defmodule HamacaWeb.TalkComponents do
   @moduledoc """
-  The Talk pane (RE268 / ADR 0009) — the card drawer's terminal session, matching the
+  The Talk pane (RE268 / ADR 0014) — the card drawer's terminal session, matching the
   `TALK: terminal session` block of `docs/designs/Relay Card Detail v5.dc.html` (lines ~261–339).
 
   Deliberately NOT in `core_components.ex`, which is already ~3.2k lines, and self-contained (no

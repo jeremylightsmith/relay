@@ -278,7 +278,7 @@ defmodule HamacaWeb.BoardLiveTalkTest do
     view |> element("#card-drawer-tab-talk") |> render_click()
     view |> form("#talk-pane-composer", %{"text" => "take your time"}) |> render_submit()
 
-    # Detaching is not cancelling (ADR 0009 §1): only Stop stops. Navigating to the bare board
+    # Detaching is not cancelling (ADR 0014 §1): only Stop stops. Navigating to the bare board
     # ends this LiveView process, which is the strongest form of "the drawer was closed".
     {:ok, _board_view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
     turn = FakeTalkRunner.claim(runner)

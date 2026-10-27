@@ -1826,8 +1826,8 @@ defmodule Hamaca.Cards do
 
   This is **deliberately narrower than `needs_you_rollup/1`**: it excludes the
   ready-awaiting-human flavor, so the mobile count diverges from the board's by design (ADR
-  0005). The F4 feed, the F5 badge (RLY-81), and the inbox (RLY-85) all read this one query, so
-  the three can never drift.
+  0005). The F4 feed and the inbox (RLY-85) read this one query, so they can never drift. The
+  badge counts with `Hamaca.Push.needs_you_count/1` instead, which also leaves out muted boards.
 
   Returns `[%{card: card, question: latest_question_string | nil, questions: structured | nil}]`
   — `question`/`questions` come from the card's newest `:needs_input` activity meta (one extra

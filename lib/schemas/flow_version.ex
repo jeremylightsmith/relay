@@ -3,8 +3,8 @@ defmodule Schemas.FlowVersion do
   Immutable snapshot of a flow's versioned definition (isolation, nodes, edges) at a given
   `version`. Written by `Hamaca.Flows` in the same transaction as every definition-changing
   save; never edited. Rows have no `updated_at`. Every flow always has a snapshot row for its
-  current version — the invariant the Runs engine relies on to pin a mid-run card to the
-  definition it started on.
+  current version — the invariant a future Runs pin-to-version feature relies on. Runs do not
+  use it today: a run points at the live flow row (see `Schemas.Run`).
   """
   use Ecto.Schema
 

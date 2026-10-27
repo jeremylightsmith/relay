@@ -47,7 +47,7 @@ agents are peers on the same cards — and where the *shape of the board* is the
    moves forward. The board is the accountability surface.
 5. **One workspace, everywhere.** The same board and the same hand-off model on web and
    mobile. Content (board, card, spec, comments, mockups) is one shared LiveView; only the
-   decision surfaces are native — see [ADR 0001](adr/0001-client-architecture.md) as refined by
+   decision surfaces are native — see [ADR 0001](adr/0001-client-architecture.md) and
    [ADR 0005](adr/0005-mobile-app-scope-and-architecture.md).
 
 ## Core concepts (working model)

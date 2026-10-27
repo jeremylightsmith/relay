@@ -1,6 +1,6 @@
 defmodule Schemas.TalkEvent do
   @moduledoc """
-  One rendered line of the transcript, append-only (ADR 0009). `seq` is server-assigned and
+  One rendered line of the transcript, append-only (ADR 0014). `seq` is server-assigned and
   monotonic per session — **render order is this, never a timestamp**, because two lines
   written in the same second must still have one true order.
 

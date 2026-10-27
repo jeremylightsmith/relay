@@ -8,12 +8,12 @@ fallback dispatcher to describe. The runner lives on a developer machine — it 
 checkout, git worktrees, and the `claude` CLI — and talks to the deployed app only through
 the board-key REST API.
 
-`./relay` (Python, single file) is two things:
+`./hamaca` (Python, single file) is two things:
 
 1. **A CLI** for every card operation an agent needs (`card`, `move`, `comment`,
    `needs-input`, `approve`, …) — the surface documented in
-   [`../../relay.md`](../../relay.md).
-2. **`relay start`** — the only runner mode: a poll loop that claims node-jobs from the
+   [`../../hamaca.md`](../../hamaca.md).
+2. **`hamaca start`** — the only runner mode: a poll loop that claims node-jobs from the
    server and runs them (see "Runner mode" below).
 
 ## Dispatch is server-side
@@ -117,7 +117,7 @@ flowchart LR
   `ios` and `android` skip with exit 0 when the card's commit didn't touch `flutter/`
   (`bin/card_touched_flutter.sh`), and Android also skips until its credentials exist (RLY-103).
 - **Secrets** come from the runner's own environment, which shell nodes inherit. On the RE board
-  that is `.envrc.local`, loaded by direnv in the shell that ran `relay start`. Each deploy
+  that is `.envrc.local`, loaded by direnv in the shell that ran `hamaca start`. Each deploy
   script fails fast naming any secret it's missing.
 - **Why `checkout -B` and not `--detach`.** On an `exclusive` flow the runner re-attaches the
   card's branch before every node, and it refuses a detached HEAD unless the command contains
@@ -133,7 +133,7 @@ A card in any AI-enabled stage is dispatched by `Hamaca.Runs.Scheduler` (folding
 enabled `Flow` on the board, rightmost flow stage position first; each flow pulls from the
 stage before its own in board order, worked out by `Hamaca.Flows.neighbours/2`) straight to the
 node-job engine (`Hamaca.Runs`) — no per-stage config file, no board-runner poll loop.
-`relay start` claims the resulting `NodeJob` rows over the node-job REST API (below) and
+`hamaca start` claims the resulting `NodeJob` rows over the node-job REST API (below) and
 runs whatever node it is handed; it knows nothing about stages, columns, or which flow a
 job belongs to. Board-specific facts (stages, prompts, per-node budgets) live entirely in
 `Flow`/`Flow.Node`/`Flow.Edge` rows, seeded from
@@ -170,7 +170,7 @@ the runner's board id and is evicted by the reaper's reclaim sweep once the runn
 board-scoped: `Scheduler.Server.build_snapshot/2`
 keeps a capacity entry only for a runner of *this* board that `Hamaca.Runs.counting_runner?/1`
 accepts (not `:gone`) — an allow-list, so another board's runner or an orphaned ETS entry
-contributes nothing to dispatch or to `relay why`'s `capacity` evidence (RE338). Every snapshot
+contributes nothing to dispatch or to `hamaca why`'s `capacity` evidence (RE338). Every snapshot
 capacity key is therefore a runner `Hamaca.Runs.list_runner_status/2` names. What remains
 unscoped is one physical machine registered on two boards: that is two runner rows advertising
 the same slots, so two boards' schedulers can both count the same free slot. The runner's own
@@ -209,7 +209,7 @@ double-booking (YAGNI: no multi-board reservation yet).
   the server stamps `agent_heartbeat_at` on the cards whose reported job is still active, the
   positive complement of the revoke query, so a live-but-quiet agent never falsely reads `:stale`
   in `Cards.health/1`. `latest_runner_version` (RE185/RE304) is the `RUNNER_VERSION` of the
-  `./relay` the app itself serves — `Hamaca.Runs.latest_runner_version/0`, delegating to
+  `./hamaca` the app itself serves — `Hamaca.Runs.latest_runner_version/0`, delegating to
   `Hamaca.Scaffold.runner_version/0`, read from `priv/scaffold/hamaca/hamaca` at runtime (the same
   bytes the legacy layout serves at `relay`). Truthful
   by construction. It is a **target**, distinct from `required_version`'s **floor**; a runner
@@ -268,7 +268,7 @@ never 403s):
   above the rows. It renders whether or not a runner is connected — an empty roster is exactly
   when a stacked queue matters. Read-only and deliberately **no** new endpoint and **no** new CLI
   verb: `POST /api/node-jobs/claim` stays the only path a job is handed out on, and
-  `list_queue/2` is the function a future `relay queue` would render.
+  `list_queue/2` is the function a future `hamaca queue` would render.
   Each runner panel's **HARNESSES** section (RE436) joins `list_runner_status/2`'s `harnesses`
   with the board's harness definitions and agents (`Hamaca.Runs.runner_harness_rows/4`, read once
   per refresh): one row per board harness the runner reported, with its version, signed-in state,
@@ -296,7 +296,7 @@ never 403s):
   and every live, current runner is paused. Its evidence carries `resumes_at` (the earliest reset)
   and `rate_limited_runners`. The roster-blaming reasons live once in
   `Scheduler.roster_blocking_reasons/0`. `Hamaca.Runs.stopped_work/2` returns the new reason for the
-  board and Runners-page banner (warning tint). `Hamaca.Runs.diagnose/3` (`relay why`,
+  board and Runners-page banner (warning tint). `Hamaca.Runs.diagnose/3` (`hamaca why`,
   `GET /api/cards/:ref/diagnosis`) returns verdict `:runner_rate_limited` for a live run whose job
   is queued behind that roster; its sentence is `Hamaca.Runs.rate_limited_run_detail/1` ("… every
   connected runner is paused at its usage limits"). Rate-limited runners are also excluded from `:job_awaiting_slot`'s
@@ -350,25 +350,25 @@ never 403s):
   `verdict_flipped` (a retry turned `failed` into `succeeded` at the same `git_sha`),
   `planner_not_migrated` (RE368 — one WARNING per flow when a run's tasks were seeded by the
   legacy plan-parse fallback, read from `runs.tasks_from_plan`; names the affected-card count
-  and most recent refs, fix `/relay-doctor`), and `outcomeless_attempts` (RE410 — one WARNING
+  and most recent refs, fix `/hamaca-doctor`), and `outcomeless_attempts` (RE410 — one WARNING
   per `{run, node, visit}` with at least `Hamaca.Runs.max_outcomeless_reentries/0` executions
   that never reported an outcome: something keeps killing the node's job). The check ids are
   pinned as `vocabulary.audit_checks` in the runner contract fixture. The
-  other half of `relay audit` — CI parity — is computed in `./relay`, because the server has
+  other half of `hamaca audit` — CI parity — is computed in `./hamaca`, because the server has
   no checkout of any board's repo. Read-only, board-scoped, advisory.
 - `GET /api/flows` (`HamacaWeb.Api.FlowController.index/2`) — every flow on the board, fully
-  serialized in stable `key` order. One round trip is all `relay doctor` (RLY-240) needs.
+  serialized in stable `key` order. One round trip is all `hamaca doctor` (RLY-240) needs.
 - `GET /api/flows/:key` (`HamacaWeb.Api.FlowController.show/2`) — one flow as the canonical
   `Hamaca.Flows.Document` (RLY-241): `key`, `version`, `enabled`, `isolation`, the trigger as
   the one stage **name** the flow works in, `{"stage": "<name>"}` (portable across boards), and
   the ordered `nodes`/`edges` arrays. Sparse — nil fields and schema defaults are omitted.
   Beside the document sits a read-only `"derived": {"pulls_from", "lands_on"}` block (RE429,
   `Hamaca.Flows.Document.derived/1`): the stage names worked out from current board order, `null`
-  at either end. `./relay flow` prints it as `pulls_from → stage → lands_on`. A read-only
+  at either end. `./hamaca flow` prints it as `pulls_from → stage → lands_on`. A read-only
   `"problem"` (RE430) sits beside it: `null`, or `Hamaca.Flows.Shape.wire/1` of the flow's broken
   board shape — `flow_key`, `kind`, `what`, `why`, `fixes` (`action` + `label`) and `columns`
-  (`stage_id`, `name`, `type`, `mark`). `./relay flow` marks an enabled flow with a problem
-  `PAUSED` and `relay flow KEY` prints its What / Why / Fix verbatim. Every key set, plus
+  (`stage_id`, `name`, `type`, `mark`). `./hamaca flow` marks an enabled flow with a problem
+  `PAUSED` and `hamaca flow KEY` prints its What / Why / Fix verbatim. Every key set, plus
   `Shape.kinds/0` / `Shape.fix_actions/0`, is pinned in `test/fixtures/runner_contract.json`
   (`"flows"`, `vocabulary.shape_problem_kinds` / `shape_fix_actions`). 404s an unknown key.
 - `PUT /api/flows/:key` (`HamacaWeb.Api.FlowController.update/2`) — upsert a flow from a document
@@ -382,10 +382,10 @@ never 403s):
   `unknown_stages` / `stage_occupied` (the named stage already holds another key's flow —
   `error.stage` / `error.flow` name it) / `invalid`, and `409 stale_version` when the document carries a `version`
   that no longer matches (absent `version` = last-write-wins).
-- CLI: `./relay why REF` / `./relay runs REF` / `./relay runners` /
-  `./relay version` / `./relay flow-stats KEY` / `./relay flow [KEY]` /
-  `./relay flow-push KEY FILE` / `./relay audit [KEY]`, documented in
-  [`../../relay.md`](../../relay.md).
+- CLI: `./hamaca why REF` / `./hamaca runs REF` / `./hamaca runners` /
+  `./hamaca version` / `./hamaca flow-stats KEY` / `./hamaca flow [KEY]` /
+  `./hamaca flow-push KEY FILE` / `./hamaca audit [KEY]`, documented in
+  [`../../hamaca.md`](../../hamaca.md).
 
 ## Bootstrap surface (RE304, ADR 0010)
 
@@ -435,26 +435,26 @@ ONE Elixir definition); `Hamaca.Scaffold.local_items/2` maps a layout's skill it
 LLM's dir (`.agents/skills` for Codex) without changing the served manifest, and
 `Hamaca.Scaffold.primary_items/1` is the hamaca layout's view without the aliases. (RE443 retired the
 fourth, setup skill: the board's setup wizard hands out the install command instead.) They are
-never user-edited, which is what lets `./relay update` overwrite them unconditionally — no provenance
+never user-edited, which is what lets `./hamaca update` overwrite them unconditionally — no provenance
 ledger, no per-file diff prompt. Everything else in a project (agents, other skills,
-`AGENTS.md`/`CLAUDE.md`, `.relay/runner.json`, flow documents) is out of scope and is never
-served by this surface; the flow documents and `.relay/runner.json` are wired by
-`/relay-onboard`, which works step 5 of the board's setup checklist (5.1–5.8). The one local exception
-(RE383): when `.relay/runner.json` is missing, `./relay update` renders a starter one from the
+`AGENTS.md`/`CLAUDE.md`, `.hamaca/runner.json`, flow documents) is out of scope and is never
+served by this surface; the flow documents and `.hamaca/runner.json` are wired by
+`/hamaca-onboard`, which works step 5 of the board's setup checklist (5.1–5.8). The one local exception
+(RE383): when `.hamaca/runner.json` is missing, `./hamaca update` renders a starter one from the
 runner's own template — no endpoint serves it — and reports it under the `config` key
 (`created`, `missing` under `--check`, or `present`). It is never overwritten, never part of
 the scaffold version or manifest, never touched by auto-update, and not behind the in-app-repo
 `--force` refusal. `--base REF` sets the `base` of a runner.json the update creates.
 
-**The project's LLM layout** (RE457). `.relay/runner.json` carries two optional, user-owned
+**The project's LLM layout** (RE457). `.hamaca/runner.json` carries two optional, user-owned
 keys: `skill_dir` (default `.claude/skills`) and `pointer_file` (default `CLAUDE.md`) — the
-defaults are `./relay`'s `DEFAULT_SKILL_DIR` / `DEFAULT_POINTER_FILE`, pinned against the board by
-`setup.runner_config_defaults` in the runner contract fixture, as `./relay`'s `POINTER_LINE` is by
+defaults are `./hamaca`'s `DEFAULT_SKILL_DIR` / `DEFAULT_POINTER_FILE`, pinned against the board by
+`setup.runner_config_defaults` in the runner contract fixture, as `./hamaca`'s `POINTER_LINE` is by
 `setup.pointer_line` (`Hamaca.Setup.pointer_line/0`). The manifest keeps its canonical
-`.claude/skills/…` paths; `./relay update` maps every item under `.claude/skills/` to
+`.claude/skills/…` paths; `./hamaca update` maps every item under `.claude/skills/` to
 `<skill_dir>/…` (`local_scaffold_path`) for its comparison, its install and its report — a skill
 is still **fetched** from its manifest path but written, hashed and reported at the local one, and
-the report carries `skill_dir`. `./relay update --skill-dir DIR --pointer-file FILE` (either flag
+the report carries `skill_dir`. `./hamaca update --skill-dir DIR --pointer-file FILE` (either flag
 alone works) **switches** an existing project to another LLM's layout: it rewrites only those two
 runner.json keys in place, installs the skills under the new dir, removes Hamaca's three old skill
 files (reported as `obsolete`, `removed` on apply — never anything else in the old dir), and
@@ -465,20 +465,20 @@ creates. Board Settings → Agents shows the switch command as a flash when "Mak
 board to an LLM with another skill dir (`Hamaca.Setup.llm_switch_notice/2`); the board never
 changes repo files.
 
-**`./relay update --starter-only [--base REF] [--skill-dir DIR --pointer-file FILE]`** (RE443) writes **only** the user-owned starter
-files, each only when missing: that `.relay/runner.json` and a generic
-`.relay/prepare-worktree.sh` (mode 755, `render_prepare_hook()` — the copy-from-cache-or-main-
+**`./hamaca update --starter-only [--base REF] [--skill-dir DIR --pointer-file FILE]`** (RE443) writes **only** the user-owned starter
+files, each only when missing: that `.hamaca/runner.json` and a generic
+`.hamaca/prepare-worktree.sh` (mode 755, `render_prepare_hook()` — the copy-from-cache-or-main-
 checkout warm-up, generalized over a `WARM=""` list the project fills in; empty, it copies
 nothing and exits 0). No network, no scaffold work, not refused in the Hamaca app repo, never an
 overwrite. Report: `{"config": "created"|"present", "hook": "created"|"present", "applied":
 true}`. The install script runs it right after downloading `./hamaca`, before `./hamaca update`.
 
-**The served `./relay` carries its board's URL** (RE443). The committed file has a placeholder
+**The served `./hamaca` carries its board's URL** (RE443). The committed file has a placeholder
 line `BOARD_URL = ""` right after `RUNNER_FINGERPRINT`; `ScaffoldController.show/2` serves it
 via `Hamaca.Scaffold.fetch(runner_path(layout), layout: layout, board_url: HamacaWeb.Endpoint.url())`
 (`relay` in the legacy layout, `hamaca` in the hamaca one), which rewrites that one
 line to `BOARD_URL = "<url>"` (`Hamaca.Scaffold.bake_board_url/2` / `board_url_line/1`, the ONE
-Elixir regex; `./relay`'s `bake_board_url` / `board_url_of` / `BOARD_URL_RE` are the ONE Python
+Elixir regex; `./hamaca`'s `bake_board_url` / `board_url_of` / `BOARD_URL_RE` are the ONE Python
 parse; the contract fixture's `scaffold.board_url_line_example` pins the two). The URL is the
 endpoint's configured one, never the request's `Host`, because this text gets executed.
 
@@ -498,7 +498,7 @@ endpoint's configured one, never the request's `Host`, because this text gets ex
 - **Fingerprint:** `FINGERPRINT_MASK` masks `RUNNER_VERSION|RUNNER_FINGERPRINT|BOARD_URL`, so a
   baked copy fingerprints the same as the committed one.
 - **Carried across rewrites:** `install_runner` keeps the existing file's non-empty `BOARD_URL`
-  over the one it is installing, so neither `./relay update` nor auto-update ever drops (or
+  over the one it is installing, so neither `./hamaca update` nor auto-update ever drops (or
   repoints) a project's board.
 
 **The install handshake** (RE443). `GET /b/:slug/install` (`HamacaWeb.InstallController`, a
@@ -535,7 +535,7 @@ as `curl -fsSL <host>/b/<slug>/install | sh` with `RELAY_API_KEY` exported, it:
 4. `POST /api/setup/installed` (board key) with `files`: `hamaca`, then every other path in the
    update report's `written` (once, in report order), then the pointer file, `.hamaca/runner.json`,
    `.hamaca/prepare-worktree.sh` and `.gitignore`. That finishes step 4 and activates step 5; the
-   script then prints `Next: open <cli> here and run /relay-onboard`.
+   script then prints `Next: open <cli> here and run /hamaca-onboard`.
 
 The key travels only in the `Authorization` header and is never written to a file. Both
 `/api/setup/*` endpoints refuse a key from another board (`403 wrong_board`); preflight also
@@ -547,7 +547,7 @@ setup (`Hamaca.Setup.target_for_key/1`, RE446): a key minted by **Connect a mach
 that machine's checklist (step 3 reads `"minted for <name> · first authed call …"`), never the
 board's, and a board key never touches a machine's.
 
-**Onboarding reports** (RE445). After the install, step 5 is worked by the `/relay-onboard` skill
+**Onboarding reports** (RE445). After the install, step 5 is worked by the `/hamaca-onboard` skill
 through two more board-key routes on `HamacaWeb.Api.SetupController`, rendered by
 `HamacaWeb.Api.SetupJSON`: `GET /api/setup` answers `{"data": checklist}` — the board name,
 `connect` (true for a connected machine's checklist, RE446: the skill then does 5.1 and a
@@ -570,14 +570,14 @@ no_checklist` ("no guided setup on this board"), `409 not_current` with the curr
 `PUT /api/flows/:key` and enabled) and 5.8 (a card created in `first_card_stage`, or in the first flow stage) itself. The
 wire shape is pinned by the `"setup"` section of `test/fixtures/runner_contract.json`.
 
-The skill reaches those routes only through two `./relay` verbs (v91+). `./relay setup status`
+The skill reaches those routes only through two `./hamaca` verbs (v91+). `./hamaca setup status`
 calls `GET /api/setup` and prints the checklist (`--json` / `--field` give it raw).
-`./relay setup report STEP --status S [--evidence] [--error] [--data JSON]` calls `POST
+`./hamaca setup report STEP --status S [--evidence] [--error] [--data JSON]` calls `POST
 /api/setup/steps/STEP` with only the fields given. `--status` choices are `SETUP_REPORT_STATUSES`,
 pinned equal to `Hamaca.Setup.advance_statuses/0` by the contract fixture. `--data` must be a JSON
 object, checked before the request. Exit codes: **0** success; **3**
 (`SETUP_NO_CHECKLIST_EXIT`, used by nothing else) on `404 no_checklist` from either route — the
-skill's signal to stop and point at `/relay-doctor`; **1** on `409 not_current`, with a stderr line
+skill's signal to stop and point at `/hamaca-doctor`; **1** on `409 not_current`, with a stderr line
 naming `not_current` and the server's `current` step, and on any other API failure.
 
 **The version is derived, never maintained.** `Hamaca.Scaffold.version/1` is the first 12 hex
@@ -594,11 +594,11 @@ behind" is deliberately unsupported.
 **Consequence, accepted deliberately:** publishing is coupled to deploying. A skill fix reaches
 projects only when the app ships. In exchange, the whole publish/marker/drift apparatus is gone.
 
-**`./relay update`** is the one mechanism for getting those files onto disk. **The work list is
+**`./hamaca update`** is the one mechanism for getting those files onto disk. **The work list is
 the verdict:** every item is hashed against the manifest on every run, and "current" means
 nothing needs writing — never a version comparison. That is what makes a deleted *or edited*
 file come back, and what keeps the RE185 steady state honest, since auto-update rewrites
-`./relay` in place without touching `.relay/scaffold.json`, so the marker legitimately lags the
+`./hamaca` in place without touching `.hamaca/scaffold.json`, so the marker legitimately lags the
 bytes. Applying with an empty work list reconciles the marker; `--check` reports and writes
 nothing, ever; `--json` on either. The runner rewrites itself through RE185's verified
 installer (`verify_runner_source` + `install_runner`'s atomic `os.replace` and write ledger),
@@ -614,7 +614,7 @@ An old `bin/relay` running the upgrade installs `./relay` **without the executab
 installer gives mode 755 only to its own path and writes every other item at 644. The one-time
 step is `chmod +x relay && ./relay update`, which also removes the leftover, and the commit must
 carry `relay` as mode 755. From then on the new CLI keeps it that way: `scaffold_status` counts a
-`./relay` whose bytes match but which is not executable as `changed`, so `relay update` reinstalls
+`./hamaca` whose bytes match but which is not executable as `changed`, so `hamaca update` reinstalls
 it through `install_runner` and restores 0o755.
 
 **The rename migration (RE478).** `update` (v94+) also moves an old repo to the Hamaca names in
@@ -644,7 +644,7 @@ written over that runner). Only when something is renamed are two more things li
 `skipped`: pointer files with neither line, and root `.envrc*` files that mention `RELAY_*`
 (still read, so they are the user's to rename). `--starter-only` never migrates.
 
-## Node-job transport (RLY-134, ADR 0006 card 04)
+## Node-job transport (RLY-134)
 
 The first slice of ADR 0006's target shape: a pure REST transport on top of the runs engine
 (W5, `Hamaca.Runs`), board-key auth like the rest of `/api`, no scheduling/dispatch policy —
@@ -656,7 +656,7 @@ that stays server-side.
   `NodeJob` (`Hamaca.Runs.claim_next_job/1`, `SELECT … FOR UPDATE SKIP LOCKED`). Long-polls
   up to ~25s on the `board:<id>:runs` topic when nothing is immediately claimable (`?wait=0`
   short-polls instead); serialises the raw `run` + resolved `vars` W5 already stored, never
-  a worktree path. **Eligibility is three-way (ADR 0006 §5, RE311):** a job is offered when it
+  a worktree path. **Eligibility is three-way (RE311):** a job is offered when it
   is *pinned* to the requesting runner (`runner_name` = its name), OR when that runner
   declares it *holds that card's worktree* (the job is `exclusive` and its `vars.ref` appears in
   the claim's `held` with a state in `Schemas.Runner.active_holding_states/0`), OR when it fits
@@ -700,7 +700,7 @@ that stays server-side.
   `HamacaWeb.Api.NodeJobController`; a body that carries `runner` is current whatever else it
   carries.
 - **Version negotiation (RLY-184).** Every claim and heartbeat carries `runner.version`, the
-  `RUNNER_VERSION` the running `./relay` declares. `claim/2` compares it against
+  `RUNNER_VERSION` the running `./hamaca` declares. `claim/2` compares it against
   `Hamaca.Runs.min_runner_version/0` and answers **409 `runner_outdated`** (with `required`
   and `running`) instead of handing out work — claim is the only call that dispenses jobs, so
   that is the load-bearing check. `nil` counts as outdated: a runner sending no version
@@ -717,14 +717,14 @@ that stays server-side.
 - **Paused plan or read-only on Free (RE460, RE469).** When billing is on and
   `Hamaca.Billing.board_paused?/1` is true — the board's owner is held, or the owner is on Free
   and this board is not their one editable board
-  ([ADR 0013](../adr/0013-free-plan-replaces-the-trial.md)) — every
+  ([ADR 0013](../adr/0013-the-free-plan.md)) — every
   board-key `/api/*` call — claim and heartbeat included — is refused **402 `plan_paused`**
   (`HamacaWeb.PlanPaused`, sent by `HamacaWeb.Plugs.RequireActivePlan`; the message is
   `HamacaWeb.PlanPaused.message/0`, which names both causes), and the board's
-  `Scheduler.Server` dispatches nothing. `./relay` mirrors the code as `PLAN_PAUSED_CODE` (pinned
+  `Scheduler.Server` dispatches nothing. `./hamaca` mirrors the code as `PLAN_PAUSED_CODE` (pinned
   by `claim_refused.plan_paused` in the contract fixture) and never retries the 402. A one-shot
   command exits 1 with `relay: This board's plan is paused. Manage billing at
-  <board>/account/billing`. `relay start` claims with `soft_paused=True`: it logs one
+  <board>/account/billing`. `hamaca start` claims with `soft_paused=True`: it logs one
   `PAUSED: …` line on the transition, waits `poll_timeout` between claims (the 402 answers
   instantly, so this is what keeps it from hot-looping), and logs `plan active again — claiming
   resumed` on the first claim reply that isn't paused. The heartbeat also posts with
@@ -785,13 +785,13 @@ that stays server-side.
   windows: [{label, used_path, resets_path, pause_at}], pause_now: {when, resets_path} | null,
   recheck: {model, interval_min} | null}`, `source` one of `Schemas.HarnessUsage.sources/0`
   (`output` / `command` / `none`). Paths and conditions are a jq subset evaluated by
-  `Schemas.HarnessUsage.Rule` and, line for line, by `./relay`'s `usage_reading` and friends; both
+  `Schemas.HarnessUsage.Rule` and, line for line, by `./hamaca`'s `usage_reading` and friends; both
   pass the contract fixture's `usage_rule_cases`. Seeds: Claude Code reads its stream's
   `rate_limit_event` (5h / 7d), Codex polls its newest rollout file's `token_count` line (5h /
   wk), Gemini CLI is `none`; the `AddUsageToHarnesses` migration backfilled existing boards'
   seeded harnesses from a frozen copy. The `AddHarnessRouting` migration pointed already-queued/claimed agent jobs
   at a frozen Claude Code harness with model `opus`.
-- **Talk rides the same claim, a different transport (RE268 / ADR 0009).** Every
+- **Talk rides the same claim, a different transport (RE268 / ADR 0014).** Every
   `POST /api/node-jobs/claim` reply now carries **`kind`** (`"node"` or `"talk"`), so the
   runner can branch without a second endpoint. A `"talk"` claim carries exactly
   `{id, kind, ref, turn_id, prompt, author, branch, seed, resume_session}` —
@@ -820,7 +820,7 @@ that stays server-side.
 - **Capability inventory (RLY-182).** The runner heartbeat may carry an optional
   `capabilities` payload — `{"agents": [...], "skills": [...]}`, the names this machine can
   actually resolve from its repo `.claude/`, the user-level `~/.claude/`, and the CLI's
-  built-in agents. `./relay`'s `collect_capabilities()` enumerates BOTH `skills/<name>/SKILL.md`
+  built-in agents. `./hamaca`'s `collect_capabilities()` enumerates BOTH `skills/<name>/SKILL.md`
   and `commands/<name>.md`, because a slash command can live in either (`/write-plan` lives
   only in `commands/`). It rides **send-on-change, not every beat**: the runner hashes the
   inventory each beat and includes the key only when the hash differs from the last
@@ -864,7 +864,7 @@ that stays server-side.
   this board's `Hamaca.Runs.counting_runner?/1` runners — RE338) — after `reserve_active_runs`
   has debited its still-`:running` held runs — so the planner never resumes a pinned run onto a
   machine that has stopped counting; without this a parked exclusive run oscillates
-  resume↔reap forever and `relay why` misreports it as "dispatchable" (RLY-199).
+  resume↔reap forever and `hamaca why` misreports it as "dispatchable" (RLY-199).
   The same reaper tick also calls `Hamaca.Runs.close_orphaned_runs/0` — a companion sweep, not
   a runner-liveness check — closing any run still active while its card already sits in a
   terminal-type stage (RLY-233) or has been archived (RE335 — the board's
@@ -912,7 +912,7 @@ Those `sub_tasks` rows are also addressable one at a time (RE355):
 `GET /api/cards/:ref/tasks/:id` (adds `body`), `POST /api/cards/:ref/tasks`
 (`{"tasks": [{title, body}, …]}` — one atomic append after the last task, argument order),
 `PATCH /api/cards/:ref/tasks/:id` (`title` / `body` only) and `DELETE /api/cards/:ref/tasks/:id`
-(later tasks move up one), wrapped by `relay tasks add|list` and `relay task show|update|rm`. None
+(later tasks move up one), wrapped by `hamaca tasks add|list` and `hamaca task show|update|rm`. None
 of them replaces the set, so a surviving row keeps its id — and every `node_executions.sub_task_id`
 bound to it. `done` is not writable there; the toggle route below owns it. Nothing in the engine
 calls these routes yet: `Hamaca.Runs.PlanTasks` still seeds the rows at run start.
@@ -1165,7 +1165,7 @@ refusal clock — it never pre-empts the owner above, which still holds the resu
 `Hamaca.Runs.Scheduler.resume_runs/5` filters on this before its existing human/needs-input
 guards, so it never even considers a Listener-owned park; `Scheduler.explain/2` mirrors the
 same split, surfacing `:awaiting_listener_resume` instead of `:awaiting_capacity` for a
-Listener-owned park so `relay why` stays honest. Without this split, both processes reacted
+Listener-owned park so `hamaca why` stays honest. Without this split, both processes reacted
 to the same card event and whichever won decided whether a resumed agent kept its Claude
 session — the loser silently re-wrote the run underneath the winner.
 
@@ -1180,9 +1180,9 @@ second silent write.
 arrived while the Listener was down is not lost — the scheduler is no longer a backstop for
 `:needs_input`/`:claimed` parks the way it was before this split.
 
-## Runner mode (`relay start`) (RLY-135, ADR 0006 card 05)
+## Runner mode (`hamaca start`) (RLY-135)
 
-`./relay start` is **the only runner mode**: a thin, board-agnostic client of the
+`./hamaca start` is **the only runner mode**: a thin, board-agnostic client of the
 node-job transport above. It knows the Hamaca REST API and how to execute a node-job;
 nothing else — every board-specific fact lives server-side as flow data.
 
@@ -1233,7 +1233,7 @@ compatibility window (until RE482).
   `cleanup-worktree.sh` resolve through `repo_state_path/1` (`repo_state_rel/1` for messages):
   `.hamaca/<name>` if it exists, else `.relay/<name>` if it exists, else — a new file —
   `.hamaca/<name>`, except in an unmigrated repo running as `./relay` that only has a `.relay/`
-  dir, which keeps writing there. Resolved from `ROOT` at call time. Below, `.relay/runner.json`
+  dir, which keeps writing there. Resolved from `ROOT` at call time. Below, `.hamaca/runner.json`
   means whichever of the two this resolves to.
 
 Agent steps run headless Claude, which uses whatever authentication the local Claude CLI has — a
@@ -1241,9 +1241,9 @@ Agent steps run headless Claude, which uses whatever authentication the local Cl
 metered API. Subscription rate limits are the ceiling; when hit, the step is throttled, not
 silently billed to the paid API.
 
-- **Config.** `.relay/runner.json` holds `name` (defaults to
+- **Config.** `.hamaca/runner.json` holds `name` (defaults to
   `<checkout-dir>@<short-host>`, e.g. `relay@Jeremys-MBP`; override per invocation with
-  `relay start --name foo`). **Upgrading past RE305 changes that default**, and because the
+  `hamaca start --name foo`). **Upgrading past RE305 changes that default**, and because the
   name is the exclusive-affinity pin key (see Node-job transport above), runs pinned under the
   old bare-hostname identity park `:runner_gone` instead of resuming. The hop happens
   unattended — auto-update re-execs at a *job* boundary, which is "nothing in flight", not "no
@@ -1258,7 +1258,7 @@ silently billed to the paid API.
   checkout to start would eat the only telling and leave the others (often the one actually
   holding the pins) silent. A `--dry-run` prints the line but does not spend it. To adopt those pins,
   restart the one checkout that owns them with `--name <hostname>` — per invocation, **not** as
-  a `"name"` key in `.relay/runner.json`, which is tracked in git and shared by every
+  a `"name"` key in `.hamaca/runner.json`, which is tracked in git and shared by every
   checkout, so a bare hostname there restores exactly the shared identity this default exists
   to split apart. Per run the recovery depends on where the run already is: while it is still
   **running**, a human baton clears the pin (`Runs.park_claimed/1` nils `pinned_runner_name`,
@@ -1282,7 +1282,7 @@ silently billed to the paid API.
   developer routinely edits. The loader (`load_runner_config`) strips **full-line `//`
   comments** (first non-whitespace characters `//`) before parsing, keeping each stripped line
   as a blank line so JSON error line numbers match the file; trailing `//` and `/* */` are not
-  supported, and a string value containing `//` is never altered. `./relay update` creates the
+  supported, and a string value containing `//` is never altered. `./hamaca update` creates the
   file if missing (RE383, `ensure_runner_config`): `namespace` = the sanitized checkout-dir
   name (fallback `project`), `cache_dir` = `~/.cache/relay/<namespace>`, starter capacity
   `shared_clean` 3 / `exclusive` 2, the `worktrees` block commented out (PAUSE AT is per
@@ -1317,7 +1317,7 @@ silently billed to the paid API.
   post-mortem, which holds its exclusive slot until reclaimed). Both are capped at one line
   per reason per `IDLE_LOG_INTERVAL` (300s, a module constant, deliberately not a config
   key), and a claim re-arms them, so a quiet runner costs ~2 lines per 5 minutes.
-- **Single-process guarantee (RLY-193).** Exactly one `relay start` may run per `{server,
+- **Single-process guarantee (RLY-193).** Exactly one `hamaca start` may run per `{server,
   name}` (the pair the server keys a `Runner` on, `name` defaulting to
   `<checkout-dir>@<short-host>` — RE305, so two checkouts of one project on one machine no
   longer collide on identity, *provided their directories are named differently*) and per
@@ -1339,7 +1339,7 @@ silently billed to the paid API.
   different checkouts — a distinct name gives a distinct identity lock, and a distinct `ROOT`
   gives a distinct namespace lock; what remains unsupported is two runners sharing one
   checkout and name.
-- `./relay update [--check] [--json]` — non-interactive, writes only the six
+- `./hamaca update [--check] [--json]` — non-interactive, writes only the six
   Hamaca-owned files, needs no TTY and no board key.
 - **Worktree namespace (RLY-231: one worktree per card).** `RunnerPool` maps every job's
   `isolation` onto worktrees under the `exec-*` namespace. `shared_clean` jobs share one
@@ -1407,7 +1407,7 @@ silently billed to the paid API.
     `HAMACA_REF`/`HAMACA_BRANCH`/`HAMACA_BASE`/`HAMACA_CACHE_DIR`, each also under its `RELAY_`
     name) with `cwd` set to the new worktree; **a nonzero exit fails the run
     fail-fast** (its stderr becomes the node's failure detail) rather than silently running
-    against a half-warmed tree. Hamaca's own hook, `.relay/prepare-worktree.sh`, is a boring
+    against a half-warmed tree. Hamaca's own hook, `.hamaca/prepare-worktree.sh`, is a boring
     first cut: it copies `deps/`, `_build/`, and `assets/node_modules/` from `cache_dir` (or
     else the main checkout) into the fresh worktree via APFS clonefile copy-on-write
     (`cp -Rc`, falling back to plain `cp -R`), so `mix deps.get` is a no-op and `mix compile`
@@ -1478,12 +1478,12 @@ silently billed to the paid API.
   worktree, keyed only on `(ref, node)` so a re-queued job after a runner restart resolves
   the identical path. It sits under the checkout's own `.gitignore`, so it survives
   `reset_worktree`'s salvage/stash/clean untouched and never gets committed. See
-  [`../../relay.md`](../../relay.md#the-relay_node_scratch-contract) for the
+  [`../../hamaca.md`](../../hamaca.md#the-hamaca_node_scratch-contract) for the
   full contract, including why agents must not invent their own scratch path (RLY-177).
 - **Test database per slot (RLY-213).** Worktree isolation keeps two concurrent runs' files
   apart, but `mix test` for both would otherwise hit the same Postgres database — Ecto's SQL
   sandbox only isolates concurrent tests *within* one BEAM, not across two OS processes.
-  `RunnerPool.partition_for(slot)` (`./relay`) derives `MIX_TEST_PARTITION` from a
+  `RunnerPool.partition_for(slot)` (`./hamaca`) derives `MIX_TEST_PARTITION` from a
   free-list index held by the worktree's registry record at the single point where a node's
   command launches (both `_stream_shell` and `_stream_agent_job`), so every step of a run —
   including the `precommit` gate — sees the same database: each active per-card worktree
@@ -1491,7 +1491,7 @@ silently billed to the paid API.
   shared `exec-clean` is always partition `0`. `config/test.exs` already keys the database
   name off `MIX_TEST_PARTITION`.
 - **Harness command templates (RE433).** An agent node runs whatever command the claim's
-  `harness` defines; `./relay` names no harness (`RunnerHarnessGuardTest` greps it for the seeded
+  `harness` defines; `./hamaca` names no harness (`RunnerHarnessGuardTest` greps it for the seeded
   keys and names). `select_command(harness, resume_session)` picks `resume_command` only when the
   job carries a session **and** the harness has one — otherwise `command` and a fresh start (a
   harness that cannot resume never sees the old session). `expand_command(template, values)` is
@@ -1555,7 +1555,7 @@ silently billed to the paid API.
   (`held`), and the server names the subset whose card has at least one run and no run left in
   `Schemas.Run.active_statuses/0` — with the status needed to choose remove vs retain
   (`Hamaca.Runs.releasable_held/2`) — so `RunnerPool.release_held/2` disposes of them within one
-  heartbeat. Since RE337 `release_held` also carries **human-requested releases**: the runners page's *Release worktree* action appends the card ref to the runner row's `runners.release_requests` (`Hamaca.Runs.request_worktree_release/4`, accepted only while the runner's latest `held` reports the ref `bound`), and the reply (`Hamaca.Runs.release_held/3`) adds `{ref, status: "cancelled"}` — a *remove* disposition (`Schemas.Runner.release_remove_status/0`), never `failed` — for each pending request this beat still reports `bound`. The run stays parked; on resume the runner's `assign()` rebuilds the worktree from the branch. **Clearing rule:** every beat that reports `held` prunes the column in one atomic UPDATE (`upsert_runner/2`) — a request survives only while its ref is reported `bound` or `talk` (teardown deferred under a talk turn); absent (torn down) or `running` (the run resumed first) clears it, so a stale request can never tear down a resumed run's tree. A runner that goes silent keeps its requests until it beats again. No runner change was needed: `RunnerPool.release_held` already refuses a live or talk-attached tree and stashes dirty edits as `auto-salvage <slot>` (never restored). A card with **zero** runs is a talk-only worktree and is never named (ADR 0009 §2:
+  heartbeat. Since RE337 `release_held` also carries **human-requested releases**: the runners page's *Release worktree* action appends the card ref to the runner row's `runners.release_requests` (`Hamaca.Runs.request_worktree_release/4`, accepted only while the runner's latest `held` reports the ref `bound`), and the reply (`Hamaca.Runs.release_held/3`) adds `{ref, status: "cancelled"}` — a *remove* disposition (`Schemas.Runner.release_remove_status/0`), never `failed` — for each pending request this beat still reports `bound`. The run stays parked; on resume the runner's `assign()` rebuilds the worktree from the branch. **Clearing rule:** every beat that reports `held` prunes the column in one atomic UPDATE (`upsert_runner/2`) — a request survives only while its ref is reported `bound` or `talk` (teardown deferred under a talk turn); absent (torn down) or `running` (the run resumed first) clears it, so a stale request can never tear down a resumed run's tree. A runner that goes silent keeps its requests until it beats again. No runner change was needed: `RunnerPool.release_held` already refuses a live or talk-attached tree and stashes dirty edits as `auto-salvage <slot>` (never restored). A card with **zero** runs is a talk-only worktree and is never named (ADR 0014 §2:
   a talk session's tree spans runs and must outlive them), and a `retained` tree is the human's
   post-mortem, the runner's own to evict. This is how taking the baton (ADR 0004, via
   `park_claimed/1`) or cancelling from the run panel stops a running agent without waiting on its
@@ -1595,23 +1595,23 @@ silently billed to the paid API.
   The layout matches the name it runs as (`auto_update_layout/0`, RE478): `./hamaca` fetches
   `<board>/api/scaffold/hamaca?layout=hamaca`; a full runner still running as `./relay` fetches
   `<board>/api/scaffold/relay?layout=legacy` — a full runner, never the hamaca layout's shim —
-  and either way the download is installed over the file it runs as. `relay update` likewise
+  and either way the download is installed over the file it runs as. `hamaca update` likewise
   requests the manifest and every file with `?layout=hamaca` (its runner item is `hamaca`).
-  `download_runner` shares `verify_runner_source` with `relay update` — HTTPS, UTF-8,
+  `download_runner` shares `verify_runner_source` with `hamaca update` — HTTPS, UTF-8,
   a leading `#!`, a `RUNNER_VERSION` parsed **from the downloaded bytes** (authoritative — a
   board ahead of what it serves is then harmless, not a chase), a `compile()` syntax check, and
   (for auto-update only) strictly newer. Verification is deliberately HTTPS + parse only: no
   checksum, no signature. Any rejection logs why and the running version keeps serving; a bad
   update can never leave a machine with a broken runner.
 
-  The install writes the **tracked** `./relay` in place (`os.replace`, so a concurrent
-  `./relay card …` never reads a half-written file). `_safe_to_overwrite` is what makes that
+  The install writes the **tracked** `./hamaca` in place (`os.replace`, so a concurrent
+  `./hamaca card …` never reads a half-written file). `_safe_to_overwrite` is what makes that
   tolerable: untracked or not-a-repo is fine, tracked-and-clean is fine, and tracked-and-dirty is
   allowed **only** when the file's sha256 matches a write recorded in `~/.relay/auto-update.json`
   — otherwise the dirt is a human's uncommitted edit and the update is skipped with a one-time
   log line. That ledger is not a nicety: after the first auto-update the file is permanently
   dirty against HEAD, so a clean-only rule would wedge every later update. The accepted cost is
-  that `./relay` shows as modified in `git status` on the machine running the runner.
+  that `./hamaca` shows as modified in `git status` on the machine running the runner.
 
   The restart stops the heartbeat and the log forwarder, calls `release_runner_locks()` —
   **required**, because RLY-193's flocks belong to open file descriptions that survive `execv`
@@ -1624,15 +1624,15 @@ silently billed to the paid API.
 
 ### Usage limits (RE320 → RE436)
 
-`relay start` stops claiming work **for one harness** once that harness's usage passes the PAUSE
+`hamaca start` stops claiming work **for one harness** once that harness's usage passes the PAUSE
 AT its board rule sets, and resumes by itself. RE320 did this for Claude Code alone, from
-hard-coded event shapes and per-runner `.relay/runner.json` `limits`; RE436 made it generic.
+hard-coded event shapes and per-runner `.hamaca/runner.json` `limits`; RE436 made it generic.
 Reading usage, and deciding when to pause, is now each harness's `usage` rule (Settings → Agents
-→ Harnesses, served by `GET /api/harnesses` — see "Harness routing" above). `./relay` names no
+→ Harnesses, served by `GET /api/harnesses` — see "Harness routing" above). `./hamaca` names no
 CLI, event or window in executable code (`bin/test_relay.py` `RunnerHarnessGuardTest`).
 
 - **Config.** PAUSE AT lives only on the harness (`windows[].pause_at`). There is no per-runner
-  override. `.relay/runner.json` `limits` is retired: `load_runner_config` drops it and logs
+  override. `.hamaca/runner.json` `limits` is retired: `load_runner_config` drops it and logs
   `LIMITS_IGNORED_LINE` once; it never refuses to start. The starter config no longer writes it.
 - **The book.** `cmd_start` keeps a `HarnessUsageBook` (the global `USAGE`): one `UsageLimiter`
   per harness key. `RunnerHeartbeat.refresh_harnesses` hands each successful fetch's raw
@@ -1691,7 +1691,7 @@ CLI, event or window in executable code (`bin/test_relay.py` `RunnerHarnessGuard
   `harnesses` leaves the stored readings alone. The roster derives "rate limited" from these
   readings (see the Rate-limited roster bullet).
 
-### Talk turns (RE268, ADR 0009)
+### Talk turns (RE268, ADR 0014)
 
 The claim loop's `worker()` branches on `job.get("kind")`: a `"talk"` job runs `execute_talk`
 instead of `execute_one`, and `reject()` reports a rejected talk job through
@@ -1751,7 +1751,7 @@ claim/execute/report loop, one more branch.
   **Restart durability of the `talk` marker (accepted gap, RE311).** That marker is in-memory
   only: `recover()` rebuilds every adopted tree with no `talk` key, so after a restart a
   talk-created tree on a card that HAS runs (all terminal) is named by the server and torn down,
-  which ADR 0009 §2 otherwise forbids. The exposure is narrow — an idle talk-only tree has
+  which ADR 0014 §2 otherwise forbids. The exposure is narrow — an idle talk-only tree has
   already been `retained` by `_retire_talk_only_locked`, and `retained` IS disk-marked and
   survives — so it takes a talk turn that was live at crash time, whose `claude` process died
   with the runner anyway; teardown stashes any dirty edits (`_teardown` salvages via
@@ -1779,7 +1779,7 @@ claim/execute/report loop, one more branch.
   tree's identity is the card's branch. See "Adopting the card's own tree" below.) That refusal used to be reported as a
   **failed job**, so someone asking "why did this fail?" during a retry failed the retry. The
   claim loop now retries placement for a bounded window (`PLACEMENT_ATTEMPTS` ×
-  `PLACEMENT_RETRY_S`, ~10s, `./relay`) before rejecting, which covers one talk turn handing
+  `PLACEMENT_RETRY_S`, ~10s, `./hamaca`) before rejecting, which covers one talk turn handing
   the tree back; only a persistent miss is treated as genuine capacity exhaustion. See
   [failures.md](failures.md) E2t.
 
@@ -1795,9 +1795,9 @@ claim/execute/report loop, one more branch.
   than swallowed, so it doesn't silently fall back to a detached tree describing none of the
   card's work.
 - **Prompt.** `talk_prompt(job)` is built in **product code**, not a `.claude/agents/*.md`
-  definition — a recorded exception to ADR 0006 (ADR 0009 §5): Talk is a property of Hamaca
+  definition — a recorded exception to ADR 0006 (ADR 0014 §5): Talk is a property of Hamaca
   itself and must behave identically on every connected repo. It is the preamble (names the
-  pane, the read-only rule, and `./relay why`/`runs`/`card`) + the card's seed fields + the
+  pane, the read-only rule, and `./hamaca why`/`runs`/`card`) + the card's seed fields + the
   human's text, spliced in **verbatim and last** — never passed through `render()`, so a
   person's `{ref}`-shaped typing can never reach into the var namespace.
 - **Event mapping.** `_stream_agent_job` (then `_stream_claude_job`) gained an `on_event=None` callback, invoked with each
@@ -1922,7 +1922,7 @@ unambiguous verdict.
 
 ### What an agent node's prompt is made of
 
-`./relay` composes an agent node's prompt from up to four parts, in this order
+`./hamaca` composes an agent node's prompt from up to four parts, in this order
 (`compose_node_prompt`):
 
 1. **the node's own `run`**, rendered — `{ref}`, `{branch}`, `{relay}` and the rest substituted
@@ -1973,7 +1973,7 @@ The server derives them **live**, never snapshotting them into `run.context`:
   Entries are ordered oldest → newest (`inserted_at`, then `id`).
 - **The rendering** is one entry per comment, separated by a blank line: a header
   `<author> · <YYYY-MM-DD HH:MM> UTC` (tagged ` · CHANGES REQUESTED` or ` · STEER` by kind), the
-  body verbatim, and — when the note carries images — `(N images attached — see ./relay card
+  body verbatim, and — when the note carries images — `(N images attached — see ./hamaca card
   <ref>)`, since images don't travel in a prompt.
 - **Derived at insert, refreshed at claim.** `build_payload/4` computes it for every job it
   builds (agent, shell and gate alike). In the pull model the claim is the real dispatch — a job
@@ -2049,7 +2049,7 @@ working the card and restarts that same node with the note in its guidance.
 
 A flow node of type `agent` may name an `agent` (e.g. `plan-implementer`). The server
 carries it in the job payload (`Hamaca.Runs.build_payload/4` → the claim response's
-`agent`), and `./relay` fills the harness template's `{subagent}` placeholder with it (RE433).
+`agent`), and `./hamaca` fills the harness template's `{subagent}` placeholder with it (RE433).
 The Claude Code harness carries it as an optional `[--agent {subagent}]` segment, so a node with
 an agent runs `claude -p … --agent <name>` and a node without one drops the segment: the agent
 file supplies the system prompt, the node's `run` string stays the user prompt. A harness whose
@@ -2077,7 +2077,7 @@ it to build something it can see is wrong.
 This needed **no engine change**. `needs_input` is decided before any edge is consulted
 (`Hamaca.Runs.Engine`), so it consumes no `max_loops` budget, does not increment the visit count,
 and is not degraded to `:failed`. The command itself reaches every agent node for free —
-`./relay` appends its outcome contract, already rendered, to every agent prompt (see
+`./hamaca` appends its outcome contract, already rendered, to every agent prompt (see
 [What an agent node's prompt is made of](#what-an-agent-nodes-prompt-is-made-of)).
 
 **The human's answer, not the plan, is authoritative for the remainder of the run.** This is a
@@ -2093,7 +2093,7 @@ the edited plan as authoritative — does not work:
   attempt's — `build_payload` exposes no `answer` variable.
 
 So editing the plan mid-run changes nothing any node reads. The answer arrives as a **card
-comment** (`Cards.answer_input/3`) and the resumed reviewer reads it with `relay card <ref>`.
+comment** (`Cards.answer_input/3`) and the resumed reviewer reads it with `hamaca card <ref>`.
 `plan.md` and `card.plan` stay stale by design; any lasting plan correction is a **follow-up
 card**, not a mid-run mutation.
 
@@ -2188,7 +2188,7 @@ server-side by the scheduler and the engine (see "Dispatch is server-side" above
 locally will disagree with the server.
 
 ---
-*Sources of truth: `./relay`, `.relay/runner.json`, `bin/test_relay.py`,
+*Sources of truth: `./hamaca`, `.hamaca/runner.json`, `bin/test_relay.py`,
 `lib/hamaca_web/controllers/api/node_job_controller.ex`, `lib/hamaca/runs.ex`,
 `lib/hamaca_web/controllers/api/board_controller.ex`,
 `lib/hamaca_web/controllers/api/run_controller.ex`,

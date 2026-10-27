@@ -12,8 +12,8 @@ flowchart LR
         engine -- "PubSub run events" --> board
     end
     subgraph dev["Developer machine (or future cloud sandbox)"]
-        exec["./relay runner<br/>(thin: claim job, run, report)"]
-        agent["claude -p<br/>one agent node"]
+        exec["./hamaca runner<br/>(thin: claim job, run, report)"]
+        agent["agent CLI<br/>(Claude Code, Codex or Gemini CLI)<br/>one agent node"]
         repo["project checkout + worktrees<br/>CLAUDE.md · .claude/skills · MCP<br/>(developer-owned)"]
         exec --> agent
         agent --- repo
@@ -40,7 +40,7 @@ One flat `one_for_one` supervisor (`Hamaca.Supervisor`, started by `Hamaca.Appli
 | `Hamaca.Activity.LogSink` | debounces runner log lines into one `insert_all` per burst (RLY-112) |
 | `Hamaca.Activity.Pruner` | ages `:action` chatter out after 14 days; first sweep one interval after boot |
 | `Hamaca.Usage.Tracker` | the only writer of `usage_visits` (RE475): keeps one open visit per signed-in user in memory, fed by `touch/3` casts from `HamacaWeb.UsageTrack` (LiveView hook) and `HamacaWeb.Plugs.UsageTrack` (`:browser` plug) — no DB per touch. Every `Hamaca.Usage.flush_ms/0` (60s) it upserts the dirty visits in one `insert_all` on `(user_id, started_at)`, and issues no query when nothing changed; it traps exits so a graceful shutdown flushes too. Best-effort like `LogSink`: a DB error drops the batch (one `warning`), a crash loses the in-memory visits — at most a minute of usage. Started only when `:usage_tracking` (default `true`, `false` in test, where each test starts its own and points `:usage_tracker` at it). One per node, never merged across nodes — prod runs one machine |
-| `Hamaca.Billing.Clock` | the hourly billing clock (RE460): each tick takes the Postgres advisory lock `Clock.lock_key/0` inside `Repo.checkout/1` (one node runs it; `:skipped` elsewhere) and runs `Hamaca.Billing.run_clock(Date.utc_today(), final_pass?: hour >= Clock.final_pass_hour())` — resolving unknown/overdue-pending attempts with Stripe, then renewals and the grace day's one retry, then the once-only billing emails (card declined, dropped to Free). There is no launch backfill and no first charge after a trial (RE469, [ADR 0013](../adr/0013-free-plan-replaces-the-trial.md)): a Free account is never charged by the clock — it pays by upgrading. The tick rescues; each account is isolated. First tick 5s after boot. Started `enabled: Hamaca.Billing.enabled?()` — with billing off (test, self-hosted) no tick is ever scheduled |
+| `Hamaca.Billing.Clock` | the hourly billing clock (RE460): each tick takes the Postgres advisory lock `Clock.lock_key/0` inside `Repo.checkout/1` (one node runs it; `:skipped` elsewhere) and runs `Hamaca.Billing.run_clock(Date.utc_today(), final_pass?: hour >= Clock.final_pass_hour())` — resolving unknown/overdue-pending attempts with Stripe, then renewals and the grace day's one retry, then the once-only billing emails (card declined, dropped to Free). There is no launch backfill and no first charge after a trial (RE469, [ADR 0013](../adr/0013-the-free-plan.md)): a Free account is never charged by the clock — it pays by upgrading. The tick rescues; each account is isolated. First tick 5s after boot. Started `enabled: Hamaca.Billing.enabled?()` — with billing off (test, self-hosted) no tick is ever scheduled |
 | `Task.Supervisor` (`Hamaca.Push.TaskSupervisor`) | push dispatch off the caller's process (RLY-81) |
 | `Task.Supervisor` (`Hamaca.Billing.TaskSupervisor`) | billing-email delivery off the caller's process (`Hamaca.Billing.Notifier.dispatch/1`, RE464), so a mail-provider failure or stall never reaches the billing clock; inline in test |
 | `Finch` (`Hamaca.Push.APNSFinch`) | dedicated HTTP/2 pool — APNs requires h2; Req's default pool is h1-first |
@@ -54,7 +54,7 @@ One flat `one_for_one` supervisor (`Hamaca.Supervisor`, started by `Hamaca.Appli
 every absolute URL the app generates (install scripts, mail links, the runner's board URL), uses
 it. `PHX_EXTRA_HOSTS` (comma-separated; `relayboard.fly.dev,www.hamaca.app` in prod) names the
 other hostnames that serve the same app. `config/runtime.exs` parses it once — trimmed,
-downcased, blanks dropped — into `:relay, :extra_hosts` (default `[]` in `config/config.exs`;
+downcased, blanks dropped — into `:hamaca, :extra_hosts` (default `[]` in `config/config.exs`;
 never set from the environment in `:test`), and both consumers read that one list:
 
 - the prod endpoint's `check_origin` accepts `//<host>` for `PHX_HOST` and every extra host, so
@@ -173,7 +173,7 @@ the last page seen on screen (else the requested stage) with the `relay:show-sta
 | `events:firehose` | `Hamaca.Events` — mirrors every board event as `{board_id, event}` | every `board:<board_id>` event, tagged with its board id | `Hamaca.Runs.Listener` (reconciles card events against runs — RLY-132; its first rule closes, rather than resumes, an active run whose card has reached a terminal-type stage or been archived — RLY-233, RE335; `{:card_archived, card}` triggers a reconcile) |
 | `runs:capacity` | `Hamaca.Runs.Capacity` | `{:runner_capacity_changed, runner_id}` — broadcast only when a runner's entry actually changes (slots or board id) or is removed; a heartbeat re-advertising the same total is silent (RE402) | every per-board `Hamaca.Runs.Scheduler.Server` |
 | `api_log` | `HamacaWeb.ApiLog` | `{:api_log, entry}` | `Admin.ApiLive` |
-| `card:<card_id>:talk` | `Hamaca.Talk` (RE268 / ADR 0009) | `{:talk_event, event}`, `{:talk_turn_changed, turn}` | the open `BoardLive` whose drawer is on the Talk tab, only while it is |
+| `card:<card_id>:talk` | `Hamaca.Talk` (RE268 / ADR 0014) | `{:talk_event, event}`, `{:talk_turn_changed, turn}` | the open `BoardLive` whose drawer is on the Talk tab, only while it is |
 | `billing:<user_id>` | `Hamaca.Billing` (RE460) — `broadcast_changed/1`, when a plan is cancelled or resumed, the owner picks which board stays editable on Free (`choose_free_board/2`, RE471), a card is saved, a promo code is redeemed, a payment attempt opens or settles (`Hamaca.Billing.Charging`, after each commit), or the superadmin comps / un-comps, holds / lifts a hold, extends or retries the charge from the `/admin/users` side panel (`Hamaca.Billing.Admin`, RE463, after commit); RE469 — and from the web layer when an owner archives a board (`BoardSettingsLive`) or restores one (`BoardLive`), since either moves them against the Free limit | `{:billing_changed, user_id}` — the user's billing standing may have changed; carries no state | `BoardLive` (subscribed to the board owner's topic), `BillingLive` and `BoardsLive` (RE469, the viewer's own topic: plan line, READ-ONLY tiles, picker footer), which re-read `Hamaca.Billing` standing. Does NOT bump `BoardWatch` |
 | `user:<user_id>:notify` | `Hamaca.Push` (RE399) — fire-and-forget, after commit (dropped on rollback); the same `dispatch/2` path as APNs, to every push recipient whether or not they have a device token — a member who muted the board (RE406, `board_members.muted`) still receives this broadcast; only their APNs push is skipped | `{:browser_notification, message}` — `message` = `%{id, kind, title, body, card_ref, board_slug, board_name, card_title}` (`Hamaca.Push.message/2`; `id` is shared by every recipient of one event) | every non-embed authenticated LiveView via `HamacaWeb.BrowserNotify`, which relays it to the client as `push_event "relay:notify"` only from a LiveView showing `message.board_slug` (its `:board` assign — the board or any `/board/:slug/…` sub-page, read at delivery; RE404); other LiveViews (another board, `/boards`, `/admin`) drop it. Does NOT bump `BoardWatch` |
 
@@ -212,7 +212,7 @@ The needs-input round trip (the baton passing to a human and back):
 
 ```mermaid
 sequenceDiagram
-    participant R as runner step (claude -p)
+    participant R as runner step (agent CLI)
     participant API as POST /api/cards/:ref/needs-input
     participant C as Hamaca.Cards
     participant H as human (BoardLive drawer)
@@ -294,7 +294,7 @@ bars, nil once it joins (`Runs.open_region/1`'s rule, read for the whole board i
 `Runs.happy_path/1` still steps from the `fan_out` straight to its `fan_in`, so a card face
 reads "node N of M" against the `fan_out` while the region is open. The full engine rules are in
 [runner.md](runner.md#fan-out-regions-re437); the runner side — concurrent node jobs in one
-worktree — is in [runner.md's worktree pool](runner.md#runner-mode-relay-start-rly-135-adr-0006-card-05).
+worktree — is in [runner.md's worktree pool](runner.md#runner-mode-hamaca-start-rly-135).
 
 ---
 *Sources of truth: `lib/hamaca/application.ex`, `lib/hamaca/events.ex`,

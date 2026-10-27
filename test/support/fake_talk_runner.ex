@@ -1,6 +1,6 @@
 defmodule Hamaca.FakeTalkRunner do
   @moduledoc """
-  RE268 — the test seam ADR 0009 names: claims a talk job the way `relay start` would and
+  RE268 — the test seam ADR 0014 names: claims a talk job the way `relay start` would and
   posts canned event batches through the real `Hamaca.Talk` API. No model, no HTTP, no worktree —
   it covers post -> claim -> append -> render, which is most of the feature's surface.
   """

@@ -3114,7 +3114,7 @@ class RunnerPoolTest(unittest.TestCase):
         self.assertEqual(p.wts[slot]["pending_finish"], "cancelled")
 
     def test_release_held_never_touches_a_talk_only_worktree(self):
-        # ADR 0009 §2: a talk session's tree spans runs. The server never names one (the card
+        # ADR 0014 §2: a talk session's tree spans runs. The server never names one (the card
         # has no runs), and this is the runner-side belt to that server-side brace.
         p = self.pool()
         slot, _ = p.assign_talk("RLY-9")
@@ -10203,7 +10203,7 @@ class RealGitWorktreeTest(unittest.TestCase):
 class TalkBranchCheckoutTest(unittest.TestCase):
     """RE268: `execute_talk`'s reset path (create_or_rebaseline
     + the prepare hook) leaves a freshly-created talk worktree DETACHED at base — the hook only
-    warms the tree, it checks nothing out. ADR 0009's worktree table is explicit: a talk turn
+    warms the tree, it checks nothing out. ADR 0014's worktree table is explicit: a talk turn
     with no live run must land "on the card's branch, or the base branch if it has none." Drives
     real git plumbing (RealGitWorktreeTest's style, above) rather than mocking `subprocess.run`.
     `refs/remotes/origin/<branch>` is what `git_fetch_with_retry` actually leaves behind — this
@@ -13060,7 +13060,7 @@ class NoHardcodedScratchPathTest(unittest.TestCase):
 
 class TalkPromptTest(unittest.TestCase):
     """RE268 — the prompt is built in PRODUCT code, not a .claude/agents definition: a recorded
-    exception to ADR 0006 (ADR 0009 §5), because Talk must behave identically on every board
+    exception to ADR 0006 (ADR 0014 §5), because Talk must behave identically on every board
     regardless of what the connected repo ships."""
 
     def setUp(self):
@@ -13089,7 +13089,7 @@ class TalkPromptTest(unittest.TestCase):
 
 
 class TalkEventMappingTest(unittest.TestCase):
-    """The recorded stream-json seam (ADR 0009 § Testing): assistant text -> :out, tool
+    """The recorded stream-json seam (ADR 0014): assistant text -> :out, tool
     invocations -> a single dim :tool line, a turn error -> :error."""
 
     def _replay(self):
@@ -13234,7 +13234,7 @@ class TalkEventSenderTest(unittest.TestCase):
 
 
 class TalkWorktreeTest(unittest.TestCase):
-    """ADR 0009 §2: a turn always uses the card's exclusive per-card worktree, attaching to the
+    """ADR 0014 §2: a turn always uses the card's exclusive per-card worktree, attaching to the
     live one when there is one. NEVER the shared <ns>-clean tree, which other cards' jobs are
     using."""
 

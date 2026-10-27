@@ -1,6 +1,6 @@
 defmodule Hamaca.TalkTest do
   @moduledoc """
-  RE268 — the transcript store's promises (ADR 0009 § Testing): `seq` strictly increasing with
+  RE268 — the transcript store's promises (ADR 0014): `seq` strictly increasing with
   no gaps, a replayed batch stores and broadcasts nothing new, `clear/1` hides without
   deleting, Stop revokes, and posting a turn creates a claimable talk job.
   """

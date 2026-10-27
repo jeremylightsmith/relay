@@ -42,7 +42,7 @@ defmodule HamacaWeb.PublicBoardLiveTest do
     # surface. Opening a card first is what makes this a real regression guard.
     #
     # RE268 — the public board renders its own `#public-card-modal`, never `card_drawer/1`, so
-    # public viewers get no Talk surface, ever (ADR 0009: Talk is authenticated-member only).
+    # public viewers get no Talk surface, ever (ADR 0014: Talk is authenticated-member only).
     test "offers no Talk surface — public viewers never see the tab", %{conn: conn, board: board, mobile: mobile} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/public")
 

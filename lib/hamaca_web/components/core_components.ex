@@ -4928,7 +4928,7 @@ defmodule HamacaWeb.CoreComponents do
             </script>
             <%!--
               RE268 — the Talk entry point, always in the same place, in every card state
-              (ADR 0009 §6 change 6: "Talk button in the header on every card, shortcut t"). Not
+              (ADR 0014: the Talk button sits in the header of every card, shortcut t). Not
               gated on @archived — Talk stays reachable on an archived (read-only) board; only
               writes are refused there. It IS gated on the drawer breakpoint: the panel it opens
               is desktop-only, so rendering the entry point on a phone was a tap into nothing.
@@ -5726,7 +5726,7 @@ defmodule HamacaWeb.CoreComponents do
               </div>
 
               <%!--
-                RE268 — the Talk pane (ADR 0009). The tab-hide is the OUTER div and nothing else:
+                RE268 — the Talk pane (ADR 0014). The tab-hide is the OUTER div and nothing else:
                 `hidden` there hides the whole subtree at every width, so no viewport rule can
                 override it (`drawer:block` and `hidden` are equal specificity and `drawer:block`
                 sorts later in the built stylesheet — carrying both on the same element, as this

@@ -123,7 +123,7 @@ defmodule HamacaWeb.Api.RunnerContractTest do
     {_run, exclusive_shell} = claim_one(exclusive, %{"exclusive" => 1})
 
     # 5. talk — the person-dispatched shape. Claimed on the SAME endpoint, distinguished only
-    #    by `kind`, which is the whole point of reusing `node_jobs` (ADR 0009).
+    #    by `kind`, which is the whole point of reusing `node_jobs` (ADR 0014).
     talk_author = user
 
     {:ok, talk_card} =

@@ -24,33 +24,8 @@ defmodule Hamaca.DocsTaxonomyTest do
     end
   end
 
-  defp well_formed_status?(nil), do: false
-
-  defp well_formed_status?(line) do
-    line =~ ~r/^(Proposed|Accepted) \(\d{4}-\d{2}-\d{2}\)$/ or
-      line =~ ~r/^Superseded by \d{4} \(\d{4}-\d{2}-\d{2}\)$/
-  end
-
-  # A `Refined by [ADR NNNN](...)` line in an Accepted ADR's Status section records a later ADR
-  # that narrows it without superseding it; an `Amended by [ADR NNNN](...)` line one that replaces
-  # some of its numbered decisions (RE469). The index marks them `, refined by NNNN` /
-  # `, amended by NNNN`, in the order the lines appear.
-  defp later_adr_markers(contents) do
-    status_section =
-      contents
-      |> String.split("\n")
-      |> Enum.drop_while(&(String.trim(&1) != "## Status"))
-      |> Enum.drop(1)
-      |> Enum.take_while(&(not String.starts_with?(&1, "## ")))
-      |> Enum.join("\n")
-
-    for [_, verb, nnnn] <- Regex.scan(~r/^(Refined|Amended) by \[ADR (\d{4})\]/m, status_section),
-        do: "#{String.downcase(verb)} by #{nnnn}"
-  end
-
-  defp expected_index_cell(contents) do
-    Enum.join([status_line(contents) | later_adr_markers(contents)], ", ")
-  end
+  # An ADR is current: Proposed or Accepted, no date (git history is the record).
+  defp well_formed_status?(line), do: line in ["Proposed", "Accepted"]
 
   # Index rows keyed by link target: `| [NNNN](file.md) | Title | Status |` → %{"file.md" => "Status"}.
   defp index_status_cells(index) do
@@ -67,7 +42,7 @@ defmodule Hamaca.DocsTaxonomyTest do
       map = read("docs/README.md")
 
       for home <- [
-            "relay.md",
+            "hamaca.md",
             "priv/docs/",
             "docs/architecture/",
             "docs/adr/",
@@ -115,15 +90,35 @@ defmodule Hamaca.DocsTaxonomyTest do
         assert template =~ section
       end
 
-      assert template =~ "immutable"
+      assert template =~ "Git history is the record"
+      refute template =~ "immutable"
     end
 
-    test "the ADR index records the template and the 0003 exception" do
+    test "the ADR index says ADRs are edited in place or deleted, never appended to" do
       index = read("docs/adr/README.md")
 
-      refute index =~ "| Draft |"
       assert index =~ "TEMPLATE.md"
-      assert index =~ "0003 was amended in place"
+      assert index =~ "edit its ADR in place"
+      assert index =~ "delete the ADR"
+      refute index =~ "immutable"
+      refute index =~ "Known exception"
+    end
+
+    # The user's rule (2026-10-27): ADRs are the decisions that hold today, not a record of how
+    # they changed. Any of these is history that belongs in git, not in the ADR.
+    test "no ADR carries history: as-built, amendment, what-shipped, or later-ADR chains" do
+      history = [
+        ~r/^## (As built|What shipped|Amendment)/m,
+        ~r/^(Refined|Amended|Superseded) by\b/m,
+        ~r/^\*\*Implementation:\*\*/m
+      ]
+
+      offenders =
+        for path <- adr_paths(), body = File.read!(path), re <- history, body =~ re do
+          {Path.basename(path), Regex.source(re)}
+        end
+
+      assert offenders == [], "these ADRs still carry history: #{inspect(offenders)}"
     end
 
     test "every ADR's status line is well-formed" do
@@ -135,17 +130,16 @@ defmodule Hamaca.DocsTaxonomyTest do
         end
 
       assert offenders == [],
-             "these ADRs have a malformed status line (want `Proposed|Accepted (YYYY-MM-DD)` " <>
-               "or `Superseded by NNNN (YYYY-MM-DD)`): #{inspect(offenders)}"
+             "these ADRs have a malformed status line (want `Proposed` or `Accepted`): #{inspect(offenders)}"
     end
 
-    test "the ADR index Status cell mirrors each file's status line exactly, plus any refined-by marker" do
+    test "the ADR index Status cell mirrors each file's status line exactly" do
       rows = index_status_cells(read("docs/adr/README.md"))
 
       offenders =
         for path <- adr_paths(),
             file = Path.basename(path),
-            expected = expected_index_cell(File.read!(path)),
+            expected = status_line(File.read!(path)),
             not Map.has_key?(rows, file) or rows[file] != expected do
           case Map.fetch(rows, file) do
             {:ok, cell} -> "ADR #{file}: index says #{inspect(cell)}, file says #{inspect(expected)}"
@@ -154,14 +148,6 @@ defmodule Hamaca.DocsTaxonomyTest do
         end
 
       assert offenders == [], "the ADR index disagrees with the files: #{inspect(offenders)}"
-    end
-
-    test "the template and the index document the Implementation line and As built section" do
-      for path <- ["docs/adr/TEMPLATE.md", "docs/adr/README.md"] do
-        doc = read(path)
-        assert doc =~ "**Implementation:**", "#{path} should document the `**Implementation:**` line"
-        assert doc =~ "## As built", "#{path} should document the `## As built` section"
-      end
     end
   end
 
@@ -194,13 +180,12 @@ defmodule Hamaca.DocsTaxonomyTest do
       assert adr =~ "../architecture/state.md"
     end
 
-    test "ADR 0007 keeps the decision and the known gaps but not the failure grid" do
+    test "ADR 0007 keeps the decision but not the failure grid" do
       adr = read("docs/adr/0007-card-lifecycle-and-failure-states.md")
 
       assert adr =~ "## Decision"
       assert adr =~ "### The happy path"
       assert adr =~ "### Where the machines meet"
-      assert adr =~ "## Known gaps"
       assert adr =~ "../architecture/failures.md"
 
       refute adr =~ "| A1 |", "the failure grid moved to docs/architecture/failures.md"
@@ -250,25 +235,14 @@ defmodule Hamaca.DocsTaxonomyTest do
 
   describe "the Free plan (RE469)" do
     @adr_0012 "docs/adr/0012-board-owners-pay-up-front.md"
-    @adr_0013 "docs/adr/0013-free-plan-replaces-the-trial.md"
+    @adr_0013 "docs/adr/0013-the-free-plan.md"
 
-    test "ADR 0013 is Accepted and ADR 0012 stays Accepted, amended by 0013" do
-      assert status_line(read(@adr_0013)) == "Accepted (2026-10-25)"
+    test "ADRs 0012 and 0013 are both Accepted, and 0012 no longer describes a trial" do
+      assert status_line(read(@adr_0013)) == "Accepted"
 
       adr_0012 = read(@adr_0012)
-      assert status_line(adr_0012) == "Accepted (2026-10-24)"
-      assert adr_0012 =~ "Amended by [ADR 0013](0013-free-plan-replaces-the-trial.md)"
-    end
-
-    test "the ADR index lists 0013 as Accepted and 0012 as amended by 0013" do
-      index = read("docs/adr/README.md")
-
-      assert index =~ ~r/\[0013\]\(0013-free-plan-replaces-the-trial\.md\).*\| Accepted \(2026-10-25\) \|/
-      assert index =~ ~r/\[0012\]\(0012-board-owners-pay-up-front\.md\).*\| Accepted \(2026-10-24\), amended by 0013 \|/
-    end
-
-    test "the ADR index documents the Amended by line" do
-      assert read("docs/adr/README.md") =~ "Amended by [ADR NNNN]"
+      assert status_line(adr_0012) == "Accepted"
+      refute adr_0012 =~ ~r/\btrial\b/i, "ADR 0012 should say what's true now; the trial is gone"
     end
   end
 
@@ -295,31 +269,25 @@ defmodule Hamaca.DocsTaxonomyTest do
       end
     end
 
-    test "ADR 0001 stays Accepted and records that ADR 0005 refines it" do
+    test "ADR 0001 is Accepted, describes the hybrid app itself, and points at ADR 0005" do
       adr = read(@adr_0001)
 
-      assert adr =~ "Accepted (2026-07-06)"
-      assert adr =~ "Refined by [ADR 0005](0005-mobile-app-scope-and-architecture.md)"
+      assert status_line(adr) == "Accepted"
+      refute adr =~ "thin native wrapper"
+      assert adr =~ "0005-mobile-app-scope-and-architecture.md"
     end
 
-    test "the ADR index lists 0001 as Accepted and refined by 0005, and 0005 as Accepted" do
-      index = read("docs/adr/README.md")
-
-      assert index =~ ~r/0001.*\| Accepted \(2026-07-06\), refined by 0005 \|/
-      assert index =~ ~r/0005.*\| Accepted \(2026-07-16\) \|/
-    end
-
-    test "ADR 0005 records what shipped, names Flutter for Layer 1 and stays Accepted" do
+    test "ADR 0005 lists the native API, names Flutter for Layer 1 and is Accepted" do
       adr = read(@adr_0005)
 
-      assert adr =~ "## What shipped (2026-10-08)"
+      assert adr =~ "## The native API"
       assert adr =~ ~r/^- \*\*Layer 1 .*Flutter/m, "ADR 0005's Layer 1 line should name Flutter"
       refute adr =~ "Native shell (Swift/Kotlin)"
-      assert adr =~ "Accepted (2026-07-16)"
+      assert status_line(adr) == "Accepted"
     end
 
-    test "ADR 0005's What shipped section names every native API route in the router" do
-      shipped = adr_0005_what_shipped()
+    test "ADR 0005's native API section names every native API route in the router" do
+      shipped = adr_0005_native_api()
 
       routes =
         for %{verb: verb, path: path} <- Phoenix.Router.routes(HamacaWeb.Router),
@@ -332,7 +300,7 @@ defmodule Hamaca.DocsTaxonomyTest do
 
       for {verb, path} <- routes do
         assert shipped =~ "#{verb} #{path}",
-               "ADR 0005's What shipped section is missing `#{verb} #{path}`"
+               "ADR 0005's native API section is missing `#{verb} #{path}`"
       end
     end
 
@@ -402,10 +370,10 @@ defmodule Hamaca.DocsTaxonomyTest do
     end
   end
 
-  defp adr_0005_what_shipped do
+  defp adr_0005_native_api do
     adr = read("docs/adr/0005-mobile-app-scope-and-architecture.md")
 
-    case String.split(adr, "## What shipped (2026-10-08)", parts: 2) do
+    case String.split(adr, "## The native API\n", parts: 2) do
       [_, rest] -> rest |> String.split(~r/^## /m, parts: 2) |> hd()
       [_] -> ""
     end

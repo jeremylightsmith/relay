@@ -24,7 +24,7 @@ shipped. Never treat one as a spec, never hand-edit one, and never write a captu
 
 **Client strategy (important for where code goes):** LiveView is the default home for UI and
 real-time logic. The mobile app (Flutter, iOS-first) is a **hybrid** that embeds that LiveView
-for content — see [ADR 0001](docs/adr/0001-client-architecture.md) as refined by
+for content — see [ADR 0001](docs/adr/0001-client-architecture.md) and
 [ADR 0005](docs/adr/0005-mobile-app-scope-and-architecture.md); read both before adding any
 client-side or API surface.
 
