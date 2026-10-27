@@ -13,6 +13,7 @@ import 'package:relay_mobile/features/board/board_screen.dart';
 import 'package:relay_mobile/features/board/last_place.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/boards/current_board.dart';
+import 'package:relay_mobile/features/boards/icon_badge.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
@@ -24,6 +25,7 @@ import 'package:relay_mobile/main.dart';
 import 'needs_you_screen_test.dart' show FakeFeedRepository, makeRow;
 import 'support/fake_auth.dart';
 import 'support/fake_boards.dart';
+import 'support/fake_icon_badge.dart';
 import 'support/fake_push_platform.dart';
 import 'support/fake_push_prefs.dart';
 import 'support/hanging_adapter.dart';
@@ -76,6 +78,8 @@ Future<_Launch> _pumpLaunch(
   InMemoryBoardPrefs? prefs,
   HttpClientAdapter? adapter,
   Map<String, dynamic>? coldNotification,
+  FakeBoardsRepository? boards,
+  FakeIconBadge? iconBadge,
 }) async {
   final auth = ScriptedAuthController();
   final platform = FakePushPlatform()..initial = coldNotification;
@@ -97,13 +101,15 @@ Future<_Launch> _pumpLaunch(
         ),
         lastPlaceStoreProvider.overrideWithValue(store),
         boardsRepositoryProvider.overrideWithValue(
-          FakeBoardsRepository(
-            boards: [
-              makeBoard('relay', name: 'Relay'),
-              makeBoard('mkt', name: 'Marketing site'),
-            ],
-          ),
+          boards ??
+              FakeBoardsRepository(
+                boards: [
+                  makeBoard('relay', name: 'Relay'),
+                  makeBoard('mkt', name: 'Marketing site'),
+                ],
+              ),
         ),
+        iconBadgeProvider.overrideWithValue(iconBadge ?? FakeIconBadge()),
         feedRepositoryProvider.overrideWithValue(
           FakeFeedRepository(
             page: FeedPage(
@@ -553,5 +559,32 @@ void main() {
   test('boardLocation names the stage page, or the first one', () {
     expect(LaunchRestorer.boardLocation(null), '/board');
     expect(LaunchRestorer.boardLocation(30), '/board?stage=30');
+  });
+
+  testWidgets('a resume refetches the boards once and resets the icon badge '
+      '(RE496)', (tester) async {
+    final repo = FakeBoardsRepository(
+      boards: [
+        makeBoard('relay', needsYou: 3),
+        makeBoard('mkt', needsYou: 4, muted: true),
+      ],
+    );
+    final badge = FakeIconBadge();
+    final launch = await _pumpLaunch(tester, boards: repo, iconBadge: badge);
+    launch.auth.resolve(_signedIn);
+    await tester.pumpAndSettle();
+    expect(badge.calls, contains(3));
+    final before = repo.calls;
+
+    repo.boards = [
+      makeBoard('relay', needsYou: 1),
+      makeBoard('mkt', needsYou: 4, muted: true),
+    ];
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(repo.calls, before + 1);
+    expect(badge.calls.last, 1);
   });
 }

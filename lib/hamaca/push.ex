@@ -3,10 +3,17 @@ defmodule Hamaca.Push do
   Push notifications (RLY-81, brief §06): the reason Hamaca is on the phone.
 
   Owns registered devices (`Schemas.DeviceToken`), the recipient fan-out, the
-  APNs payload, the app-icon badge count, and the delivery adapter seam
-  (`Hamaca.Push.Delivery`). A member who muted a board (RE406, `Membership.muted`)
-  gets no APNs push for it but still gets the browser broadcast; the board's cards are
-  left out of their app-icon badge (RE489).
+  APNs payload, and the delivery adapter seam (`Hamaca.Push.Delivery`). A member who
+  muted a board (RE406, `Membership.muted`) gets no alert push for it but still gets the
+  browser broadcast.
+
+  **`Push` does not count the app-icon badge.** Every entry point that builds an APNs
+  payload takes a required `badge_fun: (User.t() -> non_neg_integer())` option and stamps
+  `badge_fun.(recipient)` as `aps.badge`, per recipient, after commit. `Hamaca.Cards` passes
+  `&Hamaca.Cards.needs_you_badge_count/1`, the one badge definition (RE496). A missing
+  `badge_fun` raises `KeyError` in the caller's process, before dispatch, so it is never
+  swallowed. `badge_changed/2` sends the silent, badge-only push that keeps the number fresh
+  when it drops.
 
   **Depends on `Hamaca.Members`/`Hamaca.Repo`, never on `Hamaca.Cards`** — `Cards`
   calls `Push` from `set_status/3`, so a back-dependency would be a boundary
@@ -41,7 +48,7 @@ defmodule Hamaca.Push do
 
   @doc """
   The push-worthy card statuses: entering one of these notifies the board's humans (APNs and
-  the browser), and they are what `needs_you_count/1` counts. This *is*
+  the browser). This *is*
   `Schemas.Card.awaiting_human_statuses/0` — the push policy reuses the awaiting-human set — and
   the web layer's toast templates iterate over it.
   """
@@ -115,50 +122,17 @@ defmodule Hamaca.Push do
   end
 
   @doc """
-  How many cards need `user`: unarchived cards in `:needs_input` or `:in_review`
-  on any non-archived board `user` is a resolved member of **and has not muted**
-  (`Membership.muted == false`), across boards. Stamped onto every push as `aps.badge`.
-
-  Muted boards are left out (RE489, which reverses RE406's original badge rule).
-  Cards are counted **distinctly**: `board_members` has
-  no unique `(board_id, user_id)` index, so a user can hold several rows on one board and a
-  plain join count would count a card once per row. `Boards.set_muted/3` writes every row a
-  user has on the board, so the rows agree on `muted` and the filter holds for all of them.
-
-  **Differs from `Cards.needs_you_feed/1` only by mute.** Both use the same two-status set
-  (ADR 0005) and the same scoping (resolved membership, unarchived card, non-archived
-  board), **except** the in-app feed (and the inbox and switcher counts built on it)
-  includes muted boards and this badge does not. `Push` cannot call `Cards` (that would be
-  a Boundary cycle: `Cards.set_status/3` calls `Push`), so this mirrors
-  `Cards.needs_you_feed/1`'s scoping by hand instead of sharing it. Keep the shared
-  scoping in sync by hand too.
-  """
-  def needs_you_count(%User{id: user_id}) do
-    Repo.one(
-      from(c in Card,
-        join: m in Membership,
-        on: m.board_id == c.board_id,
-        join: b in Board,
-        on: b.id == c.board_id,
-        where: m.user_id == ^user_id,
-        where: m.muted == false,
-        where: c.status in @notification_statuses,
-        where: is_nil(c.archived_at),
-        where: is_nil(b.archived_at),
-        select: count(c.id, :distinct)
-      )
-    )
-  end
-
-  @doc """
   The push trigger: `card` just **entered** `from_status → card.status`, performed
   by `actor`. Notifies every resolved human member of the card's board except the
-  actor, one push per registered device, each stamped with that recipient's own
-  `needs_you_count/1` as the badge.
+  actor, one push per registered device, each stamped with `badge_fun.(recipient)` as the
+  badge.
+
+  `opts[:badge_fun]` is **required** in every clause, the non-push-status one included: it is
+  fetched in the caller's process before dispatch, so a missing one raises `KeyError` here
+  rather than being logged and swallowed by the dispatched task.
 
   A member who muted the board (RE406, `Membership.muted`) still gets the browser
-  broadcast but no APNs push for it, and the muted board's cards are excluded from the
-  badge carried by any other board's push (RE489).
+  broadcast but no APNs push for it.
 
   **Fire-and-forget.** Always returns `:ok` immediately and never raises into the
   caller: the recipient query and the network call run under
@@ -184,16 +158,56 @@ defmodule Hamaca.Push do
   `opts[:config]` overrides the resolved `config/0` — used by tests to inject a broken adapter or
   an unreachable task supervisor without mutating application env (ADR 0009 rule 1).
   """
-  def card_status_changed(card, from_status, actor, opts \\ [])
-
   def card_status_changed(%Card{status: status} = card, _from_status, actor, opts)
       when status in @notification_statuses do
+    badge_fun = Keyword.fetch!(opts, :badge_fun)
     config = Keyword.get_lazy(opts, :config, &config/0)
-    dispatch(config, fn -> notify(card, actor, config) end)
+    dispatch(config, fn -> notify(card, actor, badge_fun, config) end)
     :ok
   end
 
-  def card_status_changed(%Card{}, _from_status, _actor, _opts), do: :ok
+  def card_status_changed(%Card{}, _from_status, _actor, opts) do
+    _badge_fun = Keyword.fetch!(opts, :badge_fun)
+    :ok
+  end
+
+  @doc """
+  The silent, badge-only push (RE496): delivers `%{"aps" => %{"badge" => badge_fun.(user)}}`
+  to every device token of every user `target` resolves to. No alert, no sound, no deep-link
+  keys, and mute does not suppress it: the number must stay right even for a muted board.
+  Nothing is broadcast on the browser-notification topic.
+
+  `target` is a `%User{}`, a list of users (de-duplicated by id), or a `%Board{}` (every
+  resolved human member, invites skipped). Users without device tokens are skipped.
+
+  `opts[:badge_fun]` is required and fetched in the caller's process (a missing one raises
+  `KeyError`); `opts[:config]` overrides `config/0`. Same contract as `card_status_changed/4`:
+  never dispatches inside an open transaction, fire-and-forget, always `:ok`. Call it through
+  `Hamaca.Cards.badge_changed/1`, which supplies the badge definition.
+  """
+  @spec badge_changed(User.t() | [User.t()] | Board.t(), keyword()) :: :ok
+  def badge_changed(target, opts) do
+    badge_fun = Keyword.fetch!(opts, :badge_fun)
+    config = Keyword.get_lazy(opts, :config, &config/0)
+    dispatch(config, fn -> deliver_badges(target, badge_fun, config) end)
+  end
+
+  defp deliver_badges(target, badge_fun, config) do
+    for %User{} = user <- badge_users(target) do
+      case device_tokens(user) do
+        [] ->
+          :ok
+
+        tokens ->
+          payload = %{"aps" => %{"badge" => badge_fun.(user)}}
+          Enum.each(tokens, &config.adapter.deliver(&1, payload))
+      end
+    end
+  end
+
+  defp badge_users(%User{} = user), do: [user]
+  defp badge_users(users) when is_list(users), do: Enum.uniq_by(users, & &1.id)
+  defp badge_users(%Board{} = board), do: board |> recipients(nil) |> Enum.map(& &1.user)
 
   # The whole dispatch decision — including the `start_child` call itself — runs
   # under `safely/1`. `start_child` is a `GenServer.call` to the named
@@ -232,25 +246,25 @@ defmodule Hamaca.Push do
   # One message per event (one `id`, shared by every recipient and both channels): the
   # browser broadcast goes to every recipient; APNs only to those with device tokens
   # who have not muted this board (RE406, `Membership.muted`).
-  defp notify(%Card{} = card, actor, config) do
+  defp notify(%Card{} = card, actor, badge_fun, config) do
     board = Repo.get!(Board, card.board_id)
     message = message(card, board)
 
     for %Membership{user: user} = membership <- recipients(board, actor) do
       Phoenix.PubSub.broadcast(@pubsub, user_topic(user.id), {:browser_notification, message})
-      if !membership.muted, do: deliver_apns(user, message, config)
+      if !membership.muted, do: deliver_apns(user, message, badge_fun, config)
     end
 
     :ok
   end
 
-  defp deliver_apns(%User{} = user, message, config) do
+  defp deliver_apns(%User{} = user, message, badge_fun, config) do
     case device_tokens(user) do
       [] ->
         :ok
 
       tokens ->
-        payload = payload(message, needs_you_count(user))
+        payload = payload(message, badge_fun.(user))
         Enum.each(tokens, &config.adapter.deliver(&1, payload))
     end
   end

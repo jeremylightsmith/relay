@@ -1,6 +1,8 @@
 defmodule Hamaca.PushTest do
   use Hamaca.DataCase, async: true
 
+  import ExUnit.CaptureLog
+
   alias Hamaca.Boards
   alias Hamaca.Cards
   alias Hamaca.Push
@@ -85,78 +87,6 @@ defmodule Hamaca.PushTest do
     end
   end
 
-  describe "needs_you_count/1" do
-    test "counts needs_input and in_review cards across the user's boards" do
-      user = insert(:user)
-      board_a = insert(:board)
-      board_b = insert(:board)
-      insert(:membership, board: board_a, user: user)
-      insert(:membership, board: board_b, user: user)
-
-      stage_a = insert(:stage, board: board_a)
-      stage_b = insert(:stage, board: board_b)
-
-      insert(:card, stage: stage_a, status: :needs_input)
-      insert(:card, stage: stage_a, status: :in_review)
-      insert(:card, stage: stage_b, status: :needs_input)
-
-      assert Push.needs_you_count(user) == 3
-    end
-
-    test "excludes other statuses, archived cards, and boards the user is not on" do
-      user = insert(:user)
-      board = insert(:board)
-      insert(:membership, board: board, user: user)
-      stage = insert(:stage, board: board)
-
-      insert(:card, stage: stage, status: :ready)
-      insert(:card, stage: stage, status: :working)
-
-      insert(:card,
-        stage: stage,
-        status: :in_review,
-        archived_at: DateTime.truncate(DateTime.utc_now(), :second)
-      )
-
-      other_stage = insert(:stage)
-      insert(:card, stage: other_stage, status: :needs_input)
-
-      assert Push.needs_you_count(user) == 0
-    end
-
-    test "an unresolved invite row does not grant a count" do
-      user = insert(:user)
-      board = insert(:board)
-      insert(:membership, board: board, user: nil, email: user.email)
-      stage = insert(:stage, board: board)
-      insert(:card, stage: stage, status: :needs_input)
-
-      assert Push.needs_you_count(user) == 0
-    end
-
-    test "excludes needs_input/in_review cards on an archived board" do
-      user = insert(:user)
-      board = insert(:board, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
-      insert(:membership, board: board, user: user)
-      stage = insert(:stage, board: board)
-
-      insert(:card, stage: stage, status: :needs_input)
-      insert(:card, stage: stage, status: :in_review)
-
-      assert Push.needs_you_count(user) == 0
-    end
-
-    test "a card counts once even when the user has duplicate membership rows on its board" do
-      user = insert(:user)
-      board = insert(:board)
-      insert(:membership, board: board, user: user)
-      insert(:membership, board: board, user: user)
-      insert(:card, stage: insert(:stage, board: board), status: :needs_input)
-
-      assert Push.needs_you_count(user) == 1
-    end
-  end
-
   describe "muted boards (RE406)" do
     # A board with one stage, one `:working` card, and `n` resolved human members.
     defp board_with_members(n) do
@@ -227,18 +157,36 @@ defmodule Hamaca.PushTest do
 
       {:ok, _} = Cards.set_status(card_b, %{status: :needs_input}, :agent)
 
-      assert_received {:push_delivered, "tok-alice", %{"aps" => %{"badge" => 1}}}
+      assert_received {:push_delivered, "tok-alice", %{"aps" => aps} = payload}
+      assert aps["badge"] == 1
+      assert aps["sound"] == Push.sound()
+      assert aps["alert"]["title"] == "Question from the AI"
+      assert payload["kind"] == "needs_input"
+      assert payload["card_ref"] == Cards.ref(board_b, card_b)
+      assert payload["board_slug"] == board_b.slug
     end
 
-    test "muting drops the board from needs_you_count/1; unmuting restores it" do
+    test "the alert badge counts a stalled agent card (RE496)" do
+      %{board: board, card: card, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+      stalled = insert(:card, stage: insert_ai_stage(board: board), status: :working)
+      insert(:card_owner, card: stalled)
+      insert(:activity, card: stalled, type: :failure, text: "agent stopped")
+
+      {:ok, _} = Cards.set_status(card, %{status: :in_review}, :agent)
+
+      assert_received {:push_delivered, "tok-alice", %{"aps" => %{"badge" => 2}}}
+    end
+
+    test "muting drops the board from Cards.needs_you_badge_count/1; unmuting restores it" do
       %{board: board_a, users: [alice]} = board_with_members(1)
       insert(:card, stage: insert(:stage, board: board_a), status: :needs_input)
 
-      assert Push.needs_you_count(alice) == 1
+      assert Cards.needs_you_badge_count(alice) == 1
       mute(alice, board_a)
-      assert Push.needs_you_count(alice) == 0
+      assert Cards.needs_you_badge_count(alice) == 0
       mute(alice, board_a, false)
-      assert Push.needs_you_count(alice) == 1
+      assert Cards.needs_you_badge_count(alice) == 1
     end
 
     test "muting with duplicate membership rows still drops the board from the count" do
@@ -249,7 +197,7 @@ defmodule Hamaca.PushTest do
       insert(:card, stage: insert(:stage, board: board), status: :needs_input)
 
       assert {:ok, true} = Boards.set_muted(user, board.slug, true)
-      assert Push.needs_you_count(user) == 0
+      assert Cards.needs_you_badge_count(user) == 0
     end
 
     test "unmuting a board resumes APNs pushes" do
@@ -272,6 +220,118 @@ defmodule Hamaca.PushTest do
 
       assert_received {:browser_notification, _}
       refute_received {:push_delivered, _, _}
+    end
+  end
+
+  describe "badge_changed/2 (RE496)" do
+    test "a board target sends each member's own badge, badge-only, to every device" do
+      %{board: board, users: [alice, bob, _carol]} = board_with_members(3)
+      with_device(alice, "tok-a1")
+      with_device(alice, "tok-a2")
+      with_device(bob, "tok-b")
+
+      assert :ok = Push.badge_changed(board, badge_fun: fn u -> if u.id == alice.id, do: 7, else: 2 end)
+
+      deliveries =
+        for _ <- 1..3 do
+          assert_received {:push_delivered, token, payload}
+          {token, payload}
+        end
+
+      refute_received {:push_delivered, _, _}
+
+      assert Enum.sort(deliveries) == [
+               {"tok-a1", %{"aps" => %{"badge" => 7}}},
+               {"tok-a2", %{"aps" => %{"badge" => 7}}},
+               {"tok-b", %{"aps" => %{"badge" => 2}}}
+             ]
+
+      for {_token, payload} <- deliveries do
+        assert Map.keys(payload) == ["aps"]
+        assert Map.keys(payload["aps"]) == ["badge"]
+      end
+    end
+
+    test "mute does not suppress it" do
+      %{board: board, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+      mute(alice, board)
+
+      assert :ok = Push.badge_changed(alice, badge_fun: fn _ -> 0 end)
+
+      assert_received {:push_delivered, "tok-alice", %{"aps" => %{"badge" => 0}}}
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "a list target is de-duplicated by user" do
+      %{users: [alice, bob]} = board_with_members(2)
+      with_device(alice, "tok-alice")
+      with_device(bob, "tok-bob")
+
+      assert :ok = Push.badge_changed([alice, alice, bob], badge_fun: fn _ -> 1 end)
+
+      assert_received {:push_delivered, "tok-alice", _}
+      assert_received {:push_delivered, "tok-bob", _}
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "an unresolved invite row on the board gets nothing" do
+      %{board: board, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+      insert(:membership, board: board, user: nil, email: "invitee@example.com")
+
+      assert :ok = Push.badge_changed(board, badge_fun: fn _ -> 1 end)
+
+      assert_received {:push_delivered, "tok-alice", %{"aps" => %{"badge" => 1}}}
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "does not dispatch while inside an open transaction" do
+      %{users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+
+      Repo.transaction(fn ->
+        assert :ok = Push.badge_changed(alice, badge_fun: fn _ -> 1 end)
+      end)
+
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "an exploding adapter never fails the caller" do
+      %{users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-alice")
+      config = %{Push.config() | adapter: Hamaca.Push.Delivery.DoesNotExist}
+
+      log =
+        capture_log(fn ->
+          assert :ok = Push.badge_changed(alice, config: config, badge_fun: fn _ -> 1 end)
+        end)
+
+      assert log =~ "[push] dispatch failed"
+    end
+  end
+
+  describe "badge_fun is required (RE496)" do
+    test "badge_changed/2 without badge_fun raises in the caller" do
+      %{users: [alice]} = board_with_members(1)
+
+      assert_raise KeyError, fn -> Push.badge_changed(alice, []) end
+    end
+
+    test "card_status_changed/4 into a push status without badge_fun raises in the caller" do
+      %{card: card} = board_with_members(1)
+
+      assert_raise KeyError, fn ->
+        Push.card_status_changed(%{card | status: :in_review}, :working, :agent, [])
+      end
+    end
+
+    test "card_status_changed/4 into a non-push status without badge_fun raises too" do
+      %{card: card} = board_with_members(1)
+
+      assert_raise KeyError, fn ->
+        Push.card_status_changed(%{card | status: :working}, :ready, :agent, [])
+      end
     end
   end
 end

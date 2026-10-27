@@ -96,7 +96,7 @@ class _NeedsYouScreenState extends ConsumerState<NeedsYouScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       ref.read(feedControllerProvider.notifier).refresh();
-      unawaited(ref.read(boardsProvider.notifier).refresh());
+      // The boards list refreshes on resume at the app level (main.dart).
     }
   }
 

@@ -439,4 +439,83 @@ void main() {
     );
     expect(find.byType(SnackBar), findsNothing);
   });
+
+  group('BoardRow needs-you pill (RE496)', () {
+    final scheme = RelayTheme.light.colorScheme;
+    const pillKey = Key('board_row_needs_you_alpha');
+
+    Container pill(WidgetTester tester) => tester.widget<Container>(
+      find.descendant(
+        of: find.byKey(pillKey),
+        matching: find.byType(Container),
+      ),
+    );
+    BoxDecoration pillDecoration(WidgetTester tester) =>
+        pill(tester).decoration! as BoxDecoration;
+    Text pillText(WidgetTester tester) => tester.widget<Text>(
+      find.descendant(of: find.byKey(pillKey), matching: find.byType(Text)),
+    );
+
+    testWidgets('an unmuted board with a count draws the amber pill', (
+      tester,
+    ) async {
+      await pumpRow(tester, makeBoard('alpha', needsYou: 2));
+
+      expect(find.byKey(pillKey), findsOneWidget);
+      final text = pillText(tester);
+      expect(text.data, '2 needs you');
+      expect(text.style?.color, RelayTheme.relayNeedsInputText);
+      final decoration = pillDecoration(tester);
+      expect(decoration.color, RelayTheme.relayNeedsInputBg);
+      expect(
+        (decoration.border! as Border).top.color,
+        RelayTheme.relayNeedsInputBorder,
+      );
+    });
+
+    testWidgets('a muted board with a count draws the same pill in grey', (
+      tester,
+    ) async {
+      await pumpRow(tester, makeBoard('alpha', needsYou: 4, muted: true));
+
+      expect(find.byKey(pillKey), findsOneWidget);
+      final text = pillText(tester);
+      expect(text.data, '4 needs you');
+      expect(text.style?.color, scheme.onSurface.withValues(alpha: 0.45));
+      expect(text.style?.fontSize, 10);
+      expect(text.style?.fontFamily, 'monospace');
+      expect(text.style?.fontWeight, FontWeight.w600);
+      final decoration = pillDecoration(tester);
+      expect(decoration.color, scheme.surfaceContainerHigh);
+      expect((decoration.border! as Border).top.color, scheme.outlineVariant);
+      expect(decoration.borderRadius, BorderRadius.circular(5));
+      expect(
+        pill(tester).padding,
+        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      );
+    });
+
+    for (final muted in [true, false]) {
+      testWidgets('a 0 count draws no pill (muted: $muted)', (tester) async {
+        await pumpRow(tester, makeBoard('alpha', muted: muted));
+
+        expect(find.byKey(pillKey), findsNothing);
+      });
+    }
+
+    testWidgets('a muted current row keeps its ✓, bell and star', (
+      tester,
+    ) async {
+      await pumpRow(
+        tester,
+        makeBoard('alpha', needsYou: 4, muted: true),
+        current: true,
+      );
+
+      expect(find.byKey(pillKey), findsOneWidget);
+      expect(find.byKey(const Key('board_row_current_alpha')), findsOneWidget);
+      expect(find.byKey(const Key('board_row_mute_alpha')), findsOneWidget);
+      expect(find.byKey(const Key('board_row_star_alpha')), findsOneWidget);
+    });
+  });
 }

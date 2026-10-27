@@ -5,8 +5,9 @@ import '../board_summary.dart';
 
 /// One board in the switcher sheet (SWITCH-01) and on Choose a board (BOARDS-00)
 /// — the same row in both places, as card mockup "B — always in one board,
-/// switch from the title" draws it: name, an amber "N needs you" badge (absent
-/// at 0), a ✓ on the current board, and (Choose a board only) the meta line.
+/// switch from the title" draws it: name, an "N needs you" badge (absent at 0;
+/// amber, or neutral grey on a muted board — RE496), a ✓ on the current board,
+/// and (Choose a board only) the meta line.
 ///
 /// The top line ends with a 44px star tap target (RE396, card mockup "B — native
 /// Switch board sheet: same order, star at far right of each row"): a neutral
@@ -81,6 +82,7 @@ class BoardRow extends StatelessWidget {
                     _NeedsYouBadge(
                       key: Key('board_row_needs_you_${board.slug}'),
                       count: board.needsYouCount,
+                      muted: board.muted,
                     ),
                   if (current)
                     Padding(
@@ -194,28 +196,45 @@ class _MuteButton extends StatelessWidget {
 }
 
 /// The mockup's `badge-soft badge-warning font-mono` — the same amber trio the
-/// NEEDS INPUT pill uses.
+/// NEEDS INPUT pill uses — for a board that counts toward the app-icon badge.
+///
+/// A [muted] board's pill keeps its text and shape but turns neutral grey (RE496,
+/// card mockup "A — muted board's needs-you pill turns grey; icon badge = sum of
+/// amber pills"): `bg-base-200 border-base-300 text-base-content/45`, so the
+/// amber pills are exactly what the icon badge adds up.
 class _NeedsYouBadge extends StatelessWidget {
-  const _NeedsYouBadge({super.key, required this.count});
+  const _NeedsYouBadge({super.key, required this.count, required this.muted});
 
   final int count;
+  final bool muted;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: RelayTheme.relayNeedsInputBg,
-        border: Border.all(color: RelayTheme.relayNeedsInputBorder),
+        color: muted
+            ? scheme
+                  .surfaceContainerHigh // base-200
+            : RelayTheme.relayNeedsInputBg,
+        border: Border.all(
+          color: muted
+              ? scheme
+                    .outlineVariant // base-300
+              : RelayTheme.relayNeedsInputBorder,
+        ),
         borderRadius: BorderRadius.circular(5),
       ),
       child: Text(
         '$count needs you',
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 10,
           fontFamily: 'monospace',
           fontWeight: FontWeight.w600,
-          color: RelayTheme.relayNeedsInputText,
+          color: muted
+              ? scheme.onSurface.withValues(alpha: 0.45)
+              : RelayTheme.relayNeedsInputText,
         ),
       ),
     );

@@ -66,10 +66,13 @@ defmodule HamacaWeb.Api.AllController do
 
   # RE406 — the native switcher's mute: sets (never toggles) the caller's per-board APNs mute via
   # Boards.set_muted/3. A narrow addition to ADR 0005's native API. The body is validated
-  # before the membership lookup.
+  # before the membership lookup. RE496: a mute changes the caller's app-icon badge, so they
+  # (only) get the silent badge-only push with the fresh count.
   def mute(conn, %{"slug" => slug} = params) do
     with {:ok, muted} <- muted_param(params),
          {:ok, muted} <- Boards.set_muted(conn.assigns.current_user, slug, muted) do
+      :ok = Cards.badge_changed(conn.assigns.current_user)
+
       conn
       |> put_view(json: BoardListJSON)
       |> render(:mute, slug: slug, muted: muted)

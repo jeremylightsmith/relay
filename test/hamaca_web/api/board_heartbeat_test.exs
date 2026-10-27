@@ -54,6 +54,71 @@ defmodule HamacaWeb.Api.BoardHeartbeatTest do
     assert DateTime.after?(stamped, before)
   end
 
+  # RE496: a stalled agent's next heartbeat resolves the stall, so the badge drops — one silent
+  # badge-only push per beat that revived a :stale card. A live → live beat sends nothing.
+  describe "stall resolves (RE496)" do
+    setup %{board: board} do
+      member = insert(:user)
+      insert(:membership, board: board, user: member)
+      {:ok, _} = Hamaca.Push.register_device(member, "tok-m")
+      %{ai_stage: insert_ai_stage(board: board)}
+    end
+
+    defp ago(seconds), do: DateTime.utc_now() |> DateTime.add(-seconds, :second) |> DateTime.truncate(:second)
+
+    defp agent_card(stage, ref_number, heartbeat_at) do
+      card = insert(:card, stage: stage, status: :working, ref_number: ref_number, agent_heartbeat_at: heartbeat_at)
+      insert(:card_owner, card: card)
+      card
+    end
+
+    defp stale_card(stage, ref_number) do
+      card = agent_card(stage, ref_number, ago(180))
+      insert(:activity, card: card, type: :action, text: "reindexing", inserted_at: ago(180))
+      card
+    end
+
+    test "a live card's beats push nothing", %{conn: conn, ai_stage: ai_stage} do
+      agent_card(ai_stage, 3, ago(0))
+
+      for _ <- 1..3 do
+        assert %{"stamped" => 1} = json_response(beat(conn, ["RL3"]), 200)
+      end
+
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "the beat that revives a stale card pushes the badge once", %{conn: conn, ai_stage: ai_stage} do
+      stale_card(ai_stage, 3)
+
+      assert %{"stamped" => 1} = json_response(beat(conn, ["RL3"]), 200)
+      assert_received {:push_delivered, "tok-m", payload}
+      assert payload == %{"aps" => %{"badge" => 0}}
+      refute_received {:push_delivered, _, _}
+
+      assert %{"stamped" => 1} = json_response(beat(conn, ["RL3"]), 200)
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "one beat reviving two stale cards pushes once", %{conn: conn, ai_stage: ai_stage} do
+      stale_card(ai_stage, 3)
+      stale_card(ai_stage, 4)
+
+      assert %{"stamped" => 2} = json_response(beat(conn, ["RL3", "RL4"]), 200)
+      assert_received {:push_delivered, "tok-m", payload}
+      assert payload == %{"aps" => %{"badge" => 0}}
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "a stopped card is not resolved by a heartbeat", %{board: board, ai_stage: ai_stage} do
+      card = agent_card(ai_stage, 3, ago(180))
+      insert(:activity, card: card, type: :failure, text: "agent stopped", inserted_at: ago(180))
+
+      assert {1, nil} = Cards.touch_heartbeats(board, ["RL3"])
+      refute_received {:push_delivered, _, _}
+    end
+  end
+
   test "an unauthenticated POST is rejected with 401" do
     conn =
       build_conn()

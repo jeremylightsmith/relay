@@ -1832,4 +1832,160 @@ defmodule Hamaca.CardsTest do
   defp activities(card) do
     Repo.all(from a in Schemas.Activity, where: a.card_id == ^card.id, order_by: a.id)
   end
+
+  describe "needs_you_badge_count/1 (RE496)" do
+    # A board the user is a resolved member of, with one default (queue) stage.
+    defp member_board(user, attrs \\ []) do
+      board = insert(:board, attrs)
+      insert(:membership, board: board, user: user)
+      %{board: board, stage: insert(:stage, board: board)}
+    end
+
+    # RLY-148's stopped agent: an AI stage, a :working card with an AI owner, a :failure entry.
+    defp insert_stopped_card(board) do
+      card = insert(:card, stage: insert_ai_stage(board: board), status: :working)
+      insert(:card_owner, card: card)
+      insert(:activity, card: card, type: :failure, text: "agent stopped")
+      card
+    end
+
+    defp mute_board(user, board, muted) do
+      {:ok, ^muted} = Hamaca.Boards.set_muted(user, board.slug, muted)
+    end
+
+    test "counts needs_input, in_review and a stopped agent card" do
+      user = insert(:user)
+      %{board: board, stage: stage} = member_board(user)
+      insert(:card, stage: stage, status: :needs_input)
+      insert(:card, stage: stage, status: :in_review)
+      insert_stopped_card(board)
+
+      assert Cards.needs_you_badge_count(user) == 3
+    end
+
+    test "counts a stale agent card" do
+      user = insert(:user)
+      %{board: board} = member_board(user)
+      card = insert(:card, stage: insert_ai_stage(board: board), status: :working, agent_heartbeat_at: nil)
+      insert(:card_owner, card: card)
+      quiet = DateTime.utc_now() |> DateTime.add(-3 * 60, :second) |> DateTime.truncate(:second)
+      insert(:activity, card: card, type: :action, text: "reindexing", inserted_at: quiet)
+
+      assert Cards.needs_you_badge_count(user) == 1
+    end
+
+    test "leaves out a muted board, and counts it again once unmuted" do
+      user = insert(:user)
+      %{stage: stage_a} = member_board(user)
+      %{board: board_b, stage: stage_b} = member_board(user)
+      insert(:card, stage: stage_a, status: :needs_input)
+      insert(:card, stage: stage_b, status: :in_review)
+
+      mute_board(user, board_b, true)
+      assert Cards.needs_you_badge_count(user) == 1
+
+      mute_board(user, board_b, false)
+      assert Cards.needs_you_badge_count(user) == 2
+    end
+
+    test "excludes other statuses, archived cards, other boards and ready-awaiting-human" do
+      user = insert(:user)
+      %{board: board, stage: stage} = member_board(user)
+      human_work = insert(:stage, board: board, type: :work, category: :in_progress)
+      done = insert(:stage, board: board, type: :done, category: :complete)
+      insert(:card, stage: stage, status: :working)
+      insert(:card, stage: done, status: :ready)
+      insert(:card, stage: stage, status: :needs_input, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      insert(:card, stage: insert(:stage), status: :needs_input)
+      insert(:card, stage: human_work, status: :ready)
+
+      assert Cards.needs_you_rollup(board).awaiting_human == 1
+      assert Cards.needs_you_badge_count(user) == 0
+    end
+
+    test "an unresolved invite row does not grant a count" do
+      user = insert(:user)
+      board = insert(:board)
+      insert(:membership, board: board, user: nil, email: user.email)
+      insert(:card, stage: insert(:stage, board: board), status: :needs_input)
+
+      assert Cards.needs_you_badge_count(user) == 0
+    end
+
+    test "excludes needs_input/in_review cards on an archived board" do
+      user = insert(:user)
+      %{stage: stage} = member_board(user, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
+      insert(:card, stage: stage, status: :needs_input)
+      insert(:card, stage: stage, status: :in_review)
+
+      assert Cards.needs_you_badge_count(user) == 0
+    end
+
+    test "duplicate membership rows count the board once, and muting drops it" do
+      user = insert(:user)
+      %{board: board, stage: stage} = member_board(user)
+      insert(:membership, board: board, user: user)
+      insert(:card, stage: stage, status: :needs_input)
+
+      assert Cards.needs_you_badge_count(user) == 1
+
+      mute_board(user, board, true)
+      assert Cards.needs_you_badge_count(user) == 0
+    end
+
+    test "equals the sum of the unmuted switcher rows' needs_you_two_type" do
+      user = insert(:user)
+      %{board: board_a, stage: stage_a} = member_board(user)
+      insert(:card, stage: stage_a, status: :needs_input)
+      insert(:card, stage: stage_a, status: :in_review)
+      insert_stopped_card(board_a)
+
+      %{board: board_b, stage: stage_b} = member_board(user)
+      insert(:card, stage: stage_b, status: :needs_input)
+      mute_board(user, board_b, true)
+
+      %{stage: stage_c} = member_board(user)
+      insert(:card, stage: stage_c, status: :in_review)
+
+      switcher_sum =
+        user
+        |> Cards.list_board_summaries()
+        |> Enum.reject(& &1.muted?)
+        |> Enum.map(& &1.needs_you_two_type)
+        |> Enum.sum()
+
+      assert Cards.needs_you_badge_count(user) == switcher_sum
+      assert switcher_sum == 4
+    end
+
+    test "mute leaves the needs-you feed and the web's three-type count alone" do
+      user = insert(:user)
+      %{board: board, stage: stage} = member_board(user)
+      card = insert(:card, stage: stage, status: :needs_input)
+      human_work = insert(:stage, board: board, type: :work, category: :in_progress)
+      insert(:card, stage: human_work, status: :ready)
+      mute_board(user, board, true)
+
+      assert card.id in Enum.map(Cards.needs_you_feed(user), & &1.card.id)
+
+      assert [%{needs_you_count: 2, needs_you_two_type: 1, muted?: true}] =
+               Enum.filter(Cards.list_board_summaries(user), &(&1.board.id == board.id))
+    end
+  end
+
+  describe "badge_changed/1 (RE496)" do
+    test "sends the user a badge-only push carrying needs_you_badge_count/1" do
+      user = insert(:user)
+      board = insert(:board)
+      insert(:membership, board: board, user: user)
+      insert(:card, stage: insert(:stage, board: board), status: :needs_input)
+      {:ok, _} = Hamaca.Push.register_device(user, "tok-a")
+
+      assert :ok = Cards.badge_changed(user)
+
+      assert_received {:push_delivered, "tok-a", payload}
+      assert payload == %{"aps" => %{"badge" => 1}}
+      refute_received {:push_delivered, _, _}
+    end
+  end
 end

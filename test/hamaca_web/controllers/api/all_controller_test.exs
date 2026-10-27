@@ -343,6 +343,44 @@ defmodule HamacaWeb.Api.AllControllerTest do
       assert Hamaca.Repo.get_by!(Schemas.Membership, user_id: other.id, board_id: zeta.id).muted == false
     end
 
+    # RE496: muting or unmuting changes the app-icon badge, so the caller (only) gets a silent
+    # badge-only push carrying the fresh count.
+    test "mute then unmute pushes the caller's fresh badge, in order", %{conn: conn, user: user} do
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
+      insert(:card, stage: insert(:stage, board: alpha), status: :in_review)
+      {:ok, _} = Hamaca.Push.register_device(user, "tok-u")
+
+      assert conn |> post(~p"/api/all/boards/#{alpha.slug}/mute", %{"muted" => true}) |> json_response(200)
+      assert_received {:push_delivered, "tok-u", payload}
+      assert payload == %{"aps" => %{"badge" => 0}}
+
+      assert conn |> post(~p"/api/all/boards/#{alpha.slug}/mute", %{"muted" => false}) |> json_response(200)
+      assert_received {:push_delivered, "tok-u", payload}
+      assert payload == %{"aps" => %{"badge" => 1}}
+
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "muting one board leaves the other board's count in the badge", %{conn: conn, user: user} do
+      alpha = member_board(user, "AAA", unique_slug("alpha"))
+      beta = member_board(user, "BBB", unique_slug("beta"))
+      insert(:card, stage: insert(:stage, board: alpha), status: :needs_input)
+      insert(:card, stage: insert(:stage, board: beta), status: :in_review)
+      {:ok, _} = Hamaca.Push.register_device(user, "tok-u")
+
+      assert conn |> post(~p"/api/all/boards/#{beta.slug}/mute", %{"muted" => true}) |> json_response(200)
+      assert_received {:push_delivered, "tok-u", payload}
+      assert payload == %{"aps" => %{"badge" => 1}}
+    end
+
+    test "a non-member slug answers 404 and pushes nothing", %{conn: conn, user: user} do
+      zeta = member_board(insert(:user), "ZZZ", unique_slug("zeta"))
+      {:ok, _} = Hamaca.Push.register_device(user, "tok-u")
+
+      assert conn |> post(~p"/api/all/boards/#{zeta.slug}/mute", %{"muted" => true}) |> json_response(404)
+      refute_received {:push_delivered, _, _}
+    end
+
     test "401 without a bearer token" do
       assert build_conn()
              |> post(~p"/api/all/boards/alpha/mute", %{"muted" => true})

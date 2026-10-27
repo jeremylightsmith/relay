@@ -6,18 +6,21 @@ import 'package:relay_mobile/features/boards/board_summary.dart';
 import 'package:relay_mobile/features/boards/boards_controller.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/boards/current_board.dart';
+import 'package:relay_mobile/features/boards/icon_badge.dart';
 import 'package:relay_mobile/features/needs_you/feed_controller.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 import 'package:relay_mobile/features/needs_you/models/feed_row.dart';
 
 import 'needs_you_screen_test.dart' show FakeFeedRepository, makeRow;
 import 'support/fake_boards.dart';
+import 'support/fake_icon_badge.dart';
 
 ProviderContainer containerWith({
   required FakeBoardsRepository repo,
   InMemoryBoardPrefs? prefs,
   String? token = 'relayu_t',
   FakeFeedRepository? feed,
+  FakeIconBadge? iconBadge,
 }) {
   final c = ProviderContainer(
     overrides: [
@@ -25,6 +28,7 @@ ProviderContainer containerWith({
       boardPrefsProvider.overrideWithValue(prefs ?? InMemoryBoardPrefs()),
       authTokenProvider.overrideWithValue(token),
       feedRepositoryProvider.overrideWithValue(feed ?? FakeFeedRepository()),
+      iconBadgeProvider.overrideWithValue(iconBadge ?? FakeIconBadge()),
     ],
   );
   addTearDown(c.dispose);
@@ -267,6 +271,60 @@ void main() {
       await c.read(boardsProvider.notifier).toggleMute('beta');
 
       expect(slugs(c), ['alpha']);
+    });
+  });
+
+  group('icon badge (RE496)', () {
+    List<BoardSummary> threeBoards() => [
+      makeBoard('a', needsYou: 3),
+      makeBoard('b', needsYou: 2),
+      makeBoard('c', needsYou: 4, muted: true),
+    ];
+
+    test('a load sets the badge to the unmuted boards\' sum', () async {
+      final badge = FakeIconBadge();
+      final c = containerWith(
+        repo: FakeBoardsRepository(boards: threeBoards()),
+        prefs: InMemoryBoardPrefs('a'),
+        iconBadge: badge,
+      );
+
+      await c.read(boardsProvider.future);
+
+      expect(badge.calls, [5]);
+    });
+
+    test('a mute recomputes the badge right after', () async {
+      final badge = FakeIconBadge();
+      final repo = FakeBoardsRepository(boards: threeBoards())
+        ..onMute = (r) => r.boards = [
+          makeBoard('a', needsYou: 3),
+          makeBoard('b', needsYou: 2, muted: true),
+          makeBoard('c', needsYou: 4, muted: true),
+        ];
+      final c = containerWith(
+        repo: repo,
+        prefs: InMemoryBoardPrefs('a'),
+        iconBadge: badge,
+      );
+      await c.read(boardsProvider.future);
+
+      await c.read(boardsProvider.notifier).toggleMute('b');
+
+      expect(badge.calls.last, 3);
+    });
+
+    test('a failed load never sets the badge', () async {
+      final badge = FakeIconBadge();
+      final c = containerWith(
+        repo: FakeBoardsRepository(error: const ApiException('offline')),
+        prefs: InMemoryBoardPrefs('a'),
+        iconBadge: badge,
+      );
+
+      await expectLater(c.read(boardsProvider.future), throwsA(anything));
+
+      expect(badge.calls, isEmpty);
     });
   });
 }

@@ -53,6 +53,14 @@ import UserNotifications
         }
         UserDefaults.standard.set(epochMs.int64Value, forKey: Self.primingDeferredAtKey)
         result(nil)
+      case "setBadgeCount":
+        guard let args = call.arguments as? [String: Any],
+              let count = args["count"] as? NSNumber else {
+          result(FlutterError(code: "bad_args", message: "count is required", details: nil))
+          return
+        }
+        self?.setBadgeCount(count.intValue)
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -90,6 +98,19 @@ import UserNotifications
     DispatchQueue.main.async {
       self.tokenCompletion = { token in result(token) }
       UIApplication.shared.registerForRemoteNotifications()
+    }
+  }
+
+  /// The app-icon badge the app computes from its boards list (RE496): Σ
+  /// needs-you over unmuted boards; 0 clears it. Needs the `.badge`
+  /// authorization requested below — without it iOS ignores the call.
+  private func setBadgeCount(_ count: Int) {
+    if #available(iOS 16.0, *) {
+      UNUserNotificationCenter.current().setBadgeCount(count)
+    } else {
+      DispatchQueue.main.async {
+        UIApplication.shared.applicationIconBadgeNumber = count
+      }
     }
   }
 

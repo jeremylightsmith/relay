@@ -24,6 +24,22 @@ defmodule HamacaWeb.BoardArchiveReadOnlyTest do
       refute has_element?(home, "#board-card-#{board.slug}")
       assert Schemas.Board |> Hamaca.Repo.get!(board.id) |> Schemas.Board.archived?()
     end
+
+    # RE496: archiving a board drops its cards out of every member's badge — one silent push.
+    test "Archive sends the owner a badge-only push with the fresh count", %{conn: conn, user: user} do
+      {:ok, board} = Boards.create_board(user, %{name: "Retire me"})
+      insert(:card, stage: hd(board.stages), status: :needs_input)
+      {:ok, _} = Hamaca.Push.register_device(user, "tok-u")
+      assert Cards.needs_you_badge_count(user) == 1
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      assert {:error, {:live_redirect, %{to: "/boards"}}} =
+               view |> element("#archive-board-button") |> render_click()
+
+      assert_received {:push_delivered, "tok-u", payload}
+      assert payload == %{"aps" => %{"badge" => 0}}
+    end
   end
 
   describe "a read-only archived board" do

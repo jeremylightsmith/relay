@@ -133,9 +133,9 @@ sharing behavior.
   The **per-board push mute** (RE406) lives beside it (`board_members.muted`, also never cast):
   one flag per member per board, written only by `set_muted/3`, which mirrors `set_starred/3`
   (sets, never toggles; only the caller's own row; `{:error, :not_found}` without a resolved
-  membership). A muted member gets no APNs push for that board, and the board's cards are left
-  out of the app-icon badge (`Push.needs_you_count/1`, RE489); browser notifications and the
-  in-app needs-you counts (feed, tab badge, switcher) are unaffected. Muting never moves a row
+  membership). A muted member gets no alert push for that board, and the board's cards are left
+  out of the app-icon badge (`Cards.needs_you_badge_count/1`, RE496); browser notifications and
+  the in-app needs-you counts (feed, tab badge, switcher) are unaffected. Muting never moves a row
   in the display order.
 - **Examples** (`Hamaca.Examples`, RE444) — the public, read-only example board for each
   template: **Streaks (bare-minimum)** `ST`, **Pantry (design-led)** `PA` and **Tiny Dungeon
@@ -486,7 +486,9 @@ sharing behavior.
   (RE395) and per-board push `muted?` (RE406) — is `Hamaca.Cards.list_board_summaries/1` (RE376), the one definition both the web
   boards home (`HamacaWeb.BoardsLive`) and the native board switcher read. Its rows come in
   `Boards.list_boards_for_display/1` order (starred first, then A–Z), so both surfaces agree
-  on order and flag by construction. The switcher's list is **`GET /api/all/boards`** on the
+  on order and flag by construction. The app-icon badge, `Cards.needs_you_badge_count/1` (RE496),
+  is the sum of `needs_you_two_type` over the user's **unmuted** rows (one per board, duplicate
+  membership rows collapsed), so it always equals the switcher's amber pills. The switcher's list is **`GET /api/all/boards`** on the
   `/api/all` user-token scope (`AllController.boards`, `HamacaWeb.Api.BoardListJSON`), returning
   `{data: [{name, slug, key, needs_you_count, stage_count, card_count, ai_active, starred, muted}]}`
   in display order, with `needs_you_count` = the two-type count and `starred`/`muted` booleans.
@@ -941,9 +943,30 @@ sharing behavior.
   user-content origin is a documented follow-up. The sandbox token list is
   `HamacaWeb.mockup_sandbox/0`, shared with every mockup `<iframe sandbox>`.
 - **Push** — APNs notifications, dispatched off-caller via a `Task.Supervisor` so a status
-  change never waits on Apple (RLY-81). A member's `board_members.muted` (RE406) suppresses
-  APNs for that board only — the browser broadcast is unaffected; the app-icon badge
-  (`needs_you_count/1`, which counts distinct cards) excludes muted boards (RE489).
+  change never waits on Apple (RLY-81), never from inside an open transaction, and never
+  failing the caller. A member's `board_members.muted` (RE406) suppresses alert pushes for that
+  board only — the browser broadcast is unaffected. `Push` does not count the badge: every
+  entry point that builds an APNs payload takes a required `badge_fun` option (fetched in the
+  caller, so a missing one raises there) and stamps `badge_fun.(recipient)` as `aps.badge`.
+  `Cards` passes `&Cards.needs_you_badge_count/1` (RE496) — `Push` cannot call `Cards`, which
+  calls it from `set_status/3`. `Push.badge_changed/2` is the silent, badge-only push
+  (`%{"aps" => %{"badge" => n}}`, no alert, no sound, not suppressed by mute, nothing on the
+  browser topic) to a user, a list of users, or a board's members; callers go through
+  `Cards.badge_changed/1`, which supplies the badge definition. It fires once, after commit, on
+  every event that can lower or change the count (entering needs-you needs none — the alert
+  carries the new badge):
+  - a card **leaves** needs-you (`Push.notification_statuses/0` → outside it) — `set_status/3`,
+    an answer, a reject, an approve, a move's snap — to every board member, actor included. The
+    edge lives in `Cards.maybe_notify/3`, which the transactional callers re-run after commit;
+  - a counting card (needs-you, or agent-stalled) is **archived** (`Cards.archive_card/2`, on
+    the active → archived edge only), or its **board** is archived — `HamacaWeb.BoardSettingsLive`
+    fires that one, since `Boards` cannot call `Cards` — to the board's members;
+  - a stall **resolves**: `Cards.touch_heartbeats/2` stamps a card that was `:stale` just
+    before (at most one push per beat; a live beat costs one prefiltered select and sends
+    nothing; `:stopped` is not resolved by a heartbeat) — to the board's members;
+  - the user **mutes or unmutes** a board (`POST /api/all/boards/:slug/mute`) — to that user.
+  Activity-only revival (runner log lines through `Activity.LogSink`) is not a trigger: the
+  runner's 30s heartbeat covers it.
 - **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`
   toggles and broadcasts `{:vote_changed, card_id}`. A card's supporters are the voting users.
 - **ValueStream** (`Hamaca.ValueStream`, RE146) — the level-1 value-stream derivation behind the

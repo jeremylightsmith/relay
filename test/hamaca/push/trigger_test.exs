@@ -179,7 +179,11 @@ defmodule Hamaca.Push.TriggerTest do
 
       log =
         capture_log(fn ->
-          assert :ok = Push.card_status_changed(%{card | status: :needs_input}, :working, :agent, config: config)
+          assert :ok =
+                   Push.card_status_changed(%{card | status: :needs_input}, :working, :agent,
+                     config: config,
+                     badge_fun: fn _ -> 0 end
+                   )
         end)
 
       assert log =~ "[push] dispatch failed"
@@ -198,7 +202,11 @@ defmodule Hamaca.Push.TriggerTest do
 
       log =
         capture_log(fn ->
-          assert :ok = Push.card_status_changed(%{card | status: :needs_input}, :working, :agent, config: config)
+          assert :ok =
+                   Push.card_status_changed(%{card | status: :needs_input}, :working, :agent,
+                     config: config,
+                     badge_fun: fn _ -> 0 end
+                   )
         end)
 
       assert log =~ "[push] dispatch exit"
@@ -216,7 +224,11 @@ defmodule Hamaca.Push.TriggerTest do
 
       config = %{Push.config() | async: true}
 
-      assert :ok = Push.card_status_changed(%{card | status: :in_review}, :working, :agent, config: config)
+      assert :ok =
+               Push.card_status_changed(%{card | status: :in_review}, :working, :agent,
+                 config: config,
+                 badge_fun: fn _ -> 0 end
+               )
 
       assert_receive {:push_delivered, "tok-alice", payload}, 1000
       assert payload["kind"] == "in_review"
@@ -233,7 +245,7 @@ defmodule Hamaca.Push.TriggerTest do
       with_device(alice, "tok-alice")
 
       Repo.transaction(fn ->
-        assert :ok = Push.card_status_changed(%{card | status: :in_review}, :working, :agent)
+        assert :ok = Push.card_status_changed(%{card | status: :in_review}, :working, :agent, badge_fun: fn _ -> 0 end)
       end)
 
       refute_received {:push_delivered, _, _}
@@ -290,12 +302,151 @@ defmodule Hamaca.Push.TriggerTest do
     end
   end
 
+  # RE496: the silent, badge-only push on every event that can lower or change the count. Each
+  # event fires once, after commit, to every resolved human member — the actor included.
+  describe "badge-only push (RE496)" do
+    # Compared with ==, never matched: a map pattern would accept extra keys (an alert, a sound).
+    @badge_zero %{"aps" => %{"badge" => 0}}
+
+    defp badge_only?(%{"aps" => aps} = payload), do: map_size(payload) == 1 and Map.keys(aps) == ["badge"]
+
+    defp stalled_card(board) do
+      stage = insert_ai_stage(board: board)
+      card = insert(:card, stage: stage, status: :working)
+      insert(:card_owner, card: card)
+      insert(:activity, card: card, type: :failure, text: "agent stopped")
+      card
+    end
+
+    test "answering a :needs_input card sends each member, actor included, one badge-only push" do
+      %{board: board, users: [alice, bob]} = board_with_members(2)
+      with_device(alice, "tok-a")
+      with_device(bob, "tok-b")
+      card = insert(:card, stage: insert(:stage, board: board), status: :needs_input)
+
+      assert {:ok, answered} = Cards.answer_input(card, "yes", {:user, alice.id})
+      refute answered.status in Push.notification_statuses()
+
+      assert_received {:push_delivered, "tok-a", payload}
+      assert payload == @badge_zero
+      assert_received {:push_delivered, "tok-b", payload}
+      assert payload == @badge_zero
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "set_status out of :in_review sends the actor one badge-only push" do
+      %{board: board, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-a")
+      card = insert(:card, stage: insert(:stage, board: board, type: :work), status: :in_review)
+
+      assert {:ok, _} = Cards.set_status(card, %{status: :working}, {:user, alice.id})
+
+      assert_received {:push_delivered, "tok-a", payload}
+      assert payload == @badge_zero
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "rejecting into a work stage sends the actor one badge-only push after commit" do
+      %{board: board, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-a")
+      target = insert(:stage, board: board, type: :work, position: 0)
+      review = insert(:stage, board: board, type: :review, position: 1, reject_to_stage_id: target.id)
+      card = insert(:card, stage: review, status: :in_review)
+
+      assert {:ok, rejected} = Cards.reject(card, "fix it", {:user, alice.id})
+      refute rejected.status in Push.notification_statuses()
+
+      assert_received {:push_delivered, "tok-a", payload}
+      assert payload == @badge_zero
+      refute_received {:push_delivered, _, _}
+    end
+
+    test ":needs_input → :in_review is not a leave: the alert goes out, no badge-only push" do
+      %{board: board, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-a")
+      card = insert(:card, stage: insert(:stage, board: board, type: :work), status: :needs_input)
+
+      assert {:ok, _} = Cards.set_status(card, %{status: :in_review}, :agent)
+
+      assert_received {:push_delivered, "tok-a", payload}
+      assert payload["aps"]["alert"]
+      refute badge_only?(payload)
+      refute_received {:push_delivered, _, _}
+    end
+
+    # The plan's scenario says `:done`, which is not a card status; any edge between two
+    # non-needs-you statuses is the same "not a leave" case.
+    test "an edge that never was needs-you (:working → :ready) pushes nothing" do
+      %{card: card, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-a")
+
+      assert {:ok, _} = Cards.set_status(card, %{status: :ready}, :agent)
+
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "a cross-stage move that snaps :in_review away sends each member one badge-only push" do
+      %{board: board, users: [alice, bob]} = board_with_members(2)
+      with_device(alice, "tok-a")
+      with_device(bob, "tok-b")
+      review = insert(:stage, board: board, type: :review)
+      work = insert(:stage, board: board, type: :work)
+      card = insert(:card, stage: review, status: :in_review)
+
+      assert {:ok, moved} = Cards.move_card(card, work, 0, {:user, alice.id})
+      refute moved.status in Push.notification_statuses()
+
+      assert_received {:push_delivered, "tok-a", payload}
+      assert payload == @badge_zero
+      assert_received {:push_delivered, "tok-b", payload}
+      assert payload == @badge_zero
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "archiving a :needs_input card sends one badge-only push; re-archiving sends nothing" do
+      %{board: board, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-a")
+      card = insert(:card, stage: insert(:stage, board: board), status: :needs_input)
+
+      assert {:ok, archived} = Cards.archive_card(card, {:user, alice.id})
+
+      assert_received {:push_delivered, "tok-a", payload}
+      assert payload == @badge_zero
+      refute_received {:push_delivered, _, _}
+
+      assert {:ok, _} = Cards.archive_card(archived, {:user, alice.id})
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "archiving a non-counting :working card sends nothing" do
+      %{card: card, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-a")
+
+      assert {:ok, _} = Cards.archive_card(card, {:user, alice.id})
+
+      refute_received {:push_delivered, _, _}
+    end
+
+    test "archiving a stalled agent card sends one badge-only push" do
+      %{board: board, users: [alice]} = board_with_members(1)
+      with_device(alice, "tok-a")
+      card = stalled_card(board)
+      assert Cards.needs_you_badge_count(alice) == 1
+
+      assert {:ok, _} = Cards.archive_card(card, {:user, alice.id})
+
+      assert_received {:push_delivered, "tok-a", payload}
+      assert payload == @badge_zero
+      refute_received {:push_delivered, _, _}
+    end
+  end
+
   describe "card_status_changed/3 directly" do
     test "returns :ok and does nothing for a non-push status" do
       %{card: card, users: [alice]} = board_with_members(1)
       with_device(alice, "tok-alice")
 
-      assert :ok = Push.card_status_changed(%{card | status: :working}, :ready, :agent)
+      assert :ok = Push.card_status_changed(%{card | status: :working}, :ready, :agent, badge_fun: fn _ -> 0 end)
       refute_received {:push_delivered, _, _}
     end
   end
@@ -404,7 +555,11 @@ defmodule Hamaca.Push.TriggerTest do
 
       assert {:error, :nope} =
                Repo.transaction(fn ->
-                 assert :ok = Push.card_status_changed(%{card | status: :needs_input}, :working, :agent)
+                 assert :ok =
+                          Push.card_status_changed(%{card | status: :needs_input}, :working, :agent,
+                            badge_fun: fn _ -> 0 end
+                          )
+
                  Repo.rollback(:nope)
                end)
 

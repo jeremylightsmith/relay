@@ -72,6 +72,27 @@ defmodule Hamaca.Push.Delivery.APNSTest do
     assert headers["apns-priority"] == "10"
   end
 
+  # RE496: a badge-only (silent) push rides the same alert push type and priority, so it needs no
+  # adapter change — pin that the bare `%{"aps" => %{"badge" => n}}` body goes out as-is.
+  test "posts a badge-only payload verbatim with the alert push type", %{apns: apns} do
+    test_pid = self()
+
+    Req.Test.stub(APNS, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:apns_request, conn.req_headers, Jason.decode!(body)})
+      Plug.Conn.send_resp(conn, 200, "")
+    end)
+
+    assert :ok = APNS.deliver("device-token-xyz", %{"aps" => %{"badge" => 3}}, apns)
+
+    assert_received {:apns_request, headers, body}
+    assert body == %{"aps" => %{"badge" => 3}}
+
+    headers = Map.new(headers)
+    assert headers["apns-push-type"] == "alert"
+    assert headers["apns-priority"] == "10"
+  end
+
   test "signs an ES256 provider JWT carrying kid, iss and iat", %{apns: apns} do
     test_pid = self()
 

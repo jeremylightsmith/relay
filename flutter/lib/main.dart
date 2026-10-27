@@ -7,6 +7,7 @@ import 'app/push_tap.dart';
 import 'app/router.dart';
 import 'app/theme.dart';
 import 'features/auth/auth_controller.dart';
+import 'features/boards/boards_controller.dart';
 import 'features/push/push_service.dart';
 
 void main() => runApp(const ProviderScope(child: RelayApp()));
@@ -19,6 +20,8 @@ class RelayApp extends ConsumerStatefulWidget {
 }
 
 class _RelayAppState extends ConsumerState<RelayApp> {
+  late final AppLifecycleListener _lifecycle;
+
   @override
   void initState() {
     super.initState();
@@ -26,6 +29,21 @@ class _RelayAppState extends ConsumerState<RelayApp> {
     // the router while it is still restoring, so the redirect stashes the card as
     // the pending deep link — otherwise the user watches /needs-you flash first.
     _wirePush();
+    // The one owner of the boards refresh on resume, whatever tab is showing
+    // (RE496): each load resets the app-icon badge and the switcher's counts.
+    _lifecycle = AppLifecycleListener(onResume: _refreshBoardsOnResume);
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  void _refreshBoardsOnResume() {
+    // Signed out, the load would only fail with MissingTokenException.
+    if (!ref.read(authProvider).signedIn) return;
+    unawaited(ref.read(boardsProvider.notifier).refresh());
   }
 
   @override

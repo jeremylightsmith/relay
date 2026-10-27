@@ -1468,9 +1468,12 @@ defmodule HamacaWeb.BoardSettingsLive do
   end
 
   # RE469 — archiving frees a Free slot, so the owner's open board, Boards and Billing pages re-derive.
+  # RE496 — it also drops the board's cards out of every member's app-icon badge. Fired here
+  # because Boards cannot call Cards (Cards depends on Boards).
   def handle_event("archive_board", _params, socket) do
     {:ok, board} = Boards.archive_board(socket.assigns.board)
     _ = Billing.broadcast_changed(board.owner_id)
+    :ok = Cards.badge_changed(board)
 
     {:noreply,
      socket

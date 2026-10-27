@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
@@ -6,6 +8,7 @@ import '../needs_you/models/feed_row.dart';
 import 'board_summary.dart';
 import 'boards_repository.dart';
 import 'current_board.dart';
+import 'icon_badge.dart';
 
 /// The user's boards (RE376). The switcher sheet, Choose a board, and board-name
 /// lookups all read this list. Every successful load also reconciles the current
@@ -29,11 +32,15 @@ class BoardsController extends AsyncNotifier<List<BoardSummary>> {
     final current = ref.read(currentBoardProvider.notifier);
     await current.ready;
     await current.reconcile(boards.map((b) => b.slug).toList(growable: false));
+    // RE496: every successful load (launch, resume, after a mute) resets the
+    // app-icon badge. Fire-and-forget: the badge never fails or delays the load,
+    // and a failed load (above) leaves whatever iOS shows.
+    unawaited(ref.read(iconBadgeProvider).set(iconBadgeCount(boards)));
     return boards;
   }
 
-  /// Refetch. The sheet calls this each time it opens, and Needs you calls it on
-  /// pull-to-refresh and app resume. The previous list stays readable while the
+  /// Refetch. The sheet calls this each time it opens, Needs you calls it on
+  /// pull-to-refresh, and the app calls it on resume (main.dart). The previous list stays readable while the
   /// new one loads.
   Future<void> refresh() async {
     ref.invalidateSelf();

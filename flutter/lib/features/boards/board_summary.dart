@@ -18,6 +18,8 @@ class BoardSummary {
   final String key;
 
   /// The server's two-type needs-you count (ADR 0005), incl. agent_stalled.
+  /// The app-icon badge is this summed over unmuted boards (`iconBadgeCount`),
+  /// the same number as the server's `Hamaca.Cards.needs_you_badge_count/1`.
   final int needsYouCount;
   final int stageCount;
   final int cardCount;
@@ -28,8 +30,10 @@ class BoardSummary {
   final bool starred;
 
   /// The signed-in user's personal mute (RE406). It suppresses this board's
-  /// phone pushes; the in-app needs-you count is unchanged, but the app-icon
-  /// badge excludes muted boards (RE489).
+  /// phone pushes and leaves the in-app needs-you count unchanged. The app-icon
+  /// badge is Σ [needsYouCount] over **unmuted** boards (`iconBadgeCount`), the
+  /// server's `Hamaca.Cards.needs_you_badge_count/1`; a muted board's pill turns
+  /// grey so the amber pills are exactly what that badge adds up (RE496).
   final bool muted;
 
   factory BoardSummary.fromJson(Map<String, dynamic> json) => BoardSummary(

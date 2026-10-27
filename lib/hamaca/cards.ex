@@ -482,9 +482,14 @@ defmodule Hamaca.Cards do
 
   Also deletes the dependency rows pointing AT the card (RE93 decision 2), permanently freeing
   its dependents; the card's own blocked-by rows survive an archive/unarchive round trip.
+
+  RE496 — archiving an active card that counted toward the badge (needs-you, or agent-stalled)
+  sends the board's members one silent badge-only push (`badge_changed/1`).
   """
   def archive_card(%Card{} = card, actor \\ :agent) do
     was_active? = is_nil(card.archived_at)
+    # RE496 — decided on the pre-archive card: archiving drops a counting card out of the badge.
+    badge_drops? = was_active? and card |> preload_owners() |> counts_toward_badge?()
 
     {:ok, archived} =
       card
@@ -505,6 +510,7 @@ defmodule Hamaca.Cards do
     Repo.delete_all(from d in CardDependency, where: d.depends_on_card_id == ^archived.id)
 
     Events.broadcast(archived.board_id, {:card_archived, archived})
+    if badge_drops?, do: :ok = badge_changed(Repo.get!(Board, archived.board_id))
     {:ok, archived}
   end
 
@@ -1768,15 +1774,30 @@ defmodule Hamaca.Cards do
     end)
   end
 
-  # RLY-148: the same health/1 inputs BoardLive.health_by_card/2 assembles.
-  defp agent_stalled?(card, newest, ai_stage_ids, now) do
+  defp agent_stalled?(card, newest, ai_stage_ids, now),
+    do: card_health(card, newest, ai_stage_ids, now) in [:stale, :stopped]
+
+  # RLY-148: the same health/1 inputs BoardLive.health_by_card/2 assembles. `card` needs owners.
+  defp card_health(card, newest, ai_stage_ids, now) do
     health(%{
       newest: Map.get(newest, card.id),
       heartbeat_at: card.agent_heartbeat_at,
       ai_active?: active_owner_type(card) == :ai,
       ai_stage?: MapSet.member?(ai_stage_ids, card.stage_id),
       now: now
-    }) in [:stale, :stopped]
+    })
+  end
+
+  # RE496 — whether `card` (owners preloaded) is one of the things the badge counts: a
+  # needs-you status, or an agent stall — `agent_stalled?/4` built for this one card.
+  defp counts_toward_badge?(%Card{} = card) do
+    card.status in Push.notification_statuses() or
+      agent_stalled?(
+        card,
+        Activity.newest_per_card([card.id]),
+        Flows.ai_stage_ids(Repo.get!(Board, card.board_id)),
+        DateTime.utc_now()
+      )
   end
 
   @doc """
@@ -1809,12 +1830,46 @@ defmodule Hamaca.Cards do
         stage_count: Enum.count(stages, &is_nil(&1.parent_id)),
         ai_active?: Enum.any?(cards, &(&1.status == :working and active_owner_type(&1) == :ai)),
         needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human + rollup.agent_stalled,
-        needs_you_two_type: rollup.needs_input + rollup.in_review + rollup.agent_stalled,
+        needs_you_two_type: needs_you_two_type(rollup),
         starred?: starred?,
         muted?: muted?
       }
     end
   end
+
+  # The ONE place the mobile two-type count is written (ADR 0005): questions, reviews and
+  # stalled agents. Ready-awaiting-human is left out on purpose.
+  defp needs_you_two_type(rollup), do: rollup.needs_input + rollup.in_review + rollup.agent_stalled
+
+  @doc """
+  The app-icon badge (RE496): the sum of the switcher's amber pills — `needs_you_two_type`
+  (needs_input + in_review + agent_stalled) over every board `user` is a resolved member of,
+  is not archived, and **has not muted**. The ONE badge definition: every APNs push carries it
+  (`Hamaca.Push` receives it as `badge_fun`), and it always equals the unmuted rows of
+  `list_board_summaries/1` summed.
+
+  `board_members` has no unique `(board_id, user_id)` index, so a user can hold several rows on
+  one board; rows are de-duplicated by board id so the board counts once. `Boards.set_muted/3`
+  writes every row, so the rows agree on `muted?`.
+  """
+  @spec needs_you_badge_count(User.t()) :: non_neg_integer()
+  def needs_you_badge_count(%User{} = user) do
+    user
+    |> Boards.list_boards_for_display()
+    |> Enum.reject(& &1.muted?)
+    |> Enum.uniq_by(& &1.board.id)
+    |> Enum.map(&(&1.board |> needs_you_rollup() |> needs_you_two_type()))
+    |> Enum.sum()
+  end
+
+  @doc """
+  Sends the silent, badge-only push (`Hamaca.Push.badge_changed/2`) to `target` — a user, a
+  list of users, or every member of a board — stamped with `needs_you_badge_count/1`. The one
+  wrapper every badge-drop trigger calls; nothing calls `Push.badge_changed/2` directly.
+  Fire-and-forget, after commit, always `:ok`.
+  """
+  @spec badge_changed(User.t() | [User.t()] | Board.t()) :: :ok
+  def badge_changed(target), do: Push.badge_changed(target, badge_fun: &needs_you_badge_count/1)
 
   @feed_statuses Card.awaiting_human_statuses()
 
@@ -1827,7 +1882,8 @@ defmodule Hamaca.Cards do
   This is **deliberately narrower than `needs_you_rollup/1`**: it excludes the
   ready-awaiting-human flavor, so the mobile count diverges from the board's by design (ADR
   0005). The F4 feed and the inbox (RLY-85) read this one query, so they can never drift. The
-  badge counts with `Hamaca.Push.needs_you_count/1` instead, which also leaves out muted boards.
+  app-icon badge is `needs_you_badge_count/1` instead, which also counts stalled agents and
+  leaves out muted boards; this feed still lists muted boards' cards.
 
   Returns `[%{card: card, question: latest_question_string | nil, questions: structured | nil}]`
   — `question`/`questions` come from the card's newest `:needs_input` activity meta (one extra
@@ -1901,6 +1957,9 @@ defmodule Hamaca.Cards do
   broadcast**: a broadcast per beat per card would bump the board version on every
   tick, the exact storm `{:card_log_appended, ...}` batching exists to avoid. Open
   boards learn about a heartbeat on their own 30s health tick.
+
+  RE496 — when the beat revives a card that was `:stale` just before, the stall resolves and
+  the board's members get one silent badge-only push (`badge_changed/1`) per call.
   """
   def touch_heartbeats(%Board{id: board_id} = board, refs) when is_list(refs) do
     ref_numbers =
@@ -1912,11 +1971,36 @@ defmodule Hamaca.Cards do
 
       ref_numbers ->
         now = DateTime.truncate(DateTime.utc_now(), :second)
+        named = from(c in Card, where: c.board_id == ^board_id and c.ref_number in ^ref_numbers)
+        revives_stall? = any_stale?(board, named, now)
 
-        Repo.update_all(
-          from(c in Card, where: c.board_id == ^board_id and c.ref_number in ^ref_numbers),
-          set: [agent_heartbeat_at: now]
-        )
+        result = Repo.update_all(named, set: [agent_heartbeat_at: now])
+        if revives_stall?, do: :ok = badge_changed(board)
+        result
+    end
+  end
+
+  # RE496 — does this beat resolve an agent stall? Decided on the rows as they were BEFORE the
+  # stamp (after it, every card reads :live). Only a card whose heartbeat is missing or older
+  # than the stale window can be :stale, and that prefilter is in the query, so a healthy beat
+  # costs one select. `:stopped` is not resolved by a heartbeat, so only `:stale` counts.
+  defp any_stale?(board, named, now) do
+    cutoff = DateTime.add(now, -@stale_after, :millisecond)
+
+    candidates =
+      named
+      |> where([c], is_nil(c.agent_heartbeat_at) or c.agent_heartbeat_at < ^cutoff)
+      |> preload(:owners)
+      |> Repo.all()
+
+    case candidates do
+      [] ->
+        false
+
+      candidates ->
+        newest = candidates |> Enum.map(& &1.id) |> Activity.newest_per_card()
+        ai_stage_ids = Flows.ai_stage_ids(board)
+        Enum.any?(candidates, &(card_health(&1, newest, ai_stage_ids, now) == :stale))
     end
   end
 
@@ -2895,20 +2979,35 @@ defmodule Hamaca.Cards do
   # Push trigger (RLY-81): fires only on the *edge* out of one status into
   # another — the same `card.status != from_status` guard `log_status_changed/3`
   # uses, so a same-status re-set, a move, or an owner change never pushes.
-  # Which statuses are push-worthy is `Push.card_status_changed/3`'s call, not
-  # ours — `Cards` only owns the edge it uniquely sees. Fire-and-forget:
-  # `Push.card_status_changed/3` always returns :ok and dispatches off-process,
+  # Which statuses are push-worthy is `Push.card_status_changed/4`'s call, not
+  # ours — `Cards` only owns the edge it uniquely sees, and the badge definition
+  # (`needs_you_badge_count/1`, passed as `badge_fun`). Fire-and-forget:
+  # `Push.card_status_changed/4` always returns :ok and dispatches off-process,
   # so this returns `result` untouched and a push failure can never fail
   # set_status.
+  #
+  # RE496 — the *leave* edge (needs-you → outside it) lowers every member's badge, so it
+  # sends the silent badge-only push to the whole board, actor included. Entering needs-you
+  # (or moving within it, :needs_input → :in_review) is covered by the alert push's own
+  # badge. Transactional callers re-run this after commit; the copy their inner
+  # set_status/3 runs is a no-op through Push's in-transaction guard, so a leave pushes once.
   defp maybe_notify({:ok, %Card{} = card} = result, from_status, actor) do
     if card.status != from_status do
-      :ok = Push.card_status_changed(card, from_status, actor)
+      :ok = Push.card_status_changed(card, from_status, actor, badge_fun: &needs_you_badge_count/1)
+    end
+
+    if left_needs_you?(from_status, card.status) do
+      :ok = badge_changed(Repo.get!(Board, card.board_id))
     end
 
     result
   end
 
   defp maybe_notify({:error, _changeset} = result, _from_status, _actor), do: result
+
+  defp left_needs_you?(from_status, to_status) do
+    from_status in Push.notification_statuses() and to_status not in Push.notification_statuses()
+  end
 
   defp log_owners_changed(%Card{} = card, actor, meta) do
     {:ok, _entry} = Activity.log(card, %{type: :owners_changed, actor: actor, meta: meta})

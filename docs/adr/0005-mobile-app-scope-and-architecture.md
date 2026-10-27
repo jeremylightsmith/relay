@@ -65,14 +65,20 @@ placement rule is in [ADR 0001](0001-client-architecture.md) and `AGENTS.md`.
   cards in `needs_input` and `in_review` (`Hamaca.Cards.needs_you_feed/1`). It leaves out the web
   board's third, ready-awaiting-human flavor, so the mobile count deliberately differs from the
   web board's `needs_you_rollup`.
-- The **app-icon badge** counts the same two types, minus boards you muted
-  (`Hamaca.Push.needs_you_count/1`). The in-app inbox still shows muted boards.
+- The **app-icon badge** is the sum of the board switcher's amber pills: each board's two-type
+  count plus its stalled agents (`needs_you_two_type`), over boards you have not muted
+  (`Hamaca.Cards.needs_you_badge_count/1`, the one definition; `Hamaca.Push` receives it as
+  `badge_fun`). The in-app inbox still shows muted boards.
 
 ### Notifications: push is the product
 
 - A push fires when a card enters `needs_input` or `in_review`
-  (`Hamaca.Push.notification_statuses/0`). Progress and status never push. Muting a board stops
-  its pushes.
+  (`Hamaca.Push.notification_statuses/0`). Progress and status never push an alert. Muting a
+  board stops its alert pushes.
+- The server also sends a silent, badge-only push when an event changes the count: a card
+  leaves needs-you, a counting card or its board is archived, a stalled agent heartbeats again,
+  or you mute or unmute a board. It carries only the new badge — never an alert or a sound —
+  and mute does not suppress it.
 - One card is one push. Tapping it opens that card, never a generic inbox.
 - Quiet hours rely on the OS's Do Not Disturb; there are no in-app notification settings
   beyond per-board mute.
