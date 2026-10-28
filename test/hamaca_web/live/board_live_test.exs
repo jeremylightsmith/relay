@@ -1370,6 +1370,21 @@ defmodule HamacaWeb.BoardLiveTest do
       assert has_element?(view, "#stage-strip-#{backlog.id} .stage-count", "0")
       assert html =~ "Card archived."
       assert board |> Cards.list_archived_cards() |> Enum.map(& &1.title) == ["Draft the spec"]
+      # RE498 — the native-back bridge is card mode's alone; board mode patches.
+      refute_push_event(view, "native-back", _)
+    end
+
+    test "the open card archived elsewhere closes the drawer back to the board, no native-back",
+         %{conn: conn, user: user, card: card} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      {:ok, _archived} = Cards.archive_card(card, :agent)
+      render(view)
+
+      assert_patch(view, ~p"/board/#{board.slug}")
+      refute_push_event(view, "native-back", _)
     end
 
     test "opening an archived card by URL shows the banner + Restore, hides edit actions, and logs the phrase",

@@ -436,6 +436,10 @@ sharing behavior.
   bridge (`"prev"` / `"next"`) instead of patching, binds no arrow keys, and renders disabled for a
   direction `nav` omits. No `nav` (or no known token), no chevrons; `nav` rides through the
   viewer's patches like `back`, and `/board/:slug` ignores it.
+  Card mode never patches itself to the board (RE498): when the open card is archived — from its
+  ⋯ menu or elsewhere — the server pushes `"native-back"` once with a message (`"<REF> archived"` /
+  `"<REF> was archived"`), and the `.NativeBack` hook's hidden listener calls the shell's
+  `relayNavBack` bridge with it (the app pops and toasts it; a plain browser `history.back()`s).
   The same viewer opens the AI Result's **Screenshots** (RE390): the drawer shows them as the same
   80px tiles, which lead the violet AI Result box with a count and are always visible (RE401 —
   Show more reveals only the Changes and is absent when there are none), and a tile patches to

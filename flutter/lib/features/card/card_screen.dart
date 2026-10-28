@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/plan_paused.dart';
 import '../../app/embedded_webview.dart';
+import '../../app/messenger.dart';
 import '../../app/theme.dart';
 import '../../config.dart';
 import '../decisions/review_queue.dart';
@@ -72,12 +73,37 @@ class CardScreen extends ConsumerStatefulWidget {
   /// What the web nav bar's back control does: pop to wherever the card was pushed
   /// from, or — for a card opened by a push (RE376 · PUSH-01: a root route with
   /// nothing to pop) — land on the now-current board's Needs you, never a dead end.
-  static void navBack(GoRouter router) {
+  /// Given a [message] (RE498 — e.g. "RE12 archived" when the card left the board)
+  /// and the app-wide [messenger] (from [scaffoldMessengerKeyProvider]), it then
+  /// toasts it through the app's one [showToast], so it shows over wherever it
+  /// landed — never this screen's own Scaffold, which the pop is disposing.
+  static void navBack(
+    GoRouter router, {
+    GlobalKey<ScaffoldMessengerState>? messenger,
+    String? message,
+  }) {
     if (router.canPop()) {
       router.pop();
     } else {
       router.go('/needs-you');
     }
+    if (messenger != null && message != null) {
+      showToast(messenger, message, key: leftToastKey);
+    }
+  }
+
+  /// The key of the [navBack] toast, for tests.
+  static const leftToastKey = Key('card_left_toast');
+
+  /// Decodes the [navBackHandler] args: the toast message only for a leading
+  /// String that is non-blank (returned trimmed); the plain back control passes
+  /// none, and a malformed call never toasts.
+  static String? navBackMessageFromArgs(List<dynamic> args) {
+    if (args.isEmpty) return null;
+    final message = args.first;
+    if (message is! String) return null;
+    final trimmed = message.trim();
+    return trimmed.isEmpty ? null : trimmed;
   }
 
   /// The JS handler the web drawer's ‹ › chevrons call (RE400) with `"prev"` or
@@ -322,10 +348,15 @@ class _CardScreenState extends ConsumerState<CardScreen> {
                 onWebViewCreated: (controller) {
                   controller.addJavaScriptHandler(
                     handlerName: CardScreen.navBackHandler,
-                    callback: (_) {
-                      if (context.mounted) {
-                        CardScreen.navBack(GoRouter.of(context));
-                      }
+                    callback: (args) {
+                      if (!context.mounted) return;
+                      // Read before the pop disposes this State.
+                      final messenger = ref.read(scaffoldMessengerKeyProvider);
+                      CardScreen.navBack(
+                        GoRouter.of(context),
+                        messenger: messenger,
+                        message: CardScreen.navBackMessageFromArgs(args),
+                      );
                     },
                   );
                   controller.addJavaScriptHandler(

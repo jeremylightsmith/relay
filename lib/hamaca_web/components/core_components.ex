@@ -2840,6 +2840,11 @@ defmodule HamacaWeb.CoreComponents do
   `<.link patch>`; `back_bridge` is a button whose `.NativeBack` hook asks the native shell to pop
   (the hook names the handler), falling back to `history.back()` in a plain browser. A nil or blank
   `back_label` reads "Back".
+
+  The same hook on an element carrying `data-native-back-listener` (`card_drawer/1` renders one
+  when embedded, RE498) instead listens for the server's `"native-back"` push and makes the same
+  bridge call with the push's `message`, which the native shell shows as a toast. Only that
+  element registers the listener, so one push is one pop.
   """
   attr :id, :string, required: true
   attr :title, :string, required: true
@@ -2891,15 +2896,25 @@ defmodule HamacaWeb.CoreComponents do
         </div>
       </div>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".NativeBack">
+        const navBack = (message) => {
+          if (window.flutter_inappwebview) {
+            if (typeof message === "string" && message !== "") {
+              window.flutter_inappwebview.callHandler("relayNavBack", message)
+            } else {
+              window.flutter_inappwebview.callHandler("relayNavBack")
+            }
+          } else {
+            history.back()
+          }
+        }
+
         export default {
           mounted() {
-            this.el.addEventListener("click", () => {
-              if (window.flutter_inappwebview) {
-                window.flutter_inappwebview.callHandler("relayNavBack")
-              } else {
-                history.back()
-              }
-            })
+            if (this.el.hasAttribute("data-native-back-listener")) {
+              this.handleEvent("native-back", ({message}) => navBack(message))
+            } else {
+              this.el.addEventListener("click", () => navBack())
+            }
           }
         }
       </script>
@@ -4741,6 +4756,15 @@ defmodule HamacaWeb.CoreComponents do
             webview): "‹ Board" pops the native stack, the ref is the centered title, and the Talk
             button and ⋯ move up here — each still renders exactly once on the page.
           --%>
+          <%!-- RE498 — the `"native-back"` push listener (see mobile_nav_bar/1's `.NativeBack`). --%>
+          <div
+            :if={@embed}
+            id="card-drawer-native-back"
+            phx-hook=".NativeBack"
+            data-native-back-listener
+            hidden
+          >
+          </div>
           <.mobile_nav_bar
             :if={@embed}
             id="card-drawer-nav-bar"

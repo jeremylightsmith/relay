@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:relay_mobile/app/messenger.dart';
 import 'package:relay_mobile/features/card/card_nav_context.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/card/widgets/card_review_bar.dart';
@@ -26,8 +27,14 @@ GoRouter _router(String initialLocation) => GoRouter(
   ],
 );
 
-Future<void> _pump(WidgetTester tester, GoRouter router) async {
-  await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+Future<void> _pump(
+  WidgetTester tester,
+  GoRouter router, {
+  GlobalKey<ScaffoldMessengerState>? messenger,
+}) async {
+  await tester.pumpWidget(
+    MaterialApp.router(routerConfig: router, scaffoldMessengerKey: messenger),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -61,6 +68,126 @@ void main() {
 
     expect(router.state.uri.path, '/needs-you');
     expect(find.byKey(const Key('inbox_stub')), findsOneWidget);
+  });
+
+  group('relayNavBack with a message (RE498)', () {
+    test('the message decodes from a leading non-blank String', () {
+      expect(
+        CardScreen.navBackMessageFromArgs(['RE498 archived']),
+        'RE498 archived',
+      );
+      expect(
+        CardScreen.navBackMessageFromArgs(['  RE498 was archived  ']),
+        'RE498 was archived',
+        reason: 'returned trimmed',
+      );
+    });
+
+    test('a malformed or empty call decodes to no message', () {
+      for (final args in <List<dynamic>>[
+        [],
+        [42],
+        [null],
+        [''],
+        ['   '],
+        [
+          {'message': 'x'},
+        ],
+      ]) {
+        expect(
+          CardScreen.navBackMessageFromArgs(args),
+          isNull,
+          reason: '$args',
+        );
+      }
+    });
+
+    Future<GoRouter> pushedCard(
+      WidgetTester tester,
+      GlobalKey<ScaffoldMessengerState> messenger,
+    ) async {
+      final router = _router('/needs-you');
+      await _pump(tester, router, messenger: messenger);
+      router.push('/cards/RLY-1?board=b&back=Board');
+      await tester.pumpAndSettle();
+      return router;
+    }
+
+    testWidgets('pops and toasts the message over the destination', (
+      tester,
+    ) async {
+      final messenger = GlobalKey<ScaffoldMessengerState>();
+      final router = await pushedCard(tester, messenger);
+
+      CardScreen.navBack(
+        router,
+        messenger: messenger,
+        message: 'RLY-1 archived',
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      // Settle the route transition: until the card route is gone its Scaffold
+      // also renders the app messenger's SnackBar.
+      await tester.pumpAndSettle();
+
+      expect(router.state.uri.path, '/needs-you');
+      final toast = find.byKey(CardScreen.leftToastKey);
+      expect(toast, findsOneWidget);
+      expect(find.text('RLY-1 archived'), findsOneWidget);
+      expect(
+        tester.widget<SnackBar>(toast).duration,
+        toastDuration,
+        reason: "the app's one toast, not a raw SnackBar",
+      );
+    });
+
+    testWidgets('an orphan deep link goes to Needs you and toasts', (
+      tester,
+    ) async {
+      final messenger = GlobalKey<ScaffoldMessengerState>();
+      final router = _router('/cards/RLY-1?board=b');
+      await _pump(tester, router, messenger: messenger);
+      expect(router.canPop(), isFalse);
+
+      CardScreen.navBack(
+        router,
+        messenger: messenger,
+        message: 'RLY-1 was archived',
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      // Settle the route transition: until the card route is gone its Scaffold
+      // also renders the app messenger's SnackBar.
+      await tester.pumpAndSettle();
+
+      expect(router.state.uri.path, '/needs-you');
+      expect(find.byKey(CardScreen.leftToastKey), findsOneWidget);
+      expect(find.text('RLY-1 was archived'), findsOneWidget);
+    });
+
+    testWidgets('with a messenger but no message pops with no toast', (
+      tester,
+    ) async {
+      final messenger = GlobalKey<ScaffoldMessengerState>();
+      final router = await pushedCard(tester, messenger);
+
+      CardScreen.navBack(router, messenger: messenger);
+      await tester.pumpAndSettle();
+
+      expect(router.state.uri.path, '/needs-you');
+      expect(find.byKey(CardScreen.leftToastKey), findsNothing);
+    });
+
+    testWidgets('with no messenger pops with no toast', (tester) async {
+      final messenger = GlobalKey<ScaffoldMessengerState>();
+      final router = await pushedCard(tester, messenger);
+
+      CardScreen.navBack(router);
+      await tester.pumpAndSettle();
+
+      expect(router.state.uri.path, '/needs-you');
+      expect(find.byKey(CardScreen.leftToastKey), findsNothing);
+    });
   });
 
   testWidgets('the card host draws no native AppBar or back button', (

@@ -1236,7 +1236,8 @@ defmodule HamacaWeb.BoardLive do
   def mount(%{"ref" => ref} = params, _session, socket) do
     case Cards.resolve_ref(socket.assigns.current_scope.user, ref, params["board"]) do
       {:ok, board, _card} ->
-        socket |> assign(:embed, true) |> mount_board(board.slug)
+        # RE498 — set once the page has asked the native shell to leave (leave_card/2).
+        socket |> assign(embed: true, card_left?: false) |> mount_board(board.slug)
 
       # Unknown ref, a board the user cannot see, or an ambiguous duplicate-key ref: all 404.
       # Never leak the difference, and never guess a card.
@@ -2194,11 +2195,8 @@ defmodule HamacaWeb.BoardLive do
 
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
          {:ok, archived} <- Cards.archive_card(card, current_actor(socket)) do
-      {:noreply,
-       socket
-       |> apply_archive(archived)
-       |> push_patch(to: board_path(socket.assigns))
-       |> put_flash(:info, "Card archived.")}
+      socket = socket |> apply_archive(archived) |> leave_card("#{Cards.ref(socket.assigns.board, archived)} archived")
+      {:noreply, flash_archived(socket)}
     else
       _ -> {:noreply, socket}
     end
@@ -4995,12 +4993,28 @@ defmodule HamacaWeb.BoardLive do
   end
 
   # Close the drawer when the just-archived card is the one open here.
-  defp close_drawer_if_selected(socket, %Card{id: id}) do
+  defp close_drawer_if_selected(socket, %Card{id: id} = card) do
     case socket.assigns.selected_card do
-      %Card{id: ^id} -> push_patch(socket, to: board_path(socket.assigns))
+      %Card{id: ^id} -> leave_card(socket, "#{Cards.ref(socket.assigns.board, card)} was archived")
       _other -> socket
     end
   end
+
+  # RE498 — the open card is gone; leave it. Card mode (/cards/:ref) has no board behind the
+  # drawer — the native shell owns dismissal (RLY-87) — so ask it to go back (the `.NativeBack`
+  # hook's relayNavBack bridge), carrying the toast it shows where it lands. Once only: the
+  # acting session's own {:card_archived, _} echo would otherwise pop the native stack twice.
+  defp leave_card(%{assigns: %{live_action: :card, card_left?: true}} = socket, _message), do: socket
+
+  defp leave_card(%{assigns: %{live_action: :card}} = socket, message) do
+    socket |> push_event("native-back", %{message: message}) |> assign(:card_left?, true)
+  end
+
+  defp leave_card(socket, _message), do: push_patch(socket, to: board_path(socket.assigns))
+
+  # Card mode has no flash group to show it — the native toast carries the message instead.
+  defp flash_archived(%{assigns: %{live_action: :card}} = socket), do: socket
+  defp flash_archived(socket), do: put_flash(socket, :info, "Card archived.")
 
   defp assign_archived_count(socket) do
     assign(socket, :archived_count, Cards.count_archived_cards(socket.assigns.board))

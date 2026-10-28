@@ -17,6 +17,11 @@ defmodule Hamaca.Runs.OutcomelessReentryTest do
   alias Schemas.NodeJob
   alias Schemas.Run
 
+  # Each step restarts a RunServer and waits on its async dispatch/park. Under the full
+  # suite's load (max_cases 36) that can exceed the 500ms default `assert_receive_timeout`,
+  # so these waits get a wider budget; a real regression still fails, just later.
+  @engine_wait 2_000
+
   setup do
     # Engine FIRST, before any run exists — see reenter_findings_test.exs for why.
     start_engine!()
@@ -50,7 +55,7 @@ defmodule Hamaca.Runs.OutcomelessReentryTest do
       [{pid, _}] ->
         ref = Process.monitor(pid)
         GenServer.stop(pid, :normal)
-        assert_receive {:DOWN, ^ref, :process, ^pid, _}
+        assert_receive {:DOWN, ^ref, :process, ^pid, _}, @engine_wait
 
       [] ->
         :ok
@@ -83,11 +88,11 @@ defmodule Hamaca.Runs.OutcomelessReentryTest do
   # start + two re-entries: attempts 1..cap of brainstorm visit 1, all outcome nil.
   defp build_streak_at_cap(ctx) do
     {:ok, run} = Runs.start_run(ctx.card, ctx.flow)
-    assert_receive {:dispatched, %NodeJob{}}
+    assert_receive {:dispatched, %NodeJob{}}, @engine_wait
 
     for _ <- 2..Runs.max_outcomeless_reentries()//1 do
       force_reenter(run)
-      assert_receive {:dispatched, %NodeJob{}}
+      assert_receive {:dispatched, %NodeJob{}}, @engine_wait
     end
 
     run
@@ -97,9 +102,9 @@ defmodule Hamaca.Runs.OutcomelessReentryTest do
     run = build_streak_at_cap(ctx)
     pid = force_reenter(run)
     ref = Process.monitor(pid)
-    assert_receive {:run_parked, %Run{status: :parked, parked_reason: :needs_input} = parked}
+    assert_receive {:run_parked, %Run{status: :parked, parked_reason: :needs_input} = parked}, @engine_wait
     assert parked.id == run.id
-    assert_receive {:DOWN, ^ref, :process, ^pid, _}
+    assert_receive {:DOWN, ^ref, :process, ^pid, _}, @engine_wait
     run
   end
 

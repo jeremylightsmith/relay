@@ -350,6 +350,85 @@ defmodule HamacaWeb.CardLiveTest do
     end
   end
 
+  describe "/cards/:ref archive (RE498)" do
+    # Card mode never navigates itself to the board: leaving the card asks the native shell to
+    # go back (the `.NativeBack` bridge), carrying the toast the app shows where it lands.
+    defp card_mode(conn, board, ref) do
+      {:ok, view, _html} = live(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1&back=Board")
+      render_async(view)
+      view
+    end
+
+    defp archive_from_overflow(view) do
+      view |> element("#card-drawer-overflow") |> render_click()
+      view |> element("#archive-card-button") |> render_click()
+    end
+
+    test "archiving from the ⋯ menu asks the native shell to go back, never patches to the board",
+         %{conn: conn, board: board, ref: ref} do
+      view = card_mode(conn, board, ref)
+
+      archive_from_overflow(view)
+
+      assert_push_event(view, "native-back", %{message: message})
+      assert message == "#{ref} archived"
+      refute_patched(view)
+      assert has_element?(view, "#card-drawer")
+      refute has_element?(view, "#board-viewport")
+      assert Cards.get_card_by_ref(board, ref).archived_at
+    end
+
+    test "the acting session's own archive echo does not push native-back a second time",
+         %{conn: conn, board: board, ref: ref} do
+      view = card_mode(conn, board, ref)
+
+      archive_from_overflow(view)
+      # A synchronous call to the view: the {:card_archived, _} echo is processed before it.
+      render(view)
+
+      assert_push_event(view, "native-back", %{message: _})
+      refute_push_event(view, "native-back", _)
+      refute_patched(view)
+    end
+
+    test "the open card archived elsewhere asks the native shell to go back with a was-archived message",
+         %{conn: conn, board: board, card: card, ref: ref} do
+      view = card_mode(conn, board, ref)
+
+      {:ok, _archived} = Cards.archive_card(card, :agent)
+      render(view)
+
+      assert_push_event(view, "native-back", %{message: message})
+      assert message == "#{ref} was archived"
+      refute_patched(view)
+      refute has_element?(view, "#board-viewport")
+    end
+
+    test "another card on the board archived elsewhere leaves this card alone",
+         %{conn: conn, board: board, card: card, ref: ref} do
+      {:ok, other} = Cards.create_card(Enum.find(board.stages, &(&1.id == card.stage_id)), %{title: "Other"})
+      view = card_mode(conn, board, ref)
+
+      {:ok, _archived} = Cards.archive_card(other, :agent)
+      render(view)
+
+      refute_push_event(view, "native-back", _)
+      refute_patched(view)
+    end
+
+    test "the page mounts exactly one native-back listener beside the back button",
+         %{conn: conn, board: board, ref: ref} do
+      view = card_mode(conn, board, ref)
+
+      assert has_element?(view, ~s(#card-drawer-native-back[phx-hook$="NativeBack"][data-native-back-listener]))
+      assert has_element?(view, ~s(#card-drawer-nav-bar-back[phx-hook$="NativeBack"]))
+      refute has_element?(view, ~s(#card-drawer-nav-bar-back[data-native-back-listener]))
+
+      doc = view |> render() |> LazyHTML.from_fragment()
+      assert doc |> LazyHTML.query("[data-native-back-listener]") |> Enum.count() == 1
+    end
+  end
+
   describe "/cards/:ref with duplicate board keys" do
     # Board keys are not unique. Derive the twin's key and ref_number from the card the
     # outer setup made, so the two boards genuinely produce the same ref string.

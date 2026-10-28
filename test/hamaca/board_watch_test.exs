@@ -4,19 +4,21 @@ defmodule Hamaca.BoardWatchTest do
   alias Hamaca.BoardWatch
 
   # BoardWatch is started by the application, so we use the running table and
-  # isolate tests with unique board_ids rather than starting our own instance.
+  # isolate tests with unique keys rather than starting our own instance. Keys
+  # are refs, never integers: async tests bump real (small, sequential) board ids
+  # in the same table, so a `System.unique_integer/1` key could collide with one.
 
   test "version/1 on an unknown board returns 0" do
-    assert BoardWatch.version(System.unique_integer([:positive])) == 0
+    assert BoardWatch.version(make_ref()) == 0
   end
 
   test "first bump seeds the counter above 0" do
-    board_id = System.unique_integer([:positive])
+    board_id = make_ref()
     assert BoardWatch.bump(board_id) > 0
   end
 
   test "bump/1 increments and is monotonic per board" do
-    board_id = System.unique_integer([:positive])
+    board_id = make_ref()
 
     v1 = BoardWatch.bump(board_id)
     v2 = BoardWatch.bump(board_id)
@@ -28,8 +30,8 @@ defmodule Hamaca.BoardWatchTest do
   end
 
   test "independent boards have independent counters" do
-    a = System.unique_integer([:positive])
-    b = System.unique_integer([:positive])
+    a = make_ref()
+    b = make_ref()
 
     va = BoardWatch.bump(a)
     _ = BoardWatch.bump(b)

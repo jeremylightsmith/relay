@@ -141,6 +141,33 @@ defmodule HamacaWeb.Browser.EmbedCardReviewTest do
              "/board/#{board.slug}?embed=1"
   end
 
+  # RE498 — card mode never renders a board at the card URL: archiving pushes "native-back",
+  # whose listener makes the same bridge call as the back button — history.back() out here.
+  # PhoenixTest.Playwright accepts the Archive button's data-confirm dialog by default.
+  test "outside the app, archiving the card goes back via history.back()", %{conn: conn} do
+    {board, ref} = review_card()
+
+    conn =
+      conn
+      |> visit("/dev/login")
+      |> assert_has("body .phx-connected")
+      |> visit("/board/#{board.slug}?embed=1")
+      |> assert_has("main[data-embed] #board-create-card")
+
+    measure(conn, "window.location.assign('#{card_url(board, ref)}')")
+
+    conn =
+      conn
+      |> assert_has("#card-drawer-nav-bar-back", text: "Board")
+      |> await_connected()
+      |> click("#card-drawer-overflow")
+      |> click("#archive-card-button")
+      |> assert_has("main[data-embed] #board-create-card")
+
+    assert measure(conn, "window.location.pathname + window.location.search") ==
+             "/board/#{board.slug}?embed=1"
+  end
+
   test "dark theme: the bar and active segment take the dark tokens", %{conn: conn} do
     {board, ref} = review_card()
 
