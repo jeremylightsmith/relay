@@ -34,7 +34,7 @@ class FeedQuestion {
   /// Plain strings — RLY-71's merged wire format has no per-option description (D3).
   final List<String> options;
 
-  /// `allow_text` on the wire. NOT `allow_free_text`, which exists nowhere in Relay.
+  /// `allow_text` on the wire. NOT `allow_free_text`, which exists nowhere in Hamaca.
   final bool allowText;
 
   factory FeedQuestion.fromJson(Map<String, dynamic> json) => FeedQuestion(

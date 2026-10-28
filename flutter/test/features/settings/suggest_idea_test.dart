@@ -1,4 +1,4 @@
-// RE397: the Settings "Suggest an idea" row opens Relay's public roadmap in the
+// RE397: the Settings "Suggest an idea" row opens Hamaca's public roadmap in the
 // system browser, and only when the server sent a `feedback_url`.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

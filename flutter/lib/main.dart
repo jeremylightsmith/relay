@@ -75,7 +75,7 @@ class _RelayAppState extends ConsumerState<RelayApp> {
     });
 
     return MaterialApp.router(
-      title: 'Relay',
+      title: 'Hamaca',
       theme: RelayTheme.light,
       darkTheme: RelayTheme.dark,
       routerConfig: router,

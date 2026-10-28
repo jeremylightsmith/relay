@@ -251,7 +251,7 @@ class _PlanPill extends StatelessWidget {
   }
 }
 
-/// "Suggest an idea" (RE397): opens Relay's public roadmap outside the app —
+/// "Suggest an idea" (RE397): opens Hamaca's public roadmap outside the app —
 /// [LaunchMode.externalApplication], the system browser, never an in-app view.
 class _SuggestIdeaRow extends ConsumerWidget {
   const _SuggestIdeaRow({required this.url});

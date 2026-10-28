@@ -317,13 +317,13 @@ final routerProvider = Provider<GoRouter>((ref) {
 /// card — nothing to route to, so the tap just opens the app.
 ///
 /// `kind` rides through so the host can pick its bottom bar without a fetch (RLY-87 §5);
-/// `Relay.Push.payload/3` has always emitted it. **Accepted cost:** a *stale* push — the
-/// card was `needs_input` when sent and `in_review` when tapped — carries the old kind and
-/// shows the wrong bar. Harmless here (RLY-87's actions are stubbed), but **RLY-88 must
-/// handle it** when the buttons start calling the API. Absent kind → no bar, rather than
-/// the wrong one. This deliberately supersedes RLY-86 §8, which routed every push without
-/// `kind` on the assumption RLY-87 would read the card's current state; the approved spec
-/// chose the URL instead.
+/// `Hamaca.Push` has always emitted it (`message/2` sets it). **Accepted cost:** a
+/// *stale* push — the card was `needs_input` when sent and `in_review` when tapped —
+/// carries the old kind and shows the wrong bar. Harmless here (RLY-87's actions are
+/// stubbed), but **RLY-88 must handle it** when the buttons start calling the API.
+/// Absent kind → no bar, rather than the wrong one. This deliberately supersedes RLY-86
+/// §8, which routed every push without `kind` on the assumption RLY-87 would read the
+/// card's current state; the approved spec chose the URL instead.
 String? pathForPayload(Map<String, dynamic> payload) {
   final ref = payload['card_ref'] as String?;
   final slug = payload['board_slug'] as String?;

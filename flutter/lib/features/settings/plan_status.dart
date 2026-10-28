@@ -3,7 +3,7 @@
 // it. Status only: the app sells nothing (App Store rules).
 
 /// A plan's standing. The one client-side definition of the wire names, which
-/// mirror the server's `Relay.Billing.Standing` kinds.
+/// mirror the server's `Hamaca.Billing.Standing` kinds.
 enum PlanStanding {
   free('free'),
   active('active'),
@@ -30,7 +30,7 @@ enum PlanStanding {
 class PlanStatus {
   const PlanStatus({required this.enabled, this.standing, this.through});
 
-  /// False when the operator runs Relay with billing switched off.
+  /// False when the operator runs Hamaca with billing switched off.
   final bool enabled;
 
   /// Null when the server sent none, or one this app doesn't know.

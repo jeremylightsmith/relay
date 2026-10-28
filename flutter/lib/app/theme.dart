@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Relay's "who holds the baton" palette + Material 3 themes.
+/// Hamaca's "who holds the baton" palette + Material 3 themes.
 ///
 /// Colors are derived from the design tokens in `assets/css/app.css`
 /// (converted oklch → sRGB). Human = blue (primary), AI = violet (secondary).

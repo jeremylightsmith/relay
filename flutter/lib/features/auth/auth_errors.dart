@@ -19,7 +19,7 @@ class SignInRejected implements Exception {
       'SignInRejected(statusCode: $statusCode, method: ${method.name})';
 }
 
-/// Dio failure types that all mean "we never reached Relay".
+/// Dio failure types that all mean "we never reached Hamaca".
 const _connectivityFailures = {
   DioExceptionType.connectionError,
   DioExceptionType.connectionTimeout,

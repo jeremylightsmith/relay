@@ -3,7 +3,7 @@
 //
 // Nonce contract (one definition here, mirrored by AppleTokenValidator on the
 // server): Apple is handed sha256(raw) as lowercase hex and embeds it in the
-// identity token's `nonce` claim; the *raw* string goes to Relay, which recomputes
+// identity token's `nonce` claim; the *raw* string goes to Hamaca, which recomputes
 // the hash. A replayed token is useless without the raw nonce it was minted for.
 import 'dart:convert';
 import 'dart:math';

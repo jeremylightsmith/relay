@@ -1,8 +1,8 @@
 /// App configuration, supplied at build time via --dart-define. None of these
-/// are secrets: the iOS OAuth client id and the Relay host are public app
+/// are secrets: the iOS OAuth client id and the Hamaca host are public app
 /// config (an iOS OAuth client has no client secret), so they're safe to bake in.
 class AppConfig {
-  /// The Relay server. Dev default is the local Phoenix server on :4003.
+  /// The Hamaca server. Dev default is the local Phoenix server on :4003.
   static const String baseUrl = String.fromEnvironment(
     'RELAY_BASE_URL',
     defaultValue: 'http://localhost:4003',

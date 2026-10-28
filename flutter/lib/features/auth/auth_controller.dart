@@ -192,7 +192,7 @@ class AuthController extends Notifier<AuthState> {
   }
 
   /// RE106: Sign in with Apple (iOS). Apple embeds sha256(raw nonce) in the
-  /// identity token; Relay gets the raw nonce and checks the two agree.
+  /// identity token; Hamaca gets the raw nonce and checks the two agree.
   Future<void> signInWithApple() async {
     const method = SignInMethod.apple;
     state = const AuthState(status: AuthStatus.signingIn, method: method);

@@ -19,10 +19,11 @@ import 'widgets/card_review_bar.dart';
 /// The card-detail host: the **embedded chromeless LiveView card
 /// body**, and a persistent native action bar beneath it (RLY-87 · CORE-03).
 ///
-/// Per ADR 0001 this is a **thin wrapper over the existing LiveView**, not a parallel
-/// native card UI: the body is `/cards/:ref`, the standalone chromeless route, which
-/// renders the card drawer alone with no board and no web chrome. F2 already injected
-/// the session cookie into the webview store, so it renders signed-in.
+/// The body is embedded chromeless LiveView content (ADR 0001), never re-implemented
+/// natively; the review action bar beneath it is a native decision surface (ADR 0005).
+/// It loads `/cards/:ref`, the standalone chromeless route, which renders the card
+/// drawer alone with no board and no web chrome. F2 already injected the session
+/// cookie into the webview store, so it renders signed-in.
 ///
 /// The bar swaps by [kind] and lives in `bottomNavigationBar` — outside the webview's
 /// scroll, so no amount of body scrolling can lose it (brief §04).
