@@ -13,6 +13,7 @@ import 'package:relay_mobile/features/board/board_screen.dart';
 import 'package:relay_mobile/features/board/last_place.dart';
 import 'package:relay_mobile/features/boards/boards_repository.dart';
 import 'package:relay_mobile/features/boards/current_board.dart';
+import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/needs_you/feed_repository.dart';
 
 import 'needs_you_screen_test.dart' show FakeFeedRepository;
@@ -144,10 +145,14 @@ void main() {
   });
 
   group('the /board route (RE452)', () {
-    Future<GoRouter> pumpRouter(WidgetTester tester) async {
+    Future<GoRouter> pumpRouter(
+      WidgetTester tester, {
+      WidgetBuilder? boardBody,
+    }) async {
       final router = buildRouter(
-        boardBodyBuilder: (_) =>
-            const Text('board body', key: Key('stub_board_body')),
+        boardBodyBuilder:
+            boardBody ??
+            (_) => const Text('board body', key: Key('stub_board_body')),
         cardBodyBuilder: (_) =>
             const Text('card body', key: Key('stub_card_body')),
       );
@@ -235,6 +240,33 @@ void main() {
 
       expect(state.shownStages, [20]);
     });
+
+    testWidgets(
+      'pushCardTap pushes the tapped card with the Board back label',
+      (tester) async {
+        final router = await pumpRouter(
+          tester,
+          boardBody: (ctx) => TextButton(
+            key: const Key('board_tap'),
+            onPressed: () => BoardScreen.pushCardTap(ctx, [
+              {'ref': 'MA3', 'board': 'relay'},
+            ]),
+            child: const Text('tap'),
+          ),
+        );
+        router.go('/board');
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('board_tap')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('stub_card_body')), findsOneWidget);
+        final card = tester.widget<CardScreen>(find.byType(CardScreen));
+        expect(card.cardRef, 'MA3');
+        expect(card.boardSlug, 'relay');
+        expect(card.backLabel, 'Board');
+      },
+    );
 
     testWidgets('a non-integer or missing stage is null', (tester) async {
       final router = await pumpRouter(tester);
@@ -337,6 +369,17 @@ void main() {
           'kind': null,
         }),
         '/cards/RLY-7?board=demo&back=Board',
+      );
+    });
+
+    test('a card tap carries the originating card as the back label', () {
+      expect(
+        BoardScreen.cardPathForTap({
+          'ref': 'RLY-7',
+          'board': 'demo',
+          'kind': 'in_review',
+        }, backLabel: 'RE1'),
+        '/cards/RLY-7?board=demo&kind=in_review&back=RE1',
       );
     });
 

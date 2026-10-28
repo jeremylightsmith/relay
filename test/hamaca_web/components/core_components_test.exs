@@ -4718,6 +4718,151 @@ defmodule HamacaWeb.CoreComponentsTest do
     end
   end
 
+  describe "dependency_list/1 links and the :touch variant (RE474)" do
+    @dep_cards [
+      %{ref: "RE2", title: "Waiting on this", satisfied?: false},
+      %{ref: "RE3", title: "Already done", satisfied?: true}
+    ]
+
+    defp dep_href(ref), do: "/board/demo?card=" <> ref
+
+    defp dep_doc(attrs) do
+      (&CoreComponents.dependency_list/1)
+      |> render_component(attrs)
+      |> LazyHTML.from_fragment()
+    end
+
+    defp dep_classes(doc, selector) do
+      doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") |> List.first("") |> String.split()
+    end
+
+    defp assert_dep_classes(doc, selector, expected) do
+      actual = dep_classes(doc, selector)
+      missing = String.split(expected) -- actual
+      assert missing == [], "#{selector} is missing #{inspect(missing)}; has #{inspect(actual)}"
+    end
+
+    test "with an href each chip's tick, ref and title sit in a select_card link; ✕ stays outside it" do
+      html =
+        render_component(&CoreComponents.dependency_list/1,
+          id: "blocked-by",
+          cards: @dep_cards,
+          removable: true,
+          href: &dep_href/1
+        )
+
+      doc = LazyHTML.from_fragment(html)
+      link = LazyHTML.query(doc, "a#blocked-by-link-RE2")
+
+      assert LazyHTML.attribute(link, "href") == ["/board/demo?card=RE2"]
+      assert LazyHTML.attribute(link, "phx-click") == ["select_card"]
+      assert LazyHTML.attribute(link, "phx-value-ref") == ["RE2"]
+
+      refute Enum.empty?(LazyHTML.query(doc, "#blocked-by-link-RE3 .hero-check-circle"))
+      refute Enum.empty?(LazyHTML.query(doc, "#blocked-by-link-RE3 .line-through"))
+
+      assert Enum.empty?(LazyHTML.query(doc, "#blocked-by-link-RE2 #blocked-by-remove-RE2"))
+      refute Enum.empty?(LazyHTML.query(doc, "#blocked-by-RE2 #blocked-by-remove-RE2"))
+    end
+
+    test "without an href the chips stay unlinked, exactly as before" do
+      html =
+        render_component(&CoreComponents.dependency_list/1,
+          id: "blocked-by",
+          cards: @dep_cards,
+          removable: true
+        )
+
+      refute html =~ "<a"
+      refute html =~ "select_card"
+      assert html =~ "hero-check-circle"
+      assert html =~ "text-success"
+      assert html =~ "line-through"
+      assert html =~ "hero-x-mark"
+    end
+
+    test "the :touch variant renders 44px rows with a status icon, a chevron and a large ✕" do
+      doc = dep_doc(id: "blocked-by", cards: @dep_cards, removable: true, href: &dep_href/1, variant: :touch)
+
+      assert_dep_classes(
+        doc,
+        "#blocked-by-RE2",
+        "dependency-chip flex min-h-11 items-center gap-1 rounded-[10px] border border-base-300 bg-base-100 pl-3 pr-1"
+      )
+
+      assert_dep_classes(doc, "#blocked-by-link-RE2", "flex min-w-0 flex-1 items-center gap-2 py-2")
+      assert_dep_classes(doc, "#blocked-by-link-RE2 .hero-lock-closed", "size-4 shrink-0 text-warning")
+      assert_dep_classes(doc, "#blocked-by-link-RE3 .hero-check-circle", "size-4 shrink-0 text-success")
+      assert_dep_classes(doc, "#blocked-by-link-RE3 .font-mono", "line-through text-base-content/55")
+
+      for ref <- ["RE2", "RE3"] do
+        assert_dep_classes(
+          doc,
+          "#blocked-by-link-#{ref} .hero-chevron-right",
+          "ml-auto size-4 shrink-0 text-base-content/35"
+        )
+      end
+
+      assert_dep_classes(doc, "#blocked-by-link-RE2 .font-mono", "shrink-0 font-mono text-[13px]")
+      assert_dep_classes(doc, "#blocked-by-link-RE2 .truncate", "truncate text-[14px] text-base-content/75")
+
+      assert_dep_classes(doc, "#blocked-by-remove-RE2", "btn btn-ghost btn-sm btn-square shrink-0")
+
+      assert doc |> LazyHTML.query("#blocked-by-remove-RE2") |> LazyHTML.attribute("aria-label") == [
+               "Remove RE2 as a blocker"
+             ]
+
+      assert_dep_classes(doc, "#blocked-by-remove-RE2 .hero-x-mark", "size-4")
+    end
+
+    test "the :touch Blocks direction wears the turn-down arrow and offers no ✕" do
+      html =
+        render_component(&CoreComponents.dependency_list/1,
+          id: "blocks",
+          cards: [%{ref: "RE95", title: "Draft badge"}],
+          href: &dep_href/1,
+          variant: :touch,
+          direction: :blocks
+        )
+
+      doc = LazyHTML.from_fragment(html)
+
+      assert_dep_classes(
+        doc,
+        "#blocks-link-RE95 .hero-arrow-turn-down-right",
+        "size-4 shrink-0 text-base-content/45"
+      )
+
+      refute html =~ "hero-lock-closed"
+      refute html =~ "remove_dependency"
+      assert_dep_classes(doc, "#blocks", "dependency-list flex flex-col gap-1.5")
+    end
+
+    test "an empty :touch list says None" do
+      html = render_component(&CoreComponents.dependency_list/1, id: "blocks", cards: [], variant: :touch)
+      assert html =~ "None"
+    end
+
+    test "the :compact chip keeps its badge classes, wraps the link and keeps the small ✕" do
+      doc = dep_doc(id: "blocked-by", cards: @dep_cards, removable: true, href: &dep_href/1)
+
+      assert_dep_classes(
+        doc,
+        "#blocked-by-RE2",
+        "dependency-chip badge badge-ghost badge-sm flex w-full items-center justify-start gap-1 hover:bg-base-300"
+      )
+
+      assert_dep_classes(
+        doc,
+        "#blocked-by-link-RE2",
+        "flex min-w-0 flex-1 items-center gap-1 hover:underline decoration-base-content/30"
+      )
+
+      assert_dep_classes(doc, "#blocked-by-remove-RE2", "btn btn-ghost btn-xs btn-square ml-auto shrink-0")
+      assert_dep_classes(doc, "#blocked-by-link-RE3 .hero-check-circle", "size-3 shrink-0 text-success")
+    end
+  end
+
   defp crumbs_doc(crumbs) do
     html = render_component(&CoreComponents.breadcrumbs/1, crumbs: crumbs)
     LazyHTML.from_fragment(html)

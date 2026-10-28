@@ -121,17 +121,44 @@ class BoardScreen extends ConsumerStatefulWidget {
     return match?.group(1);
   }
 
+  /// The JS handler the web card-tap bridge calls (`phx:card-tap` in app.js) — the
+  /// only Dart copy of the name. The board and the card host (RE474: a tapped
+  /// dependency chip) both register it.
+  static const String cardTapHandler = 'relayCardTap';
+
+  /// Pushes the card a [cardTapHandler] call names — shared by the board and the
+  /// card host, so both open a tapped card the same way. A **push**, never a
+  /// replacement: Back returns to wherever the tap came from, whose label is
+  /// [backLabel]. A no-op for a payload with no ref.
+  static void pushCardTap(
+    BuildContext context,
+    List<dynamic> args, {
+    String backLabel = CardScreen.backFromBoard,
+  }) {
+    final payload = args.isNotEmpty && args.first is Map
+        ? args.first as Map
+        : const <dynamic, dynamic>{};
+    final path = cardPathForTap(payload, backLabel: backLabel);
+    if (path != null && context.mounted) {
+      context.push(path, extra: navContextForTap(payload));
+    }
+  }
+
   /// The native route for a `relayCardTap` payload (`{ref, board, kind}`) — the
-  /// board-tap sibling of pathForPayload (app/router.dart). Null when the payload
-  /// carries no ref: nothing to route to.
-  static String? cardPathForTap(Map<dynamic, dynamic> payload) {
+  /// board-tap sibling of pathForPayload (app/router.dart). [backLabel] names the
+  /// screen it was tapped from. Null when the payload carries no ref: nothing to
+  /// route to.
+  static String? cardPathForTap(
+    Map<dynamic, dynamic> payload, {
+    String backLabel = CardScreen.backFromBoard,
+  }) {
     final ref = payload['ref'] as String?;
     if (ref == null || ref.isEmpty) return null;
     final board = payload['board'] as String? ?? '';
     final kind = payload['kind'] as String?;
     final kindParam = kind == null ? '' : '&kind=$kind';
     return '/cards/$ref?board=$board$kindParam'
-        '&back=${Uri.encodeQueryComponent(CardScreen.backFromBoard)}';
+        '&back=${Uri.encodeQueryComponent(backLabel)}';
   }
 
   /// The ‹ › navigation context for a `relayCardTap` payload (RLY-234): the tapped
@@ -293,19 +320,8 @@ class BoardScreenState extends ConsumerState<BoardScreen> {
         onWebViewCreated: (controller) {
           _controller = controller;
           controller.addJavaScriptHandler(
-            handlerName: 'relayCardTap',
-            callback: (args) {
-              final payload = args.isNotEmpty && args.first is Map
-                  ? args.first as Map
-                  : const <dynamic, dynamic>{};
-              final path = BoardScreen.cardPathForTap(payload);
-              if (path != null && context.mounted) {
-                context.push(
-                  path,
-                  extra: BoardScreen.navContextForTap(payload),
-                );
-              }
-            },
+            handlerName: BoardScreen.cardTapHandler,
+            callback: (args) => BoardScreen.pushCardTap(context, args),
           );
           // RLY-126 · BOARD-04 — the board header "+" bubbles out of the
           // webview; the shell opens the native New-card sheet over the tab.

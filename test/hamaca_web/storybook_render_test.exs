@@ -44,6 +44,20 @@ defmodule HamacaWeb.StorybookRenderTest do
     assert html =~ "AI · terminal"
   end
 
+  test "GET /storybook/core_components/dependency_list shows the linked and :touch variations (RE474)",
+       %{conn: conn} do
+    html = conn |> get("/storybook/core_components/dependency_list") |> html_response(200)
+
+    for id <- ~w(blocked_by blocks_read_only empty linked_compact touch_blocked_by touch_blocks),
+        do: assert(html =~ "variation_id=#{id}")
+
+    # Storybook replaces the `id` attribute with its own per-variation id.
+    assert html =~ ~s(id="dependency-list-single-linked-compact-link-RE12")
+    assert html =~ ~s(href="/board/demo?card=RE12")
+    assert html =~ "hero-lock-closed size-4"
+    assert html =~ "hero-arrow-turn-down-right"
+  end
+
   test "GET /storybook/core_components/card_drawer shows the Notes count and the :question state (RE277)",
        %{conn: conn} do
     conn = get(conn, "/storybook/core_components/card_drawer")

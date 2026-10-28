@@ -3818,18 +3818,36 @@ defmodule HamacaWeb.CoreComponents do
   end
 
   @doc """
-  The drawer's dependency rail list (RE93): one ghost chip per card — mono ref + truncated
-  title, a success tick and a struck-through ref when the blocker is satisfied, and a ✕ when
-  the list is editable.
+  The drawer's dependency rail list (RE93): one chip per card — mono ref + truncated title, a
+  success tick and a struck-through ref when the blocker is satisfied, and a ✕ when the list is
+  editable.
 
   One component for both directions: **Blocked by** (`removable`) and **Blocks** (read-only).
   `satisfied?` is optional — the Blocks direction does not carry it, and its absence reads as
   false. Semantic tokens only; no color literals.
 
+  ## Links (RE474)
+
+  Pass `href` — a `(ref -> path)` function — and each chip's icon, ref and title sit in one
+  `<a id="<id>-link-<ref>">` carrying that real `href` plus `phx-click="select_card"`, so
+  `select_card` stays the one navigation path (web patch, embed card-tap, read-only no-op). The
+  `.DependencyChipLink` hook stops a plain click from also loading the `href`, and lets a
+  modified click (Cmd/Ctrl/Shift/Alt/middle) open it in a new tab without pushing
+  `select_card`. The ✕ is a sibling of the link, never inside it, so removing never navigates.
+  Without `href` the chips render unlinked.
+
+  ## Variants
+
+    * `:compact` (default) — the web rail's ghost badge chip.
+    * `:touch` — a 44px row for the embedded card's Properties tab: a status icon (a lock for an
+      open blocker, a tick for a satisfied one, a turn-down arrow in the `:blocks` `direction`),
+      a chevron when linked, and a larger ✕. Only `:touch` reads `direction`.
+
   ## Examples
 
-      <.dependency_list id="card-blocked-by" cards={@dependencies} removable />
-      <.dependency_list id="card-blocks" cards={@dependents} />
+      <.dependency_list id="card-blocked-by" cards={@dependencies} removable href={&path/1} />
+      <.dependency_list id="card-blocks" cards={@dependents} href={&path/1} />
+      <.dependency_list id="card-blocks" cards={@dependents} variant={:touch} direction={:blocks} />
   """
   attr :id, :string, required: true
 
@@ -3840,40 +3858,147 @@ defmodule HamacaWeb.CoreComponents do
   attr :removable, :boolean, default: false, doc: "render the ✕ that fires remove_dependency"
   attr :empty_text, :string, default: "None"
 
+  attr :href, :any,
+    default: nil,
+    doc: "RE474 (ref -> path) — links each chip to its card via select_card; nil renders the chips unlinked"
+
+  attr :variant, :atom, values: [:compact, :touch], default: :compact, doc: "RE474 web chip or 44px touch row"
+
+  attr :direction, :atom,
+    values: [:blocked_by, :blocks],
+    default: :blocked_by,
+    doc: "RE474 which rail this is — only :touch reads it, to pick the row icon"
+
   def dependency_list(assigns) do
     ~H"""
-    <div id={@id} class="dependency-list flex flex-col gap-1">
+    <div
+      id={@id}
+      class={["dependency-list flex flex-col", if(@variant == :touch, do: "gap-1.5", else: "gap-1")]}
+    >
       <span :if={@cards == []} class="text-base-content/55">{@empty_text}</span>
       <div
         :for={card <- @cards}
         id={"#{@id}-#{card.ref}"}
-        class="dependency-chip badge badge-ghost badge-sm flex w-full items-center justify-start gap-1"
+        class={dependency_chip_class(@variant, @href)}
         data-satisfied={to_string(Map.get(card, :satisfied?, false))}
       >
-        <.icon
-          :if={Map.get(card, :satisfied?, false)}
-          name="hero-check-circle"
-          class="size-3 shrink-0 text-success"
+        <a
+          :if={@href}
+          id={"#{@id}-link-#{card.ref}"}
+          href={@href.(card.ref)}
+          phx-click="select_card"
+          phx-value-ref={card.ref}
+          phx-hook=".DependencyChipLink"
+          class={dependency_link_class(@variant)}
+        >
+          <.dependency_chip_body card={card} variant={@variant} direction={@direction} linked />
+        </a>
+        <div :if={!@href && @variant == :touch} class={dependency_link_class(:touch)}>
+          <.dependency_chip_body card={card} variant={:touch} direction={@direction} />
+        </div>
+        <.dependency_chip_body
+          :if={!@href && @variant == :compact}
+          card={card}
+          variant={:compact}
+          direction={@direction}
         />
-        <span class={["shrink-0 font-mono", Map.get(card, :satisfied?, false) && "line-through"]}>
-          {card.ref}
-        </span>
-        <span class="truncate text-base-content/65">{card.title}</span>
         <button
           :if={@removable}
           type="button"
           id={"#{@id}-remove-#{card.ref}"}
-          class="btn btn-ghost btn-xs btn-square ml-auto shrink-0"
+          class={
+            if(@variant == :touch,
+              do: "btn btn-ghost btn-sm btn-square shrink-0",
+              else: "btn btn-ghost btn-xs btn-square ml-auto shrink-0"
+            )
+          }
           phx-click="remove_dependency"
           phx-value-ref={card.ref}
           aria-label={"Remove #{card.ref} as a blocker"}
         >
-          <.icon name="hero-x-mark" class="size-3" />
+          <.icon name="hero-x-mark" class={if(@variant == :touch, do: "size-4", else: "size-3")} />
         </button>
       </div>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".DependencyChipLink">
+        // LiveView pushes phx-click from a window listener but only prevents default for
+        // href="#": without this a plain click would ALSO follow the href (a full reload). A
+        // modified click stops here instead, so the browser opens the href in a new tab and
+        // select_card never fires.
+        export default {
+          mounted() {
+            this.el.addEventListener("click", (e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+                e.stopPropagation()
+              } else {
+                e.preventDefault()
+              }
+            })
+          }
+        }
+      </script>
     </div>
     """
   end
+
+  defp dependency_chip_class(:touch, _href),
+    do: "dependency-chip flex min-h-11 items-center gap-1 rounded-[10px] border border-base-300 bg-base-100 pl-3 pr-1"
+
+  defp dependency_chip_class(:compact, href),
+    do: [
+      "dependency-chip badge badge-ghost badge-sm flex w-full items-center justify-start gap-1",
+      href && "hover:bg-base-300"
+    ]
+
+  defp dependency_link_class(:touch), do: "flex min-w-0 flex-1 items-center gap-2 py-2"
+
+  defp dependency_link_class(:compact),
+    do: "flex min-w-0 flex-1 items-center gap-1 hover:underline decoration-base-content/30"
+
+  attr :card, :map, required: true
+  attr :variant, :atom, required: true
+  attr :direction, :atom, required: true
+  attr :linked, :boolean, default: false
+
+  defp dependency_chip_body(%{variant: :compact} = assigns) do
+    assigns = assign(assigns, :satisfied?, Map.get(assigns.card, :satisfied?, false))
+
+    ~H"""
+    <.icon :if={@satisfied?} name="hero-check-circle" class="size-3 shrink-0 text-success" />
+    <span class={["shrink-0 font-mono", @satisfied? && "line-through"]}>{@card.ref}</span>
+    <span class="truncate text-base-content/65">{@card.title}</span>
+    """
+  end
+
+  defp dependency_chip_body(%{variant: :touch} = assigns) do
+    satisfied? = Map.get(assigns.card, :satisfied?, false)
+
+    assigns =
+      assigns
+      |> assign(:satisfied?, satisfied?)
+      |> assign(:status_icon, dependency_touch_icon(assigns.direction, satisfied?))
+
+    ~H"""
+    <.icon name={elem(@status_icon, 0)} class={elem(@status_icon, 1)} />
+    <span class={[
+      "shrink-0 font-mono text-[13px]",
+      @satisfied? && "line-through text-base-content/55"
+    ]}>
+      {@card.ref}
+    </span>
+    <span class="truncate text-[14px] text-base-content/75">{@card.title}</span>
+    <.icon
+      :if={@linked}
+      name="hero-chevron-right"
+      class="ml-auto size-4 shrink-0 text-base-content/35"
+    />
+    """
+  end
+
+  defp dependency_touch_icon(:blocks, _satisfied?),
+    do: {"hero-arrow-turn-down-right", "size-4 shrink-0 text-base-content/45"}
+
+  defp dependency_touch_icon(:blocked_by, true), do: {"hero-check-circle", "size-4 shrink-0 text-success"}
+  defp dependency_touch_icon(:blocked_by, false), do: {"hero-lock-closed", "size-4 shrink-0 text-warning"}
 
   @doc """
   The one modal scrim (RE237).
@@ -4524,12 +4649,12 @@ defmodule HamacaWeb.CoreComponents do
   attr :embed, :boolean,
     default: false,
     doc:
-      "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. RE93 adds a third: both dependency rails (Blocked by / Blocks) are dropped, because editing them needs the datalist + inline-refusal affordances the native host has no room for — note the *face* chip is NOT embed-gated, so a native reader can see \"Blocked by 2 cards\" without being able to see which two. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
+      "RLY-87: hosted inside the native shell — drops the web review buttons (the native action bar is the only actor) and the drawer's own dismissal affordances (scrim + close ✕), which the native back chevron owns. RE474: the properties rail is not beside the body but on its own Properties segment (Detail is the body only), and Blocked by is edited there through a touch add box with an in-page suggestion list instead of the web datalist, which the native host cannot drive. Keeps the review panel's label and hint: the context for the decision is the point of the screen."
 
   attr :drawer_tab, :atom,
-    values: [:detail, :run, :talk, :activity],
+    values: [:detail, :properties, :run, :talk, :activity],
     default: :detail,
-    doc: "RLY-137/RE268: which of the drawer's tab panels is visible"
+    doc: "RLY-137/RE268: which of the drawer's tab panels is visible; RE474 :properties is embed-only (the rail)"
 
   attr :runs, :list,
     default: [],
@@ -4560,7 +4685,21 @@ defmodule HamacaWeb.CoreComponents do
   attr :dependencies, :list, default: [], doc: "RE93 [%{ref, title, satisfied?}] — the Blocked by rail"
   attr :dependents, :list, default: [], doc: "RE93 [%{ref, title}] — the read-only Blocks rail"
   attr :dependency_options, :list, default: [], doc: "RE93 [%{ref, title}] for the add-blocker datalist"
+
+  attr :dependency_href, :any,
+    default: nil,
+    doc:
+      "RE474 (ref -> path) — the card URL a dependency chip links to, forwarded to both rail lists as `href`; nil leaves the chips unlinked"
+
   attr :dependency_error, :string, default: nil, doc: "RE93 the 422 sentence, rendered inline under the input"
+
+  attr :dependency_adding?, :boolean,
+    default: false,
+    doc: "RE474 whether the embedded card's touch add-blocker box is open (BoardLive owns it)"
+
+  attr :dependency_suggestions, :list,
+    default: [],
+    doc: "RE474 [%{ref, title}] — the touch box's suggestion rows, already filtered and capped by BoardLive"
 
   attr :dependency_input, :string,
     default: "",
@@ -5059,7 +5198,14 @@ defmodule HamacaWeb.CoreComponents do
               aria_label="Card sections"
             >
               <:option
-                :for={{tab, label} <- [{:detail, "Detail"}, {:run, "Run"}, {:activity, "Activity"}]}
+                :for={
+                  {tab, label} <- [
+                    {:detail, "Detail"},
+                    {:properties, "Properties"},
+                    {:run, "Run"},
+                    {:activity, "Activity"}
+                  ]
+                }
                 :if={tab != :run or @show_run_tab?}
                 id={"card-drawer-tab-#{tab}"}
                 label={label}
@@ -5103,7 +5249,8 @@ defmodule HamacaWeb.CoreComponents do
               id={"#{@id}-main"}
               class={[
                 "flex min-w-0 flex-none flex-col gap-6 p-5 drawer:flex-1 drawer:overflow-y-auto",
-                @drawer_tab == :talk && "drawer:gap-0 drawer:p-0"
+                @drawer_tab == :talk && "drawer:gap-0 drawer:p-0",
+                @drawer_tab == :properties && "hidden"
               ]}
             >
               <section
@@ -5916,11 +6063,15 @@ defmodule HamacaWeb.CoreComponents do
               </div>
             </div>
 
+            <%!-- RE474 — embedded, the rail is the Properties tab and nothing else: absent on
+                 every other segment, and on its own surface (border-t-0 bg-base-100). --%>
             <div
+              :if={!@embed or @drawer_tab == :properties}
               id={"#{@id}-rail"}
               class={[
                 "flex w-full shrink-0 flex-col gap-[18px] border-t border-base-300 bg-base-200/30 px-[18px] py-5 text-sm drawer:w-[224px] drawer:overflow-y-auto drawer:border-l drawer:border-t-0",
-                @drawer_tab == :talk && "drawer:hidden"
+                @drawer_tab == :talk && "drawer:hidden",
+                @embed && "border-t-0 bg-base-100"
               ]}
             >
               <%!-- RE282 (Relay Card Detail v5.dc.html, changes 15/21/23): Status → Blocked by → Blocks →
@@ -5933,52 +6084,79 @@ defmodule HamacaWeb.CoreComponents do
                 </div>
               </div>
 
-              <%!-- BLOCKED BY (RE93) — editable; hidden on @embed, the native card host. Sits beside
-                   Status because it explains why a card is blocked. --%>
-              <div :if={!@embed} class="rail-section flex flex-col gap-1.5">
+              <%!-- BLOCKED BY (RE93) — editable. Sits beside Status because it explains why a card
+                   is blocked. RE474: the embed swaps the web datalist for 44px touch rows and the
+                   touch add box (dependency_add_touch/1). --%>
+              <div class="rail-section flex flex-col gap-1.5">
                 <.section_label>Blocked by</.section_label>
-                <.dependency_list
-                  id={"#{@id}-blocked-by"}
-                  cards={@dependencies}
-                  removable={not @archived}
-                />
-                <form
-                  :if={not @archived}
-                  id={"#{@id}-add-dependency"}
-                  phx-change="validate_dependency"
-                  phx-submit="add_dependency"
-                  class="flex items-center gap-1"
-                >
-                  <%!-- RE363 — SubmitOnDatalistPick submits on a suggestion pick, so a click in
-                       the list saves the blocker; typed refs still wait for Enter. --%>
-                  <input
-                    type="text"
-                    id={"#{@id}-dependency-input"}
-                    name="ref"
-                    value={@dependency_input}
-                    list={"#{@id}-dependency-options"}
-                    placeholder="+ Add"
-                    autocomplete="off"
-                    phx-hook="SubmitOnDatalistPick"
-                    class="input input-xs w-full border border-dashed border-base-300 font-mono"
+                <%= if @embed do %>
+                  <.dependency_list
+                    id={"#{@id}-blocked-by"}
+                    cards={@dependencies}
+                    removable={not @archived}
+                    href={@dependency_href}
+                    variant={:touch}
+                    direction={:blocked_by}
                   />
-                  <datalist id={"#{@id}-dependency-options"}>
-                    <option :for={opt <- @dependency_options} value={opt.ref}>{opt.title}</option>
-                  </datalist>
-                </form>
-                <p
-                  :if={@dependency_error}
-                  id={"#{@id}-dependency-error"}
-                  class="text-xs text-error"
-                >
-                  {@dependency_error}
-                </p>
+                  <.dependency_add_touch
+                    :if={not @archived}
+                    id={@id}
+                    adding?={@dependency_adding?}
+                    input={@dependency_input}
+                    suggestions={@dependency_suggestions}
+                    error={@dependency_error}
+                  />
+                <% else %>
+                  <.dependency_list
+                    id={"#{@id}-blocked-by"}
+                    cards={@dependencies}
+                    removable={not @archived}
+                    href={@dependency_href}
+                  />
+                  <form
+                    :if={not @archived}
+                    id={"#{@id}-add-dependency"}
+                    phx-change="validate_dependency"
+                    phx-submit="add_dependency"
+                    class="flex items-center gap-1"
+                  >
+                    <%!-- RE363 — SubmitOnDatalistPick submits on a suggestion pick, so a click in
+                         the list saves the blocker; typed refs still wait for Enter. --%>
+                    <input
+                      type="text"
+                      id={"#{@id}-dependency-input"}
+                      name="ref"
+                      value={@dependency_input}
+                      list={"#{@id}-dependency-options"}
+                      placeholder="+ Add"
+                      autocomplete="off"
+                      phx-hook="SubmitOnDatalistPick"
+                      class="input input-xs w-full border border-dashed border-base-300 font-mono"
+                    />
+                    <datalist id={"#{@id}-dependency-options"}>
+                      <option :for={opt <- @dependency_options} value={opt.ref}>{opt.title}</option>
+                    </datalist>
+                  </form>
+                  <p
+                    :if={@dependency_error}
+                    id={"#{@id}-dependency-error"}
+                    class="text-xs text-error"
+                  >
+                    {@dependency_error}
+                  </p>
+                <% end %>
               </div>
 
               <%!-- BLOCKS (RE93) — read-only, hidden entirely when empty --%>
-              <div :if={!@embed and @dependents != []} class="rail-section flex flex-col gap-1.5">
+              <div :if={@dependents != []} class="rail-section flex flex-col gap-1.5">
                 <.section_label>Blocks</.section_label>
-                <.dependency_list id={"#{@id}-blocks"} cards={@dependents} />
+                <.dependency_list
+                  id={"#{@id}-blocks"}
+                  cards={@dependents}
+                  href={@dependency_href}
+                  variant={if(@embed, do: :touch, else: :compact)}
+                  direction={:blocks}
+                />
               </div>
 
               <%!-- OWNERS: avatars + names, active owner ringed; Reassign stays here because it acts on this field --%>
@@ -6268,6 +6446,77 @@ defmodule HamacaWeb.CoreComponents do
         </aside>
       </div>
     </div>
+    """
+  end
+
+  # RE474 — the embedded card's add-blocker box (card mockup "Properties gets its own tab on
+  # mobile", frames 2–3). Closed, a dashed "+ Add blocker" button; open, an input + Cancel and the
+  # server-filtered suggestion rows. Each row is a type="button" with its own add_dependency
+  # click, so tapping one never submits the form (which would add the typed text too); Enter
+  # still submits a typed ref. No <datalist>: the native host cannot drive one (RE93).
+  attr :id, :string, required: true, doc: "the drawer id; the box's ids hang off it"
+  attr :adding?, :boolean, required: true
+  attr :input, :string, required: true
+  attr :suggestions, :list, required: true
+  attr :error, :string, default: nil
+
+  defp dependency_add_touch(assigns) do
+    ~H"""
+    <button
+      :if={!@adding?}
+      type="button"
+      id={"#{@id}-add-dependency-open"}
+      phx-click="open_add_dependency"
+      class="flex min-h-11 items-center gap-1.5 rounded-[10px] border border-dashed border-base-300 px-3 text-left font-mono text-[13px] text-base-content/60"
+    >
+      <.icon name="hero-plus" class="size-4" /> Add blocker
+    </button>
+    <form
+      :if={@adding?}
+      id={"#{@id}-add-dependency"}
+      phx-change="validate_dependency"
+      phx-submit="add_dependency"
+      class="flex flex-col gap-1.5"
+    >
+      <div class="flex items-center gap-1.5">
+        <input
+          type="text"
+          id={"#{@id}-dependency-input"}
+          name="ref"
+          value={@input}
+          placeholder="Ref or title"
+          autocomplete="off"
+          phx-mounted={JS.focus()}
+          class="input input-sm h-11 w-full font-mono text-[15px] input-primary"
+        />
+        <button
+          type="button"
+          id={"#{@id}-add-dependency-cancel"}
+          phx-click="cancel_add_dependency"
+          class="btn btn-ghost btn-sm h-11 text-primary"
+        >
+          Cancel
+        </button>
+      </div>
+      <div
+        :if={@suggestions != []}
+        id={"#{@id}-dependency-suggestions"}
+        class="flex flex-col overflow-hidden rounded-[10px] border border-base-300 bg-base-100 shadow-md"
+      >
+        <button
+          :for={opt <- @suggestions}
+          type="button"
+          id={"#{@id}-dependency-suggestion-#{opt.ref}"}
+          phx-click="add_dependency"
+          phx-value-ref={opt.ref}
+          class="flex min-h-11 items-center gap-2 border-b border-base-300 px-3 text-left last:border-b-0"
+        >
+          <span class="font-mono text-[13px]">{opt.ref}</span>
+          <span class="truncate text-[14px] text-base-content/75">{opt.title}</span>
+        </button>
+      </div>
+    </form>
+    <p :if={@error} id={"#{@id}-dependency-error"} class="text-xs text-error">{@error}</p>
     """
   end
 

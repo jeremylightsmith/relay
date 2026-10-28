@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:relay_mobile/app/messenger.dart';
+import 'package:relay_mobile/features/board/board_screen.dart';
 import 'package:relay_mobile/features/card/card_nav_context.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/card/widgets/card_review_bar.dart';
@@ -207,6 +208,10 @@ void main() {
 
   test('the card nav JS handler name pins the web chevron contract', () {
     expect(CardScreen.cardNavHandler, 'relayCardNav');
+  });
+
+  test('the card tap JS handler name pins the app.js contract', () {
+    expect(BoardScreen.cardTapHandler, 'relayCardTap');
   });
 
   test('the card nav direction names are the wire tokens', () {

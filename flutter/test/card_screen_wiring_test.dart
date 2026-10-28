@@ -6,6 +6,7 @@ import 'package:relay_mobile/api/plan_paused.dart';
 import 'package:relay_mobile/app/theme.dart';
 import 'package:relay_mobile/features/auth/auth_controller.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
+import 'package:relay_mobile/features/card/card_nav_context.dart';
 import 'package:relay_mobile/features/card/card_screen.dart';
 import 'package:relay_mobile/features/decisions/decision_api.dart';
 import 'package:relay_mobile/features/decisions/review_queue.dart';
@@ -53,6 +54,7 @@ GoRouter _router({WidgetBuilder? bodyBuilder}) => GoRouter(
         boardSlug: s.uri.queryParameters['board'] ?? '',
         kind: s.uri.queryParameters['kind'],
         backLabel: s.uri.queryParameters['back'],
+        navContext: s.extra as CardNavContext?,
         bodyBuilder: bodyBuilder ?? (_) => const Text('card body'),
       ),
     ),
@@ -75,6 +77,7 @@ Future<({ProviderContainer container, GoRouter router})> pumpCardHost(
   bool seedQueue = true,
   WidgetBuilder? bodyBuilder,
   ThemeData? theme,
+  String at = '/cards/RLY-A?board=relay&kind=in_review',
 }) async {
   final container = ProviderContainer(
     overrides: [
@@ -106,7 +109,7 @@ Future<({ProviderContainer container, GoRouter router})> pumpCardHost(
     ),
   );
   await tester.pumpAndSettle();
-  router.push('/cards/RLY-A?board=relay&kind=in_review');
+  router.push(at);
   await tester.pumpAndSettle();
   return (container: container, router: router);
 }
@@ -407,4 +410,96 @@ void main() {
       );
     },
   );
+
+  group('RE474: a dependency tap on a card pushes that card natively', () {
+    const tap = {
+      'ref': 'RE2',
+      'board': 'demo',
+      'kind': null,
+      'cards': [
+        {'ref': 'RE2', 'kind': null},
+        {'ref': 'RE5', 'kind': null},
+      ],
+    };
+
+    /// A stand-in for the webview: each button fires the exact call the
+    /// `relayCardTap` JS callback makes, with the given args.
+    Widget tapBody(BuildContext ctx) => Column(
+      children: [
+        TextButton(
+          key: const Key('dep_tap'),
+          onPressed: () => CardScreen.onCardTap(ctx, [tap]),
+          child: const Text('RE2'),
+        ),
+        TextButton(
+          key: const Key('dep_tap_no_args'),
+          onPressed: () => CardScreen.onCardTap(ctx, []),
+          child: const Text('none'),
+        ),
+        TextButton(
+          key: const Key('dep_tap_no_ref'),
+          onPressed: () => CardScreen.onCardTap(ctx, [
+            {'board': 'demo'},
+          ]),
+          child: const Text('no ref'),
+        ),
+      ],
+    );
+
+    Future<GoRouter> pumpRe1(WidgetTester tester) async {
+      final h = await pumpCardHost(
+        tester,
+        api: FakeDecisionApi(),
+        seedQueue: false,
+        bodyBuilder: tapBody,
+        at: '/cards/RE1?board=demo&back=Board',
+      );
+      return h.router;
+    }
+
+    CardScreen topCard(WidgetTester tester) =>
+        tester.widget<CardScreen>(find.byType(CardScreen));
+
+    testWidgets('the tapped card is pushed with the originating card as its '
+        'back label and the tapped column as its ‹ › context', (tester) async {
+      await pumpRe1(tester);
+
+      await tester.tap(find.byKey(const Key('dep_tap')));
+      await tester.pumpAndSettle();
+
+      final card = topCard(tester);
+      expect(card.cardRef, 'RE2');
+      expect(card.boardSlug, 'demo');
+      expect(card.backLabel, 'RE1');
+      expect(card.navContext?.next?.ref, 'RE5');
+    });
+
+    testWidgets('Back returns to the card the tap came from', (tester) async {
+      final router = await pumpRe1(tester);
+      await tester.tap(find.byKey(const Key('dep_tap')));
+      await tester.pumpAndSettle();
+      expect(topCard(tester).cardRef, 'RE2');
+
+      router.pop();
+      await tester.pumpAndSettle();
+
+      final card = topCard(tester);
+      expect(card.cardRef, 'RE1');
+      expect(card.backLabel, 'Board');
+    });
+
+    testWidgets('a tap with no ref pushes nothing', (tester) async {
+      final router = await pumpRe1(tester);
+
+      await tester.tap(find.byKey(const Key('dep_tap_no_args')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('dep_tap_no_ref')));
+      await tester.pumpAndSettle();
+
+      expect(router.state.uri.toString(), startsWith('/cards/RE1'));
+      expect(router.canPop(), isTrue, reason: 'RE1 still sits on the inbox');
+      expect(find.byType(CardScreen, skipOffstage: false), findsOneWidget);
+      expect(topCard(tester).cardRef, 'RE1');
+    });
+  });
 }

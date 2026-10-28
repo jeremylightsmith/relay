@@ -10,6 +10,7 @@ import '../../app/embedded_webview.dart';
 import '../../app/messenger.dart';
 import '../../app/theme.dart';
 import '../../config.dart';
+import '../board/board_screen.dart';
 import '../decisions/review_queue.dart';
 import 'card_nav_context.dart';
 import 'card_summary.dart';
@@ -134,6 +135,20 @@ class CardScreen extends ConsumerStatefulWidget {
         ? own
         : context.findAncestorStateOfType<_CardScreenState>();
     state?._navigate(direction);
+  }
+
+  /// Pushes the card a tapped dependency chip names (RE474) on top of the
+  /// enclosing card screen, labelled with this card's ref so Back reads
+  /// "‹ RE1" and returns here. The [BoardScreen.cardTapHandler] callback lands
+  /// here — a static, testable entry point like [navigate], with the same
+  /// own-element-first lookup. A no-op outside a [CardScreen].
+  static void onCardTap(BuildContext context, List<dynamic> args) {
+    final own = context is StatefulElement ? context.state : null;
+    final state = own is _CardScreenState
+        ? own
+        : context.findAncestorStateOfType<_CardScreenState>();
+    if (state == null) return;
+    BoardScreen.pushCardTap(context, args, backLabel: state.widget.cardRef);
   }
 
   /// Overrides the webview body. `flutter test` runs on the host, where
@@ -357,6 +372,13 @@ class _CardScreenState extends ConsumerState<CardScreen> {
                         messenger: messenger,
                         message: CardScreen.navBackMessageFromArgs(args),
                       );
+                    },
+                  );
+                  controller.addJavaScriptHandler(
+                    handlerName: BoardScreen.cardTapHandler,
+                    callback: (args) {
+                      if (!context.mounted) return;
+                      CardScreen.onCardTap(context, args);
                     },
                   );
                   controller.addJavaScriptHandler(

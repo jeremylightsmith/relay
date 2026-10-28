@@ -82,9 +82,10 @@ window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
 // RLY-94 — embed card-tap bridge: the server reports a card tap on the embedded
-// board; the native shell (flutter_inappwebview) pushes its CardScreen. In a plain
-// browser with ?embed=1 (no native handler), fall back to the standalone card page
-// so the tap still lands somewhere sensible.
+// board, or (RE474) a dependency-row tap on the embedded card's Properties tab; the
+// native shell (flutter_inappwebview) pushes its CardScreen. In a plain browser with
+// ?embed=1 (no native handler), fall back to the standalone card page so the tap
+// still lands somewhere sensible.
 window.addEventListener("phx:card-tap", ({detail}) => {
   if (window.flutter_inappwebview) {
     window.flutter_inappwebview.callHandler("relayCardTap", detail)

@@ -282,6 +282,56 @@ defmodule HamacaWeb.CardLiveTest do
       assert has_element?(view, ~s(#card-drawer-tab-activity[data-active="true"]))
     end
 
+    # RE474 — the rail moves to its own Properties segment in the embed.
+    defp segment_ids(view) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s(#card-drawer-tabs [role="group"] [id^="card-drawer-tab-"]))
+      |> Enum.flat_map(&LazyHTML.attribute(&1, "id"))
+    end
+
+    defp rail_labels(view) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#card-drawer-rail > .rail-section > span:first-child")
+      |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+    end
+
+    test "Properties sits between Detail and Activity, and Detail has no rail",
+         %{conn: conn, board: board, ref: ref} do
+      view = embed_view(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1")
+
+      assert segment_ids(view) == ["card-drawer-tab-detail", "card-drawer-tab-properties", "card-drawer-tab-activity"]
+      assert has_element?(view, ~s(#card-drawer-tab-properties[data-active="false"]))
+      refute has_element?(view, "#card-drawer-rail")
+    end
+
+    test "Properties shows the rail on its own surface and hides the body",
+         %{conn: conn, board: board, ref: ref} do
+      view = embed_view(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1")
+
+      view |> element("#card-drawer-tab-properties") |> render_click()
+
+      assert has_element?(view, ~s(#card-drawer-tab-properties[data-active="true"]))
+      assert has_element?(view, "#card-drawer-rail.border-t-0.bg-base-100")
+      assert has_element?(view, "#card-drawer-main.hidden")
+      assert view |> rail_labels() |> Enum.take(3) == ["Status", "Blocked by", "Owners"]
+    end
+
+    test "back on Detail, the rail is gone and the body is shown again",
+         %{conn: conn, board: board, ref: ref} do
+      view = embed_view(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1")
+
+      view |> element("#card-drawer-tab-properties") |> render_click()
+      view |> element("#card-drawer-tab-detail") |> render_click()
+
+      refute has_element?(view, "#card-drawer-rail")
+      assert has_element?(view, "#card-drawer-main")
+      refute has_element?(view, "#card-drawer-main.hidden")
+    end
+
     test "the review hint points at the native bar; no web decision buttons",
          %{conn: conn, board: board, ref: ref} do
       view = embed_view(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1")

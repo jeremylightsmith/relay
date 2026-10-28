@@ -729,6 +729,7 @@ defmodule HamacaWeb.BoardLive do
         health={health_state(@health_by_card, @selected_card.id)}
         done={Cards.done?(@selected_card, @board.stages)}
         close_patch={board_path(assigns)}
+        dependency_href={&card_path(assigns, &1)}
         hold_open={markdown_editor_open?(assigns)}
         title_form={@title_form}
         editing_title={@editing_title}
@@ -806,6 +807,8 @@ defmodule HamacaWeb.BoardLive do
         dependency_options={@dependency_options}
         dependency_error={@dependency_error}
         dependency_input={@dependency_input}
+        dependency_adding?={@dependency_adding?}
+        dependency_suggestions={@dependency_suggestions}
         vote_count={@drawer_vote_count}
         supporters={@drawer_supporters}
         public_description={@selected_card.public_description}
@@ -1399,6 +1402,8 @@ defmodule HamacaWeb.BoardLive do
       |> assign(:dependency_options, [])
       |> assign(:dependency_error, nil)
       |> assign(:dependency_input, "")
+      |> assign(:dependency_adding?, false)
+      |> assign(:dependency_suggestions, [])
       |> assign(:editing_public_desc, false)
       |> assign(:public_desc_form, nil)
       # RE362 — unsaved drawer text, keyed {card_id, field}; survives card switches and drawer
@@ -1861,8 +1866,9 @@ defmodule HamacaWeb.BoardLive do
          |> assign_steer(card)
          |> assign(:drawer_supporters, supporters)
          |> assign(:drawer_vote_count, vote_count)
-         |> assign_card_dependencies(card)
          |> assign(:dependency_input, "")
+         |> assign(:dependency_adding?, false)
+         |> assign_card_dependencies(card)
          |> stream_notes(conversation)
          |> stream(:activity, activity, reset: true)
          |> drop_stale_viewer()}
@@ -2575,7 +2581,28 @@ defmodule HamacaWeb.BoardLive do
   # will not touch a `value` property it never wrote. Holding it in an assign is what lets the
   # success path empty the box — the same reason the comment and compose forms hold theirs.
   def handle_event("validate_dependency", %{"ref" => ref}, socket) do
-    {:noreply, assign(socket, :dependency_input, ref)}
+    {:noreply,
+     socket
+     |> assign(:dependency_input, ref)
+     |> assign(
+       :dependency_suggestions,
+       dependency_suggestions(socket.assigns.dependency_options, socket.assigns.card_dependencies, ref)
+     )}
+  end
+
+  # RE474 — the embedded card's touch add box (Properties tab) is server state: open shows the
+  # input + suggestion list; cancel closes it and drops everything typed into it.
+  def handle_event("open_add_dependency", _params, socket) do
+    {:noreply, assign(socket, :dependency_adding?, true)}
+  end
+
+  def handle_event("cancel_add_dependency", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:dependency_adding?, false)
+     |> assign(:dependency_input, "")
+     |> assign(:dependency_error, nil)
+     |> assign(:dependency_suggestions, [])}
   end
 
   def handle_event("add_dependency", %{"ref" => ref}, socket) do
@@ -3533,6 +3560,14 @@ defmodule HamacaWeb.BoardLive do
   def handle_event("drawer_tab", %{"tab" => tab}, socket) when tab in ~w(detail run talk activity) do
     {:noreply, select_drawer_tab(socket, String.to_existing_atom(tab))}
   end
+
+  # RE474 — Properties is the embedded card's own tab (the rail, which web shows beside the body
+  # on every tab). Web has no such segment, so the event is ignored there.
+  def handle_event("drawer_tab", %{"tab" => "properties"}, %{assigns: %{embed: true}} = socket) do
+    {:noreply, select_drawer_tab(socket, :properties)}
+  end
+
+  def handle_event("drawer_tab", %{"tab" => "properties"}, socket), do: {:noreply, socket}
 
   # RE279 — the blocked strip's Answer: select Detail through the ordinary tab path (so leaving
   # Talk still unsubscribes), then ask the strip's `.BlockedStrip` hook to focus the first answer
@@ -4566,11 +4601,37 @@ defmodule HamacaWeb.BoardLive do
           c.id != card.id,
           do: %{ref: Card.format_ref(board.key, c.ref_number), title: c.title}
 
+    dependencies = Cards.list_dependencies(board, card)
+
     socket
-    |> assign(:card_dependencies, Cards.list_dependencies(board, card))
+    |> assign(:card_dependencies, dependencies)
     |> assign(:card_dependents, Cards.list_dependents(board, card))
     |> assign(:dependency_options, options)
+    |> assign(:dependency_suggestions, dependency_suggestions(options, dependencies, socket.assigns.dependency_input))
     |> then(&if Keyword.get(opts, :clear_error?, true), do: assign(&1, :dependency_error, nil), else: &1)
+  end
+
+  # RE474 — the embedded touch box's in-page suggestion list (the native host has no working
+  # <datalist>). The filter lives here, never in the template: a case-insensitive substring on
+  # ref or title, minus the card's current blockers, in option order, capped.
+  @dependency_suggestion_limit 5
+  @spec dependency_suggestions([%{ref: String.t(), title: String.t()}], [%{ref: String.t()}], String.t()) ::
+          [%{ref: String.t(), title: String.t()}]
+  defp dependency_suggestions(options, current_dependencies, query) do
+    case query |> String.trim() |> String.downcase() do
+      "" ->
+        []
+
+      needle ->
+        taken = MapSet.new(current_dependencies, & &1.ref)
+
+        options
+        |> Enum.filter(fn opt ->
+          not MapSet.member?(taken, opt.ref) and
+            (String.contains?(String.downcase(opt.ref), needle) or String.contains?(String.downcase(opt.title), needle))
+        end)
+        |> Enum.take(@dependency_suggestion_limit)
+    end
   end
 
   # RE93 — the add/remove_dependency handlers both funnel here: the rail edits the whole set, not
@@ -4587,8 +4648,9 @@ defmodule HamacaWeb.BoardLive do
       {:ok, _card} ->
         {:noreply,
          socket
-         |> assign_card_dependencies(card)
          |> assign(:dependency_input, "")
+         |> assign(:dependency_adding?, false)
+         |> assign_card_dependencies(card)
          |> push_event("dependency_added", %{})}
 
       {:error, reason} ->
