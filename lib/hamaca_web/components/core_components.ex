@@ -1176,6 +1176,45 @@ defmodule HamacaWeb.CoreComponents do
   defp user_name(nil), do: nil
   defp user_name(user), do: Map.get(user, :name) || Map.get(user, :email)
 
+  @board_view_names [:board, :story_map, :value_stream]
+
+  @doc """
+  The board views' names, in display order — the closed set `board_views/1` renders and the
+  `values:` every board-view attr validates against (`board_view_tabs/1`,
+  `HamacaWeb.BoardBarComponents`).
+  """
+  @spec board_view_names() :: [:board | :story_map | :value_stream]
+  def board_view_names, do: @board_view_names
+
+  @doc """
+  The ONE list of board views (RE497) — Board, Story map, Value stream, in that order. Both
+  the wide view switch (`board_view_tabs/1`) and the ⋯ menu's phone View section
+  (`HamacaWeb.BoardBarComponents.board_more_menu/1`) render from it, so a view is added or
+  renamed in exactly one place.
+  """
+  @spec board_views(String.t()) :: [
+          %{
+            view: :board | :story_map | :value_stream,
+            key: String.t(),
+            label: String.t(),
+            icon: String.t(),
+            path: String.t()
+          }
+        ]
+  def board_views(slug) do
+    [
+      %{view: :board, key: "board", label: "Board", icon: "hero-view-columns", path: ~p"/board/#{slug}"},
+      %{view: :story_map, key: "story-map", label: "Story map", icon: "hero-map", path: ~p"/board/#{slug}/story-map"},
+      %{
+        view: :value_stream,
+        key: "value-stream",
+        label: "Value stream",
+        icon: "hero-chart-bar",
+        path: ~p"/board/#{slug}/value-stream"
+      }
+    ]
+  end
+
   @doc """
   The Board ↔ Story map ↔ Value stream switch (RE264, RE347) — shared board chrome, so it lives
   here with the rest of it. Renders `docs/designs/Relay Story Map.dc.html`'s segmented control
@@ -1190,18 +1229,10 @@ defmodule HamacaWeb.CoreComponents do
   off the crumb, header actions and avatar in a phone's one-row top bar.
   """
   attr :board_slug, :string, required: true
-  attr :active, :atom, values: [:board, :story_map, :value_stream], required: true
+  attr :active, :atom, values: @board_view_names, required: true
 
   def board_view_tabs(assigns) do
-    assigns =
-      assign(assigns,
-        segments: [
-          {:board, "board-view-tab-board", ~p"/board/#{assigns.board_slug}", "Board", "hero-view-columns"},
-          {:story_map, "board-view-tab-story-map", ~p"/board/#{assigns.board_slug}/story-map", "Story map", "hero-map"},
-          {:value_stream, "board-view-tab-value-stream", ~p"/board/#{assigns.board_slug}/value-stream", "Value stream",
-           "hero-chart-bar"}
-        ]
-      )
+    assigns = assign(assigns, :views, board_views(assigns.board_slug))
 
     # Below `sm` the three text segments (~237px) do not fit the one-row top bar (RE347 smoke),
     # so each segment collapses to its icon (label kept as aria-label/title). The container may
@@ -1216,17 +1247,17 @@ defmodule HamacaWeb.CoreComponents do
       style="display:flex;background:var(--color-field-hover);border-radius:8px;padding:2px;flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;"
     >
       <.link
-        :for={{view, id, path, label, icon} <- @segments}
-        navigate={path}
-        id={id}
-        aria-current={@active == view && "page"}
-        aria-label={label}
-        title={label}
+        :for={view <- @views}
+        navigate={view.path}
+        id={"board-view-tab-#{view.key}"}
+        aria-current={@active == view.view && "page"}
+        aria-label={view.label}
+        title={view.label}
         class="flex flex-none items-center whitespace-nowrap px-[7px] sm:px-[11px]"
-        style={board_view_tab_style(@active == view)}
+        style={board_view_tab_style(@active == view.view)}
       >
-        <.icon name={icon} class="size-3.5 sm:hidden" />
-        <span class="hidden sm:inline">{label}</span>
+        <.icon name={view.icon} class="size-3.5 sm:hidden" />
+        <span class="hidden sm:inline">{view.label}</span>
       </.link>
     </div>
     """
@@ -1348,7 +1379,9 @@ defmodule HamacaWeb.CoreComponents do
   cannot take focus can never be one. On the wrapper the handler is simply unreachable in a
   browser, and a `render_keydown/2` test cannot see the difference because it pushes straight
   at the server. Same reason the compose textarea and the story-map rename input scope their
-  Escape to the input.
+  Escape to the input. The borderless look (RE497, "Wide B") wraps the input in a daisyUI
+  `label.input` that carries the magnifier and the `/` hint; the keydown stays on the `<input>`
+  inside it, which is still the focused element.
 
   Clearing is two-sided. The server empties `query`, but LiveView deliberately never patches a
   FOCUSED input's value (`dom.js` `mergeFocusedInput`), which is exactly the state Escape leaves
@@ -1372,7 +1405,7 @@ defmodule HamacaWeb.CoreComponents do
   name plus the Board/Story map toggle. A `flex-none` box wins the entire space fight: the
   title crushes to width 0 and the toggle overflows *underneath* the search input, so at 768px
   `elementFromPoint` over "Story map" returned `board-search-input` and the toggle could not be
-  clicked at all (RE198 smoke). Hence a shrinkable `w-[210px] min-w-[150px]` here, and a
+  clicked at all (RE198 smoke). Hence a shrinkable `w-[200px] min-w-[150px]` here, and a
   breakpoint `BoardLive` picks PER VIEW: `hidden lg:block` on the board, `hidden xl:block` on
   the story map. The story-map bar carries five controls the board bar does not — `ZOOM`,
   `Map`, `Compact`, `Full`, `Hide steps` — so at `lg` it still has no budget: the box kept
@@ -1395,24 +1428,27 @@ defmodule HamacaWeb.CoreComponents do
 
   def card_search(assigns) do
     ~H"""
-    <div id="board-search" class={["relative w-[210px] min-w-[150px]", @class]}>
+    <div id="board-search" class={["relative w-[200px] min-w-[150px]", @class]}>
       <form id="board-search-form" phx-change="search" phx-submit="search_open_first">
-        <input
-          type="text"
-          id="board-search-input"
-          name="q"
-          value={@query}
-          autocomplete="off"
-          role="searchbox"
-          aria-label="Search cards"
-          aria-keyshortcuts="/"
-          placeholder="Search cards…"
-          phx-debounce="200"
-          phx-hook={@hook}
-          phx-keydown="search_clear"
-          phx-key="Escape"
-          class="input input-sm input-bordered min-h-[44px] w-full text-[12.5px]"
-        />
+        <label class="input input-sm min-h-[44px] w-full border-transparent bg-base-200 text-[12.5px] shadow-none">
+          <.icon name="hero-magnifying-glass" class="size-4 text-base-content/45" />
+          <input
+            type="text"
+            id="board-search-input"
+            name="q"
+            value={@query}
+            autocomplete="off"
+            role="searchbox"
+            aria-label="Search cards"
+            aria-keyshortcuts="/"
+            placeholder="Search cards…"
+            phx-debounce="200"
+            phx-hook={@hook}
+            phx-keydown="search_clear"
+            phx-key="Escape"
+          />
+          <kbd class="kbd kbd-xs">/</kbd>
+        </label>
       </form>
       <div
         :if={String.trim(@query) != ""}

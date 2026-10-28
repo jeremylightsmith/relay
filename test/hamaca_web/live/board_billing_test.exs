@@ -107,7 +107,8 @@ defmodule HamacaWeb.BoardBillingTest do
            )
 
     refute has_element?(view, "#restore-board-button")
-    refute has_element?(view, "#board-settings-link")
+    refute has_element?(view, "#board-more-settings")
+    assert has_element?(view, "#board-more-button")
   end
 
   test "a paused board refuses writes with the paused flash (scenario 14)", %{
@@ -150,7 +151,7 @@ defmodule HamacaWeb.BoardBillingTest do
 
       assert has_element?(view, "#read-only-banner", "This board's owner's plan is paused.")
       refute has_element?(view, "#billing-paused-update-card")
-      refute has_element?(view, "#board-settings-link")
+      refute has_element?(view, "#board-more-settings")
       refute has_element?(view, "#card-drawer")
     end
 
@@ -262,7 +263,7 @@ defmodule HamacaWeb.BoardBillingTest do
                "Upgrade"
              )
 
-      refute has_element?(view, "#board-settings-link")
+      refute has_element?(view, "#board-more-settings")
       refute has_element?(view, "#restore-board-button")
     end
 

@@ -1233,7 +1233,9 @@ defmodule HamacaWeb.StoryMapComponentsTest do
             focus_name: nil,
             filter_active: false,
             visible: 5,
-            total: 5
+            total: 5,
+            zoom: :map,
+            hide_steps: false
           ],
           overrides
         )
@@ -1381,6 +1383,22 @@ defmodule HamacaWeb.StoryMapComponentsTest do
 
     test "the artboard's + filter button is deliberately absent" do
       refute filter_bar([]) =~ "+ filter"
+    end
+
+    # RE497 — ZOOM and Hide steps left the top bar for the filter bar, right-aligned after the
+    # count by the bar's existing `flex:1` spacer.
+    test "RE497: the zoom toolbar is the filter bar's last child, after the count" do
+      html = filter_bar(zoom: :compact, hide_steps: true)
+      children = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-filter-bar > *")
+      ids = Enum.map(children, &(&1 |> LazyHTML.attribute("id") |> List.first()))
+
+      assert List.last(ids) == "story-map-toolbar"
+
+      assert Enum.find_index(ids, &(&1 == "story-map-count")) <
+               Enum.find_index(ids, &(&1 == "story-map-toolbar"))
+
+      assert matches?(html, ~s(#story-map-filter-bar #story-map-zoom-compact[aria-pressed="true"]))
+      assert matches?(html, ~s(#story-map-filter-bar #story-map-hide-steps[aria-pressed="true"]))
     end
   end
 

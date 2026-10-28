@@ -1,7 +1,9 @@
 defmodule HamacaWeb.BoardCrumbs do
   @moduledoc """
-  The top-bar breadcrumb trails for the board and its settings pages (RE334) — the ONE place
-  each crumb's label, path and DOM id is written. Pages pass the result to `Layouts.app`'s
+  The top-bar breadcrumb trails for a board's settings pages and the mockup viewer (RE334) —
+  the ONE place each crumb's label, path and DOM id is written. The board pages themselves
+  (board, story map, value stream) carry no crumbs: they use the board bar (RE497,
+  `Layouts.app`'s `board_bar`). Pages pass the result to `Layouts.app`'s
   `crumbs` attr, which renders it with `CoreComponents.breadcrumbs/1`; the page's own
   `<:title>` is the final, un-linked segment, so the current page is never in these lists.
 
@@ -21,10 +23,6 @@ defmodule HamacaWeb.BoardCrumbs do
           optional(:icon) => String.t(),
           optional(:patch) => boolean()
         }
-
-  @doc "The board page: `Boards / <board>` — the board name is the page's title."
-  @spec board(%{name: String.t(), slug: String.t()}) :: [crumb()]
-  def board(_board), do: [boards()]
 
   @doc "A settings section or the Runners page: `Boards / <board> / Settings / <title>`."
   @spec settings_section(%{name: String.t(), slug: String.t()}) :: [crumb()]

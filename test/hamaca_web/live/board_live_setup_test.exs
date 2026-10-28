@@ -1,7 +1,8 @@
 defmodule HamacaWeb.BoardLiveSetupTest do
   @moduledoc """
   RE443 task 4: the setup wizard on the board — the docked-left panel (`#setup-panel`), the
-  top-bar chip (`#setup-chip`) and the read-only checklist phones see (`#setup-mobile`), all
+  board bar's ⋯ Setup item (`#board-more-setup`, with its `#board-more-dot`; RE497 moved the
+  chip there) and the read-only checklist phones see (`#setup-mobile`), all
   rendered from `Hamaca.Setup.checklist/1` and re-rendered live on `{:setup_changed, board_id}`.
   """
   use HamacaWeb.ConnCase, async: true
@@ -63,7 +64,38 @@ defmodule HamacaWeb.BoardLiveSetupTest do
 
       assert has_element?(view, "#setup-step-2 #setup-llm-form")
       assert has_element?(view, ~s(section[id^="category-"]))
-      assert text(view, "#setup-chip") =~ "Setup · 2 of 7"
+      assert text(view, "#board-more-setup") =~ "Setup · 2 of 7"
+    end
+
+    # RE497 scenario 5 — the chip moved into ⋯, which wears a dot while setup is shown.
+    test "the ⋯ menu carries the Setup item and the dot, and the item reopens the panel",
+         %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#board-more-dot")
+      assert text(view, "#board-more-setup") =~ "Setup · "
+
+      view |> element("#setup-minimize") |> render_click()
+      refute has_element?(view, "#setup-panel")
+
+      view |> element("#board-more-setup") |> render_click()
+      assert has_element?(view, "#setup-panel")
+    end
+
+    # RE497 scenario 7 — today's chip rule: no Setup item on the story map or in card mode.
+    test "the story map and card mode carry no Setup item and no dot", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      stage = Repo.one!(from s in Stage, where: s.board_id == ^board.id, order_by: s.position, limit: 1)
+      card = insert(:card, stage: stage, title: "Streak counter")
+
+      {:ok, map, _html} = live(conn, ~p"/board/#{board.slug}/story-map")
+      refute has_element?(map, "#board-more-setup")
+      refute has_element?(map, "#board-more-dot")
+
+      {:ok, card_view, _html} = live(conn, ~p"/cards/#{Hamaca.Cards.ref(board, card)}?board=#{board.slug}")
+      refute has_element?(card_view, "#board-more-setup")
+      refute has_element?(card_view, "#board-more-dot")
     end
 
     # Scenario 3
@@ -167,9 +199,9 @@ defmodule HamacaWeb.BoardLiveSetupTest do
 
       view |> element("#setup-minimize") |> render_click()
       refute has_element?(view, "#setup-panel")
-      assert has_element?(view, "#setup-chip")
+      assert has_element?(view, "#board-more-setup")
 
-      view |> element("#setup-chip") |> render_click()
+      view |> element("#board-more-setup") |> render_click()
       assert has_element?(view, "#setup-panel")
     end
 
@@ -310,7 +342,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       %{board: board, card: card, ref: ref}
     end
 
-    defp gone?(view), do: Enum.map(~w(#setup-callout #setup-panel #setup-chip), &has_element?(view, &1))
+    defp gone?(view), do: Enum.map(~w(#setup-callout #setup-panel #board-more-setup), &has_element?(view, &1))
 
     # Scenario 1
     test "the claimed card gets the baton callout", %{conn: conn, user: user} do
@@ -341,7 +373,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       assert view |> text("#setup-done #setup-close") |> String.trim() == "Close setup"
       assert view |> text("#setup-done #setup-connect-another") |> String.trim() == "➕ Connect another machine"
       assert text(view, "#setup-panel") =~ "#{checklist.total} of #{checklist.total}"
-      assert view |> text("#setup-chip") |> String.trim() == "Setup · done"
+      assert view |> text("#board-more-setup-chip") |> String.trim() == "Setup · done"
     end
 
     # Scenario 3
@@ -387,7 +419,8 @@ defmodule HamacaWeb.BoardLiveSetupTest do
 
       {:ok, remounted, _html} = live(conn, ~p"/board/#{board.slug}")
       refute has_element?(remounted, "#setup-panel")
-      refute has_element?(remounted, "#setup-chip")
+      refute has_element?(remounted, "#board-more-setup")
+      refute has_element?(remounted, "#board-more-dot")
       refute has_element?(remounted, "#setup-callout")
       refute has_element?(remounted, "#setup-mobile")
     end
@@ -403,7 +436,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
 
       render(second)
       refute has_element?(second, "#setup-panel")
-      refute has_element?(second, "#setup-chip")
+      refute has_element?(second, "#board-more-setup")
     end
 
     # Scenario 8
@@ -572,7 +605,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       %{board: board} = finished!(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
       progress = attr(view, "#setup-panel progress", "value")
-      chip = text(view, "#setup-chip")
+      chip = text(view, "#board-more-setup")
       before = Setup.checklist(board)
 
       open_peek!(view, "4")
@@ -583,7 +616,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       assert progress == "100"
       assert attr(view, "#setup-panel progress", "value") == progress
       assert chip =~ "Setup · done"
-      assert text(view, "#setup-chip") == chip
+      assert text(view, "#board-more-setup") == chip
       assert Setup.checklist(board) == before
     end
 
@@ -809,7 +842,8 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
       refute has_element?(view, "#setup-panel")
-      refute has_element?(view, "#setup-chip")
+      refute has_element?(view, "#board-more-setup")
+      refute has_element?(view, "#board-more-dot")
       refute has_element?(view, "#setup-mobile")
       assert attr(view, "#board-bands", "style") =~ "display:flex"
       refute has_element?(view, "#board-pager-nav.hidden")

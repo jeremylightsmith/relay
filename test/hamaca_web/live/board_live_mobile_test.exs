@@ -47,8 +47,9 @@ defmodule HamacaWeb.BoardLiveMobileTest do
       assert view |> element("#board-name") |> render() =~ "truncate"
 
       # The interactive bar controls are ≥44px tap targets.
-      assert view |> element("#board-settings-link") |> render() =~ "min-h-[44px]"
-      assert view |> element("#board-settings-link") |> render() =~ "min-w-[44px]"
+      assert view |> element("#board-switcher-button") |> render() =~ "min-h-[44px]"
+      assert view |> element("#board-more-button") |> render() =~ "min-h-[44px]"
+      assert view |> element("#board-more-button") |> render() =~ "min-w-[44px]"
       assert view |> element("#user-avatar") |> render() =~ "min-h-[44px]"
       assert view |> element("#user-avatar") |> render() =~ "min-w-[44px]"
     end

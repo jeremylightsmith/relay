@@ -12,21 +12,32 @@ defmodule HamacaWeb.BoardLiveAgentLogTest do
     %{board: Boards.get_or_create_default_board(user)}
   end
 
-  test "the top-right toggle opens the bottom sheet", %{conn: conn, board: board} do
+  test "the ⋯ menu's Agent log item opens the bottom sheet", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
     refute has_element?(view, "#agent-log-sheet")
 
-    view |> element("#agent-logs-button") |> render_click()
+    view |> element("#board-more-agent-log") |> render_click()
 
     assert has_element?(view, "#agent-log-sheet")
     assert has_element?(view, "#agent-log-empty")
+    assert has_element?(view, ~s(#board-more-agent-log[aria-pressed="true"]))
+  end
+
+  test "RE497: a second click on the ⋯ Agent log item closes the sheet", %{conn: conn, board: board} do
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+    view |> element("#board-more-agent-log") |> render_click()
+    view |> element("#board-more-agent-log") |> render_click()
+
+    refute has_element?(view, "#agent-log-sheet")
+    assert has_element?(view, ~s(#board-more-agent-log[aria-pressed="false"]))
   end
 
   test "the open panel is in-flow inside the board viewport, not a fixed overlay",
        %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-    view |> element("#agent-logs-button") |> render_click()
+    view |> element("#board-more-agent-log") |> render_click()
 
     # the panel lives inside the fixed-height board viewport, as a flex sibling of the
     # board, so opening it pushes the board up instead of floating over the bottom of it
@@ -39,7 +50,7 @@ defmodule HamacaWeb.BoardLiveAgentLogTest do
 
   test "an agent_log broadcast renders a line while the sheet is open", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-    view |> element("#agent-logs-button") |> render_click()
+    view |> element("#board-more-agent-log") |> render_click()
 
     AgentLog.record(board.id, [%{"ref" => "RLY-1", "kind" => "claude", "text" => "hello from claude"}])
 
@@ -50,7 +61,7 @@ defmodule HamacaWeb.BoardLiveAgentLogTest do
 
   test "closing the sheet removes it and unsubscribes", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-    view |> element("#agent-logs-button") |> render_click()
+    view |> element("#board-more-agent-log") |> render_click()
     assert has_element?(view, "#agent-log-sheet")
 
     view |> element("#agent-log-close") |> render_click()
@@ -63,7 +74,7 @@ defmodule HamacaWeb.BoardLiveAgentLogTest do
 
   test "the sheet keeps only the newest 500 lines", %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
-    view |> element("#agent-logs-button") |> render_click()
+    view |> element("#board-more-agent-log") |> render_click()
 
     entries =
       for n <- 1..501 do

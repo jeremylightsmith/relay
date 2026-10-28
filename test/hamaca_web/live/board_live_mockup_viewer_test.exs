@@ -235,7 +235,7 @@ defmodule HamacaWeb.BoardLiveMockupViewerTest do
     assert view |> element("#top-bar-crumb-card") |> render() |> text() == "Review me"
     assert view |> element("#mockup-viewer-title") |> render() |> text() == "Mockups"
 
-    for id <- ~w(#board-name #board-view-tabs #agent-logs-button #board-settings-link #mockup-viewer-banner) do
+    for id <- ~w(#board-name #board-view-tabs #board-switcher-button #board-more-button #mockup-viewer-banner) do
       refute has_element?(view, id), "#{id} should not render in viewer mode"
     end
   end

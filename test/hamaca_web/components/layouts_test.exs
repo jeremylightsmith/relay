@@ -180,11 +180,63 @@ defmodule HamacaWeb.LayoutsTest do
       assert logo < crumb and crumb < title
     end
 
+    test "without board_bar the bar keeps its divider, crumbs and md-only wordmark (RE497)" do
+      doc =
+        %{inner_block: inner_block_slot(), crumbs: [@boards_crumb]}
+        |> render_app()
+        |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("#top-bar-divider") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#top-bar-crumb-boards") |> Enum.count() == 1
+
+      wordmark = LazyHTML.query(doc, "#top-bar-logo span.hidden.md\\:inline")
+      assert LazyHTML.text(wordmark) =~ Hamaca.Brand.name()
+    end
+
     test "renders no trail and no divider when there are no crumbs and no title" do
       html = render_app(%{inner_block: inner_block_slot()})
 
       refute html =~ ~s(id="top-bar-divider")
       refute html =~ ~s(id="top-bar-crumb")
+    end
+  end
+
+  describe "board_bar (RE497)" do
+    defp board_bar_doc do
+      %{
+        board_bar: true,
+        crumbs: [@boards_crumb],
+        title: [%{__slot__: :title, inner_block: fn _, _ -> Phoenix.HTML.raw("Acme") end}],
+        inner_block: inner_block_slot()
+      }
+      |> render_app()
+      |> LazyHTML.from_fragment()
+    end
+
+    test "keeps the logo linking to /boards, without the wordmark" do
+      logo = LazyHTML.query(board_bar_doc(), "#top-bar-logo")
+
+      assert LazyHTML.attribute(logo, "href") == ["/boards"]
+      refute LazyHTML.text(logo) =~ Hamaca.Brand.name()
+    end
+
+    test "drops the divider and the crumbs" do
+      doc = board_bar_doc()
+
+      assert doc |> LazyHTML.query("#top-bar-divider") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#top-bar-crumb") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#top-bar-crumb-boards") |> Enum.count() == 0
+    end
+
+    test "the title grows to fill the row instead of a spacer" do
+      doc = board_bar_doc()
+
+      [title_class] = doc |> LazyHTML.query("#top-bar-title") |> LazyHTML.attribute("class")
+      assert title_class == "flex min-w-0 flex-1 items-center gap-1"
+      assert doc |> LazyHTML.query("#top-bar > span.flex-1") |> Enum.count() == 0
+
+      [bar_class] = doc |> LazyHTML.query("#top-bar") |> LazyHTML.attribute("class")
+      assert bar_class =~ "gap-2 sm:gap-3"
     end
   end
 

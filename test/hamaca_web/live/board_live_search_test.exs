@@ -30,11 +30,9 @@ defmodule HamacaWeb.BoardLiveSearchTest do
        %{conn: conn, board: board} do
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-    input = view |> element("#board-search-input") |> render()
-
-    assert input =~ "input input-sm"
-    assert input =~ "min-h-[44px]"
-    assert input =~ ~s(name="q")
+    # RE497: the borderless "Wide B" field — the daisyUI `label.input` is the 44px control and
+    # the input sits inside it.
+    assert has_element?(view, "label.input.input-sm.min-h-\\[44px\\] #board-search-input[name=q]")
     refute has_element?(view, "#board-search-results")
   end
 

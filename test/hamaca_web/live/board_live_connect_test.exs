@@ -232,13 +232,13 @@ defmodule HamacaWeb.BoardLiveConnectTest do
 
     {:ok, view, _html} = live(conn, connect_url(board))
     assert text(view, "#setup-panel") =~ "Connect a machine to Streaks"
-    refute has_element?(view, "#setup-chip")
+    refute has_element?(view, "#board-more-setup")
     refute has_element?(view, "#setup-callout")
 
     render_patch(view, ~p"/board/#{board.slug}")
 
     refute has_element?(view, "#setup-panel")
-    refute has_element?(view, "#setup-chip")
+    refute has_element?(view, "#board-more-setup")
   end
 
   # RE455 scenario 11

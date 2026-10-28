@@ -6,20 +6,9 @@ defmodule HamacaWeb.BoardCrumbsTest do
 
   @board %Schemas.Board{name: "Payments", slug: "payments"}
 
-  test "board/1 is just the Boards root, carrying the squares icon" do
-    assert [
-             %{
-               id: "top-bar-crumb-boards",
-               label: "Boards",
-               to: "/boards",
-               icon: "hero-squares-2x2"
-             }
-           ] = BoardCrumbs.board(@board)
-  end
-
   test "settings_section/1 is Boards / <board> / Settings, each linking to its page" do
     assert [
-             %{id: "top-bar-crumb-boards", to: "/boards"},
+             %{id: "top-bar-crumb-boards", label: "Boards", to: "/boards", icon: "hero-squares-2x2"},
              %{id: "top-bar-crumb-board", label: "Payments", to: "/board/payments"},
              %{id: "top-bar-crumb-settings", label: "Settings", to: "/board/payments/settings"}
            ] = BoardCrumbs.settings_section(@board)

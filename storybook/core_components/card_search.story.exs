@@ -9,8 +9,10 @@ defmodule Storybook.Components.CoreComponents.CardSearch do
     %{ref: ref, title: title, stage: stage, archived: archived, path: "/board/demo?card=#{ref}"}
   end
 
-  # `hook: nil` renders the box inert: the BoardSearchInput hook lives in the app bundle and
-  # only has anything to clear inside BoardLive.
+  # RE497: the box is the borderless "Wide B" field — a `label.input` on `bg-base-200` holding
+  # the magnifier, the input and a `/` kbd hint. `hook: nil` renders the box inert: the
+  # BoardSearchInput hook lives in the app bundle and only has anything to clear inside
+  # BoardLive.
   def variations do
     [
       %Variation{id: :empty, attributes: %{query: "", results: [], hook: nil}},

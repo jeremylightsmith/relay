@@ -18,11 +18,12 @@ defmodule HamacaWeb.ValueStreamFlowLive do
   """
   use HamacaWeb, :live_view
 
+  alias Hamaca.Billing
   alias Hamaca.Boards
   alias Hamaca.Flows
   alias Hamaca.Runs
   alias Hamaca.ValueStream
-  alias HamacaWeb.BoardCrumbs
+  alias HamacaWeb.BoardBarComponents
   alias HamacaWeb.FlowSettingsComponents
   alias HamacaWeb.ValueStreamComponents
   alias HamacaWeb.ValueStreamFlowLayout, as: FlowLayout
@@ -47,8 +48,16 @@ defmodule HamacaWeb.ValueStreamFlowLive do
         {:ok,
          socket
          |> assign(:page_title, "#{name} flow — value stream — #{board.name}")
-         |> assign(board: board, flow: flow, name: name, flow_layout: FlowLayout.layout(flow))}
+         |> assign(board: board, flow: flow, name: name, flow_layout: FlowLayout.layout(flow))
+         |> assign(:settings_path, settings_path(board))}
     end
+  end
+
+  # RE497 — ⋯'s Board settings item, behind the settings page's own access gate
+  # (`BoardSettingsLive.mount/3`), so it never links to a page that bounces. Computed once at
+  # mount: `Billing.board_paused?/1` reads the owner's standing.
+  defp settings_path(board) do
+    if not Billing.board_paused?(board), do: ~p"/board/#{board.slug}/settings"
   end
 
   @impl true
@@ -227,13 +236,22 @@ defmodule HamacaWeb.ValueStreamFlowLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} wide crumbs={BoardCrumbs.board(@board)}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} wide board_bar>
       <:title>
-        <span id="board-name" class="truncate shrink-[1000] max-w-[58vw] sm:max-w-[280px]">
-          {@board.name}
-        </span>
-        <.board_view_tabs board_slug={@board.slug} active={:value_stream} />
+        <BoardBarComponents.board_bar_title
+          board={@board}
+          user={@current_scope.user}
+          active_view={:value_stream}
+        />
       </:title>
+      <:actions>
+        <BoardBarComponents.board_more_menu
+          board_slug={@board.slug}
+          active_view={:value_stream}
+          show_logs={false}
+          settings_path={@settings_path}
+        />
+      </:actions>
       <div
         id="value-stream-flow"
         class="flex min-w-0 flex-col gap-[18px] px-4 py-5 md:px-[30px] md:py-[26px]"

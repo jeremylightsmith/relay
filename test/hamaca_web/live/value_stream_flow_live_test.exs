@@ -118,6 +118,18 @@ defmodule HamacaWeb.ValueStreamFlowLiveTest do
     end
   end
 
+  # RE497 — level 2 wears the same board bar as level 1.
+  describe "the board bar" do
+    test "has the switcher and ⋯ with Value stream current, no Agent log and no crumb", ctx do
+      {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.slug}/value-stream/code")
+
+      assert has_element?(view, "#board-switcher-button")
+      assert has_element?(view, ~s(#board-more-view-value-stream[aria-current="page"]))
+      refute has_element?(view, "#board-more-agent-log")
+      refute has_element?(view, "#top-bar-crumb-boards")
+    end
+  end
+
   describe "the Code flow map" do
     test "matches the artboard's topology, roles from node_roles/1", ctx do
       {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.slug}/value-stream/code")

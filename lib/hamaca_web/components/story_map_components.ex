@@ -151,7 +151,7 @@ defmodule HamacaWeb.StoryMapComponents do
   defp avatar(_done?, _needs?), do: :owners
 
   @doc """
-  The top-chrome view controls (RE260, artboard lines ~42-48): the ZOOM segmented control and
+  The view controls (RE260, artboard lines ~42-48; in the filter bar since RE497): the ZOOM segmented control and
   the Hide steps toggle. Both are keys of the board-wide shared view
   (`Hamaca.StoryMap.view/1` plus `merge_view/2`, the one writer `put_view/3` and `toggle_view/2`
   compose) — they change the grid's geometry,
@@ -208,7 +208,9 @@ defmodule HamacaWeb.StoryMapComponents do
   The filter bar (RE259) — `docs/designs/Relay Story Map.dc.html` lines 60-76: a 48px-min row
   below the top chrome and above the map, carrying the mono `FILTER` label, the owner chip
   row, the `Needs input` toggle, the `◎ Focusing: <name> ✕` chip while focusing, the `Clear`
-  link while a filter is active, and the mono count label.
+  link while a filter is active, and the mono count label — then, right-aligned after the
+  count by the same `flex:1` spacer, `story_map_toolbar/1` (ZOOM / Hide steps), which RE497
+  moved here from the top bar (card mockup "Wide B — story map").
 
   Every control is a key of the board-wide shared view, so a click writes through
   `Hamaca.StoryMap` and the bar re-renders from that write's own broadcast — the clicker
@@ -247,6 +249,8 @@ defmodule HamacaWeb.StoryMapComponents do
   attr :filter_active, :boolean, required: true
   attr :visible, :integer, required: true, doc: "cards passing the filter"
   attr :total, :integer, required: true, doc: "cards on the board"
+  attr :zoom, :atom, values: @zoom_levels, required: true, doc: "`story_map_toolbar/1`'s zoom"
+  attr :hide_steps, :boolean, required: true, doc: "`story_map_toolbar/1`'s Hide steps"
 
   def story_map_filter_bar(assigns) do
     ~H"""
@@ -323,6 +327,7 @@ defmodule HamacaWeb.StoryMapComponents do
       >
         {count_label(@visible, @total)}
       </span>
+      <.story_map_toolbar zoom={@zoom} hide_steps={@hide_steps} />
     </div>
     """
   end

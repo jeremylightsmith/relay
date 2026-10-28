@@ -120,6 +120,23 @@ defmodule HamacaWeb.ValueStreamLiveTest do
     end
   end
 
+  # RE497 — the value stream is a board page: it wears the quiet board bar, with ⋯ but no
+  # Agent log, no search and no setup.
+  describe "the board bar" do
+    test "has the switcher and ⋯ with Value stream current and Board settings", ctx do
+      {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.slug}/value-stream")
+
+      assert has_element?(view, "#board-switcher-button")
+      assert has_element?(view, ~s(#board-more-view-value-stream[aria-current="page"]))
+      assert has_element?(view, ~s(#board-more-settings[href="/board/#{ctx.slug}/settings"]))
+      assert has_element?(view, ~s(#board-view-tab-value-stream[aria-current="page"]))
+
+      for gone <- ~w(#board-more-agent-log #top-bar-crumb-boards #board-search #board-more-dot) do
+        refute has_element?(view, gone), "expected no #{gone} on the value stream"
+      end
+    end
+  end
+
   describe "the board average" do
     test "is the third board view segment", ctx do
       {:ok, board_view, _html} = live(ctx.conn, ~p"/board/#{ctx.slug}")

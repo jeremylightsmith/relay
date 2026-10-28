@@ -151,6 +151,7 @@ defmodule HamacaWeb.BoardLive do
   alias Hamaca.StoryMap
   alias Hamaca.Talk
   alias Hamaca.Votes
+  alias HamacaWeb.BoardBarComponents
   alias HamacaWeb.BoardCrumbs
   alias HamacaWeb.CardMedia
   alias HamacaWeb.ChangesetErrors
@@ -227,56 +228,35 @@ defmodule HamacaWeb.BoardLive do
       flash={@flash}
       current_scope={@current_scope}
       wide
+      board_bar={!viewer_open?(assigns)}
       crumbs={top_bar_crumbs(assigns)}
       embed={@embed}
     >
       <:title>
         <%!-- RE380 / RE390 — viewer mode: `Boards / <board> / <card title> / Mockups` (or
         Screenshots), and none of the board's own title or actions (the board stays mounted under
-        the overlay). --%>
+        the overlay). Otherwise RE497's board bar: name ▾ (the switcher) and the view switch. --%>
         <span :if={viewer_open?(assigns)} id="mockup-viewer-title" class="truncate">
           {viewer_label(@viewer.section)}
         </span>
-        <span
+        <BoardBarComponents.board_bar_title
           :if={!viewer_open?(assigns)}
-          id="board-name"
-          class="truncate shrink-[1000] max-w-[58vw] sm:max-w-[280px]"
-        >
-          {@board.name}
-        </span>
-        <.board_view_tabs
-          :if={!viewer_open?(assigns)}
-          board_slug={@board.slug}
-          active={if(@live_action == :story_map, do: :story_map, else: :board)}
+          board={@board}
+          user={@current_scope.user}
+          active_view={active_view(@live_action)}
         />
       </:title>
       <:actions :if={!viewer_open?(assigns)}>
-        <%!-- RE443 — the setup chip: `Setup · <position> of 7` (`Setup · done` once finished,
-            RE446); a click reopens the panel. Gone once setup is closed. --%>
-        <SetupComponents.setup_chip
-          :if={
-            @live_action not in [:card, :story_map] and setup_shown?(@setup) and
-              not @setup_connect_mode
-          }
-          id="setup-chip"
-          checklist={@setup}
-          click="setup_open"
+        <StoryMapComponents.presence_stack
+          :if={@live_action == :story_map}
+          people={@presence_people}
+          current_user_id={@current_scope.user.id}
         />
         <.card_search
           query={@search_query}
           results={@search_results}
           limit={@search_result_limit}
           class={if(@live_action == :story_map, do: "hidden xl:block", else: "hidden lg:block")}
-        />
-        <StoryMapComponents.presence_stack
-          :if={@live_action == :story_map}
-          people={@presence_people}
-          current_user_id={@current_scope.user.id}
-        />
-        <StoryMapComponents.story_map_toolbar
-          :if={@live_action == :story_map}
-          zoom={@story_map_zoom}
-          hide_steps={@story_map_hide_steps}
         />
         <button
           :if={@stalled_count > 0 and not @read_only?}
@@ -290,31 +270,22 @@ defmodule HamacaWeb.BoardLive do
           <span class="hidden sm:inline">Restart stalled</span>
           <span class="badge badge-sm badge-neutral">{@stalled_count}</span>
         </button>
-        <button
-          type="button"
-          id="agent-logs-button"
-          phx-click={if(@logs_open, do: "close_logs", else: "open_logs")}
-          class={["btn btn-ghost btn-sm min-h-[44px] min-w-[44px]", @logs_open && "btn-active"]}
-          aria-label="Agent log"
-          aria-pressed={to_string(@logs_open)}
-        >
-          <.icon name="hero-command-line" class="size-5" />
-        </button>
-        <.link
-          :if={not @plan_read_only?}
-          navigate={~p"/board/#{@board.slug}/settings"}
-          id="board-settings-link"
-          title="Board settings"
-          aria-label="Board settings"
-          class="flex min-h-[44px] min-w-[44px] items-center gap-[7px] rounded-lg px-3 text-[12px] font-semibold"
-          style="background:var(--color-base-100);border:1px solid var(--color-field-border);color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
-        >
-          <span style="width:13px;height:13px;border-radius:50%;border:2px solid color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));position:relative;display:block;flex:0 0 auto;">
-            <span style="position:absolute;top:2.5px;left:2.5px;width:4px;height:4px;border-radius:50%;background:color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));">
-            </span>
-          </span>
-          <span class="hidden sm:inline">Board settings</span>
-        </.link>
+        <%!-- RE497 — Agent log, Board settings and the setup chip (RE443: `Setup · <position>
+            of 7`, gone once setup is closed) live in ⋯ now. --%>
+        <BoardBarComponents.board_more_menu
+          board_slug={@board.slug}
+          active_view={active_view(@live_action)}
+          show_logs={true}
+          logs_open={@logs_open}
+          settings_path={if(not @plan_read_only?, do: ~p"/board/#{@board.slug}/settings")}
+          setup={
+            if(
+              @live_action not in [:card, :story_map] and setup_shown?(@setup) and
+                not @setup_connect_mode,
+              do: @setup
+            )
+          }
+        />
       </:actions>
       <:menu_items>
         <li>
@@ -1177,6 +1148,8 @@ defmodule HamacaWeb.BoardLive do
         filter_active={@filter_active}
         visible={@grid.total}
         total={length(@cards)}
+        zoom={@zoom}
+        hide_steps={@hide_steps}
       />
       <div
         id="story-map"
@@ -6039,16 +6012,20 @@ defmodule HamacaWeb.BoardLive do
   defp viewer_param(:screenshots, n), do: {:screenshot, n}
   defp viewer_param(:images, id), do: {:image, id}
 
-  # RE380 — the top bar's trail: the board's own, or in viewer mode `Boards / <board> / <card>`
-  # whose card crumb patches back to the drawer.
+  # RE380 — in viewer mode the top bar's trail is `Boards / <board> / <card>`, whose card crumb
+  # patches back to the drawer. Otherwise the board bar (RE497) carries no crumbs.
   defp top_bar_crumbs(%{board: board} = assigns) do
     if viewer_open?(assigns) do
       card = assigns.selected_card
       BoardCrumbs.card_mockups(board, card, viewer_back_path(assigns, Cards.ref(board, card)))
     else
-      BoardCrumbs.board(board)
+      []
     end
   end
+
+  # RE497 — the board bar's current view (the title's view switch and ⋯'s View section).
+  defp active_view(:story_map), do: :story_map
+  defp active_view(_board_or_card), do: :board
 
   # RE380 / RE390 — the caption the sheet's "+ Quote" offers: the item on screen, else its noun.
   defp viewer_caption(%{viewer: %{section: section}} = assigns) do

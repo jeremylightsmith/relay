@@ -39,13 +39,13 @@ defmodule HamacaWeb.BoardLiveTest do
       refute html =~ "Phoenix Framework"
     end
 
-    # RE477 scenario 4
-    test "the top bar names Hamaca in the wordmark, both logos and the tab title", %{conn: conn, user: user} do
+    # RE477 scenario 4; RE497 — the board bar drops the wordmark (other pages keep it).
+    test "the board bar has no wordmark; both logos and the tab title name Hamaca", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       html = conn |> get(~p"/board/#{board.slug}") |> html_response(200)
       document = LazyHTML.from_document(html)
 
-      assert document |> LazyHTML.query("#top-bar-logo span") |> LazyHTML.text() |> String.trim() == "Hamaca"
+      assert document |> LazyHTML.query("#top-bar-logo span") |> Enum.count() == 0
 
       alts = document |> LazyHTML.query("img[src^='/images/logo_']") |> LazyHTML.attribute("alt")
       assert length(alts) == 2
@@ -54,15 +54,18 @@ defmodule HamacaWeb.BoardLiveTest do
       assert document |> LazyHTML.query("title") |> LazyHTML.text() |> String.trim() |> String.ends_with?(" · Hamaca")
     end
 
-    test "relaxes the board-name width cap on mobile, keeps the desktop cap", %{conn: conn, user: user} do
+    # RE497 — the name lives in the switcher button, which flexes and truncates instead of the
+    # old span's `shrink-[1000] max-w-[58vw] sm:max-w-[280px]` caps.
+    test "the board name truncates inside the switcher, without the old width caps", %{conn: conn, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
+      assert has_element?(view, "#board-switcher-button #board-name.truncate")
+
       html = render(view)
-      assert html =~ ~s(id="board-name")
-      assert html =~ "max-w-[58vw]"
-      assert html =~ "sm:max-w-[280px]"
-      refute html =~ "max-w-[46vw]"
+      refute html =~ "max-w-[58vw]"
+      refute html =~ "sm:max-w-[280px]"
+      refute html =~ "shrink-[1000]"
     end
 
     test "revisiting does not create a duplicate board", %{conn: conn, user: user} do
@@ -2147,14 +2150,70 @@ defmodule HamacaWeb.BoardLiveTest do
       assert has_element?(view, "#user-avatar", "AL")
     end
 
-    test "the logo and breadcrumb link to /boards; the settings button links to settings", %{conn: conn} do
+    # RE497 — the quiet board bar: logo · name ▾ · view switch · … · ⋯ · avatar. The Boards
+    # crumb, divider, wordmark, setup chip, Agent log icon and settings pill left the bar.
+    test "RE497: the board bar has the logo, the switcher, the view switch and ⋯ — and nothing else",
+         %{conn: conn} do
       user = insert(:user)
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
 
       assert has_element?(view, ~s(#top-bar-logo[href="/boards"]))
-      assert has_element?(view, ~s(#top-bar-crumb-boards[href="/boards"]))
-      assert has_element?(view, "#board-settings-link[href='/board/#{board.slug}/settings']")
+      assert view |> element("#board-switcher-button #board-name") |> render() =~ board.name
+      assert has_element?(view, "#board-view-tabs")
+      assert has_element?(view, "#board-more-button")
+
+      for gone <-
+            ~w(#top-bar-crumb #top-bar-crumb-boards #top-bar-divider #agent-logs-button #board-settings-link #setup-chip) do
+        refute has_element?(view, gone), "expected no #{gone} in the board bar"
+      end
+
+      logo_text =
+        view
+        |> element("#top-bar-logo")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.text()
+        |> String.trim()
+
+      assert logo_text == ""
+    end
+
+    test "RE497: ⋯ carries Agent log, Board settings and the current view; the switcher rows wait",
+         %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#board-more-agent-log")
+      assert has_element?(view, ~s(#board-more-settings[href="/board/#{board.slug}/settings"]))
+      assert has_element?(view, ~s(#board-more-view-board[aria-current="page"]))
+      refute has_element?(view, "[id^=board-switcher-row-]")
+    end
+
+    test "RE497: opening the switcher lists a starred board first and marks the current one",
+         %{conn: conn} do
+      user = insert(:user)
+      board = Boards.get_or_create_default_board(user)
+      zeta = insert(:board, name: "zeta", key: "ZZ")
+      insert(:membership, board: zeta, user: user)
+      {:ok, true} = Boards.set_starred(user, zeta.slug, true)
+      {:ok, view, _html} = conn |> log_in_user(user) |> live(~p"/board/#{board.slug}")
+
+      view |> element("#board-switcher-button") |> render_click()
+
+      ids =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("[id^=board-switcher-row-]")
+        |> LazyHTML.attribute("id")
+
+      assert Enum.find_index(ids, &(&1 == "board-switcher-row-#{zeta.slug}")) <
+               Enum.find_index(ids, &(&1 == "board-switcher-row-#{board.slug}"))
+
+      assert has_element?(view, ~s(#board-switcher-row-#{board.slug}[aria-current="page"]))
+      assert has_element?(view, ~s(#board-switcher-all-boards[href="/boards"]))
     end
 
     test "the avatar dropdown holds Archived cards, Theme, and Sign out", %{conn: conn} do

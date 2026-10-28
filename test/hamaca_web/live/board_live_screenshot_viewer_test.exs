@@ -195,7 +195,7 @@ defmodule HamacaWeb.BoardLiveScreenshotViewerTest do
              ~s|#top-bar-crumb-card[href="/board/#{board.slug}?card=MY1"][data-phx-link="patch"]|
            )
 
-    for id <- ~w(#board-name #board-view-tabs #agent-logs-button #board-settings-link) do
+    for id <- ~w(#board-name #board-view-tabs #board-switcher-button #board-more-button) do
       refute has_element?(view, id), "#{id} should not render in viewer mode"
     end
   end

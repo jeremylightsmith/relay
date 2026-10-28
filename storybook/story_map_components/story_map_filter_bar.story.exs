@@ -44,7 +44,9 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
           focus_name: nil,
           filter_active: false,
           visible: 20,
-          total: 24
+          total: 24,
+          zoom: :compact,
+          hide_steps: false
         }
       },
       %Variation{
@@ -57,7 +59,9 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
           focus_name: nil,
           filter_active: true,
           visible: 7,
-          total: 24
+          total: 24,
+          zoom: :compact,
+          hide_steps: false
         }
       },
       %Variation{
@@ -70,7 +74,9 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
           focus_name: nil,
           filter_active: true,
           visible: 3,
-          total: 24
+          total: 24,
+          zoom: :compact,
+          hide_steps: false
         }
       },
       %Variation{
@@ -83,7 +89,9 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
           focus_name: "Checkout",
           filter_active: true,
           visible: 9,
-          total: 24
+          total: 24,
+          zoom: :compact,
+          hide_steps: false
         }
       },
       %Variation{
@@ -98,7 +106,9 @@ defmodule Storybook.StoryMapComponents.StoryMapFilterBar do
           focus_name: nil,
           filter_active: true,
           visible: 24,
-          total: 24
+          total: 24,
+          zoom: :compact,
+          hide_steps: false
         }
       }
     ]

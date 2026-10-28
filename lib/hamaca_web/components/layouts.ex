@@ -70,6 +70,12 @@ defmodule HamacaWeb.Layouts do
     default: false,
     doc: "when true, suppress the web top-bar chrome (surface hosted in the native shell)"
 
+  attr :board_bar, :boolean,
+    default: false,
+    doc:
+      "when true, lay the bar out as the board bar (RE497): logo without the wordmark, no " <>
+        "divider, no crumbs (`crumbs` is ignored), and a `<:title>` that grows instead of a spacer"
+
   # No default (RE397): an absent key lets `HamacaWeb.Feedback.url/1` fall back to config;
   # a `default: nil` would always win and hide the item in prod.
   attr :feedback_url, :string,
@@ -89,31 +95,48 @@ defmodule HamacaWeb.Layouts do
     <header
       :if={!@embed}
       id="top-bar"
-      class="flex items-center gap-3 border-b border-base-300 bg-base-100 px-4 sm:px-5"
+      class={[
+        if(@board_bar, do: "flex items-center gap-2 sm:gap-3", else: "flex items-center gap-3"),
+        "border-b border-base-300 bg-base-100 px-4 sm:px-5"
+      ]}
       style="height:53px;"
     >
       <.link
         navigate={~p"/boards"}
         id="top-bar-logo"
         title="All boards"
-        class="flex items-center gap-2"
+        class={[
+          "flex items-center gap-2",
+          @board_bar && "min-h-[44px] min-w-[44px] flex-none justify-center"
+        ]}
       >
         <.logo width="23" />
-        <span class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]">
+        <span
+          :if={!@board_bar}
+          class="hidden md:inline text-[15px] font-semibold tracking-[-0.02em]"
+        >
           {Hamaca.Brand.name()}
         </span>
       </.link>
       <div
-        :if={@crumbs != [] or @title != []}
+        :if={!@board_bar and (@crumbs != [] or @title != [])}
         id="top-bar-divider"
         style="width:1px;height:18px;background:var(--color-field-border);flex:0 0 auto;"
       >
       </div>
-      <.breadcrumbs crumbs={@crumbs} />
-      <div id="top-bar-title" class="flex min-w-0 items-center text-[13px] font-medium">
+      <.breadcrumbs :if={!@board_bar} crumbs={@crumbs} />
+      <div
+        id="top-bar-title"
+        class={
+          if(@board_bar,
+            do: "flex min-w-0 flex-1 items-center gap-1",
+            else: "flex min-w-0 items-center text-[13px] font-medium"
+          )
+        }
+      >
         {render_slot(@title)}
       </div>
-      <span class="flex-1"></span>
+      <span :if={!@board_bar} class="flex-1"></span>
       {render_slot(@actions)}
       <div :if={@current_scope} id="top-bar-account" class="dropdown dropdown-end flex-none">
         <div

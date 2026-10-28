@@ -1399,6 +1399,24 @@ defmodule HamacaWeb.BoardLiveStoryMapTest do
 
       refute has_element?(view, "#story-map-toolbar")
     end
+
+    # RE497 — ZOOM / Hide steps left the top bar for the map's filter bar.
+    test "RE497: the toolbar sits in the filter bar, not the top bar, and still works",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-filter-bar #story-map-toolbar")
+      assert has_element?(view, "#story-map-filter-bar #story-map-zoom")
+      assert has_element?(view, "#story-map-filter-bar #story-map-hide-steps")
+      refute has_element?(view, "#top-bar #story-map-toolbar")
+
+      view |> element("#story-map-zoom-map") |> render_click()
+      view |> element("#story-map-zoom-compact") |> render_click()
+      assert attr_of(view, "#story-map-zoom-compact", "aria-pressed") == "true"
+
+      assert has_element?(view, ~s(#board-view-tab-story-map[aria-current="page"]))
+      assert has_element?(view, ~s(#board-more-view-story-map[aria-current="page"]))
+    end
   end
 
   describe "RE260 — Hide steps" do
@@ -1658,6 +1676,26 @@ defmodule HamacaWeb.BoardLiveStoryMapTest do
       assert html =~ "(you)"
       assert html =~ other.name
       assert :binary.match(html, "(you)") < :binary.match(html, other.name)
+    end
+
+    # RE497 — the Wide B story map: presence avatars come before search in the bar.
+    test "RE497: the presence stack precedes the search in the top bar", %{conn: conn} = ctx do
+      {_other, other_conn} = second_member(ctx.board)
+      {:ok, _view_b, _html} = live(other_conn, ~p"/board/#{ctx.board.slug}/story-map")
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      ids =
+        view_a
+        |> element("#top-bar")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("[id]")
+        |> LazyHTML.attribute("id")
+
+      presence = Enum.find_index(ids, &(&1 == "story-map-presence"))
+      search = Enum.find_index(ids, &(&1 == "board-search"))
+      assert presence && search
+      assert presence < search
     end
 
     test "a viewer who joins while you watch appears without a reload", %{conn: conn} = ctx do

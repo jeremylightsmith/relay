@@ -263,7 +263,7 @@ defmodule HamacaWeb.BoardSettingsLiveTest do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-      assert has_element?(view, "#board-settings-link[href='/board/#{board.slug}/settings']")
+      assert has_element?(view, "#board-more-settings[href='/board/#{board.slug}/settings']")
     end
   end
 
@@ -355,6 +355,8 @@ defmodule HamacaWeb.BoardSettingsLiveTest do
       refute has_element?(view, "#top-bar-crumb-stages")
       assert has_element?(view, "#settings-title", BoardSettingsLive.section_label(:stages))
       refute has_element?(view, "#settings-title", "Board settings")
+      # RE497 — the board bar is for board pages only; settings keeps its crumbs.
+      refute has_element?(view, "#board-switcher-button")
     end
 
     test "the last crumb follows the section as the rail patches", %{conn: conn, user: user} do

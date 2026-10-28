@@ -6399,4 +6399,82 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert a != b
     end
   end
+
+  describe "board_views/1 (RE497)" do
+    test "is the one list of board views, in order, with slugged paths" do
+      assert CoreComponents.board_views("acme") == [
+               %{view: :board, key: "board", label: "Board", icon: "hero-view-columns", path: "/board/acme"},
+               %{
+                 view: :story_map,
+                 key: "story-map",
+                 label: "Story map",
+                 icon: "hero-map",
+                 path: "/board/acme/story-map"
+               },
+               %{
+                 view: :value_stream,
+                 key: "value-stream",
+                 label: "Value stream",
+                 icon: "hero-chart-bar",
+                 path: "/board/acme/value-stream"
+               }
+             ]
+    end
+
+    test "names exactly board_view_names/0, in order — the set every board-view attr validates" do
+      assert Enum.map(CoreComponents.board_views("acme"), & &1.view) == CoreComponents.board_view_names()
+    end
+  end
+
+  describe "board_view_tabs/1 (RE497)" do
+    test "renders one segment per board_views/1 entry; only the active one is current" do
+      doc =
+        (&CoreComponents.board_view_tabs/1)
+        |> render_component(board_slug: "acme", active: :story_map)
+        |> LazyHTML.from_fragment()
+
+      for %{key: key, path: path} <- CoreComponents.board_views("acme") do
+        assert doc |> LazyHTML.query("a#board-view-tab-#{key}") |> LazyHTML.attribute("href") == [path]
+      end
+
+      assert doc |> LazyHTML.query("[aria-current=page]") |> LazyHTML.attribute("id") == [
+               "board-view-tab-story-map"
+             ]
+    end
+  end
+
+  describe "card_search/1 borderless restyle (RE497)" do
+    defp search_doc do
+      (&CoreComponents.card_search/1)
+      |> render_component(query: "", results: [])
+      |> LazyHTML.from_fragment()
+    end
+
+    test "the input sits inside a borderless base-200 input label" do
+      doc = search_doc()
+
+      assert doc
+             |> LazyHTML.query("label.input.bg-base-200.border-transparent #board-search-input")
+             |> Enum.count() == 1
+    end
+
+    test "the label carries a leading magnifier and a trailing / kbd" do
+      label = LazyHTML.query(search_doc(), "label.input")
+
+      assert label |> LazyHTML.query(".hero-magnifying-glass") |> Enum.count() == 1
+      assert label |> LazyHTML.query("kbd.kbd") |> LazyHTML.text() == "/"
+    end
+
+    test "the input keeps its shortcut and scoped Escape handler" do
+      input = LazyHTML.query(search_doc(), "#board-search-input")
+
+      assert LazyHTML.attribute(input, "aria-keyshortcuts") == ["/"]
+      assert LazyHTML.attribute(input, "phx-keydown") == ["search_clear"]
+      assert LazyHTML.attribute(input, "phx-key") == ["Escape"]
+    end
+
+    test "nothing is input-bordered any more" do
+      assert search_doc() |> LazyHTML.query(".input-bordered") |> Enum.count() == 0
+    end
+  end
 end
