@@ -1239,7 +1239,7 @@ defmodule Hamaca.Runs.RunServer do
     "`#{node_key}` reported success but produced no commits — HEAD is still `#{short}`. " <>
       "This task's work appears to be committed already (`#{short}` was produced by an earlier " <>
       "visit of this node for this task), so it cannot move HEAD again. If there is genuinely " <>
-      "nothing left to change, report `relay outcome succeeded --no-changes`; if there is, " <>
+      "nothing left to change, report `hamaca outcome succeeded --no-changes`; if there is, " <>
       "make the change and commit it. (no_op_success: #{node_key})"
   end
 

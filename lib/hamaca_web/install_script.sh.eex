@@ -234,7 +234,7 @@ update_out=$(HAMACA_URL="$BASE" python3 ./hamaca update --json) || {
 }
 
 # hamaca first, then every other file the update wrote (in its order, once), then the rest. The
-# report's JSON starts at its first `{` line: ./hamaca logs `[relay] …` to stdout.
+# report's JSON starts at its first `{` line: ./hamaca logs `[hamaca] …` to stdout.
 written=$(printf '%s' "$update_out" | py 'import json, sys
 lines = sys.stdin.read().splitlines()
 start = next(i for i, l in enumerate(lines) if l.startswith("{"))

@@ -251,7 +251,7 @@ defmodule HamacaWeb.Api.FallbackController do
     |> put_view(json: ErrorJSON)
     |> render(:error,
       code: "active_run",
-      message: "This card has a live run — cancel it (`relay cancel #{conn.path_params["ref"]}`) before archiving"
+      message: "This card has a live run — cancel it (`hamaca cancel #{conn.path_params["ref"]}`) before archiving"
     )
   end
 

@@ -154,13 +154,13 @@ defmodule HamacaWeb.PageControllerTest do
       end
     end
 
-    test "the RUNNER tile names the ./relay start command", %{conn: conn} do
+    test "the RUNNER tile names the ./hamaca start command", %{conn: conn} do
       doc = hood_doc(conn)
 
       assert doc |> LazyHTML.query("section#under-the-hood #under-the-hood-runner") |> squish() ==
-               "./relay start"
+               "./hamaca start"
 
-      refute hood_text(doc) =~ "./hamaca start"
+      refute hood_text(doc) =~ "./relay start"
     end
 
     test "is not linked from the nav, which keeps its How it works anchor", %{conn: conn} do

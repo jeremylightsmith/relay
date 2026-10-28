@@ -1177,14 +1177,14 @@ defmodule Hamaca.Cards do
     end
   end
 
-  # `url` is the image itself, not the page it was taken on: `relay attach` uploads the file and
+  # `url` is the image itself, not the page it was taken on: `hamaca attach` uploads the file and
   # prints the `/attachments/<id>` path to put here.
   defp validate_ai_screen_url(url, _index) when is_binary(url) and url != "", do: :ok
 
   defp validate_ai_screen_url(_url, index),
     do:
       invalid_ai_result(
-        ~s(screens[#{index}]: "url" is required and must be the image itself — upload it with `relay attach` and use the /attachments/… path it prints)
+        ~s(screens[#{index}]: "url" is required and must be the image itself — upload it with `hamaca attach` and use the /attachments/… path it prints)
       )
 
   defp validate_ai_screen_caption(nil, _index), do: :ok
@@ -1239,7 +1239,7 @@ defmodule Hamaca.Cards do
 
         %{index: index} ->
           invalid_mockups(
-            ~s(mockups[#{index}]: "url" must be an HTML or image attachment on this card — upload it with `relay mockups` and use the /attachments/… path it prints)
+            ~s(mockups[#{index}]: "url" must be an HTML or image attachment on this card — upload it with `hamaca mockups` and use the /attachments/… path it prints)
           )
       end
     end
@@ -1290,7 +1290,7 @@ defmodule Hamaca.Cards do
     else
       _ ->
         invalid_mockups(
-          ~s(mockups[#{index}]: "url" must be an /attachments/<id> path — upload the file with `relay mockups`)
+          ~s(mockups[#{index}]: "url" must be an /attachments/<id> path — upload the file with `hamaca mockups`)
         )
     end
   end

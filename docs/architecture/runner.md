@@ -1087,10 +1087,10 @@ signed-in user, the board-key API passes `:agent`, and the run `Listener` and
 
 **Cancelling never moves the card.** A caller that wants the card elsewhere follows with
 `POST /api/cards/:ref/move`, whose `409 would_strand_run` keeps meaning exactly what it
-says. That two-call sequence — `relay cancel REF && relay move REF Review` — is the
+says. That two-call sequence — `hamaca cancel REF && hamaca move REF Review` — is the
 supported way to unstick a card whose run must die.
 
-CLI: `relay cancel <ref> [--reason TEXT] [--json]`. On a refusal it prints the server's
+CLI: `hamaca cancel <ref> [--reason TEXT] [--json]`. On a refusal it prints the server's
 message to stderr and exits non-zero. Self-cancel is permitted and documented, not guarded:
 a flow node cancelling its own ref revokes its own job, and the runner handles revocation
 gracefully.
@@ -1885,7 +1885,7 @@ Five rules sit on top of it:
   into a stash.
 - **A success claim must be backed by a commit — or by proof the commit already exists.** On a
   node marked `expects_commits`, a `succeeded` that left HEAD unmoved is rewritten to `failed`
-  before finalize ([failures.md](failures.md) A6). The one way out is `relay outcome succeeded
+  before finalize ([failures.md](failures.md) A6). The one way out is `hamaca outcome succeeded
   --no-changes` (RE310): an ASSERTION that the work was already committed, which the engine
   honours only when it can show from this run's own history that this node already produced a
   commit for the thing it is bound to — the same node and, under a `foreach`, the same sub-task.

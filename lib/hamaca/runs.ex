@@ -1311,7 +1311,7 @@ defmodule Hamaca.Runs do
   # No run is created, and the card blocks on a human: a `:needs_input` card is skipped by
   # the scheduler by rule, so this reports the defect once instead of the scheduler re-pulling
   # a card it can never work. The text is self-service (RE357): the usual cause is a planner
-  # that has not migrated to `relay tasks add`, and the owner can fix that themselves.
+  # that has not migrated to `hamaca tasks add`, and the owner can fix that themselves.
   defp block_on_unusable_plan(card, flow) do
     {:ok, _card} = Cards.request_input(card, unusable_plan_message(card, flow), :agent)
     {:error, :no_plan_tasks}
@@ -1323,12 +1323,12 @@ defmodule Hamaca.Runs do
         "this card has no tasks and no plan, so its `foreach` node has nothing to implement."
       else
         "this card has no tasks, and its plan has no `## Task N:` headings for the legacy " <>
-          "plan-parse fallback to read — the planner has not migrated to `relay tasks add`."
+          "plan-parse fallback to read — the planner has not migrated to `hamaca tasks add`."
       end
 
     "The #{flow.key} flow could not start: #{why} Run `/hamaca-doctor` to migrate the planner, " <>
       "then re-plan the card (or add its tasks directly with " <>
-      "`relay tasks add <ref> --task \"<title>\" @<body-file>`) and move the card back to re-run."
+      "`hamaca tasks add <ref> --task \"<title>\" @<body-file>`) and move the card back to re-run."
   end
 
   defp start_seeded_run(card, flow, start_target, context, tasks_from_plan) do
@@ -1441,7 +1441,7 @@ defmodule Hamaca.Runs do
   end
 
   # RE357: parsing `card.plan` is the LEGACY path — a migrated planner writes the tasks itself
-  # with `relay tasks add`, so the card already has sub_tasks and this never runs. It is kept
+  # with `hamaca tasks add`, so the card already has sub_tasks and this never runs. It is kept
   # for boards whose customized flows still write monolithic plans; the warning is how we
   # learn when it is safe to delete.
   defp log_plan_parse_fallback(card, flow, count) do
@@ -1449,7 +1449,7 @@ defmodule Hamaca.Runs do
 
     Logger.warning(
       "deprecated: #{ref} (#{flow.key} flow): seeded #{count} sub_tasks by parsing card.plan; " <>
-        "migrate the planner to `relay tasks add` (run /hamaca-doctor)"
+        "migrate the planner to `hamaca tasks add` (run /hamaca-doctor)"
     )
   end
 
@@ -5333,8 +5333,8 @@ defmodule Hamaca.Runs do
   defp guidance_body(body) when is_binary(body), do: if(String.trim(body) == "", do: nil, else: body)
   defp guidance_body(_body), do: nil
 
-  defp guidance_images([_one], ref), do: "(1 image attached — see ./relay card #{ref})"
-  defp guidance_images([_ | _] = images, ref), do: "(#{length(images)} images attached — see ./relay card #{ref})"
+  defp guidance_images([_one], ref), do: "(1 image attached — see ./hamaca card #{ref})"
+  defp guidance_images([_ | _] = images, ref), do: "(#{length(images)} images attached — see ./hamaca card #{ref})"
   defp guidance_images(_none, _ref), do: nil
 
   # RE433: an agent node resolves its `llm` to a harness + model HERE, at enqueue, so the job

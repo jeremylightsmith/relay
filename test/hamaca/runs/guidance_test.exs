@@ -234,8 +234,8 @@ defmodule Hamaca.Runs.GuidanceTest do
       rendered = card |> reload_card() |> Runs.guidance_for(run) |> Runs.render_guidance("RE7")
       [first, second] = String.split(rendered, "\n\n")
 
-      assert String.ends_with?(first, "see screenshot\n(2 images attached — see ./relay card RE7)")
-      assert [header, "(1 image attached — see ./relay card RE7)"] = String.split(second, "\n")
+      assert String.ends_with?(first, "see screenshot\n(2 images attached — see ./hamaca card RE7)")
+      assert [header, "(1 image attached — see ./hamaca card RE7)"] = String.split(second, "\n")
       assert header =~ ~r/^Ada Lovelace · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/
     end
   end

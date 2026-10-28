@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""relay — one tool for a Relay board.
+"""hamaca — one tool for a Hamaca board.
 
-A REST-API CLI for cards, runs and flows and, with `relay start`, the runner that claims
-node-jobs from the server and runs them. It is generic: it knows the Relay REST API and how to run
+A REST-API CLI for cards, runs and flows and, with `hamaca start`, the runner that claims
+node-jobs from the server and runs them. It is generic: it knows the Hamaca REST API and how to run
 node-jobs, but nothing about any board's stages, agents or skills — that is flow data on the
 server (ADR 0006).
 """
@@ -34,7 +34,7 @@ import urllib.parse
 import urllib.request
 
 try:
-    from rich_argparse import RichHelpFormatter    # optional: styles `relay -h` when installed
+    from rich_argparse import RichHelpFormatter    # optional: styles `hamaca -h` when installed
 except ImportError:
     RichHelpFormatter = None
 
@@ -47,11 +47,11 @@ FORWARDER = None
 # at once, and a ref-keyed map let each branch clobber the others' ids. Set only by
 # node_job_attribution(); a talk turn and the main loop never set it.
 _JOB_ATTRIBUTION = threading.local()
-USAGE = None   # the running `relay start`'s HarnessUsageBook (RE436); None outside it
+USAGE = None   # the running `hamaca start`'s HarnessUsageBook (RE436); None outside it
 
 # ---- runner version (RLY-184) ----
 #
-# `./relay` is loaded into memory at process start, so a long-running `relay start` keeps
+# `./hamaca` is loaded into memory at process start, so a long-running `hamaca start` keeps
 # serving whatever version it started with — forever, and silently — no matter how many times
 # this file is fixed and merged underneath it. Three cards died that way before anyone noticed.
 # So the runner DECLARES a version on every claim and heartbeat, the server declares the
@@ -61,24 +61,24 @@ USAGE = None   # the running `relay start`'s HarnessUsageBook (RE436); None outs
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 94
-RUNNER_FINGERPRINT = "003bf8b3b4ab92e441a0e5c4085161d6e9e077276877abf11b952b13b2acbc3f"
+RUNNER_VERSION = 95
+RUNNER_FINGERPRINT = "52c1afcca51c614ebb69d5b11b4b24bdf269f124c46cd026bce3661297afdb5f"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it, and BOARD_URL (RE443) is the
-# board's URL, which the board bakes into every copy it serves (`Relay.Scaffold.bake_board_url`)
+# board's URL, which the board bakes into every copy it serves (`Hamaca.Scaffold.bake_board_url`)
 # so a project needs no RELAY_URL. The committed file carries it empty. Everything else in the
 # file is covered, so no behaviour change can slip through without a deliberate bump.
 FINGERPRINT_MASK = re.compile(r"(?m)^(RUNNER_VERSION|RUNNER_FINGERPRINT|BOARD_URL)\s*=.*$")
 
-# The ONE Python parse of the BOARD_URL line (RE443); `Relay.Scaffold`'s @board_url_re is the
+# The ONE Python parse of the BOARD_URL line (RE443); `Hamaca.Scaffold`'s @board_url_re is the
 # app's. The value is a JSON string literal on one line; the contract fixture pins the two.
 BOARD_URL_RE = re.compile(r"(?m)^BOARD_URL\s*=[ \t]*(.*?)[ \t]*$")
 
 
 def board_url_of(source):
-    """The URL baked into a ./relay `source`, or "" when the line is absent, empty or garbled."""
+    """The URL baked into a ./hamaca `source`, or "" when the line is absent, empty or garbled."""
     m = BOARD_URL_RE.search(source)
     if not m:
         return ""
@@ -145,12 +145,12 @@ class Died(SystemExit):
 
 
 def die(msg):
-    print(f"relay: {msg}", file=sys.stderr)
+    print(f"{cli_name()}: {msg}", file=sys.stderr)
     raise Died(msg)
 
 
 def log(msg, *, ref=None, kind="lifecycle"):
-    print(f"[relay] {msg}", flush=True)
+    print(f"[{cli_name()}] {msg}", flush=True)
     forward(kind, msg, ref)
 
 
@@ -246,7 +246,7 @@ API_MAX_ATTEMPTS = 3  # one initial try + up to two retries
 # RE449: how long the outcome POST keeps retrying a transient failure past API_MAX_ATTEMPTS. A
 # finished node's outcome is the one call whose loss throws away real work, and a home network
 # can drop for minutes; the job stays in the heartbeat's `running` list for as long as this
-# retries. Matches the server's exclusive reclaim window (Relay.Runs.exclusive_reclaim_after_s/0).
+# retries. Matches the server's exclusive reclaim window (Hamaca.Runs.exclusive_reclaim_after_s/0).
 OUTCOME_RETRY_BUDGET_S = 600
 OUTCOME_BACKOFF_CAP_S = 30   # the longest single sleep in that extended stretch
 
@@ -424,7 +424,7 @@ def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeo
 
 
 # RE460 — the server's 402 refusal code for a board whose owner's plan is paused. Mirrors
-# RelayWeb.PlanPaused.code/0; pinned by runner_contract.json's claim_refused.plan_paused.
+# HamacaWeb.PlanPaused.code/0; pinned by runner_contract.json's claim_refused.plan_paused.
 PLAN_PAUSED_CODE = "plan_paused"
 
 
@@ -463,7 +463,7 @@ def api_bytes(path):
 
 def api_download(path):
     """api_bytes() plus the response's Content-Type (RE390): `(bytes, content_type)`, the type
-    `None` when the server sent none. `relay mockups --pull` names each file by it."""
+    `None` when the server sent none. `hamaca mockups --pull` names each file by it."""
     return _request("GET", path, decode=lambda resp: (resp.read(), resp.headers.get("Content-Type")))
 
 
@@ -650,7 +650,7 @@ def harness_inventory(harnesses, which=shutil.which, run=subprocess.run):
 
 
 class RunnerHeartbeat:
-    """Per-runner heartbeat for `relay start`. POSTs
+    """Per-runner heartbeat for `hamaca start`. POSTs
     {runner, capacity, running:[job-ids]} to /api/node-jobs/heartbeat every `interval`s and
     READS the response's revoked job-ids, handing each to `on_revoke` (§5).
 
@@ -658,7 +658,7 @@ class RunnerHeartbeat:
     pull model has no other channel for:
 
       * `capacity` — the CONFIGURED per-class totals (cfg["capacity"]), never
-        RunnerPool.capacity()'s live free count. Relay.Runs.Capacity is what the scheduler
+        RunnerPool.capacity()'s live free count. Hamaca.Runs.Capacity is what the scheduler
         reads to decide whether to dispatch, it is lost on every app restart (hence a
         REPEATING beat, not a one-shot at startup), and Scheduler.Server debits in-flight
         :running runs server-side — so sending the decremented count would double-debit every
@@ -668,7 +668,7 @@ class RunnerHeartbeat:
         outcome POST 20+ minutes later.
       * `capabilities` — the agents and skills this machine can resolve by name, sent on
         startup and whenever the inventory changes (never on every beat). It is what
-        Relay.Runs.preflight_flow/1 reads to tell a human whether enabling a flow will
+        Hamaca.Runs.preflight_flow/1 reads to tell a human whether enabling a flow will
         actually work, before the first card moves.
       * `sessions` (RE358) — `sessions_fn()`, the session each in-flight agent job has
         captured, which the server writes onto its execution: a revoked job reports nothing, so
@@ -709,7 +709,7 @@ class RunnerHeartbeat:
         # Last inventory hash the server ACKNOWLEDGED. None ⇒ send on the next beat, so the
         # first beat after startup always carries it.
         self._caps_hash = None
-        # RE185: the RUNNER_VERSION of the ./relay the board itself serves at
+        # RE185: the RUNNER_VERSION of the ./hamaca the board itself serves at
         # /api/scaffold, as of the last successful beat. None — an older board that does not
         # send the key, a board whose scaffold was never built, or a beat that has not landed —
         # reads as "never auto-update", which is the safe answer.
@@ -846,7 +846,7 @@ def read_arg(text):
 
 # Bound on the ONE startup GET /api/board (RE305). Every other runner request either has
 # its own bound (the long-poll claim, `_fetch`) or runs where a stall is visible; this one
-# gates the startup line, so unbounded it would hang `relay start` printing NOTHING at all
+# gates the startup line, so unbounded it would hang `hamaca start` printing NOTHING at all
 # against a host that DROPs — a VPN that is down, a firewalled box. This is a PER-ATTEMPT
 # timeout, and that DROP case times out during CONNECT, which urllib wraps in `URLError` and
 # `_retryable` retries: worst case is ~31s (three attempts plus 1.5s of backoff), not 10s.
@@ -859,7 +859,7 @@ def get_board(timeout=None):
 
 
 def board_identity():
-    """`('"Relay" (RE)', None)` for the startup line, or `(None, why)` when the board
+    """`('"Hamaca" (RE)', None)` for the startup line, or `(None, why)` when the board
     cannot be reached (RE305).
 
     NEVER raises. Decision 3 on the card: a wrong or expired RELAY_API_KEY, or a transient
@@ -958,7 +958,7 @@ def set_dependencies(ref, refs):
 
 def split_refs(value):
     """`--depends-on RE12,RE13` -> ["RE12", "RE13"]; blanks dropped. The ONE ref-list parse, so
-    `relay create --depends-on` and `relay depends`'s positionals accept the same syntax."""
+    `hamaca create --depends-on` and `hamaca depends`'s positionals accept the same syntax."""
     return [r.strip() for r in value.split(",") if r.strip()]
 
 
@@ -1011,7 +1011,7 @@ def list_stages():
 
 def resolve_main_stage(token, stages):
     """RE384 — a MAIN stage by numeric id or exact name. Substages never match: they are
-    reachable only through `relay stage lane`. Unlike resolve_stage_id, a duplicated name is
+    reachable only through `hamaca stage lane`. Unlike resolve_stage_id, a duplicated name is
     refused rather than silently taking the first."""
     mains = [s for s in stages if s["parent_id"] is None]
     if token.isdigit():
@@ -1079,7 +1079,7 @@ def comment(ref, text):
 
 def attach(ref, path, content_type=None):
     """Upload `path` to `ref`. The content type is guessed from the extension unless the caller
-    names it (`relay mockups` passes its MOCKUP_TYPES value)."""
+    names it (`hamaca mockups` passes its MOCKUP_TYPES value)."""
     with open(path, "rb") as f:
         data = f.read()
     content_type = content_type or mimetypes.guess_type(path)[0] or "application/octet-stream"
@@ -1092,7 +1092,7 @@ def attach(ref, path, content_type=None):
 
 
 # RE390: what a mockup file may be — extension (lowercased) → content type. The ONE runner-side
-# table: `relay mockups` validates uploads and types them by it, and `--pull` names a download by
+# table: `hamaca mockups` validates uploads and types them by it, and `--pull` names a download by
 # it. Its value set is pinned by runner_contract.json's `mockups.content_types`
 # (Schemas.Attachment.mockup_types/0 on the server).
 MOCKUP_TYPES = {".html": "text/html", ".png": "image/png", ".jpg": "image/jpeg",
@@ -1155,7 +1155,7 @@ def default_pull_dir(ref):
 
 
 def default_images_dir(ref):
-    """`tmp/<REF>/images/` under the cwd — where `relay images --pull` writes by default."""
+    """`tmp/<REF>/images/` under the cwd — where `hamaca images --pull` writes by default."""
     return os.path.join("tmp", ref, "images")
 
 
@@ -1236,13 +1236,13 @@ def card_line(c):
 
 def archived_line(c):
     """`card_line` plus ` (archived)` for an archived card — the ONE place that suffix is
-    spelled, shared by `relay search`, `relay archive` and `relay unarchive`."""
+    spelled, shared by `hamaca search`, `hamaca archive` and `hamaca unarchive`."""
     return card_line(c) + (" (archived)" if c.get("archived") else "")
 
 
 def dependency_lines(c):
     """The `blocked by:` / `blocks:` lines for a card, each omitted when empty. ONE renderer,
-    shared by `relay card` and `relay depends`, so the two can never disagree."""
+    shared by `hamaca card` and `hamaca depends`, so the two can never disagree."""
     lines = []
     blocked = c.get("depends_on") or []
     if blocked:
@@ -1383,7 +1383,7 @@ def format_board(b):
 
 
 def format_search(query, cards, limit):
-    """Search results as ordinary card rows — `card_line` is the same renderer `relay board`
+    """Search results as ordinary card rows — `card_line` is the same renderer `hamaca board`
     uses, so search output reads identically to every other card list. Finding nothing is a
     valid answer printed on stdout, not an error."""
     if not cards:
@@ -1452,9 +1452,9 @@ def cmd_card(args):
 
 
 def cmd_search(args):
-    """relay search QUERY — find a card by ref or title (RE198).
+    """hamaca search QUERY — find a card by ref or title (RE198).
 
-    Matching lives server-side in Relay.Cards.search/3 and is NOT reimplemented here: a ref or
+    Matching lives server-side in Hamaca.Cards.search/3 and is NOT reimplemented here: a ref or
     bare number is an exact hit ranked first, otherwise every whitespace token must appear in
     the title, in any order. Exits 0 with a message when nothing matches — "found nothing" is
     an answer, not a failure.
@@ -1489,7 +1489,7 @@ def cmd_cancel(args):
     """Kill the card's ACTIVE run (RE309) — the stop half of the pair `retry` starts.
 
     Cancel only: it never moves the card. Unsticking a card whose live run strands it is
-    `relay cancel REF && relay move REF Review` — two composable calls, so `move`'s 409
+    `hamaca cancel REF && hamaca move REF Review` — two composable calls, so `move`'s 409
     keeps meaning exactly what it says.
 
     A card with no active run is refused 422 `no_active_run`, which api() turns into a
@@ -1553,9 +1553,9 @@ def format_flow_stats(key, data):
 
 
 def cmd_flow(args):
-    """`relay flow` lists the board's flows; `relay flow KEY` prints one.
+    """`hamaca flow` lists the board's flows; `hamaca flow KEY` prints one.
 
-    `relay flow KEY --json` IS the pull: `relay flow code --json > code.json`."""
+    `hamaca flow KEY --json` IS the pull: `hamaca flow code --json > code.json`."""
     key = getattr(args, "key", None)
     if key:
         doc = api("GET", f"/api/flows/{key}")["data"]
@@ -1566,7 +1566,7 @@ def cmd_flow(args):
 
 
 def cmd_flow_push(args):
-    """`relay flow-push KEY FILE|-` PUTs a document; `-` reads it from stdin.
+    """`hamaca flow-push KEY FILE|-` PUTs a document; `-` reads it from stdin.
 
     A 409 surfaces the server's "re-pull" message through api()'s die().
 
@@ -1611,7 +1611,7 @@ def _trigger_chain(doc):
 
 def format_problem(problem):
     """A broken board shape's explanation (RE430), printed VERBATIM from the server's `problem`
-    object (`Relay.Flows.Shape` owns every word): What, Why, then the numbered fixes. The
+    object (`Hamaca.Flows.Shape` owns every word): What, Why, then the numbered fixes. The
     labels are the only runner-owned text — never build a sentence from `kind`."""
     lines = [f"What: {problem.get('what', '')}", f"Why:  {problem.get('why', '')}", "Fix:"]
     lines += [f"  {i}. {fix.get('label', '')}" for i, fix in enumerate(problem.get("fixes") or [], 1)]
@@ -1676,12 +1676,12 @@ def format_flow_push(key, before, returned):
 
 # ============================ board-health audit (RE249) ============================
 #
-# `/relay-doctor`'s nine checks all ask "does this name resolve?", so a green doctor means "this
-# flow can start", not "this board is sound". `relay audit` asks the other question. The run
+# `/hamaca-doctor`'s nine checks all ask "does this name resolve?", so a green doctor means "this
+# flow can start", not "this board is sound". `hamaca audit` asks the other question. The run
 # history half lives on the server (only it has the data); the CI-parity half is computed HERE,
 # because the server has no checkout of any board's repo and never will.
 
-# Pinned to Relay.Runs.Audit.severities/0 by test/fixtures/runner_contract.json: the report
+# Pinned to Hamaca.Runs.Audit.severities/0 by test/fixtures/runner_contract.json: the report
 # branches on severity (errors first, the summary counts), so drift must break CI. `check` ids
 # are deliberately NOT pinned — they are printed opaquely and must never be branched on, so the
 # server can add a check without a runner bump.
@@ -1862,7 +1862,7 @@ def _plural(n, noun):
 
 
 def cmd_audit(args):
-    """`relay audit [FLOW]` — board health: run-history findings from the server, CI parity
+    """`hamaca audit [FLOW]` — board health: run-history findings from the server, CI parity
     computed locally against this working directory's .github/workflows.
 
     ALWAYS EXITS 0. Advisory, exactly like every doctor check: nothing here gates.
@@ -1902,12 +1902,12 @@ def cmd_create(args):
 
 
 def cmd_depends(args):
-    """relay depends REF [BLOCKER ...] — replace the card's blocker set; no BLOCKERs clears it.
+    """hamaca depends REF [BLOCKER ...] — replace the card's blocker set; no BLOCKERs clears it.
 
     Blockers may be given as separate arguments or comma-separated, like `--depends-on`.
 
     A blocked card is ineligible for AUTOMATIC dispatch until every blocker reaches a Done
-    column; dragging it into a work column by hand is still legal. `relay why REF` explains the
+    column; dragging it into a work column by hand is still legal. `hamaca why REF` explains the
     wait in prose."""
     card = set_dependencies(args.ref, [r for b in args.blockers for r in split_refs(b)])
     lines = dependency_lines(card) or ["blocked by: (none)"]
@@ -1943,7 +1943,7 @@ def cmd_tasks_add(args):
 
 def cmd_tasks_list(args):
     """Titles and metadata only — never a body. Isolation by default: an implementer sees THAT
-    other tasks exist, not their content. `relay task show` is the one way to read a body."""
+    other tasks exist, not their content. `hamaca task show` is the one way to read a body."""
     tasks = list_tasks(args.ref)
     emit(args, tasks, "\n".join(task_line(t) for t in tasks) or "(no tasks)")
 
@@ -2097,7 +2097,7 @@ def format_pulled(ref, dest, pulled):
 
 
 def cmd_mockups_pull(args):
-    """relay mockups REF --pull [DIR] (RE373): download the card's mockups into DIR (default
+    """hamaca mockups REF --pull [DIR] (RE373): download the card's mockups into DIR (default
     `tmp/<REF>/mockups/`) so a fresh session can read what an earlier one uploaded."""
     dest = args.pull if isinstance(args.pull, str) else default_pull_dir(args.ref)
     pulled = pull_mockups(args.ref, dest)
@@ -2113,7 +2113,7 @@ def format_images_pulled(ref, dest, pulled):
 
 
 def cmd_images(args):
-    """relay images REF --pull [DIR] (RE427): download the images attached to the card's notes
+    """hamaca images REF --pull [DIR] (RE427): download the images attached to the card's notes
     into DIR (default `tmp/<REF>/images/`), numbered in viewer order."""
     if not args.pull:
         die("pass --pull [DIR] to download the card's note images")
@@ -2123,7 +2123,7 @@ def cmd_images(args):
 
 
 def cmd_mockups(args):
-    """relay mockups REF FILE… [--caption T…] | --clear | --pull [DIR] (RE370, RE373).
+    """hamaca mockups REF FILE… [--caption T…] | --clear | --pull [DIR] (RE370, RE373).
 
     Uploads each file through the attachments endpoint, typed by its extension through
     MOCKUP_TYPES (RE390: .html or an image — anything else dies up front), then REPLACES the
@@ -2197,11 +2197,11 @@ def default_runner_name():
     `conflict_target: [:board_id, :name]` — and in the local singleton lock, which hashes
     `RELAY_URL + "\\0" + name`. So it has to differ between two checkouts of one project on
     one machine: a bare hostname did not, which made the two clobber each other's roster
-    row and got the second `relay start` refused by its own lock. The checkout DIRECTORY
+    row and got the second `hamaca start` refused by its own lock. The checkout DIRECTORY
     is what differs between two clones, so it, and not the git remote, is the project part.
 
     The host part is trimmed to its first dot-segment (`box.local` -> `box`); the full FQDN
-    still rides in `runner_ident()["host"]`, which the Runners page and `relay runners`
+    still rides in `runner_ident()["host"]`, which the Runners page and `hamaca runners`
     already show separately, so nothing is lost. Both parts are sanitized and have a
     fallback, so a directory with spaces or an empty `gethostname()` can never produce a
     blank or shell-hostile name."""
@@ -2218,7 +2218,7 @@ def legacy_identity_warning(name):
     `:runner_gone` park, so the resume returns to the machine holding that run's worktree.
     A runner that quietly starts answering to a different name therefore leaves every run
     pinned to the old one waiting on an identity that will never heartbeat again: the
-    scheduler's resume targets a stale row, and `relay retry` refuses with "pinned to runner
+    scheduler's resume targets a stale row, and `hamaca retry` refuses with "pinned to runner
     X, which is not connected" — while the worktree sits right there under the same ROOT.
 
     Nothing makes that visible on its own, and the hop is unattended: auto-update re-execs in
@@ -2266,7 +2266,7 @@ def legacy_identity_warning(name):
     :running}` clause — so a human baton clears the pin only while the run is still running.
     Once it has parked `:runner_gone` the listener leaves it on its no-op clause, the
     scheduler's resume still targets `{:pinned, pinned_runner_id}` and finds no capacity, and
-    `relay retry` refuses `{:runner_unavailable, name}`: the pin cannot be cleared in place,
+    `hamaca retry` refuses `{:runner_unavailable, name}`: the pin cannot be cleared in place,
     and cancelling is the only way out. Advertising the baton for an already-parked run would
     strand it."""
     legacy = socket.gethostname()
@@ -2400,7 +2400,7 @@ def load_runner_config():
 
 # ---- the starter .hamaca/runner.json (RE383) ----
 #
-# `./relay update` writes this commented template when a project has no runner.json yet. Every
+# `./hamaca update` writes this commented template when a project has no runner.json yet. Every
 # value that equals a built-in fallback is READ from runner_config_defaults() /
 # AUTO_UPDATE_DEFAULTS / the resolved prepare hook path at render time (AGENTS.md: a value is defined
 # exactly once). These two are the deliberate exceptions — recommended starting points that
@@ -2425,7 +2425,7 @@ def _starter_key(lines, comments, key, value, last=False):
 
 def render_runner_config(namespace, base=None, layout=None):
     """The full commented starter runner.json for `namespace`, its `base` set to `base` when
-    given (RE443, `relay update --base REF`) else the default. `layout` (RE457) holds whichever
+    given (RE443, `hamaca update --base REF`) else the default. `layout` (RE457) holds whichever
     of `skill_dir` / `pointer_file` were given; each becomes a key after `base`, and one not
     given is omitted so its default applies. Strict JSON once the full-line
     `//` comments are stripped, and still strict JSON with the three `worktrees` lines
@@ -2433,7 +2433,7 @@ def render_runner_config(namespace, base=None, layout=None):
     a `name`: the file is tracked, and a pinned name would recreate the RE305 collision."""
     d = runner_config_defaults()
     lines = [
-        "// Relay runner config — read by `./relay start`. Lines starting with // are comments.",
+        "// Hamaca runner config — read by `./hamaca start`. Lines starting with // are comments.",
         "// Docs: relay.md. Every key is optional; a missing key falls back to the runner's "
         "default.",
         "{",
@@ -2450,7 +2450,7 @@ def render_runner_config(namespace, base=None, layout=None):
                          "a repo on `master`,",
                          "a fork tracking `upstream/main`, etc."],
                  "base", base or d["base"])
-    comment = ["This project's LLM skill dir / pointer file; `./relay update "
+    comment = ["This project's LLM skill dir / pointer file; `./hamaca update "
                "--skill-dir/--pointer-file` changes them."]
     for key, value in (layout or {}).items():
         _starter_key(lines, comment, key, value)
@@ -2471,7 +2471,7 @@ def render_runner_config(namespace, base=None, layout=None):
                  "poll_timeout", d["poll_timeout"])
     _starter_key(lines, ["Seconds between heartbeats to the board."],
                  "heartbeat_interval", d["heartbeat_interval"])
-    _starter_key(lines, ["Re-install ./relay from the board when a newer one is served, "
+    _starter_key(lines, ["Re-install ./hamaca from the board when a newer one is served, "
                          "between jobs."],
                  "auto_update", AUTO_UPDATE_DEFAULTS["auto_update"])
     _starter_key(lines, ["Minimum seconds between auto-update attempts."],
@@ -2503,7 +2503,7 @@ def ensure_runner_config(check, base=None, layout=None):
 
 
 def render_prepare_hook():
-    """The generic per-worktree warm-up hook `relay update --starter-only` lays down at
+    """The generic per-worktree warm-up hook `hamaca update --starter-only` lays down at
     the default prepare hook path (RE443): this repo's own RLY-231 copy-from-cache-or-main-checkout logic,
     generalized over a `WARM` list the project fills in. It ships empty, so until someone names
     a directory it copies nothing and exits 0. Raw, so the sed backslash reaches sh verbatim."""
@@ -2625,7 +2625,7 @@ def git_fetch_with_retry(cwd):
 
 
 def cmd_git_fetch(args):
-    """`relay git-fetch` — the shell-node entry point to git_fetch_with_retry (RLY-224).
+    """`hamaca git-fetch` — the shell-node entry point to git_fetch_with_retry (RLY-224).
 
     Flow shell nodes (the `branch` node and the @rebase_onto_main sync/resync) call this so a
     transient ref-lock race retries instead of killing the run; it exits nonzero on final
@@ -2743,7 +2743,7 @@ TALK_EVENT_KINDS = ("user", "tool", "out", "error")
 # other three. Unpacked from the tuple rather than re-typed, so the fixture assertion (which
 # compares ORDER too) is the single definition of both membership and position.
 _, TALK_KIND_TOOL, TALK_KIND_OUT, TALK_KIND_ERROR = TALK_EVENT_KINDS
-# Stage vocabulary (RE384) — argparse `choices` for `relay stage`. STAGE_LANES is
+# Stage vocabulary (RE384) — argparse `choices` for `hamaca stage`. STAGE_LANES is
 # Schemas.Stage.sublane_types/0, STAGE_TYPES Schemas.Stage.types/0, STAGE_CATEGORIES
 # Schemas.Stage.categories/0.
 STAGE_LANES = ("review", "done")                                    # pinned: vocabulary.stage_lanes
@@ -3079,7 +3079,7 @@ class RunnerPool:
                 self._retire_talk_only_locked(slot, rec)
 
     def assign_talk(self, ref):
-        """Reserve the CARD'S OWN worktree for a talk turn (ADR 0009 §2): attach to the live one
+        """Reserve the CARD'S OWN worktree for a talk turn (ADR 0014 §2): attach to the live one
         when a node job has it (dirty reads are the point), reuse a retained failed one as it is
         (post-mortem is exactly what people ask about), and create one otherwise. Returns
         (slot_name, reset?) or None when there is no room — NEVER the shared `<ns>-clean` tree,
@@ -3091,7 +3091,7 @@ class RunnerPool:
 
         A talk-created worktree carries the in-memory `talk` marker, which is what makes
         `release_held` skip it (RE311): the tree must survive a run ending, because a session
-        spans runs (ADR 0009 §2). `run_id is None` alone no longer identifies one — a tree
+        spans runs (ADR 0014 §2). `run_id is None` alone no longer identifies one — a tree
         `recover()` adopts after a restart has exactly that shape and IS releasable, which is
         also why the marker does not survive a restart (a documented gap, see runner.md's Talk
         section)."""
@@ -3681,7 +3681,7 @@ def _is_retained_worktree(path):
 def _write_retained_marker(path):
     try:
         with open(os.path.join(path, RETAINED_MARKER), "w") as f:
-            f.write("retained by relay runner for post-mortem (RLY-231)\n")
+            f.write("retained by hamaca runner for post-mortem (RLY-231)\n")
     except OSError:
         pass
 
@@ -4353,7 +4353,7 @@ class UsageLimiter:
 
 
 class HarnessUsageBook:
-    """The running `relay start`'s limiters, one per board harness key (RE436). Thread-safe."""
+    """The running `hamaca start`'s limiters, one per board harness key (RE436). Thread-safe."""
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -4957,7 +4957,7 @@ def determine_agent_outcome(job, ok, outcome_path, cwd=None, report=None):
          added to the outcome payload — but an agent author reading only this docstring should
          not be surprised to see a `succeeded` land as `failed` on such a node.
       5. RE310: the outcome file may also carry `no_changes` — the node ASSERTING that its work
-         was already committed (`relay outcome succeeded --no-changes`). It rides through as the
+         was already committed (`hamaca outcome succeeded --no-changes`). It rides through as the
          third element verbatim; only the server can verify such a claim, and it rejects it by
          default (see the guard in lib/relay/runs/run_server.ex)."""
     ref = (job.get("vars") or {}).get("ref")
@@ -5402,12 +5402,12 @@ def run_node_job(job, slot_path, control, partition=None):
     return outcome, detail, git_sha, session_id, no_changes, resume_at
 
 
-# ---- Talk (RE268 / ADR 0009) ------------------------------------------------
+# ---- Talk (RE268 / ADR 0014) ------------------------------------------------
 # The turn prompt is built HERE, in product code, and deliberately not from a
-# `.claude/agents/*.md` definition — a recorded exception to ADR 0006 (ADR 0009 §5). Talk is a
-# property of Relay itself and must behave the same on every board regardless of what the
+# `.claude/agents/*.md` definition — a recorded exception to ADR 0006 (ADR 0014 §5). Talk is a
+# property of Hamaca itself and must behave the same on every board regardless of what the
 # connected repo ships.
-TALK_PREAMBLE = """You are attached to a Relay card as a terminal session.
+TALK_PREAMBLE = """You are attached to a Hamaca card as a terminal session.
 
 This is a TERMINAL, not a chat. There is no message frame and no partner persona: you answer,
 you run commands, you print what you find. Be direct and short.
@@ -5416,10 +5416,10 @@ You may read any file in this working tree and run any read-only command. The tr
 own worktree and may be dirty, mid-edit — that is deliberate, and it is often exactly what is
 being asked about.
 
-To learn what the card's runs actually did, use the Relay CLI rather than guessing:
-  ./relay why  {ref}     — why the card is where it is, including rejections
-  ./relay runs {ref}     — the card's run history and per-node outcomes
-  ./relay card {ref}     — the card's current fields
+To learn what the card's runs actually did, use the Hamaca CLI rather than guessing:
+  ./hamaca why  {ref}    — why the card is where it is, including rejections
+  ./hamaca runs {ref}    — the card's run history and per-node outcomes
+  ./hamaca card {ref}    — the card's current fields
 
 In this step you must NOT change anything: do not edit files, do not commit, do not push, and do
 not modify the card. If you are asked to change something, say plainly that you cannot yet.
@@ -5451,7 +5451,7 @@ def talk_prompt(job):
 
 
 def talk_events_from(ev):
-    """Map ONE stream-json event to the transcript lines it produces (ADR 0009):
+    """Map ONE stream-json event to the transcript lines it produces (ADR 0014):
     assistant text -> :out, a tool invocation -> one dim :tool line `<tool> · <short target>`,
     an errored result -> :error. Anything else produces nothing — an unrecognised event must
     never cost the turn.
@@ -5637,7 +5637,7 @@ def talk_failure(sender, detail):
 
 def checkout_talk_branch(slot_path, branch):
     """After `create_or_rebaseline` leaves a freshly-created talk worktree DETACHED at base, put
-    it ON THE CARD'S BRANCH when one exists (RE268; ADR 0009's worktree table: a talk turn with
+    it ON THE CARD'S BRANCH when one exists (RE268; ADR 0014's worktree table: a talk turn with
     no live run gets its worktree "on the card's branch, or the base branch if it has none").
 
     Without this, a talk turn attached to a card whose worktree had to be created fresh (the
@@ -5679,7 +5679,7 @@ def checkout_talk_branch(slot_path, branch):
 def execute_talk(job, slot, reset, control, pool):
     """Worker body for one talk turn. Mirrors execute_one's discipline — always report, never
     leak a slot — but has no run_state to act on: a talk worktree deliberately OUTLIVES any run
-    (ADR 0009 §2), so nothing is torn down here."""
+    (ADR 0014 §2), so nothing is torn down here."""
     slot_path = worktree_path(slot)
     # Hoisted out of the try so the crash path below can still carry it: if only the FIRST
     # outcome POST failed transiently, dropping the session id costs session continuity for
@@ -5815,7 +5815,7 @@ def execute_one(job, slot, reset, control, pool):
 
 
 # ---- Single-runner startup lock (RLY-193) --------------------------------
-# Two `relay start` processes on one machine default to the same hostname, so the server
+# Two `hamaca start` processes on one machine default to the same hostname, so the server
 # keys them to ONE Runner row — the exact state RLY-170 orphan recovery corrupts (each
 # process beats a partial `running` list and requeues the other's live jobs). We make that
 # state unreachable with two exclusive flocks taken at startup and held for the process's
@@ -5908,9 +5908,9 @@ def release_runner_locks():
 # ============================ auto-update (RE185) ============================
 #
 # RLY-184 made a stale runner STOP; this makes it HEAL. The board's heartbeat reply names
-# `latest_runner_version` — the RUNNER_VERSION of the ./relay the board itself serves at
+# `latest_runner_version` — the RUNNER_VERSION of the ./hamaca the board itself serves at
 # /api/scaffold (RE304) — and a runner that is behind downloads that file, verifies it,
-# writes it over its own `./relay`, and re-execs at a job boundary (see restart_runner /
+# writes it over its own `./hamaca`, and re-execs at a job boundary (see restart_runner /
 # maybe_auto_update below).
 #
 # Trust model: HTTPS to the board plus a parse check. No checksum, no signature — a settled
@@ -5935,7 +5935,7 @@ def _state_dir():
 
 
 def auto_update_state_path():
-    """The ledger of ./relay files THIS machine auto-updated, keyed by absolute path."""
+    """The ledger of ./hamaca files THIS machine auto-updated, keyed by absolute path."""
     return os.path.join(_state_dir(), "auto-update.json")
 
 
@@ -5970,13 +5970,13 @@ def _sha256_file(path):
 
 
 def runner_sha256(data):
-    """sha256 of ./relay bytes with BOARD_URL reset to the placeholder (RE443) — the manifest's
+    """sha256 of ./hamaca bytes with BOARD_URL reset to the placeholder (RE443) — the manifest's
     `unbaked_sha256` (see `manifest_sha`), since the board bakes its URL into the copy it
     serves. Every manifest comparison for RUNNER_REL goes through here."""
     try:
         data = bake_board_url(data.decode("utf-8"), "").encode("utf-8")
     except UnicodeDecodeError:
-        pass                                # not a ./relay at all: hash it as-is, never matches
+        pass                                # not a ./hamaca at all: hash it as-is, never matches
     return hashlib.sha256(data).hexdigest()
 
 
@@ -5989,9 +5989,9 @@ def _runner_sha256_file(path):
 
 
 def carry_board_url(source, path):
-    """`source` with the BOARD_URL of the ./relay already at `path` when that one is non-empty,
+    """`source` with the BOARD_URL of the ./hamaca already at `path` when that one is non-empty,
     else `source` as served (RE443): a project's baked board survives every rewrite of the file,
-    by `relay update` and by auto-update alike."""
+    by `hamaca update` and by auto-update alike."""
     try:
         with open(path, encoding="utf-8") as f:
             local = board_url_of(f.read())
@@ -6004,7 +6004,7 @@ RUNNER_VERSION_RE = re.compile(r"(?m)^RUNNER_VERSION\s*=\s*(\d+)")
 
 
 def parse_runner_version(source):
-    """The RUNNER_VERSION a ./relay SOURCE declares, or None. The one parse of it."""
+    """The RUNNER_VERSION a ./hamaca SOURCE declares, or None. The one parse of it."""
     m = RUNNER_VERSION_RE.search(source)
     return int(m.group(1)) if m else None
 
@@ -6017,10 +6017,10 @@ NOTHING_NEWER = object()
 
 
 def verify_runner_source(body, url):
-    """Every check a downloaded `./relay` must pass before it may touch disk (RE185).
+    """Every check a downloaded `./hamaca` must pass before it may touch disk (RE185).
 
     Returns (source, version) or None, logging the reason for every rejection. Shared by
-    auto-update's download_runner and `relay update`, so the trust boundary is defined ONCE:
+    auto-update's download_runner and `hamaca update`, so the trust boundary is defined ONCE:
     UTF-8, a leading `#!`, a declared RUNNER_VERSION, and it compiles. Nothing downloaded is
     ever executed in this process; it is only written to disk after it compiles."""
     try:
@@ -6059,7 +6059,7 @@ def download_runner(config_url, layout):
     `layout` (RE478) picks the scaffold layout, and with it the runner item's path
     (SCAFFOLD_RUNNERS); the download is still installed over HERE.
 
-    The auto-update path. `relay update` shares verify_runner_source below but NOT the
+    The auto-update path. `hamaca update` shares verify_runner_source below but NOT the
     strictly-newer gate: update must be able to reinstall the same or an older version (a fresh
     project, or a deleted file), while auto-update must only ever move forward.
     """
@@ -6086,7 +6086,7 @@ def download_runner(config_url, layout):
 def _safe_to_overwrite(path):
     """Whether auto-update may rewrite `path`.
 
-    Auto-update deliberately writes the TRACKED ./relay in place, so this guard is what makes
+    Auto-update deliberately writes the TRACKED ./hamaca in place, so this guard is what makes
     that tolerable:
 
       * not a git repo, or the file is untracked  -> safe (the repo-less case)
@@ -6119,7 +6119,7 @@ def _safe_to_overwrite(path):
 def install_runner(source, version, path=None, carry_from=None):
     """Atomically replace `path` (default: this file) with `source`. True on success.
 
-    os.replace() is atomic, so a concurrent `./relay card …` invocation reads either the old
+    os.replace() is atomic, so a concurrent `./hamaca card …` invocation reads either the old
     file or the new one, never a half-written one. The write is recorded so the write-safety
     guard recognizes the resulting dirt as ours next time.
 
@@ -6174,7 +6174,7 @@ def _cap_attempts(state):
     if state["attempts"] >= AUTO_UPDATE_MAX_ATTEMPTS:
         state["disabled"] = True
         log(f"auto-update: {state['attempts']} update attempts without the version advancing — "
-            "disabled to avoid thrashing. Restart `relay start` by hand to pick up new code.",
+            f"disabled to avoid thrashing. Restart `{cli_name()} start` by hand to pick up new code.",
             kind="error")
     return state["disabled"]
 
@@ -6184,7 +6184,7 @@ def check_update_handshake(state):
     left (both names, RE478: the exec'ing runner may be an older ./relay that sets only RELAY_).
 
     A restart that landed on the SAME or OLDER code means the update did not take — a symlinked
-    ./relay, a read-only mount, a `python -m` wrapper. Looping on that would restart forever,
+    ./hamaca, a read-only mount, a `python -m` wrapper. Looping on that would restart forever,
     so auto-update is disabled for this process and RLY-184's fail-stop is left as the
     behaviour: refused, visible, loud, and waiting for a human.
     """
@@ -6205,7 +6205,7 @@ def check_update_handshake(state):
             state["disabled"] = True
             log(f"auto-update: restarted but this process is still version {RUNNER_VERSION} "
                 f"(was {raw}) — the update did not take. Auto-update is disabled for this "
-                "process; restart `relay start` by hand to pick up new code.", kind="error")
+                f"process; restart `{cli_name()} start` by hand to pick up new code.", kind="error")
     _cap_attempts(state)
     return state
 
@@ -6216,7 +6216,7 @@ def auto_update_argv():
 
 
 def restart_runner(from_version, attempts):
-    """Re-exec this process in place, into the freshly installed ./relay. Does not return.
+    """Re-exec this process in place, into the freshly installed ./hamaca. Does not return.
 
     Releasing the singleton flocks FIRST is required, not tidy: RLY-193's locks belong to open
     file descriptions that survive execv, and the re-exec'd image opens NEW descriptors — it
@@ -6233,7 +6233,7 @@ def restart_runner(from_version, attempts):
 
 
 def maybe_auto_update(cfg, hb, state, config_url):
-    """Install a newer ./relay and hand off to restart_runner, when every guard passes.
+    """Install a newer ./hamaca and hand off to restart_runner, when every guard passes.
 
     Called from the claim loop with NOTHING in flight — that is what makes the restart safe at a
     job boundary (card §3). Returns True only when it handed off to restart_runner (which does
@@ -6261,7 +6261,7 @@ def maybe_auto_update(cfg, hb, state, config_url):
         return False
     # Only a GENUINE failure counts toward the cap: an attempt that reached out for new code and
     # could not run it (fetch/parse/compile → None). The skip above does not (a human's uncommitted
-    # ./relay is deliberate and already warned about), the success below does not, and
+    # ./hamaca is deliberate and already warned about), the success below does not, and
     # NOTHING_NEWER does not — the board serving nothing newer is the expected window while a
     # publish is committed here but not yet pushed, so counting it would cap out and permanently
     # disable self-update over a non-problem (RE185).
@@ -6474,7 +6474,7 @@ def cmd_start(args):
                                usage_fn=lambda key: book.wire_for(key, usage_clock()),
                                on_definitions=on_definitions,
                                sessions_fn=sessions)
-        # Beat once up front: Relay.Runs.Capacity is empty on a fresh server (it is lost on
+        # Beat once up front: Hamaca.Runs.Capacity is empty on a fresh server (it is lost on
         # every restart by design), and until it is fed the scheduler plans zero dispatches.
         # Waiting a full interval here would make "start the runner" look broken.
         # RE433: inventory the harnesses first, so this very beat already says what this
@@ -6599,7 +6599,7 @@ def cmd_start(args):
                 hb.capacity = dict(ZERO_CAPACITY)
                 hb._beat()          # stop advertising room now, not one interval from now
             log(f"OUTDATED: this runner is running version {RUNNER_VERSION} but the "
-                f"server requires {required_version} — restart `relay start` to pick up "
+                f"server requires {required_version} — restart `{cli_name()} start` to pick up "
                 "current code. No further jobs will be claimed; in-flight work will finish.",
                 kind="error")
             if args.once:
@@ -6741,7 +6741,7 @@ def cmd_outcome(args):
     RE310: `--no-changes` asserts "succeeded, and the work was already committed" — the escape
     from an `expects_commits` node re-entered onto work its own earlier visit already committed.
     It is only meaningful alongside `succeeded`; the server verifies the claim against this run's
-    own history (see `Relay.Runs.RunServer`) rather than taking the node's word for it.
+    own history (see `Hamaca.Runs.RunServer`) rather than taking the node's word for it.
     """
     if args.outcome not in NODE_OUTCOMES:
         die(f"outcome must be one of {', '.join(NODE_OUTCOMES)} (got {args.outcome!r})")
@@ -6763,10 +6763,10 @@ def cmd_outcome(args):
 
 # ============================ the scaffold (RE304) ============================
 #
-# Relay owns exactly five files in a project — `./relay`, the three `relay-*` skills, and
-# `relay.md` — and the BOARD serves them at /api/scaffold. They are never user-edited, which is
-# what lets an update overwrite them unconditionally: no provenance ledger, no per-file diff
-# prompt, no "did you edit this or did we ship a newer one?" question.
+# Hamaca owns a fixed set of files in a project — the runner, its skills, the agent guide and,
+# in the hamaca layout, the ./relay shim — and the BOARD serves them at /api/scaffold. They are
+# never user-edited, which is what lets an update overwrite them unconditionally: no provenance
+# ledger, no per-file diff prompt, no "did you edit this or did we ship a newer one?" question.
 #
 # The manifest's `version` is derived from content server-side; this end only ever compares it
 # for equality. "N versions behind" is deliberately not a thing.
@@ -6804,13 +6804,13 @@ def scaffold_url(path, layout="hamaca"):
 
 def _fetch(url, timeout=30):
     """GET a URL with NO credentials, returning raw bytes. The board's install script and
-    `relay update` run before a board key is in hand, so this deliberately bypasses api()'s bearer token — the
+    `hamaca update` run before a board key is in hand, so this deliberately bypasses api()'s bearer token — the
     scaffold routes are unauthenticated by design (RE304).
 
     Used for the manifest's file BODIES; the manifest itself goes through api() instead (JSON,
     retried on 5xx). Bodies aren't JSON, so there's nothing for api() to parse, and this is a
     single shot: a transient 5xx mid-install raises here and dies, leaving nothing written for
-    that file — write_scaffold_state() runs last, so re-running `relay update` is the recovery,
+    that file — write_scaffold_state() runs last, so re-running `hamaca update` is the recovery,
     not a retry loop."""
     req = urllib.request.Request(url, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -6846,7 +6846,7 @@ def scaffold_state_path():
 def local_scaffold_version():
     """The version this project last installed, or None for every non-answer (no file,
     unreadable, not JSON, not a JSON OBJECT, key missing, not a string) — all of which mean
-    "refetch". The object check is not belt-and-braces: this is the one file `relay update`
+    "refetch". The object check is not belt-and-braces: this is the one file `hamaca update`
     exists to heal, so a truncated or hand-mangled `[]` must return None and be repaired, not
     raise AttributeError out of the CLI."""
     try:
@@ -6886,7 +6886,7 @@ def project_layout():
 
 def local_scaffold_path(rel, skill_dir):
     """Where manifest path `rel` lives in this project (RE457): a skill under the manifest's
-    canonical DEFAULT_SKILL_DIR moves under `skill_dir`; every other item (`./relay`,
+    canonical DEFAULT_SKILL_DIR moves under `skill_dir`; every other item (`./hamaca`,
     `relay.md`) is returned unchanged. The fetch URL always keeps the manifest path."""
     prefix = DEFAULT_SKILL_DIR + "/"
     return skill_dir + "/" + rel[len(prefix):] if rel.startswith(prefix) else rel
@@ -6895,7 +6895,7 @@ def local_scaffold_path(rel, skill_dir):
 def moved_skills(items, old_dir, new_dir):
     """`{old local path: new local path}` for every manifest skill whose copy EXISTS under
     `old_dir` and whose path differs under `new_dir`, in manifest order — what an LLM switch
-    (RE457) leaves behind. Only Relay's own files, never the rest of the old skill dir."""
+    (RE457) leaves behind. Only Hamaca's own files, never the rest of the old skill dir."""
     moves = {}
     for item in items:
         old = local_scaffold_path(item["path"], old_dir)
@@ -6932,7 +6932,7 @@ def fetch_scaffold_manifest(layout="hamaca"):
 
 
 def in_relay_app_repo():
-    """Whether ROOT is the Relay APP repo — the one place the five files are SOURCE, not copies.
+    """Whether ROOT is the Hamaca APP repo — the one place the Hamaca-owned files are SOURCE, not copies.
 
     `lib/hamaca/scaffold.ex` is the marker: it is the module that defines the served paths and
     the version rule, so it exists in the app repo and nowhere else. A consuming project never
@@ -6950,7 +6950,7 @@ LEGACY_CLI_MARKER = re.compile(r"(?m)^EXECUTOR_VERSION\s*=")
 
 
 def obsolete_scaffold():
-    """Relay-owned files an older layout installed that this one no longer serves — today only a
+    """Hamaca-owned files an older layout installed that this one no longer serves — today only a
     marked bin/relay. Project-relative paths, like `changed`."""
     try:
         with open(_safe_path(LEGACY_CLI_REL), encoding="utf-8") as f:
@@ -6984,20 +6984,20 @@ def scaffold_status(skill_dir=None, leave=()):
     project's own (project_layout) unless an LLM switch passes its new one.
 
     **The work list is the verdict.** Every item is hashed against the manifest on every run,
-    and `current` is simply "nothing to write" — never a version comparison. The five files
-    total ~209 KB, so there is no cost reason to gate the hashing on a cheaper signal, and
+    and `current` is simply "nothing to write" — never a version comparison. The Hamaca-owned
+    files total ~209 KB, so there is no cost reason to gate the hashing on a cheaper signal, and
     two states make the hash the only trustworthy one:
 
       * `.hamaca/scaffold.json` LAGS the bytes. RE185's `maybe_auto_update` rewrites
-        `./relay` in place and never touches the marker, so in the steady state of any repo
-        running `relay start` the version differs while the files already match. Gating on
-        the version reported "not current" with an empty change list, and `/relay-update`
+        `./hamaca` in place and never touches the marker, so in the steady state of any repo
+        running `hamaca start` the version differs while the files already match. Gating on
+        the version reported "not current" with an empty change list, and `/hamaca-update`
         went on to ask a human where to commit zero files.
       * `.hamaca/scaffold.json` LEADS the bytes. A file edited or truncated after install
         leaves the version matching, and a version-gated check called the project current and
-        left it broken — in the one file `relay update` exists to heal.
+        left it broken — in the one file `hamaca update` exists to heal.
 
-    `./relay` is compared with its BOARD_URL reset (RE443) against the item's `unbaked_sha256`
+    `./hamaca` is compared with its BOARD_URL reset (RE443) against the item's `unbaked_sha256`
     (`manifest_sha`): the board serves, and the project keeps, a baked copy, and two projects on
     two boards hold different bytes of one build.
 
@@ -7031,7 +7031,7 @@ UNBAKED_SHA_KEY = "unbaked_sha256"
 
 
 def manifest_sha(item):
-    """The sha a manifest item is compared against: for ./relay its `unbaked_sha256` (what
+    """The sha a manifest item is compared against: for ./hamaca its `unbaked_sha256` (what
     `runner_sha256` yields), falling back to `sha256` from a board that predates that key —
     whose `sha256` was the placeholder copy's. Every other item is compared byte-for-byte."""
     if item["path"] == RUNNER_REL:
@@ -7040,7 +7040,7 @@ def manifest_sha(item):
 
 
 def _scaffold_sha256_file(rel):
-    """The manifest-comparable sha of a local scaffold item: ./relay is hashed with its baked
+    """The manifest-comparable sha of a local scaffold item: ./hamaca is hashed with its baked
     BOARD_URL reset (RE443), everything else byte-for-byte."""
     path = _safe_path(rel)
     return _runner_sha256_file(path) if rel == RUNNER_REL else _sha256_file(path)
@@ -7060,11 +7060,11 @@ def install_scaffold(status, carry_from=None):
     `carry_from` (RE478) is the file whose BOARD_URL the new runner keeps — the old full
     ./relay a migration replaces with ./hamaca; by default the runner's own path.
 
-    Each body is checked against the manifest's sha256 before it touches disk, and `./relay`
+    Each body is checked against the manifest's sha256 before it touches disk, and `./hamaca`
     additionally goes through RE185's verified installer (`verify_runner_source` +
     `install_runner`'s atomic os.replace and write ledger) rather than a second copy of that
-    logic — so a concurrent `./relay card …` never reads a half-written CLI. The served
-    `./relay` arrives with the board's URL baked in, so its sha is checked with that line reset
+    logic — so a concurrent `./hamaca card …` never reads a half-written CLI. The served
+    `./hamaca` arrives with the board's URL baked in, so its sha is checked with that line reset
     (`runner_sha256`) against `manifest_sha`, and `install_runner` keeps a local non-empty
     BOARD_URL over it (RE443).
     """
@@ -7395,7 +7395,7 @@ def format_scaffold(report, moves=None):
 
 
 def format_starter(report):
-    """The human report for `relay update --starter-only` (RE443)."""
+    """The human report for `hamaca update --starter-only` (RE443)."""
     return "\n".join([f"  {report['config']} {repo_state_rel('runner.json')}",
                       f"  {report['hook']} {repo_state_rel(HOOK_FILES['prepare'])}"])
 
@@ -7407,9 +7407,9 @@ def layout_flags(args):
 
 
 def update_starter_only(args):
-    """`relay update --starter-only` (RE443): only the two user-owned starter files — the runner
+    """`hamaca update --starter-only` (RE443): only the two user-owned starter files — the runner
     config (`base` from `--base`) and the generic prepare hook — each only if missing. No network
-    and no scaffold work, so it needs no board and is not refused in the Relay app repo."""
+    and no scaffold work, so it needs no board and is not refused in the Hamaca app repo."""
     report = {"config": ensure_runner_config(False, args.base, layout_flags(args)),
               "hook": ensure_prepare_hook(),
               "applied": True}
@@ -7418,24 +7418,24 @@ def update_starter_only(args):
 
 
 def cmd_update(args):
-    """Install or refresh the five Relay-owned files from the board (RE304).
+    """Install or refresh the Hamaca-owned files from the board (RE304).
 
     `--check` reports and writes nothing (and needs no TTY); without it, apply. Replaces
-    `relay init`: one mechanism, no prompts, no optional items.
+    the old `init`: one mechanism, no prompts, no optional items.
 
     Applying with nothing to write still RECONCILES the marker: that is the RE185 steady state
     (auto-update moved the bytes, the marker stayed behind), and without this the marker would
     lag forever. `--check` never writes it — reporting must stay side-effect free.
 
-    Applying REFUSES in the Relay app repo without `--force`. There the five files are the
-    source, and ADR 0010 couples publishing to deploying, so the board's served copy is by
+    Applying REFUSES in the Hamaca app repo without `--force`. There the Hamaca-owned files are
+    the source, and ADR 0010 couples publishing to deploying, so the board's served copy is by
     construction behind HEAD on any branch that touches them — meaning an apply would silently
-    revert the very work in progress, skills first and `./relay` last. RE185's auto-update
+    revert the very work in progress, skills first and `./hamaca` last. RE185's auto-update
     already guards this same file with `_safe_to_overwrite`; this path shares its installer, so
     it must not be the one that answers differently. `--check` is always allowed: it writes
     nothing, and "what would change?" is a fair question to ask anywhere.
 
-    It also removes a leftover Relay-owned bin/relay (RE319) after installing; `--check` reports
+    It also removes a leftover Hamaca-owned bin/relay (RE319) after installing; `--check` reports
     it as `obsolete` and removes nothing.
 
     Last, it creates a starter .hamaca/runner.json (repo_state_path, RE478) when there is none (RE383, report key
@@ -7446,7 +7446,7 @@ def cmd_update(args):
     `--starter-only` (RE443) writes just the user-owned starter files: see update_starter_only.
 
     `--skill-dir` / `--pointer-file` without `--starter-only` SWITCH the project to another LLM's
-    layout (RE457): the skills are compared and installed under the new dir, Relay's three skill
+    layout (RE457): the skills are compared and installed under the new dir, Hamaca's three skill
     files under the old one become `obsolete` (removed on apply), the changed runner.json keys
     are rewritten in place, and POINTER_LINE is appended to the new pointer file. Every path and
     the runner.json rewrite are checked before anything is written; the app-repo refusal
@@ -7472,10 +7472,10 @@ def cmd_update(args):
         # An LLM switch's removals and the renames are sources here too: the same refusal.
         touched = len(status["changed"]) + len(moves) + len(rename["renamed"])
         if touched and in_relay_app_repo() and not args.force:
-            die("refusing to install into the Relay app repo: these five files are the SOURCE "
+            die("refusing to install into the Hamaca app repo: the Hamaca-owned files are the SOURCE "
                 "here, not installed copies, and the board serves whatever was last deployed — "
                 f"applying would revert {touched} of them to it. "
-                "Use `./relay update --check` to see the difference, or --force if you really "
+                f"Use `./{cli_name()} update --check` to see the difference, or --force if you really "
                 "mean to overwrite the sources.")
         # A migration's ./hamaca keeps the BOARD_URL of the ./relay it replaces.
         carry_from = (None if os.path.exists(_safe_path(RUNNER_REL))
@@ -7532,22 +7532,22 @@ def _apply_layout(args, plan, config_text, layout):
 
 # ============================ guided setup (RE445) ============================
 #
-# `relay setup status` / `relay setup report` are the only way /relay-onboard reads and moves the
+# `hamaca setup status` / `hamaca setup report` are the only way /hamaca-onboard reads and moves the
 # board's guided-setup checklist (GET /api/setup, POST /api/setup/steps/:step). The board never
 # hands out steps: the skill reads the checklist, does the first unmet sub-step, reports it.
 
-# The statuses a report may set — Relay.Setup.advance_statuses/0, pinned by the runner contract
+# The statuses a report may set — Hamaca.Setup.advance_statuses/0, pinned by the runner contract
 # fixture (CONTRACT["setup"]["report_statuses"]).
 SETUP_REPORT_STATUSES = ("waiting", "done", "failed", "skipped")
 # Both verbs exit with this on a board that has no checklist (it predates guided setup), so the
-# skill can tell "use /relay-doctor instead" apart from a failed call. Nothing else exits 3.
+# skill can tell "use /hamaca-doctor instead" apart from a failed call. Nothing else exits 3.
 SETUP_NO_CHECKLIST_EXIT = 3
 SETUP_GLYPHS = {"done": "✓", "skipped": "–", "failed": "!", "waiting": "◌", "active": "▸",
                 "pending": "○"}
 
 
 def _no_checklist():
-    print("relay: no guided setup on this board", file=sys.stderr)
+    print(f"{cli_name()}: no guided setup on this board", file=sys.stderr)
     raise SystemExit(SETUP_NO_CHECKLIST_EXIT)
 
 
@@ -7631,7 +7631,7 @@ def cmd_setup_report(args):
 
 # ============================ argparse ============================
 #
-# RE319 — `relay -h` groups the commands. argparse has no native subcommand groups, so COMMANDS
+# RE319 — `hamaca -h` groups the commands. argparse has no native subcommand groups, so COMMANDS
 # is the ONE table: every subparser's help line comes from it, the grouped listing is rendered
 # from it, and build_parser() refuses to build when a registered command and the table disagree.
 
@@ -7683,8 +7683,8 @@ COMMANDS = (
     ("Runner", "start", "run this machine as a runner: claim node-jobs and run them"),
     ("Runner", "runners", "who is connected, their capacity, and the jobs they hold"),
     ("Runner", "git-fetch", "git fetch with retry (for flow shell nodes)"),
-    ("Setup", "setup", "read the board's guided-setup checklist, or report one step (used by /relay-onboard)"),
-    ("Setup", "update", "install or refresh the Relay-owned files from the board"),
+    ("Setup", "setup", "read the board's guided-setup checklist, or report one step (used by /hamaca-onboard)"),
+    ("Setup", "update", "install or refresh the Hamaca-owned files from the board"),
     ("Setup", "version", "the git SHA the deployed app was built from (no API key needed)"),
 )
 
@@ -7704,10 +7704,10 @@ ARG_HELP = {
     "outcome": "the outcome to declare, e.g. succeeded",
 }
 
-HELP_DESCRIPTION = " ".join(__doc__.split("\n\n", 1)[1].split())
+HELP_DESCRIPTION = " ".join(__doc__.split())
 
 HELP_EPILOG = ('TEXT, NOTE and QUESTION accept "-" (stdin) or "@path" (a file). --json prints '
-               "machine output; --field PATH prints one value bare (e.g. `relay card RLY-12 "
+               "machine output; --field PATH prints one value bare (e.g. `hamaca card RLY-12 "
                "--field status`). Needs HAMACA_URL and HAMACA_API_KEY (RELAY_URL and "
                "RELAY_API_KEY still work); the runner also reads .hamaca/runner.json.")
 
@@ -7750,7 +7750,7 @@ def _add_command_groups(parser, sub):
 def build_parser():
     kwargs = _parser_kwargs(_help_formatter())
     helps = {name: text for _group, name, text in COMMANDS}
-    p = argparse.ArgumentParser(prog="relay", usage="relay <command> [options]",
+    p = argparse.ArgumentParser(prog=cli_name(), usage=f"{cli_name()} <command> [options]",
                                 description=HELP_DESCRIPTION, epilog=HELP_EPILOG, **kwargs)
     sub = p.add_subparsers(dest="cmd", metavar="<command>", help=argparse.SUPPRESS)
 
@@ -7773,9 +7773,9 @@ def build_parser():
         sp.set_defaults(func=fn)
         return sp
 
-    # RE355 — the first nested verbs (`relay tasks add|list`, `relay task show|update|rm`). The
+    # RE355 — the first nested verbs (`hamaca tasks add|list`, `hamaca task show|update|rm`). The
     # parent command's func is None; each verb's set_defaults overrides it, and `required=True`
-    # makes a bare `relay tasks` a usage error before anything could call it.
+    # makes a bare `hamaca tasks` a usage error before anything could call it.
     def verbs(parent):
         return parent.add_subparsers(dest="verb", metavar="<verb>", required=True,
                                      help="the verb to run")
@@ -7956,7 +7956,7 @@ def build_parser():
                     help=f"the `base` of a {config_rel} this creates "
                          f"(default {DEFAULT_BASE})")
     up.add_argument("--force", action="store_true",
-                    help="install even into the Relay app repo, where these five files are the source")
+                    help="install even into the Hamaca app repo, where the Hamaca-owned files are the source")
     up.add_argument("--skill-dir", metavar="DIR",
                     help="the project's LLM skill dir — with --starter-only, recorded in a "
                          f"{config_rel} this creates; otherwise switches the skills to it "
@@ -7998,7 +7998,7 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
     if not getattr(args, "cmd", None):
-        # Dispatch is server-side (RLY-139); this binary's runner mode is `relay start`.
+        # Dispatch is server-side (RLY-139); this binary's runner mode is `hamaca start`.
         parser.print_help()
         return
     args.func(args)

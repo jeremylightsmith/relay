@@ -80,7 +80,8 @@ defmodule HamacaWeb.Api.CardArchiveTest do
           |> json_response(409)
 
         assert body["error"]["code"] == "active_run", "a #{status} run should block archive"
-        assert body["error"]["message"] =~ "relay cancel #{ref(board, card)}"
+        assert body["error"]["message"] =~ "hamaca cancel #{ref(board, card)}"
+        refute body["error"]["message"] =~ "relay cancel"
         assert is_nil(reload(card).archived_at)
         refute :archived in activity_types(card)
       end

@@ -87,7 +87,11 @@ defmodule Hamaca.CardsAiResultShapeTest do
   end
 
   test "a screen without a url is refused — it would render as a blank placeholder", %{card: card} do
-    assert refusal(card, %{"screens" => [%{"caption" => "The door"}]}) =~ ~s("url")
+    message = refusal(card, %{"screens" => [%{"caption" => "The door"}]})
+
+    assert message =~ ~s("url")
+    assert message =~ "upload it with `hamaca attach`"
+    refute message =~ "relay attach"
   end
 
   test "a screen's url and caption must be strings", %{card: card} do

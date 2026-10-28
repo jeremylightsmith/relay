@@ -371,7 +371,8 @@ defmodule Hamaca.Runs.NoOpGuardTest do
     exec = Repo.get!(NodeExecution, reentered.node_execution_id)
     assert exec.outcome == :failed
     assert exec.detail =~ "committed already"
-    assert exec.detail =~ "relay outcome succeeded --no-changes"
+    assert exec.detail =~ "hamaca outcome succeeded --no-changes"
+    refute exec.detail =~ "relay outcome"
     assert exec.detail =~ "no_op_success: impl"
     assert exec.no_changes == false
   end

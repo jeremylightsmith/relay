@@ -76,6 +76,8 @@ defmodule Hamaca.CardsMockupsTest do
       assert {:error, {:invalid_mockups, message}} = Cards.set_mockups(card, [%{"url" => url}])
       assert message =~ "mockups[0]"
       assert message =~ "HTML or image attachment on this card"
+      assert message =~ "upload it with `hamaca mockups`"
+      refute message =~ "relay mockups"
       assert Repo.get!(Card, card.id).mockups == nil
     end
 
@@ -93,6 +95,8 @@ defmodule Hamaca.CardsMockupsTest do
       for url <- ["https://example.com/mock.html", "/attachments/not-a-uuid", "/images/logo.png", nil] do
         assert {:error, {:invalid_mockups, message}} = Cards.set_mockups(card, [%{"url" => url}])
         assert message =~ "/attachments/"
+        assert message =~ "upload the file with `hamaca mockups`"
+        refute message =~ "relay mockups"
       end
     end
 

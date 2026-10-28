@@ -1595,7 +1595,8 @@ defmodule Hamaca.RunsTest do
 
       assert ["Alpha"] = Repo.all(from st in SubTask, where: st.card_id == ^card.id, select: st.title)
       assert log =~ "deprecated"
-      assert log =~ "relay tasks add"
+      assert log =~ "hamaca tasks add"
+      refute log =~ "relay tasks add"
       assert log =~ "/hamaca-doctor"
       refute log =~ "/relay-doctor"
       assert log =~ Hamaca.Cards.ref(board, card)
@@ -1634,7 +1635,8 @@ defmodule Hamaca.RunsTest do
       assert {:error, :no_plan_tasks} = Runs.start_run(card, flow)
 
       question = question_on(card)
-      assert question =~ "relay tasks add"
+      assert question =~ "hamaca tasks add"
+      refute question =~ "relay tasks add"
       assert question =~ "/hamaca-doctor"
       refute question =~ "/relay-doctor"
       assert question =~ "`## Task N:` headings"
@@ -1647,7 +1649,8 @@ defmodule Hamaca.RunsTest do
 
       question = question_on(card)
       assert question =~ "no plan"
-      assert question =~ "relay tasks add"
+      assert question =~ "hamaca tasks add"
+      refute question =~ "relay tasks add"
       assert question =~ "/hamaca-doctor"
       refute question =~ "/relay-doctor"
     end

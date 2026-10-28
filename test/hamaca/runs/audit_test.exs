@@ -237,7 +237,10 @@ defmodule Hamaca.Runs.AuditTest do
       text = Enum.join([finding.summary, finding.evidence, finding.fix], "\n")
       assert text =~ "/hamaca-doctor"
       refute text =~ "/relay-doctor"
-      assert text =~ "relay tasks add"
+      assert text =~ "hamaca tasks add"
+      refute text =~ "relay tasks add"
+      assert text =~ "hamaca runs <ref> --json"
+      refute text =~ "relay runs"
       assert text =~ "tasks"
       refute text =~ "sub_tasks"
       refute text =~ "sub_task"

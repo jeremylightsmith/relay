@@ -1,6 +1,6 @@
 defmodule Hamaca.Runs.Audit do
   @moduledoc """
-  Run-history health checks (RE249) — the half of `relay audit` whose data lives only in the
+  Run-history health checks (RE249) — the half of `hamaca audit` whose data lives only in the
   server's database.
 
   `/hamaca-doctor`'s nine checks all ask "does this name resolve?", so a green doctor means
@@ -21,7 +21,7 @@ defmodule Hamaca.Runs.Audit do
       on the next: a retry laundered a failure into a pass.
     * `:planner_not_migrated` (WARNING; one per flow) — at least one run in the window had its
       tasks seeded by the legacy plan-parse fallback (`runs.tasks_from_plan`, RE368): the plan
-      node's skill doesn't write tasks with `relay tasks add`. Names the affected-card count and
+      node's skill doesn't write tasks with `hamaca tasks add`. Names the affected-card count and
       the most recent few; the fix is `/hamaca-doctor`. Also the telemetry for deleting the
       fallback — when no board reports it, it is safe to remove.
     * `:outcomeless_attempts` (WARNING; one per `{run, node, visit}`) — one node in one visit
@@ -119,7 +119,7 @@ defmodule Hamaca.Runs.Audit do
             "node `#{execution.node_key}` failed on sub_task #{sub_task_label(execution.sub_task_id)}; " <>
               "the next `#{target}` execution carried sub_task #{sub_task_label(next.sub_task_id)} — " <>
               "findings were never addressed",
-          evidence: "relay runs <ref> --json — run #{run.id}, executions #{execution.id} → #{next.id}",
+          evidence: "hamaca runs <ref> --json — run #{run.id}, executions #{execution.id} → #{next.id}",
           fix: "re-open that task and re-run it"
         }
       ]
@@ -192,7 +192,7 @@ defmodule Hamaca.Runs.Audit do
         "node `#{failed.node_key}` flipped failed → succeeded on retry at " <>
           "#{short_sha(failed.git_sha)} (visit #{failed.visit}) — the commit did not change " <>
           "between attempts",
-      evidence: "relay runs <ref> --json — run #{run.id}, executions #{failed.id} → #{passed.id}",
+      evidence: "hamaca runs <ref> --json — run #{run.id}, executions #{failed.id} → #{passed.id}",
       fix: "this gate's verdict is not reproducible — investigate before trusting it"
     }
   end
@@ -223,9 +223,9 @@ defmodule Hamaca.Runs.Audit do
       run_id: latest.id,
       summary:
         planner_summary(affected) <>
-          " — the plan node's skill doesn't write tasks with `relay tasks add`",
-      evidence: "relay runs <ref> --json — run #{latest.id}",
-      fix: "Run `/hamaca-doctor` to migrate the planner to `relay tasks add`, then re-plan affected cards"
+          " — the plan node's skill doesn't write tasks with `hamaca tasks add`",
+      evidence: "hamaca runs <ref> --json — run #{latest.id}",
+      fix: "Run `/hamaca-doctor` to migrate the planner to `hamaca tasks add`, then re-plan affected cards"
     }
   end
 
@@ -268,7 +268,7 @@ defmodule Hamaca.Runs.Audit do
         "node `#{node_key}` was entered #{length(numbers)} times in visit #{visit} of run " <>
           "#{run.id} without any attempt reporting an outcome",
       evidence:
-        "relay runs <ref> --json — run #{run.id}, #{node_key} visit #{visit}, " <>
+        "hamaca runs <ref> --json — run #{run.id}, #{node_key} visit #{visit}, " <>
           "attempts #{Enum.join(numbers, ", ")}",
       fix:
         "Something keeps killing this node's job before it reports (a server restart from " <>

@@ -4459,7 +4459,33 @@ class DieTest(unittest.TestCase):
         self.assertIsInstance(cm.exception, relay.Died)
         self.assertEqual(cm.exception.code, 1)
         self.assertEqual(cm.exception.msg, "boom")
+        self.assertEqual(err.getvalue(), "hamaca: boom\n")
+
+    # RE494: the prefix follows the file the runner runs as, so the ./relay compatibility copy
+    # still names itself.
+    def test_the_relay_compatibility_copy_dies_with_a_relay_prefix(self):
+        err = io.StringIO()
+        with unittest.mock.patch.object(relay, "HERE", "/x/relay"), contextlib.redirect_stderr(err):
+            with self.assertRaises(relay.Died):
+                relay.die("boom")
         self.assertEqual(err.getvalue(), "relay: boom\n")
+
+
+class LogPrefixTest(unittest.TestCase):
+    """RE494: log() prefixes its line with the CLI name the runner runs as."""
+
+    def logged(self, here):
+        out = io.StringIO()
+        with unittest.mock.patch.object(relay, "HERE", here), \
+                unittest.mock.patch.object(relay, "forward"), contextlib.redirect_stdout(out):
+            relay.log("hi")
+        return out.getvalue()
+
+    def test_hamaca_logs_with_a_hamaca_prefix(self):
+        self.assertEqual(self.logged("/x/hamaca"), "[hamaca] hi\n")
+
+    def test_the_relay_compatibility_copy_logs_with_a_relay_prefix(self):
+        self.assertEqual(self.logged("/x/relay"), "[relay] hi\n")
 
 
 class ApiDefaultTimeoutTest(unittest.TestCase):
@@ -10011,7 +10037,7 @@ class PlanPausedRequestTest(unittest.TestCase):
                 relay.api("GET", "/api/board")
         self.assertEqual(cm.exception.code, 1)
         self.assertEqual(cm.exception.msg, expected)
-        self.assertEqual(err.getvalue(), f"relay: {expected}\n")
+        self.assertEqual(err.getvalue(), f"hamaca: {expected}\n")
         self.assertEqual(self.calls, 1)
 
     def test_soft_paused_returns_a_marker_and_prints_nothing(self):
@@ -12508,6 +12534,15 @@ class GroupedHelpTest(unittest.TestCase):
         for _g, name, text in relay.COMMANDS:
             self.assertRegex(out, rf"(?m)^  {re.escape(name)}\s+{re.escape(text)}$")
 
+    # RE494: help introduces the CLI as hamaca; the only "relay" left is the env-var fallback.
+    def test_plain_help_names_hamaca_and_relay_only_in_the_env_fallback(self):
+        text = self.plain_help()
+        for phrase in ("hamaca — one tool for a Hamaca board", "Hamaca-owned files",
+                       "/hamaca-onboard", "hamaca card RLY-12 --field status"):
+            self.assertIn(phrase, text)
+        self.assertIn("RELAY_URL and RELAY_API_KEY still work", text)
+        self.assertNotIn("relay", text.replace("RELAY_URL and RELAY_API_KEY still work", "").lower())
+
     def test_plain_help_has_no_colour_even_when_colour_is_forced(self):
         with unittest.mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
             self.assertIsNone(ANSI_ESCAPE.search(self.plain_help()))
@@ -13069,9 +13104,18 @@ class TalkPromptTest(unittest.TestCase):
     def test_the_preamble_names_the_pane_the_tools_and_the_read_only_rule(self):
         p = relay.talk_prompt(self.job)
         self.assertIn("terminal", p.lower())
-        self.assertIn("./relay why", p)
-        self.assertIn("./relay runs", p)
+        self.assertIn("./hamaca why", p)
+        self.assertIn("./hamaca runs", p)
         self.assertIn("must not", p.lower())
+
+    # RE494: the preamble names the Hamaca card and the ./hamaca tools, never ./relay.
+    def test_the_preamble_names_hamaca_not_relay(self):
+        p = relay.talk_prompt(self.job)
+        self.assertIn("attached to a Hamaca card", p)
+        for tool in ("./hamaca why", "./hamaca runs", "./hamaca card"):
+            self.assertIn(tool, p)
+        self.assertNotIn("./relay", p)
+        self.assertNotIn("Relay card", p)
 
     def test_the_seed_block_carries_every_injected_field(self):
         p = relay.talk_prompt(self.job)
@@ -14185,6 +14229,6 @@ class PreMigrationNoteTest(unittest.TestCase):
 if __name__ == "__main__":
     # buffer=True captures each test's stdout/stderr and replays it only if that test fails.
     # These tests drive the real `relay` CLI through error/scenario paths, so without buffering
-    # they print dozens of `relay: ...` / `[relay] ...` lines on a fully green run — noise that
+    # they print dozens of `hamaca: ...` / `[hamaca] ...` lines on a fully green run — noise that
     # agents running `mix precommit` would pay tokens for.
     unittest.main(buffer=True)

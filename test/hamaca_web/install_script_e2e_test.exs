@@ -311,7 +311,7 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     )
   end
 
-  # `./hamaca` logs `[relay] …` to stdout, so the report starts at the first `{` line.
+  # `./hamaca` logs `[hamaca] …` to stdout, so the report starts at the first `{` line.
   defp decode_report!(out) do
     out
     |> String.split("\n")
