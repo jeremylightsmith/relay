@@ -5,7 +5,26 @@ defmodule Storybook.Components.CoreComponents.CardReviewPanel do
   def function, do: &HamacaWeb.CoreComponents.card_review_panel/1
   def render_source, do: :function
 
-  defp gate, do: %{approve_label: "Approve → Done", reject_target_name: "Code", can_reject: true}
+  defp gate do
+    %{
+      approve_label: "Approve → Deploy",
+      can_approve: true,
+      approve_blocked_reason: nil,
+      reject_target_name: "Code",
+      can_reject: true
+    }
+  end
+
+  defp no_next_stage_gate do
+    %{
+      approve_label: nil,
+      can_approve: false,
+      approve_blocked_reason: "Add a Done stage after Review to approve into it.",
+      reject_target_name: "Code",
+      can_reject: true
+    }
+  end
+
   defp reject_form(note \\ ""), do: Phoenix.Component.to_form(%{"note" => note}, as: :reject)
 
   # RE428 — a hand-built stand-in for `@uploads.reject_images` (as image_attach_box's story does);
@@ -42,6 +61,13 @@ defmodule Storybook.Components.CoreComponents.CardReviewPanel do
         id: :drawer,
         description: "RE380 — the drawer's review panel, extracted verbatim: Approve names the next stage.",
         attributes: %{review_gate: gate(), reject_open: false, reject_form: reject_form()}
+      },
+      %Variation{
+        id: :no_next_stage,
+        description:
+          "RE492 — a review gate with no next stage or substage: no Approve, the add-a-Done-stage " <>
+            "line, Request changes still offered.",
+        attributes: %{review_gate: no_next_stage_gate(), reject_open: false, reject_form: reject_form()}
       },
       %Variation{
         id: :drawer_reject_open,

@@ -1396,7 +1396,7 @@ sharing behavior.
   of the card's board (owned, non-archived boards only — members get none) on the day of
   `coalesce(started_at, inserted_at)`; **shipped** is distinct cards with a `:moved` / `:approved`
   activity that *entered* a top-level Done stage (`Hamaca.Boards.top_level_done_stage_ids/1`) from
-  outside it, so an in-place approve at Done never counts; **waiting** is unarchived cards on
+  outside it, so a legacy in-place approve row at Done never counts; **waiting** is unarchived cards on
   their owned boards in `Schemas.Card.awaiting_human_statuses/0`. Each read is a fixed number of
   grouped queries (no per-user N+1), merged in memory. Depends on Boards, Config, Repo and
   Schemas; only `HamacaWeb` and `Hamaca.Application` depend on it. **UI:** the superadmin-only

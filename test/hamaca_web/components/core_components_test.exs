@@ -5106,7 +5106,22 @@ defmodule HamacaWeb.CoreComponentsTest do
   end
 
   describe "card_review_panel/1 (RE380)" do
-    @gate %{approve_label: "Approve → Done", reject_target_name: "Code", can_reject: true}
+    @gate %{
+      approve_label: "Approve → Deploy",
+      can_approve: true,
+      approve_blocked_reason: nil,
+      reject_target_name: "Code",
+      can_reject: true
+    }
+
+    # RE492 — a review gate with no next stage or substage: Approve is refused, so it is not offered.
+    @blocked_gate %{
+      approve_label: nil,
+      can_approve: false,
+      approve_blocked_reason: "Add a Done stage after Review to approve into it.",
+      reject_target_name: "Code",
+      can_reject: true
+    }
 
     defp review_doc(extra) do
       base = %{
@@ -5126,7 +5141,7 @@ defmodule HamacaWeb.CoreComponentsTest do
 
     test "the drawer mode labels Approve with the gate's label; compact says just Approve" do
       doc = review_doc(%{compact: false})
-      assert text(doc, "#review-approve .pending-idle") == "Approve → Done"
+      assert text(doc, "#review-approve .pending-idle") == "Approve → Deploy"
       assert count(doc, "#review-request-changes") == 1
 
       assert text(review_doc(%{compact: true}), "#review-approve .pending-idle") == "Approve"
@@ -5139,7 +5154,7 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert "action-group" in btn_classes(doc, "#review-panel")
       assert "pending-action" in btn_classes(doc, "#review-approve")
       assert attr_of(doc, "#review-approve", "phx-click") == ["review_approve"]
-      assert text(doc, "#review-approve .pending-idle") == "Approve → Done"
+      assert text(doc, "#review-approve .pending-idle") == "Approve → Deploy"
       assert text(doc, "#review-approve .pending-face") == "Approving…"
       assert count(doc, "#review-approve .pending-face .loading.loading-spinner.loading-xs") == 1
       refute "pending-action" in btn_classes(doc, "#review-request-changes")
@@ -5187,6 +5202,35 @@ defmodule HamacaWeb.CoreComponentsTest do
 
       assert text(doc, "#review-note-stays") == "Your note stays put while you switch mockups."
       assert attr_of(doc, "#review-reject-form", "phx-change") == ["review_reject_change"]
+    end
+
+    test "RE492: a gate with no next stage shows the blocked line in place of Approve, Request changes stays" do
+      doc = review_doc(%{review_gate: @blocked_gate, compact: false})
+
+      assert count(doc, "#review-approve") == 0
+      assert text(doc, "#review-approve-blocked") == "Add a Done stage after Review to approve into it."
+      assert count(doc, "#review-request-changes") == 1
+    end
+
+    test "RE492: the compact face hides Approve at a gate with no next stage and shows the same line" do
+      doc = review_doc(%{review_gate: @blocked_gate, compact: true})
+
+      assert count(doc, "#review-approve") == 0
+      assert text(doc, "#review-approve-blocked") == "Add a Done stage after Review to approve into it."
+    end
+
+    test "RE492: the native embed renders neither Approve nor the blocked line" do
+      doc = review_doc(%{review_gate: @blocked_gate, embed: true})
+
+      assert count(doc, "#review-approve") == 0
+      assert count(doc, "#review-approve-blocked") == 0
+    end
+
+    test "RE492: a blocked gate that cannot reject shows only the blocked line" do
+      doc = review_doc(%{review_gate: %{@blocked_gate | can_reject: false}, compact: false})
+
+      assert text(doc, "#review-approve-blocked") == "Add a Done stage after Review to approve into it."
+      assert count(doc, "#review-request-changes") == 0
     end
 
     test "the drawer mode with the note open keeps the 3-row note and the long hint, and no compact extras" do
@@ -5238,7 +5282,13 @@ defmodule HamacaWeb.CoreComponentsTest do
     test "an in_review card with a gate shows the review panel and no question panel" do
       doc =
         gate_doc(%{status: :in_review, blocked_since: nil}, %{
-          review_gate: %{approve_label: "Approve → Done", reject_target_name: "Code", can_reject: true}
+          review_gate: %{
+            approve_label: "Approve → Deploy",
+            can_approve: true,
+            approve_blocked_reason: nil,
+            reject_target_name: "Code",
+            can_reject: true
+          }
         })
 
       assert count(doc, "#review-panel") == 1
@@ -6131,7 +6181,13 @@ defmodule HamacaWeb.CoreComponentsTest do
   end
 
   describe "card_review_panel/1 embed copy (RE393)" do
-    @embed_gate %{approve_label: "Approve", reject_target_name: "Spec", can_reject: true}
+    @embed_gate %{
+      approve_label: "Approve",
+      can_approve: true,
+      approve_blocked_reason: nil,
+      reject_target_name: "Spec",
+      can_reject: true
+    }
 
     defp hint_html(gate, embed) do
       render_component(&CoreComponents.card_review_panel/1,

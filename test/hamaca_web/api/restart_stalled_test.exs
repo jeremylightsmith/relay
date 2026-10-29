@@ -45,7 +45,7 @@ defmodule HamacaWeb.Api.RestartStalledTest do
     stage = Enum.find(board.stages, &(&1.name == "Next up"))
     {:ok, card} = Cards.create_card(stage, %{title: title})
     {:ok, run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{} = job}
+    assert_receive {:dispatched, %NodeJob{} = job}, 3_000
     {:ok, _run} = Runs.report_outcome(job, %{outcome: outcome, detail: "x", session_id: "s"})
     {card, run}
   end

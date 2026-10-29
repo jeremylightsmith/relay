@@ -57,6 +57,23 @@ defmodule HamacaWeb.Api.AllActionsTest do
            |> get_in(["error", "code"]) == "not_in_review"
   end
 
+  test "approve from a review substage with nowhere to go is 422 no_next_stage", %{conn: conn, user: user} do
+    board = member_board(user, "AAA", unique_slug("alpha"))
+    code = insert(:stage, board: board, name: "Code", type: :work, position: 1)
+    {:ok, review} = Boards.enable_lane(code, :review)
+    card = insert(:card, stage: review, status: :in_review)
+
+    error =
+      conn
+      |> post(~p"/api/all/cards/#{Cards.ref(board, card)}/approve")
+      |> json_response(422)
+      |> Map.fetch!("error")
+
+    assert error["code"] == "no_next_stage"
+    assert error["message"] == "Add a Done stage after Code to approve into it."
+    assert Cards.get_card_by_ref(board, Cards.ref(board, card)).stage_id == review.id
+  end
+
   test "reject records the note and sends the card back, as the human", %{conn: conn, user: user} do
     {board, code, review} = board_with_review(user)
     card = insert(:card, stage: review, status: :in_review)

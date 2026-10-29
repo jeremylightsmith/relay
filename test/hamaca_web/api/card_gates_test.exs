@@ -102,6 +102,24 @@ defmodule HamacaWeb.Api.CardGatesTest do
     assert reject_body["error"]["code"] == "not_in_review"
   end
 
+  test "approve at the last review stage 422s no_next_stage with the add-a-Done-stage sentence", %{
+    conn: conn,
+    board: board
+  } do
+    signoff =
+      insert(:stage, board: board, name: "Signoff", type: :review, category: :in_progress, position: 4)
+
+    card = in_review_card(signoff)
+
+    body = conn |> post(~p"/api/cards/#{ref(board, card)}/approve") |> json_response(422)
+    assert body["error"]["code"] == "no_next_stage"
+    assert body["error"]["message"] == "Add a Done stage after Signoff to approve into it."
+
+    reloaded = Hamaca.Repo.get!(Schemas.Card, card.id)
+    assert reloaded.stage_id == signoff.id
+    assert reloaded.status == :in_review
+  end
+
   test "approve and reject on an unknown ref 404", %{conn: conn} do
     assert conn |> post(~p"/api/cards/RLY-9999/approve") |> json_response(404)
     assert conn |> post(~p"/api/cards/RLY-9999/reject", %{note: "x"}) |> json_response(404)

@@ -23,8 +23,9 @@ defmodule Hamaca.ValueStream do
   window.
 
   **Gate attribution.** A decision belongs to the gate the card just left — the
-  `from_stage_id` of the latest `:moved` row before it — or, for an in-place approve, to its
-  own stage. (`Hamaca.Cards.reject/3` logs the gate's *main* stage as `from_stage_id`, so the
+  `from_stage_id` of the latest `:moved` row before it — or, for a legacy in-place `:approved`
+  row (`from_stage_id == to_stage_id`, written before RE492 made Approve refuse at a gate with no
+  next stage), to its own stage. (`Hamaca.Cards.reject/3` logs the gate's *main* stage as `from_stage_id`, so the
   decision row's own `from_stage_id` is not the gate.)
 
   **Known approximations.** A stage's AI-ness (`Hamaca.Flows.ai_stage_ids/1`: some flow works in
@@ -93,7 +94,8 @@ defmodule Hamaca.ValueStream do
   One card's level-1 stream, or `nil` if it never entered a stream state.
 
   - `started_at` — its first entry into any stream state.
-  - `done_at` — its last entry into the terminal stage, or a later in-place approve there;
+  - `done_at` — its last entry into the terminal stage, or a later legacy in-place `:approved`
+    row there (`from_stage_id == to_stage_id`, written before RE492);
     `nil` unless `Hamaca.Cards.done?/2`.
   - `spans` — one per stay between the two (or to now), each
     `%{stage_id, name, kind, visit, entered_at, left_at, secs, baton, value_add_secs}`. A stay
@@ -460,7 +462,8 @@ defmodule Hamaca.ValueStream do
 
   defp stream_start(stays, ctx), do: Enum.find_index(stays, &Map.has_key?(ctx.state_by_id, &1.stage_id))
 
-  # {stays that become spans, done_at, whether the last stay is an in-place-approved terminal gate}
+  # {stays that become spans, done_at, whether the last stay is a terminal gate with a legacy
+  # (pre-RE492) in-place :approved row}
   defp stream_window(card, ctx, stays, decisions, start) do
     last = if Cards.done?(card, ctx.stages), do: last_index(stays, &(&1.stage_id == ctx.terminal.id))
 

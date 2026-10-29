@@ -96,7 +96,7 @@ defmodule HamacaWeb.Api.AllController do
   def approve(conn, %{"ref" => ref} = params) do
     with {:ok, board, card} <- Cards.resolve_ref(conn.assigns.current_user, ref, params["board"]),
          :ok <- writable(board),
-         {:ok, card} <- Cards.approve(card, conn.assigns.actor) do
+         {:ok, card} <- approve_card(card, conn.assigns.actor) do
       render_card(conn, board, card)
     end
   end
@@ -161,6 +161,15 @@ defmodule HamacaWeb.Api.AllController do
   defp create_attrs(_params), do: {:error, :missing_title}
 
   # The note is required for rejects (spec: 422 when missing).
+  # RE492 — `card` is out of scope in a `with`'s `else`, so the refusal is tagged with its sentence
+  # here, before the generic `{:error, reason}` passthrough could hand a bare atom to the fallback.
+  defp approve_card(card, actor) do
+    case Cards.approve(card, actor) do
+      {:error, :no_next_stage} -> {:error, {:no_next_stage, Cards.no_next_stage_message(card)}}
+      result -> result
+    end
+  end
+
   defp reject_note(%{"note" => note}) when is_binary(note) do
     if String.trim(note) == "", do: {:error, :missing_note}, else: {:ok, note}
   end

@@ -180,6 +180,15 @@ defmodule HamacaWeb.Api.FallbackController do
     |> render(:error, code: "not_in_review", message: "This card is not in a review stage")
   end
 
+  # RE492 — an Approve at a gate with no next stage or substage. The controller tags the sentence
+  # from `Cards.no_next_stage_message/1` (it needs the card), so the API and the drawer agree.
+  def call(conn, {:error, {:no_next_stage, message}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "no_next_stage", message: message)
+  end
+
   def call(conn, {:error, :not_needs_input}) do
     conn
     |> put_status(:unprocessable_entity)

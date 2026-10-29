@@ -414,7 +414,7 @@ defmodule HamacaWeb.Api.CardController do
     board = conn.assigns.current_board
 
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
-         {:ok, card} <- Cards.approve(card, :agent) do
+         {:ok, card} <- approve_card(card, :agent) do
       render(conn, :show,
         board: board,
         card: card,
@@ -446,6 +446,15 @@ defmodule HamacaWeb.Api.CardController do
   end
 
   # The note is required for rejects (spec: 422 when missing).
+  # RE492 — `card` is out of scope in a `with`'s `else`, so the refusal is tagged with its sentence
+  # here, before the generic `{:error, reason}` passthrough could hand a bare atom to the fallback.
+  defp approve_card(card, actor) do
+    case Cards.approve(card, actor) do
+      {:error, :no_next_stage} -> {:error, {:no_next_stage, Cards.no_next_stage_message(card)}}
+      result -> result
+    end
+  end
+
   defp reject_note(%{"note" => note}) when is_binary(note) and note != "", do: {:ok, note}
   defp reject_note(_params), do: {:error, :missing_note}
 

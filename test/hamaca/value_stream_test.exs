@@ -315,7 +315,7 @@ defmodule Hamaca.ValueStreamTest do
       assert stream.spans |> Enum.map(& &1.secs) |> Enum.sum() == stream.lead_secs
     end
 
-    test "an in-place approve at a terminal review stage ends the stream at the approval" do
+    test "a legacy in-place :approved row at a terminal review stage ends the stream at the approval" do
       board = insert(:board)
       next_up = insert(:stage, board: board, name: "Next up", type: :queue, category: :unstarted, position: 1)
 

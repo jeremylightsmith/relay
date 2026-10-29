@@ -48,6 +48,9 @@ defmodule Hamaca.Cards do
 
   require Stage
 
+  @typedoc "Who a change is attributed to: the Hamaca AI agent or a user."
+  @type actor :: :agent | {:user, pos_integer()}
+
   # Approve/reject append the card to the bottom of the target stage;
   # move_card/4 clamps this into range.
   @append_index 1_000_000
@@ -2475,23 +2478,27 @@ defmodule Hamaca.Cards do
   current stage is `:review`-type; otherwise returns `{:error, :not_in_review}`. Moves
   the card to the bottom of the next main stage by position (sub-lane children are never
   "next"; from a sub-lane, next = the first main stage after the parent), arriving with
-  the destination type's default status via the `move_card/4` snap. At the board's last
-  main stage there is no move — the card's status becomes `:done` in place. Logs an
-  `:approved` activity entry (from/to stage display names in meta) attributed to `actor`,
-  and reuses `move_card`/`set_status`, so the usual
-  `{:card_moved}`/`{:card_upserted}`/`{:timeline_appended}` events fire. Reused verbatim
-  by the API (MMF 09) and the drawer (MMF 15).
+  the destination type's default status via the `move_card/4` snap. Logs an `:approved`
+  activity entry (from/to stage display names in meta) attributed to `actor`, and reuses
+  `move_card`, so the usual `{:card_moved}`/`{:card_upserted}`/`{:timeline_appended}` events
+  fire. Reused verbatim by the API (MMF 09) and the drawer (MMF 15).
 
   From a review substage the card advances to the parent's Done substage when one exists
-  (arriving :ready and parked — Done is derived only at the board's terminal stage), else
-  the next main stage.
+  (arriving :ready and parked), else the next main stage.
+
+  Approve always moves the card. When there is no next stage or substage (`approve_target/1`
+  is nil) it is refused with `{:error, :no_next_stage}`: nothing is written, logged or
+  broadcast, and the card stays `:in_review` where it is. `no_next_stage_message/1` words the
+  refusal.
   """
+  @spec approve(Card.t(), actor) ::
+          {:ok, Card.t()} | {:error, :not_in_review | :no_next_stage | Ecto.Changeset.t()}
   def approve(%Card{} = card, actor \\ :agent) do
     stage = current_stage(card)
 
     if stage.type == :review do
       case next_approve_stage(stage) do
-        nil -> approve_in_place(card, stage, actor)
+        nil -> {:error, :no_next_stage}
         %Stage{} = target -> route(card, stage, target, :approved, nil, actor)
       end
     else
@@ -2500,9 +2507,22 @@ defmodule Hamaca.Cards do
   end
 
   @doc """
+  The human sentence for an `approve/2` refused with `:no_next_stage` — the ONE rendering, read
+  by both APIs' `FallbackController` (as the 422 body) and the card drawer (in place of the
+  Approve button), so the surfaces cannot word the same refusal differently. Names the card's
+  main stage (a substage's parent); it never re-decides whether the stage is terminal.
+  """
+  @spec no_next_stage_message(Card.t()) :: String.t()
+  def no_next_stage_message(%Card{} = card) do
+    name = card |> current_main_stage() |> Boards.stage_display_name()
+    "Add a Done stage after #{name} to approve into it."
+  end
+
+  @doc """
   The stage/substage an Approve would advance this card into, or `nil` when the card is not in a
-  review-type stage or sits at the terminal stage (approve completes it in place). Mirrors
-  `reject_target/1`; the drawer uses it to *show* the destination and `approve/2` to *move* there.
+  review-type stage or sits at a gate with no next stage or substage (approve is refused with
+  `:no_next_stage`). Mirrors `reject_target/1`; the drawer uses it to *show* the destination and
+  `approve/2` to *move* there.
   """
   def approve_target(%Card{} = card) do
     stage = current_stage(card)
@@ -2511,7 +2531,7 @@ defmodule Hamaca.Cards do
 
   # The "next stage or substage" rule. A review SUBSTAGE hands to its parent's Done substage when
   # one exists, else the next main stage after the parent; a top-level review stage advances to the
-  # next main stage. nil = no next (terminal) → approve completes in place.
+  # next main stage. nil = no next stage or substage → approve is refused (:no_next_stage).
   defp next_approve_stage(%Stage{parent_id: nil} = stage), do: Boards.next_main_stage(stage)
 
   defp next_approve_stage(%Stage{parent_id: parent_id}) do
@@ -2965,18 +2985,6 @@ defmodule Hamaca.Cards do
          :ok <- attach_note(moved, note, actor) do
       log_gate(moved, type, actor, from_stage, target, note)
       {:ok, clear_rejection(moved)}
-    end
-  end
-
-  # Approve at the board's last main stage: :ready in place, no move (derives Done).
-  defp approve_in_place(%Card{} = card, from_stage, actor) do
-    case set_status(card, %{status: :ready}, actor) do
-      {:ok, updated} ->
-        log_gate(updated, :approved, actor, from_stage, from_stage, nil)
-        {:ok, clear_rejection(updated)}
-
-      {:error, changeset} ->
-        {:error, changeset}
     end
   end
 

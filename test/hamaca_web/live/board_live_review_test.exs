@@ -70,6 +70,51 @@ defmodule HamacaWeb.BoardLiveReviewTest do
     assert has_element?(view, "#review-approve", "Approve → Code · Done")
   end
 
+  describe "a review gate with no next stage or substage (RE492)" do
+    test "a top-level review stage that ends the board hides Approve and says why",
+         %{conn: conn, board: board} do
+      signoff = insert(:stage, board: board, name: "Signoff", type: :review, category: :complete, position: 99)
+      in_review_card(signoff)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#review-approve")
+      assert has_element?(view, "#review-approve-blocked", "Add a Done stage after Signoff to approve into it.")
+      assert has_element?(view, "#review-request-changes")
+    end
+
+    test "a review substage with no Done substage under the last main stage hides Approve and says why",
+         %{conn: conn, board: board} do
+      polish = insert(:stage, board: board, name: "Polish", type: :work, category: :in_progress, position: 99)
+      {:ok, polish_review} = Boards.enable_lane(polish, :review)
+      in_review_card(polish_review)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      refute has_element?(view, "#review-approve")
+      assert has_element?(view, "#review-approve-blocked", "Add a Done stage after Polish to approve into it.")
+    end
+
+    test "a stale Approve click flashes the same sentence and leaves the card in review",
+         %{conn: conn, board: board} do
+      signoff = insert(:stage, board: board, name: "Signoff", type: :review, category: :complete, position: 99)
+      in_review_card(signoff)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      render_click(view, "review_approve", %{})
+
+      assert has_element?(view, "#flash-error", "Add a Done stage after Signoff to approve into it.")
+
+      card = Cards.get_card_by_ref(board, "MY1")
+      assert card.stage_id == signoff.id
+      assert card.status == :in_review
+    end
+  end
+
   test "an in_review card on a non-gated stage shows the banner but no decision buttons", %{
     conn: conn,
     code: code,

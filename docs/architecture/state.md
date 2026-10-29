@@ -106,10 +106,9 @@ Every arrow below is a status change, and each goes through one writer — `Hama
 carried value is *invalid* for the destination stage type (`snap_status/3`, `cards.ex:2167`); a
 status still valid for the new stage rides across unchanged. That **valid-but-stale** branch is the
 seam where a card arrives in a new stage still reading `working`, `needs_input`, or `failed` from
-the last one. Only three writers correct status around a move: `start_run` forces `working` on
-entering the work lane (`runs.ex:1403`), `reject` forces `ready` on sending a card back
-(`cards.ex:2374`), and `approve_in_place` forces `ready` in place at the terminal stage
-(`cards.ex:2757`). The non-terminal `approve` and every plain drag trust the snap alone.
+the last one. Only two writers correct status around a move: `start_run` forces `working` on
+entering the work lane (`runs.ex:1403`), and `reject` forces `ready` on sending a card back
+(`cards.ex:2374`). `approve` and every plain drag trust the snap alone.
 
 Each box's second line is the **stage types** that status is valid on (`Stage.valid_status?/2`).
 
@@ -139,7 +138,7 @@ stateDiagram-v2
     failed --> working: retry
     in_review --> working: approve → work
     in_review --> in_review: approve → review
-    in_review --> ready: reject · approve at end
+    in_review --> ready: reject
 
     note right of ready
         ready on the terminal

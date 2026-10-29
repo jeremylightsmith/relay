@@ -293,6 +293,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           review_gate: %{
             approve_label: "Approve → Deploy",
+            can_approve: true,
+            approve_blocked_reason: nil,
             reject_target_name: "Code",
             can_reject: true
           },
@@ -319,6 +321,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           review_gate: %{
             approve_label: "Approve → Deploy",
+            can_approve: true,
+            approve_blocked_reason: nil,
             reject_target_name: "Code",
             can_reject: true
           },
@@ -349,6 +353,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           review_gate: %{
             approve_label: "Approve → Deploy",
+            can_approve: true,
+            approve_blocked_reason: nil,
             reject_target_name: "Code",
             can_reject: true
           },
@@ -380,6 +386,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "in_review", "progress" => nil}, as: :card),
           review_gate: %{
             approve_label: "Approve → Deploy",
+            can_approve: true,
+            approve_blocked_reason: nil,
             reject_target_name: "Code",
             can_reject: true
           },

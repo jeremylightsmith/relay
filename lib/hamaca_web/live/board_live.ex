@@ -3473,8 +3473,16 @@ defmodule HamacaWeb.BoardLive do
     lane = lane_ids(socket, card)
 
     case Cards.approve(card, current_actor(socket)) do
-      {:ok, updated} -> {:noreply, after_review_decision(socket, :approved, card, updated, lane)}
-      {:error, _reason} -> {:noreply, socket}
+      {:ok, updated} ->
+        {:noreply, after_review_decision(socket, :approved, card, updated, lane)}
+
+      # RE492 — a stale drawer offered Approve at a gate with no next stage or substage: say why,
+      # and refresh the panel so it swaps Approve for the blocked line.
+      {:error, :no_next_stage} ->
+        {:noreply, socket |> put_flash(:error, Cards.no_next_stage_message(card)) |> assign_review(card)}
+
+      {:error, _reason} ->
+        {:noreply, socket}
     end
   end
 
@@ -4707,15 +4715,11 @@ defmodule HamacaWeb.BoardLive do
     socket.assigns.board |> Cards.stage_column(stage_id) |> Enum.map(& &1.id)
   end
 
-  # Names where the decided card actually landed. An Approve that stayed put completed in place at
-  # the terminal stage, which approve_label/1 words as "Done".
+  # Names where the decided card actually landed. A decision always moves the card (an Approve with
+  # no next stage or substage is refused, never completed in place).
   defp review_decision_flash(socket, decision, %Card{} = before, %Card{} = updated) do
     ref = Cards.ref(socket.assigns.board, before)
-
-    destination =
-      if decision == :approved and updated.stage_id == before.stage_id,
-        do: "Done",
-        else: Boards.stage_display_name(find_stage_by_id(socket, updated.stage_id))
+    destination = Boards.stage_display_name(find_stage_by_id(socket, updated.stage_id))
 
     case decision do
       :approved -> "Approved #{ref} → #{destination}"
@@ -4833,25 +4837,24 @@ defmodule HamacaWeb.BoardLive do
     stage = find_stage_by_id(socket, card.stage_id)
 
     if stage.type == :review do
-      target = Cards.reject_target(card)
+      approve_target = Cards.approve_target(card)
+      reject_target = Cards.reject_target(card)
+      can_approve = approve_target != nil
 
       %{
-        approve_label: approve_label(card),
-        reject_target_name: target && Boards.stage_display_name(target),
-        can_reject: target != nil
+        approve_label: approve_target && approve_label(approve_target),
+        can_approve: can_approve,
+        approve_blocked_reason: if(!can_approve, do: Cards.no_next_stage_message(card)),
+        reject_target_name: reject_target && Boards.stage_display_name(reject_target),
+        can_reject: reject_target != nil
       }
     end
   end
 
   # Derived from the domain target (Cards.approve_target/1) so the label can never drift from the
   # actual move. stage_display_name/1 renders a Done substage as "<Parent> · Done" (not the
-  # internal composite "<Parent>:Done"). nil target = complete in place at the terminal stage.
-  defp approve_label(card) do
-    case Cards.approve_target(card) do
-      nil -> "Approve → Done"
-      %Stage{} = target -> "Approve → #{Boards.stage_display_name(target)}"
-    end
-  end
+  # internal composite "<Parent>:Done"). A gate with no target offers no Approve at all (RE492).
+  defp approve_label(%Stage{} = target), do: "Approve → #{Boards.stage_display_name(target)}"
 
   defp empty_reject_form, do: to_form(%{"note" => ""}, as: :reject)
 

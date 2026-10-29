@@ -124,7 +124,7 @@ D4 and D7).
 
 | # | Path | Handling |
 | --- | --- | --- |
-| F1 | **Approve** | only on a `:review` stage; moves to the **next stage or substage** — the parent's Done sub-lane if one exists, else the next main stage; completes in place at the terminal stage (`Cards.approve/2`, `lib/hamaca/cards.ex:2274`) |
+| F1 | **Approve** | only on a `:review` stage; moves to the **next stage or substage** — the parent's Done sub-lane if one exists, else the next main stage; with no next stage or substage it is refused **422 `no_next_stage`** (the card stays `in_review`; the message is `Cards.no_next_stage_message/1`) (`Cards.approve/2`) |
 | F2 | **Reject** | requires a note; destination is *derived* (sub-lane → its parent; top-level → configured `reject_to_stage_id` or previous main stage); card forced `:ready` for rework, rejection embed set; Listener re-enters the flow; the note (a `:changes_requested` comment) reaches every job as live guidance (`Hamaca.Runs.guidance_for/2`, RE358) |
 
 ---

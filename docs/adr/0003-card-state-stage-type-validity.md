@@ -61,9 +61,10 @@ What the matrix says, and why:
   parked.
 
 A few writers set a status the arrival rule wouldn't pick, because the move alone doesn't say
-enough: starting a run sets `working`, a reject sets `ready` (so the card reads as handed back
-for rework), and an approve at the board's terminal stage sets `ready` in place. The
-status-by-status detail and every trigger are in
+enough: starting a run sets `working`, and a reject sets `ready` (so the card reads as handed
+back for rework). Approve always moves the card; at a review gate with no next stage or substage
+it is refused (`:no_next_stage`), so a board that wants to finish cards ends in a `done`-type
+stage. The status-by-status detail and every trigger are in
 [`../architecture/state.md`](../architecture/state.md).
 
 ## Consequences
@@ -86,10 +87,3 @@ status-by-status detail and every trigger are in
   can't answer "this stage's type just changed under its cards", which needs a pointwise
   validity check.
 
-## Open questions
-
-- **Approving at the terminal stage leaves a `ready` card in a review stage**, which the matrix
-  doesn't allow. When the review gate has no next stage or substage (the board's last main stage
-  is a review stage, or it has a Review substage and no Done substage),
-  `Hamaca.Cards.approve/2` completes the card in place as `ready` so it derives Done. Should the
-  matrix admit `ready` there, or should a board always end in a `done`-type stage?

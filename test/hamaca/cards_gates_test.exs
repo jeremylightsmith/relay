@@ -8,7 +8,7 @@ defmodule Hamaca.CardsGatesTest do
   alias Schemas.Card
 
   # Pipeline (positions 1-5): Plan (work) | Code (work) | Review (review) | Deploy (work) |
-  # Done (review, last — the final gate; approving with no next main stage completes in place).
+  # Done (review, last — the final gate; approving with no next main stage is refused).
   setup do
     board = insert(:board, key: "RLY")
     plan = insert(:stage, board: board, name: "Plan", type: :planning, category: :planning, position: 1)
@@ -91,14 +91,32 @@ defmodule Hamaca.CardsGatesTest do
       assert approved.status == :working
     end
 
-    test "at the last main stage sets :ready in place (derives Done)", %{board: board, done: done} do
-      card = insert(:card, stage: done)
-      {:ok, card} = Cards.set_status(card, %{status: :in_review})
+    test "at the last main stage is refused with :no_next_stage and leaves the card untouched",
+         %{done: done} do
+      card =
+        insert(:card, stage: done, status: :in_review, rejection: %Schemas.CardRejection{note: "redo it"})
 
-      assert {:ok, approved} = Cards.approve(card)
-      assert approved.stage_id == done.id
-      assert approved.status == :ready
-      assert Cards.done?(approved, Boards.list_stages(board))
+      assert {:error, :no_next_stage} = Cards.approve(card)
+
+      reloaded = Repo.get!(Card, card.id)
+      assert reloaded.stage_id == done.id
+      assert reloaded.status == :in_review
+      assert reloaded.rejection.note == "redo it"
+      refute Enum.any?(Activity.list_timeline(reloaded), &(Map.get(&1, :type) == :approved))
+    end
+
+    test "from a review substage with no Done substage and no next main stage is refused",
+         %{board: board} do
+      wrap = insert(:stage, board: board, name: "Wrap", type: :work, category: :in_progress, position: 6)
+      {:ok, review_sub} = Boards.enable_lane(wrap, :review)
+      card = insert(:card, stage: review_sub, status: :in_review)
+
+      assert {:error, :no_next_stage} = Cards.approve(card)
+
+      reloaded = Repo.get!(Card, card.id)
+      assert reloaded.stage_id == review_sub.id
+      assert reloaded.status == :in_review
+      refute Enum.any?(Activity.list_timeline(reloaded), &(Map.get(&1, :type) == :approved))
     end
 
     test "logs an :approved activity with from/to stage names and ids", %{review: review, deploy: deploy} do
@@ -183,6 +201,21 @@ defmodule Hamaca.CardsGatesTest do
     test "approve_target/1 is nil for a non-review stage", %{code: code} do
       card = insert(:card, stage: code)
       assert Cards.approve_target(card) == nil
+    end
+  end
+
+  describe "no_next_stage_message/1" do
+    test "names the terminal review stage", %{done: done} do
+      card = insert(:card, stage: done, status: :in_review)
+      assert Cards.no_next_stage_message(card) == "Add a Done stage after Done to approve into it."
+    end
+
+    test "names a review substage's parent, not the substage", %{board: board} do
+      wrap = insert(:stage, board: board, name: "Wrap", type: :work, category: :in_progress, position: 6)
+      {:ok, review_sub} = Boards.enable_lane(wrap, :review)
+      card = insert(:card, stage: review_sub, status: :in_review)
+
+      assert Cards.no_next_stage_message(card) == "Add a Done stage after Wrap to approve into it."
     end
   end
 

@@ -328,7 +328,8 @@ defmodule Hamaca.Usage do
   end
 
   # Distinct cards per owner that *entered* a top-level Done stage of their board in the
-  # `window_days/0` window: to Done and not from Done, so an in-place approve at Done never counts.
+  # `window_days/0` window: to Done and not from Done, so a legacy in-place `:approved` row at Done
+  # (`from_stage_id == to_stage_id`, written before RE492) never counts.
   # A NULL `from_stage_id` (pre-RE146 rows) is "not in Done".
   defp shipped_by_owner(users, now) do
     done_ids =

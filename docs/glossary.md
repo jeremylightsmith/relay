@@ -137,7 +137,7 @@ the MMF design specs).
   - Card in a **review substage** → the parent's **Done substage** if it exists, else the next
     main stage after the parent.
   - Card in a **top-level review stage** → the next main stage.
-  - No next stage/substage (terminal) → complete **in place** (`:ready`, which derives Done).
+  - No next stage/substage → Approve is refused (`no_next_stage`); add a Done stage.
 
   Implemented by `Cards.approve_target/1` + `Cards.approve/2` (RLY-76 is the routing authority).
 - **Done (derived)** — a card is *Done* only when it is `:ready` at the board's **terminal** stage.

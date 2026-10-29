@@ -4613,7 +4613,7 @@ defmodule HamacaWeb.CoreComponents do
   attr :review_gate, :any,
     default: nil,
     doc:
-      "MMF 15 gate info for an :in_review card on a review-type stage — %{approve_label, reject_target_name, can_reject}; nil when the card is not in a review-type stage"
+      "MMF 15 gate info for an :in_review card on a review-type stage — %{approve_label, can_approve, approve_blocked_reason, reject_target_name, can_reject} (see card_review_panel/1); nil when the card is not in a review-type stage"
 
   attr :reject_open, :boolean,
     default: false,
@@ -7081,13 +7081,19 @@ defmodule HamacaWeb.CoreComponents do
   reminder that the note survives switching mockups. In both faces the form reports every
   keystroke (`phx-change="review_reject_change"`), so the note is held server-side.
 
+  At a gate with no next stage or substage (`can_approve: false`, RE492) Approve is not offered:
+  `#review-approve-blocked` says why in its place, in both faces, and Request changes stays.
+
   `embed` (the native host) drops the decision buttons and the reject note, as in the drawer.
   """
   attr :id, :string, default: "review-panel"
 
   attr :review_gate, :any,
     default: nil,
-    doc: "%{approve_label, reject_target_name, can_reject}, or nil for a stage that is not a review gate"
+    doc:
+      "%{approve_label, can_approve, approve_blocked_reason, reject_target_name, can_reject}, or nil for a " <>
+        "stage that is not a review gate. can_approve false (RE492: no next stage or substage) swaps " <>
+        "Approve for #review-approve-blocked, which shows approve_blocked_reason"
 
   attr :reject_open, :boolean, default: false, doc: "whether the Request-changes note is expanded"
   attr :reject_form, :any, default: nil, doc: "a Phoenix.HTML.Form for reject[note]"
@@ -7129,6 +7135,7 @@ defmodule HamacaWeb.CoreComponents do
       </p>
       <div :if={@review_gate && !@reject_open && !@embed} class="flex gap-2">
         <.button
+          :if={@review_gate.can_approve}
           id="review-approve"
           type="button"
           phx-click="review_approve"
@@ -7138,6 +7145,13 @@ defmodule HamacaWeb.CoreComponents do
         >
           {if @compact, do: "Approve", else: @review_gate.approve_label}
         </.button>
+        <p
+          :if={!@review_gate.can_approve}
+          id="review-approve-blocked"
+          class="flex-1 self-center text-xs text-base-content/65"
+        >
+          {@review_gate.approve_blocked_reason}
+        </p>
         <button
           :if={@review_gate.can_reject}
           id="review-request-changes"

@@ -1640,21 +1640,18 @@ defmodule Hamaca.CardsTest do
       %{board: Hamaca.Repo.preload(board, :stages), code: code, done: done}
     end
 
-    test "never returns the decided card, though approval completes it in place", %{board: board, done: done} do
+    test "never returns the decided card while it is still in the terminal lane", %{board: board, done: done} do
       x = insert(:card, stage: done, title: "X", position: 1, ref_number: 1, status: :in_review)
-
-      {:ok, approved} = Cards.approve(x)
-      assert approved.stage_id == done.id
-      assert approved.status == :ready
 
       assert Cards.next_awaiting_review(board, done.id, [x.id], x.id) == nil
     end
 
-    test "advances to the next card still awaiting review in the terminal lane", %{board: board, done: done} do
+    test "advances to the next card still awaiting review after a send-back from the terminal lane",
+         %{board: board, done: done} do
       x = insert(:card, stage: done, title: "X", position: 1, ref_number: 1, status: :in_review)
       y = insert(:card, stage: done, title: "Y", position: 2, ref_number: 2, status: :in_review)
 
-      {:ok, _} = Cards.approve(x)
+      {:ok, _} = Cards.reject(x, "redo")
 
       assert Cards.next_awaiting_review(board, done.id, [x.id, y.id], x.id) == Cards.ref(board, y)
     end

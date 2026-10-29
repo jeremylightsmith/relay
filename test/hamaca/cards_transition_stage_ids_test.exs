@@ -6,7 +6,7 @@ defmodule Hamaca.CardsTransitionStageIdsTest do
   alias Schemas.Activity
 
   # Next up (queue) | Spec (planning) + Spec · Review | Done (review — terminal, so an approve
-  # there completes in place).
+  # there is refused with :no_next_stage).
   setup do
     board = insert(:board)
     next_up = insert(:stage, board: board, name: "Next up", type: :queue, category: :unstarted, position: 1)
@@ -41,14 +41,12 @@ defmodule Hamaca.CardsTransitionStageIdsTest do
     assert meta["from_stage"] == "Spec · Review"
   end
 
-  test "an in-place approve at the terminal stage records the same id on both sides", %{done: done} do
+  test "an approve at the terminal stage is refused and records no :approved row", %{done: done} do
     card = insert(:card, stage: done, status: :in_review)
 
-    {:ok, _approved} = Cards.approve(card)
+    assert {:error, :no_next_stage} = Cards.approve(card)
 
-    meta = last_meta(card, :approved)
-    assert meta["from_stage_id"] == done.id
-    assert meta["to_stage_id"] == done.id
+    refute Repo.exists?(from a in Activity, where: a.card_id == ^card.id and a.type == :approved)
   end
 
   test "a reject records ids on both the :moved and the :rejected rows",
