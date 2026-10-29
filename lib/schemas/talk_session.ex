@@ -8,7 +8,10 @@ defmodule Schemas.TalkSession do
 
   `pinned_runner_name` is the machine holding that session; every later turn is offered only
   to it (`Hamaca.Talk.post_message/3` copies it onto the job row, exactly as an exclusive run's
-  pin rides on `node_jobs.runner_name`).
+  pin rides on `node_jobs.runner_name`). When that machine is gone
+  (`Hamaca.Runs.affinity_holder_gone?/3`), posting clears BOTH fields together — the session id
+  is meaningless off its holder's disk — so the next turn starts fresh on any runner and
+  whichever finishes it becomes the new holder.
 
   `last_event_seq` is the session's monotonic render-order counter; `cleared_through_seq` is
   how `/clear` HIDES scrollback — nothing is ever deleted.

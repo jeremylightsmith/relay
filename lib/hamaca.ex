@@ -51,6 +51,7 @@ defmodule Hamaca do
       Setup,
       StoryMap,
       Talk,
+      Talk.PinReaper,
       Usage,
       Usage.Tracker,
       ValueStream,

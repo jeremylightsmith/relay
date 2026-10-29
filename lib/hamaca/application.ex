@@ -77,8 +77,12 @@ defmodule Hamaca.Application do
   # run, and the boot resume task. Off in test: tests start_supervised!
   # their own copy so processes are cleaned between tests and DB access
   # stays inside the sandbox.
+  # RE493: `Hamaca.Talk.PinReaper` is the Talk counterpart of the engine's `RunnerReaper`, so it
+  # rides the same gate — a 30s clock that writes the DB must never run outside the test sandbox.
   defp runs_children do
-    if Application.get_env(:hamaca, :start_runs_supervisor, true), do: [Hamaca.Runs.Supervisor], else: []
+    if Application.get_env(:hamaca, :start_runs_supervisor, true),
+      do: [Hamaca.Runs.Supervisor, Hamaca.Talk.PinReaper],
+      else: []
   end
 
   # Tell Phoenix to update the endpoint configuration

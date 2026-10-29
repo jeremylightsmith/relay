@@ -1169,13 +1169,26 @@ sharing behavior.
   stopped | failed`; `queued → claimed` is written by the claim endpoint via
   `Talk.mark_claimed/1`, so the claim path itself needs no knowledge of *turns* — `Hamaca.Runs`
   knows only that a job can carry `kind: :talk`, via `insert_talk_job!/3`, `revoke_talk_job/1`,
-  `finish_talk_job!/1` and the `talk_capable?/1` floor on the claim),
+  `release_talk_job/1`, `finish_talk_job!/1` and the `talk_capable?/1` floor on the claim),
   `Schemas.TalkEvent` (one per rendered transcript line, append-only). **The
   pin**: `finish_turn/3` records the claiming runner's name onto the session **on `:done`
   only** — a `:stopped` or `:failed` turn never finished, so it cannot vouch for the session id
   or the holder, and leaves both unset; `post_message/3`
   copies it onto the next job's `runner_name`, so `Runs.claim_next_job/1` needs no Talk
-  knowledge — the pin rides the same column an exclusive run's pin already uses. **Ordering is
+  knowledge — the pin rides the same column an exclusive run's pin already uses. A pin naming a
+  **gone** runner (`Runs.affinity_holder_gone?/3`: no `runners` row on the board, or silent past
+  `max(Runs.exclusive_reclaim_after_s/0, its stale threshold)` — the window that parks an
+  exclusive run `:runner_gone`) is released at post time, inside the session-row lock: the
+  session's pin and `claude_session_id` are cleared, the job goes out unpinned with no
+  `resume_session` (the seed still rides along), and a server-authored `:error` line
+  (`client_seq: -1`, broadcast with the user line) tells the person the next runner starts a
+  fresh session. A merely stale pin is kept. A turn already `:queued` when its holder goes is
+  caught by the sweep instead: every 30s `Hamaca.Talk.PinReaper` calls `release_gone_pins/1`,
+  which releases each `:queued`, pinned talk job (`Runs.queued_pinned_talk_jobs/0`) whose holder
+  is gone the same way — guarded by `Runs.release_talk_job/1` (`state == :queued`, so a job
+  claimed in the meantime rolls the whole release back), one notice on that turn, then
+  `{:talk_event, notice}` and `{:run_changed, card_id}` to wake the claim long-poll. Claimed jobs
+  are never touched, and a second sweep finds nothing. **Ordering is
   `seq`, never a timestamp** — `append_events/2` assigns it inside one transaction locking the
   session row, so two concurrent batches can't collide; delivery is at-least-once and
   `(talk_turn_id, client_seq)` is unique, so a replayed batch stores and broadcasts nothing new.

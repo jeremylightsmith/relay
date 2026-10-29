@@ -32,7 +32,7 @@ defmodule Hamaca.Runs do
       Hamaca.Setup,
       Schemas
     ],
-    exports: [Supervisor, Capacity, RunDetail, SchedulerSupervisor]
+    exports: [Supervisor, Capacity, Instance, RunDetail, SchedulerSupervisor]
 
   import Ecto.Query
 
@@ -2947,6 +2947,27 @@ defmodule Hamaca.Runs do
   defp stale_after_s(%Runner{interval: interval}), do: max(@runner_stale_floor_s, 2 * (interval || 30))
 
   @doc """
+  RE493: true when the runner a Talk session is pinned to can no longer hold it — no `runners`
+  row named `runner_name` on the board, or silent past `max(exclusive_reclaim_after_s/0, its
+  stale threshold)`. That is exactly the window past which `reclaim_stale_runners/1` parks an
+  exclusive run `:runner_gone`, so "gone" here and there can never disagree. A merely stale
+  runner is not gone. Pure apart from the one row read; `now` is injectable for tests.
+  """
+  @spec affinity_holder_gone?(integer(), String.t(), DateTime.t()) :: boolean()
+  def affinity_holder_gone?(board_id, runner_name, %DateTime{} = now) when is_binary(runner_name) do
+    case Repo.get_by(Runner, board_id: board_id, name: runner_name) do
+      nil -> true
+      runner -> silent_past_reclaim_window?(runner, "exclusive", now)
+    end
+  end
+
+  # The one reclaim-window comparison (RE449): silent past `max(isolation's window, stale
+  # threshold)`. `reclaim_runner/2` and `affinity_holder_gone?/3` both call it.
+  defp silent_past_reclaim_window?(%Runner{last_heartbeat: at} = runner, isolation, now) do
+    DateTime.diff(now, at, :second) > max(reclaim_after_s(isolation), stale_after_s(runner))
+  end
+
+  @doc """
   The runner's freshness at `now`: `:fresh | :stale | :gone`. Pure.
 
   `:gone` is deliberately *the same predicate the reaper uses* (`runner_stale?/2`) rather
@@ -4038,10 +4059,7 @@ defmodule Hamaca.Runs do
   defp isolation_class("exclusive"), do: "exclusive"
   defp isolation_class(_shared), do: "shared_clean"
 
-  defp reclaim_runner(%Runner{board_id: board_id, name: name, last_heartbeat: at} = runner, now) do
-    silent_s = DateTime.diff(now, at, :second)
-    stale_s = stale_after_s(runner)
-
+  defp reclaim_runner(%Runner{board_id: board_id, name: name} = runner, now) do
     rows =
       Repo.all(
         from j in NodeJob,
@@ -4061,7 +4079,7 @@ defmodule Hamaca.Runs do
     # RE449: a job is reclaimed only once its runner has been silent past its isolation's window
     # (never undercutting the runner's own stale threshold); until then it is held for a return.
     |> Enum.filter(fn {job, _run, _card_id} ->
-      silent_s > max(reclaim_after_s(isolation_class(job.payload["isolation"])), stale_s)
+      silent_past_reclaim_window?(runner, isolation_class(job.payload["isolation"]), now)
     end)
     |> Enum.each(fn {job, run, card_id} ->
       case job.payload["isolation"] do
@@ -5055,6 +5073,42 @@ defmodule Hamaca.Runs do
       )
 
     if n == 1, do: :ok, else: {:error, :not_active}
+  end
+
+  @doc ~S"""
+  RE493: every `:queued` **talk** job still pinned to a runner, with its card's board id —
+  the candidate set for `Hamaca.Talk.release_gone_pins/1`. Claimed jobs are never candidates:
+  their turn is in flight on that machine, and an unpinned job has nothing to release.
+  """
+  @spec queued_pinned_talk_jobs() :: [{NodeJob.t(), integer(), integer()}]
+  def queued_pinned_talk_jobs do
+    Repo.all(
+      from j in NodeJob,
+        join: c in Card,
+        on: c.id == j.card_id,
+        where: j.kind == :talk and j.state == :queued and not is_nil(j.runner_name),
+        select: {j, c.board_id, c.id}
+    )
+  end
+
+  @doc ~S"""
+  RE493: unpins a still-`:queued` **talk** job so any runner may claim it, and drops its
+  `resume_session` (kept as a nil key — the runner reads it on every talk claim): another
+  machine must never be told to `--resume` a session that lives on the gone holder's disk.
+  Guarded on `state == :queued`, so a job claimed or revoked since it was read is left alone
+  and `{:error, :not_queued}` comes back.
+  """
+  @spec release_talk_job(NodeJob.t()) :: :ok | {:error, :not_queued}
+  def release_talk_job(%NodeJob{kind: :talk} = job) do
+    payload = Map.put(job.payload || %{}, "resume_session", nil)
+
+    {n, _} =
+      Repo.update_all(
+        from(j in NodeJob, where: j.id == ^job.id and j.state == :queued),
+        set: [runner_name: nil, payload: payload, updated_at: now()]
+      )
+
+    if n == 1, do: :ok, else: {:error, :not_queued}
   end
 
   @doc "Finalises a **talk** job once its turn has reported an outcome. Terminal; idempotent-safe (a second call simply matches no active row)."

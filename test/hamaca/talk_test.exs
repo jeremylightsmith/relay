@@ -6,6 +6,7 @@ defmodule Hamaca.TalkTest do
   """
   use Hamaca.DataCase, async: true
 
+  alias Hamaca.Repo
   alias Hamaca.Runs
   alias Hamaca.Talk
   alias Schemas.TalkEvent
@@ -224,7 +225,7 @@ defmodule Hamaca.TalkTest do
 
     assert Talk.events(cleared) == []
     assert cleared.cleared_through_seq == session.last_event_seq
-    assert Hamaca.Repo.aggregate(TalkEvent, :count) == 2
+    assert Repo.aggregate(TalkEvent, :count) == 2
   end
 
   test "a talk turn is claimable while a node job is live on the same card", ctx do
@@ -376,6 +377,276 @@ defmodule Hamaca.TalkTest do
     assert again.status == :done
     refute_receive {:talk_turn_changed, _}, 50
     assert Talk.session_for_card(ctx.card).claude_session_id == "sess-1"
+  end
+
+  describe "post-time release of a gone pin (RE493)" do
+    @notice ~s(Runner "ghost-runner" is gone — this message starts a fresh session on the next available runner. It won't remember earlier turns.)
+
+    test "a pin naming a runner with no row goes out unpinned and fresh", ctx do
+      pin_session!(ctx.card, "ghost-runner", "sess-old")
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      job = Runs.get_job(turn.node_job_id)
+
+      assert job.runner_name == nil
+      assert job.payload["resume_session"] == nil
+      assert is_binary(job.payload["seed"]["summary"])
+
+      session = Talk.get_session(ctx.card)
+      assert session.pinned_runner_name == nil
+      assert session.claude_session_id == nil
+    end
+
+    test "a pin naming a runner silent past the exclusive reclaim window is released", ctx do
+      pin_session!(ctx.card, "mac-1", "sess-old")
+      silence!(ctx.runner, Runs.exclusive_reclaim_after_s() + 5)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      job = Runs.get_job(turn.node_job_id)
+
+      assert job.runner_name == nil
+      assert job.payload["resume_session"] == nil
+      assert is_binary(job.payload["seed"]["summary"])
+
+      session = Talk.get_session(ctx.card)
+      assert session.pinned_runner_name == nil
+      assert session.claude_session_id == nil
+    end
+
+    test "a released post writes the notice line right after the user line, and broadcasts both", ctx do
+      pin_session!(ctx.card, "ghost-runner", "sess-old")
+      Talk.subscribe(ctx.card.id)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+
+      [user, notice] = ctx.card |> Talk.get_session() |> Talk.events() |> Enum.filter(&(&1.talk_turn_id == turn.id))
+
+      assert %TalkEvent{kind: :user, text: "hello", client_seq: 0} = user
+      assert %TalkEvent{kind: :error, dim: false, client_seq: -1, text: @notice} = notice
+      assert notice.seq == user.seq + 1
+
+      user_id = user.id
+      notice_id = notice.id
+      assert_receive {:talk_event, %TalkEvent{id: ^user_id}}
+      assert_receive {:talk_event, %TalkEvent{id: ^notice_id}}
+    end
+
+    test "a merely stale pin is kept, resumed, and gets no notice", ctx do
+      pin_session!(ctx.card, "mac-1", "sess-abc")
+      silence!(ctx.runner, 120)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      job = Runs.get_job(turn.node_job_id)
+
+      assert job.runner_name == "mac-1"
+      assert job.payload["resume_session"] == "sess-abc"
+
+      session = Talk.get_session(ctx.card)
+      assert session.pinned_runner_name == "mac-1"
+      assert session.claude_session_id == "sess-abc"
+      assert error_events(turn) == []
+    end
+
+    test "a live pin is unchanged and gets no notice", ctx do
+      {:ok, one} = Talk.post_message(ctx.card, ctx.author, "one")
+      {:ok, _} = Runs.claim_next_job(ctx.runner)
+      {:ok, _} = Talk.finish_turn(one, :done, %{session_id: "sess-abc"})
+
+      {:ok, two} = Talk.post_message(ctx.card, ctx.author, "two")
+      job = Runs.get_job(two.node_job_id)
+
+      assert job.runner_name == "mac-1"
+      assert job.payload["resume_session"] == "sess-abc"
+      assert error_events(two) == []
+    end
+
+    test "a released turn re-pins to whichever runner claims and finishes it", ctx do
+      pin_session!(ctx.card, "ghost-runner", "sess-old")
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+
+      mac2 =
+        insert(:runner,
+          board: ctx.board,
+          name: "mac-2",
+          capacity: %{"exclusive" => 1},
+          version: Runs.min_runner_version()
+        )
+
+      job_id = turn.node_job_id
+      assert {:ok, %{id: ^job_id}} = Runs.claim_next_job(mac2)
+      {:ok, _} = Talk.finish_turn(turn, :done, %{session_id: "sess-new"})
+
+      session = Talk.get_session(ctx.card)
+      assert session.pinned_runner_name == "mac-2"
+      assert session.claude_session_id == "sess-new"
+
+      {:ok, third} = Talk.post_message(ctx.card, ctx.author, "again")
+      assert Runs.get_job(third.node_job_id).runner_name == "mac-2"
+      assert error_events(third) == []
+    end
+
+    test "a session with no pin yet gets no notice", ctx do
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "first")
+
+      assert Talk.get_session(ctx.card).pinned_runner_name == nil
+      assert error_events(turn) == []
+    end
+  end
+
+  describe "release_gone_pins/1 (RE493)" do
+    @notice ~s(Runner "ghost-runner" is gone — this message starts a fresh session on the next available runner. It won't remember earlier turns.)
+
+    setup do
+      %{now: DateTime.truncate(DateTime.utc_now(), :second)}
+    end
+
+    # Scenario 1's setup: posted while the pin is live, then the holder "renamed" to a name with
+    # no runners row — the case the post-time release cannot catch.
+    defp queued_on_ghost!(ctx) do
+      pin_session!(ctx.card, "mac-1", "sess-abc")
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      job = Runs.get_job(turn.node_job_id)
+      assert job.runner_name == "mac-1"
+      assert job.payload["resume_session"] == "sess-abc"
+
+      Repo.update_all(from(j in Schemas.NodeJob, where: j.id == ^job.id), set: [runner_name: "ghost-runner"])
+      pin_session!(ctx.card, "ghost-runner", "sess-abc")
+      {turn, Runs.get_job(job.id)}
+    end
+
+    test "a queued turn pinned to a gone runner is released unpinned and fresh, with one notice", ctx do
+      {turn, job} = queued_on_ghost!(ctx)
+      card_id = ctx.card.id
+      Talk.subscribe(card_id)
+      Runs.subscribe(ctx.board.id)
+
+      assert :ok = Talk.release_gone_pins(ctx.now)
+
+      released = Runs.get_job(job.id)
+      assert released.state == :queued
+      assert released.runner_name == nil
+      assert Map.has_key?(released.payload, "resume_session")
+      assert released.payload["resume_session"] == nil
+      assert released.payload["prompt"] == job.payload["prompt"]
+
+      session = Talk.get_session(ctx.card)
+      assert session.pinned_runner_name == nil
+      assert session.claude_session_id == nil
+
+      assert [%TalkEvent{kind: :error, client_seq: -1, text: @notice}] = error_events(turn)
+      assert_receive {:talk_event, %TalkEvent{kind: :error, text: @notice}}
+      assert_receive {:run_changed, ^card_id}
+    end
+
+    test "a second sweep is a no-op", ctx do
+      {turn, _job} = queued_on_ghost!(ctx)
+      :ok = Talk.release_gone_pins(ctx.now)
+      Talk.subscribe(ctx.card.id)
+
+      assert :ok = Talk.release_gone_pins(ctx.now)
+
+      assert [_one] = error_events(turn)
+      refute_receive {:talk_event, _}, 50
+    end
+
+    test "a claimed job whose runner is gone is untouched", ctx do
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      {:ok, _} = Runs.claim_next_job(ctx.runner)
+      Repo.delete!(ctx.runner)
+
+      assert :ok = Talk.release_gone_pins(ctx.now)
+
+      job = Runs.get_job(turn.node_job_id)
+      assert job.state == :claimed
+      assert job.runner_name == "mac-1"
+      assert error_events(turn) == []
+    end
+
+    test "a queued job pinned to a fresh runner is untouched", ctx do
+      pin_session!(ctx.card, "mac-1", "sess-abc")
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+
+      assert :ok = Talk.release_gone_pins(ctx.now)
+
+      assert_pin_kept(ctx, turn)
+    end
+
+    test "a queued job pinned to a stale-but-not-gone runner is untouched", ctx do
+      pin_session!(ctx.card, "mac-1", "sess-abc")
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      silence!(ctx.runner, 120)
+
+      assert :ok = Talk.release_gone_pins(ctx.now)
+
+      assert_pin_kept(ctx, turn)
+    end
+
+    test "an unpinned first-turn job is untouched", ctx do
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "first")
+      before = Runs.get_job(turn.node_job_id)
+      assert before.runner_name == nil
+
+      assert :ok = Talk.release_gone_pins(ctx.now)
+
+      assert Runs.get_job(turn.node_job_id) == before
+      assert error_events(turn) == []
+    end
+
+    test "release_talk_job/1 refuses a job revoked in the meantime", ctx do
+      pin_session!(ctx.card, "ghost-runner", "sess-old")
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      Repo.update_all(from(j in Schemas.NodeJob, where: j.id == ^turn.node_job_id), set: [runner_name: "ghost-runner"])
+      job = Runs.get_job(turn.node_job_id)
+      :ok = Runs.revoke_talk_job(job)
+
+      assert {:error, :not_queued} = Runs.release_talk_job(job)
+      assert Runs.get_job(job.id).runner_name == "ghost-runner"
+    end
+
+    test "a released job is claimable by another runner", ctx do
+      {_turn, job} = queued_on_ghost!(ctx)
+      :ok = Talk.release_gone_pins(ctx.now)
+
+      mac2 =
+        insert(:runner,
+          board: ctx.board,
+          name: "mac-2",
+          capacity: %{"exclusive" => 1},
+          version: Runs.min_runner_version()
+        )
+
+      job_id = job.id
+      assert {:ok, %{id: ^job_id}} = Runs.claim_next_job(mac2)
+    end
+
+    defp assert_pin_kept(ctx, turn) do
+      job = Runs.get_job(turn.node_job_id)
+      assert job.state == :queued
+      assert job.runner_name == "mac-1"
+      assert job.payload["resume_session"] == "sess-abc"
+
+      session = Talk.get_session(ctx.card)
+      assert session.pinned_runner_name == "mac-1"
+      assert session.claude_session_id == "sess-abc"
+      assert error_events(turn) == []
+    end
+  end
+
+  defp pin_session!(card, runner_name, session_id) do
+    session = Talk.session_for_card(card)
+
+    Repo.update_all(from(s in Schemas.TalkSession, where: s.id == ^session.id),
+      set: [pinned_runner_name: runner_name, claude_session_id: session_id]
+    )
+  end
+
+  defp silence!(runner, seconds) do
+    at = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -seconds, :second)
+    Repo.update_all(from(r in Schemas.Runner, where: r.id == ^runner.id), set: [last_heartbeat: at])
+  end
+
+  defp error_events(turn) do
+    Repo.all(from(e in TalkEvent, where: e.talk_turn_id == ^turn.id and e.kind == :error))
   end
 
   defp event(client_seq, kind, text) do

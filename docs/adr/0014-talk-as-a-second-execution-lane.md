@@ -86,6 +86,13 @@ rendered line, append-only).
    it advertises no isolation class and refusing it on a busy runner would mean a card nobody
    has talked to can never be talked to. The runner itself still refuses it when it is out of
    worktrees.
+   **A pin to a gone runner is released.** The holder is gone when the board has no runner of
+   that name, or it has been silent longer than both the exclusive reclaim window and its own
+   stale threshold — the same rule that parks an exclusive run as `runner_gone`, so the two can
+   never disagree. A merely stale holder keeps its pin. Releasing clears the pin *and* the
+   session id together, so another runner is never handed `--resume` for a session on a
+   different disk: the next turn is a fresh session on any runner, still seeded with the card's
+   context, and that runner becomes the new holder. The pane says so in one transcript line.
 
 4. **The transcript is a durable record, not a log.** Lines are ordered by a server-assigned
    `seq`, never a timestamp. The runner delivers them at least once, numbering each turn's
@@ -180,8 +187,5 @@ seeded.
 - **Should Talk be able to write?** Today it is read-only. Letting it edit, commit or push needs
   writes to serialize with node jobs on the shared worktree, and every change it makes to the
   card to be recorded as an audited fact rather than the agent's own account of it.
-- **Re-pinning when the holder is gone.** A session pinned to a runner that is retired or reaped
-  keeps that pin, so its later turns wait for a runner that will not come back. A card whose
-  holder is gone should start a fresh session on another runner, and the pane should say so.
 - **Session growth.** `--resume` on a long-lived session gets slower and costlier every turn,
   and nothing starts a fresh session.

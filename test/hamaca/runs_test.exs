@@ -1334,6 +1334,68 @@ defmodule Hamaca.RunsTest do
     end
   end
 
+  describe "affinity_holder_gone?/3 (RE493)" do
+    # Gone = no row on the board, or silent past max(exclusive_reclaim_after_s/0, the runner's
+    # stale threshold) — the same comparison that parks an exclusive run :runner_gone.
+    @t ~U[2026-07-17 12:00:00Z]
+
+    defp silent_runner!(board, name, interval, silent_s) do
+      insert(:runner, board: board, name: name, interval: interval, last_heartbeat: DateTime.add(@t, -silent_s, :second))
+    end
+
+    test "a name with no runners row on the board is gone" do
+      board = insert(:board)
+      assert Runs.affinity_holder_gone?(board.id, "ghost", @t)
+    end
+
+    test "a runner that beat 5s ago is not gone" do
+      board = insert(:board)
+      silent_runner!(board, "mac-1", 30, 5)
+      refute Runs.affinity_holder_gone?(board.id, "mac-1", @t)
+    end
+
+    test "a stale runner under the reclaim window is not gone" do
+      board = insert(:board)
+      runner = silent_runner!(board, "mac-1", 30, 120)
+
+      assert Runs.runner_stale?(runner, @t)
+      refute Runs.affinity_holder_gone?(board.id, "mac-1", @t)
+    end
+
+    test "the window comparison is strict: gone only past exclusive_reclaim_after_s/0" do
+      board = insert(:board)
+      at_window = silent_runner!(board, "mac-1", 30, Runs.exclusive_reclaim_after_s())
+      refute Runs.affinity_holder_gone?(board.id, "mac-1", @t)
+
+      Repo.update_all(from(r in Schemas.Runner, where: r.id == ^at_window.id),
+        set: [last_heartbeat: DateTime.add(@t, -(Runs.exclusive_reclaim_after_s() + 1), :second)]
+      )
+
+      assert Runs.affinity_holder_gone?(board.id, "mac-1", @t)
+    end
+
+    test "a stale threshold longer than the window wins (max of the two)" do
+      board = insert(:board)
+      slow = silent_runner!(board, "slow", 400, 700)
+      refute Runs.affinity_holder_gone?(board.id, "slow", @t)
+
+      Repo.update_all(from(r in Schemas.Runner, where: r.id == ^slow.id),
+        set: [last_heartbeat: DateTime.add(@t, -801, :second)]
+      )
+
+      assert Runs.affinity_holder_gone?(board.id, "slow", @t)
+    end
+
+    test "the lookup is board-scoped" do
+      board_a = insert(:board)
+      board_b = insert(:board)
+      silent_runner!(board_a, "mac-1", 30, 0)
+
+      refute Runs.affinity_holder_gone?(board_a.id, "mac-1", @t)
+      assert Runs.affinity_holder_gone?(board_b.id, "mac-1", @t)
+    end
+  end
+
   describe "reclaim_stale_runners/1 liveness windows (RE449)" do
     # A runner past the stale threshold stops COUNTING, but its work is held: shared jobs are
     # requeued only past shared_reclaim_after_s/0, exclusive runs parked only past

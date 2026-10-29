@@ -18,7 +18,13 @@ defmodule Hamaca.Talk do
   `finish_turn/3` (from the claiming runner recorded on the job row) and read by
   `post_message/3`, which copies it onto the next job's `runner_name`. That is why
   `Hamaca.Runs.claim_next_job/1` needs no Talk knowledge: the pin is expressed in the same column
-  an exclusive run's pin already uses.
+  an exclusive run's pin already uses. A pin naming a gone runner (`Runs.affinity_holder_gone?/3`
+  — no row, or silent past the exclusive reclaim window) is released at post time, inside the
+  session lock: the pin and `claude_session_id` are cleared together, so the turn goes to any
+  runner as a fresh session (never `--resume` on another machine's session), and a server-authored
+  `:error` line (`client_seq: -1`) says so in the transcript. A merely stale pin is kept. A turn
+  already `:queued` when its holder goes is released the same way by `release_gone_pins/1`, which
+  `Hamaca.Talk.PinReaper` runs every 30s; a claimed turn is never touched.
 
   **Known step-1 limitation.** A turn whose runner dies stays `claimed` — the orphan reaper
   deliberately ignores talk jobs (requeueing one would hand a resumed session to a machine that
@@ -32,7 +38,7 @@ defmodule Hamaca.Talk do
   Broadcast from this context only.
   """
 
-  use Boundary, deps: [Hamaca.Cards, Hamaca.Repo, Hamaca.Runs, Schemas]
+  use Boundary, deps: [Hamaca.Cards, Hamaca.Repo, Hamaca.Runs, Schemas], exports: [PinReaper]
 
   import Ecto.Query
 
@@ -49,6 +55,12 @@ defmodule Hamaca.Talk do
 
   @pubsub Hamaca.PubSub
   @reportable_statuses TalkTurn.reportable_statuses()
+
+  # The server's own transcript line: `0` is the human's line and the runner numbers its lines
+  # `1..n`, so a negative `client_seq` can only ever be written here — `normalize_event/1`
+  # rejects it from the runner — and the unique `(talk_turn_id, client_seq)` index caps a turn
+  # at one notice.
+  @notice_client_seq -1
 
   @doc "The per-card Talk topic."
   def topic(card_id), do: "card:#{card_id}:talk"
@@ -114,8 +126,8 @@ defmodule Hamaca.Talk do
     end
   end
 
-  defp handle_post({:ok, {turn, event}}, card) do
-    broadcast(card.id, {:talk_event, event})
+  defp handle_post({:ok, {turn, events}}, card) do
+    Enum.each(events, &broadcast(card.id, {:talk_event, &1}))
     broadcast(card.id, {:talk_turn_changed, turn})
     # Wakes the claim long-poll: `{:run_changed, card_id}` is already one of the tags
     # `HamacaWeb.Api.NodeJobController.maybe_wait/4` retries a claim on, so a talk job needs no
@@ -138,6 +150,8 @@ defmodule Hamaca.Talk do
       Repo.rollback(:turn_in_flight)
     end
 
+    {locked, released} = release_gone_pin(locked, card)
+
     turn =
       %TalkTurn{talk_session_id: locked.id, author_id: author.id, prompt: prompt}
       |> TalkTurn.changeset(%{status: :queued})
@@ -146,6 +160,7 @@ defmodule Hamaca.Talk do
     # The human's own line is `client_seq: 0`; the runner numbers its lines from 1, so the
     # two writers of one turn's transcript can never collide on the unique index.
     [event] = insert_events!(locked, turn, [%{"client_seq" => 0, "kind" => "user", "text" => prompt, "dim" => false}])
+    notices = if released, do: insert_lines!(locked, turn, [notice_line(released)]), else: []
 
     payload = %{
       "turn_id" => turn.id,
@@ -159,7 +174,89 @@ defmodule Hamaca.Talk do
 
     job = Runs.insert_talk_job!(card, payload, locked.pinned_runner_name)
     turn = turn |> TalkTurn.changeset(%{node_job_id: job.id}) |> Repo.update!()
-    {turn, event}
+    {turn, [event | notices]}
+  end
+
+  # RE493: a pin naming a gone runner (`Runs.affinity_holder_gone?/3`) is released before the
+  # job is built, so the turn goes to any runner as a fresh session instead of waiting forever
+  # on a machine that is not coming back. Returns the session and the released runner's name
+  # (nil when nothing was released). A nil pin is never looked up: the predicate reads an absent
+  # name as gone, which would announce a release that never happened on every first turn.
+  defp release_gone_pin(%TalkSession{pinned_runner_name: nil} = session, _card), do: {session, nil}
+
+  defp release_gone_pin(%TalkSession{pinned_runner_name: name} = session, card) do
+    if Runs.affinity_holder_gone?(card.board_id, name, now()) do
+      {release_session_pin!(session), name}
+    else
+      {session, nil}
+    end
+  end
+
+  # Clears the pin AND the session id together: another runner must never be handed
+  # `--resume <id>` for a session that lives on a different machine's disk.
+  defp release_session_pin!(%TalkSession{} = session) do
+    session
+    |> TalkSession.changeset(%{pinned_runner_name: nil, claude_session_id: nil})
+    |> Repo.update!()
+  end
+
+  @doc """
+  RE493's sweep (run every 30s by `Hamaca.Talk.PinReaper`): a turn already `:queued` on a pin
+  whose runner is gone (`Runs.affinity_holder_gone?/3`) is released exactly as a post-time
+  release would be — the job unpinned with no `resume_session`, the session's pin and
+  `claude_session_id` cleared, and one `:error` notice on that turn. Catches what the post-time
+  check cannot: a holder that disappears (or is renamed) after the turn was posted.
+
+  Each release is one transaction under the session lock, guarded by `Runs.release_talk_job/1`:
+  a job claimed or revoked since the candidate read rolls back, clearing nothing and announcing
+  nothing. Idempotent — a released job is unpinned and no longer a candidate. Claimed jobs and
+  live or merely stale pins are never touched. `now` defaults to wall time.
+  """
+  @spec release_gone_pins(DateTime.t() | nil) :: :ok
+  def release_gone_pins(now \\ nil) do
+    now = now || now()
+
+    for {job, board_id, card_id} <- Runs.queued_pinned_talk_jobs(),
+        Runs.affinity_holder_gone?(board_id, job.runner_name, now),
+        do: release_gone_pin_job(job, board_id, card_id)
+
+    :ok
+  end
+
+  # Broadcasts after commit, never inside (the `stop_turn/1` convention): a rolled-back release
+  # announces nothing.
+  defp release_gone_pin_job(job, board_id, card_id) do
+    case Repo.transaction(fn -> release_queued_job!(job, card_id) end) do
+      {:ok, notices} ->
+        Enum.each(notices, &broadcast(card_id, {:talk_event, &1}))
+        Runs.broadcast_run_changed(board_id, card_id)
+
+      {:error, :not_queued} ->
+        :ok
+    end
+  end
+
+  defp release_queued_job!(%NodeJob{} = job, card_id) do
+    session = Repo.one!(from s in TalkSession, where: s.card_id == ^card_id, select: s.id)
+    locked = lock_session!(session)
+
+    with {:error, reason} <- Runs.release_talk_job(job), do: Repo.rollback(reason)
+
+    locked = release_session_pin!(locked)
+
+    # An orphaned job (no turn names it) is still released; it just has no line to carry a notice.
+    case Repo.one(from t in TalkTurn, where: t.node_job_id == ^job.id) do
+      nil -> []
+      turn -> insert_lines!(locked, turn, [notice_line(job.runner_name)])
+    end
+  end
+
+  defp notice_line(runner_name) do
+    %{client_seq: @notice_client_seq, kind: :error, text: notice_text(runner_name), dim: false}
+  end
+
+  defp notice_text(runner_name) do
+    ~s(Runner "#{runner_name}" is gone — this message starts a fresh session on the next available runner. It won't remember earlier turns.)
   end
 
   @doc """
@@ -176,9 +273,18 @@ defmodule Hamaca.Talk do
     {:ok, stored}
   end
 
-  # One transaction, one lock: SELECT ... FOR UPDATE on the session row serialises seq
-  # assignment, so two concurrent batches can never claim the same number.
+  # Untrusted lines (the runner's batch, and the human's own line) are normalized first; the
+  # shared core below does the rest.
   defp insert_events!(session, turn, raw) do
+    lines = raw |> Enum.map(&normalize_event/1) |> Enum.reject(&(&1 == :invalid))
+    insert_lines!(session, turn, lines)
+  end
+
+  # The shared insert core, and the server-authored path (the RE493 notice): already-built
+  # `%{client_seq:, kind:, text:, dim:}` attrs, so `normalize_event/1` is skipped. One
+  # transaction, one lock: SELECT ... FOR UPDATE on the session row serialises seq assignment,
+  # so two concurrent batches can never claim the same number.
+  defp insert_lines!(session, turn, lines) do
     locked = lock_session!(session.id)
 
     seen =
@@ -187,9 +293,8 @@ defmodule Hamaca.Talk do
       |> MapSet.new()
 
     {stored, last} =
-      raw
-      |> Enum.map(&normalize_event/1)
-      |> Enum.reject(&(&1 == :invalid or &1.client_seq in seen))
+      lines
+      |> Enum.reject(&(&1.client_seq in seen))
       |> Enum.uniq_by(& &1.client_seq)
       |> Enum.reduce({[], locked.last_event_seq}, fn attrs, {acc, seq} ->
         next = seq + 1
@@ -500,4 +605,6 @@ defmodule Hamaca.Talk do
   end
 
   defp broadcast(card_id, message), do: Phoenix.PubSub.broadcast(@pubsub, topic(card_id), message)
+
+  defp now, do: DateTime.truncate(DateTime.utc_now(), :second)
 end

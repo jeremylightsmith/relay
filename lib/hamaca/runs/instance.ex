@@ -26,9 +26,10 @@ defmodule Hamaca.Runs.Instance do
   """
 
   # No `use Boundary`: this module belongs to the `Hamaca.Runs` sub-boundary declared in
-  # `lib/hamaca.ex`, like `Hamaca.Runs.Capacity`. Nothing outside `Hamaca.Runs` calls it except
-  # `Hamaca.DataCase` and `Hamaca.Runs.FakeDispatcher`, both of which are `check: [out: false]`, so
-  # it needs no export.
+  # `lib/hamaca.ex`, like `Hamaca.Runs.Capacity`. `Hamaca.Runs` exports it to its sibling
+  # contexts for one seam only: `Hamaca.Talk.PinReaper` (RE493) is a supervised clock outside
+  # the engine and calls `adopt_callers/1` the same way `Hamaca.Runs.RunnerReaper` does. It is
+  # not in `Hamaca`'s exports, so the web layer still cannot reach it.
 
   alias Hamaca.Runs.Capacity
 
