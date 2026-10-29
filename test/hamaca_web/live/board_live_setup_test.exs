@@ -148,6 +148,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       assert install =~ "curl -fsSL"
       assert install =~ "/b/#{board.slug}/install | sh"
       assert text(view, "#setup-then") =~ "Open claude in the same folder"
+      assert text(view, "#setup-then") =~ Setup.onboarding_llm("claude-code").onboard_command
     end
 
     # Scenario 5 (after scenario 3's pick)
@@ -159,6 +160,18 @@ defmodule HamacaWeb.BoardLiveSetupTest do
 
       assert text(view, "#setup-then") =~ "Open codex in the same folder"
       assert text(view, "#setup-install-command") =~ "/b/#{board.slug}/install | sh"
+    end
+
+    # RE468 scenario 7
+    test "step 4's then-row names codex's onboard command after the codex pick", %{conn: conn, user: user} do
+      board = create!(user, "bare-minimum")
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      pick!(view, "codex")
+      {:ok, _} = Setup.advance(board, "3", :done, %{})
+
+      then_text = text(view, "#setup-then")
+      assert then_text =~ Setup.onboarding_llm("codex").onboard_command
+      refute then_text =~ Setup.onboarding_llm("claude-code").onboard_command
     end
 
     # Scenario 6

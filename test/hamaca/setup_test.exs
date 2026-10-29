@@ -141,7 +141,8 @@ defmodule Hamaca.SetupTest do
       assert Enum.map(five.children, & &1.id) == ~w(5.1 5.2 5.3 5.4 5.5 5.6 5.7 5.8)
       assert Enum.all?(five.children, &(&1.status == :pending))
       assert five.title == "Onboard, in Claude Code"
-      assert String.starts_with?(five.why, "Open claude in your repo and run /hamaca-onboard.")
+      claude_cmd = Setup.onboarding_llm("claude-code").onboard_command
+      assert String.starts_with?(five.why, "Open claude in your repo and run #{claude_cmd}.")
     end
 
     # RE457 scenario 9
@@ -168,7 +169,8 @@ defmodule Hamaca.SetupTest do
 
       assert ".hamaca/runner.json — runner settings, base set to your default branch (kept if present)" in by_id["4"].what_this_does
 
-      assert by_id["5"].what_this_does == ["Run /hamaca-onboard in your repo; it works sub-steps 5.1–5.8 below."]
+      claude_cmd = Setup.onboarding_llm("claude-code").onboard_command
+      assert by_id["5"].what_this_does == ["Run #{claude_cmd} in your repo; it works sub-steps 5.1–5.8 below."]
 
       assert by_id["6"].what_this_does == [
                "Run ./hamaca start in its own terminal. This ticks on the runner's first heartbeat."
@@ -516,6 +518,18 @@ defmodule Hamaca.SetupTest do
       assert Enum.find(checklist.steps, &(&1.id == "5")).title == "Onboard, in Codex"
     end
 
+    # RE468 scenario 3
+    test "codex's step 5 names the codex onboard command", %{board: board, user: user} do
+      assert {:ok, _} = Setup.choose_llm(board, user, "codex")
+      codex_cmd = Setup.onboarding_llm("codex").onboard_command
+
+      five = board |> Setup.checklist() |> Map.fetch!(:steps) |> Enum.find(&(&1.id == "5"))
+
+      assert String.starts_with?(five.why, "Open codex in your repo and run #{codex_cmd}.")
+      assert five.what_this_does == ["Run #{codex_cmd} in your repo; it works sub-steps 5.1–5.8 below."]
+      refute Enum.any?([five.why | five.what_this_does], &(&1 =~ "%{"))
+    end
+
     # Scenario 10
     test "codex on three-brain reuses the existing GPT agent" do
       user = insert(:user)
@@ -854,6 +868,23 @@ defmodule Hamaca.SetupTest do
       gemini = Setup.onboarding_llm("gemini-cli")
       assert gemini.skill_dir == nil
       assert gemini.skill_path == nil
+    end
+
+    # RE468 scenario 1 — the one place the two literals are stated: it pins the facts themselves.
+    test "onboarding_llm/1 carries each LLM's onboard command" do
+      assert Setup.onboarding_llm("claude-code").onboard_command == "/hamaca-onboard"
+      assert Setup.onboarding_llm("codex").onboard_command == "$hamaca-onboard"
+      assert Setup.onboarding_llm("gemini-cli").onboard_command == nil
+    end
+
+    # RE468 scenario 2
+    test "onboard_command/1 answers the LLM's command, else the default harness's" do
+      codex = Setup.onboarding_llm("codex")
+      default_cmd = Setup.onboarding_llm(Agents.default_harness_key()).onboard_command
+
+      assert Setup.onboard_command(codex) == codex.onboard_command
+      assert Setup.onboard_command(Setup.onboarding_llm("gemini-cli")) == default_cmd
+      assert Setup.onboard_command(nil) == default_cmd
     end
 
     # RE457 scenario 5

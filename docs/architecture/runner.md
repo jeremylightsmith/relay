@@ -514,7 +514,9 @@ as `curl -fsSL <host>/b/<slug>/install | sh` with `RELAY_API_KEY` exported, it:
    onboarding CLI, using only `curl git python3 uname mktemp mkdir chmod mv rm cat grep printf`;
 2. `POST /api/setup/preflight` (board key) — the key's first authed call, which ticks setup step 3
    and marks step 4 `waiting` or `failed` with the fix text. The answer's `llm` carries
-   `harness` / `label` / `cli` / `skill_dir` / `skill_path` / `pointer_file`, and (RE457) its
+   `harness` / `label` / `cli` / `skill_dir` / `skill_path` / `pointer_file` / `onboard_command`
+   (RE468 — how that LLM invokes the onboard skill, e.g. `/hamaca-onboard` or `$hamaca-onboard`;
+   `GET /api/setup`'s `llm` does not carry it), and (RE457) its
    `relay_files` is `Hamaca.Scaffold.primary_items(llm.skill_dir)` (RE478) — `hamaca`, `hamaca.md`
    and the three `hamaca-*` skills under that LLM's skill dir, never the shim or the aliases. It prints the board's answer, one
    `ok`/`!!` line per check; on any failure, the fixes and `fix_command`, then exits 1 having
@@ -535,7 +537,8 @@ as `curl -fsSL <host>/b/<slug>/install | sh` with `RELAY_API_KEY` exported, it:
 4. `POST /api/setup/installed` (board key) with `files`: `hamaca`, then every other path in the
    update report's `written` (once, in report order), then the pointer file, `.hamaca/runner.json`,
    `.hamaca/prepare-worktree.sh` and `.gitignore`. That finishes step 4 and activates step 5; the
-   script then prints `Next: open <cli> here and run /hamaca-onboard`.
+   script then prints `Next: open <cli> here and run <llm.onboard_command>`, read from the preflight
+   answer at run time (printed from a variable, so Codex's `$hamaca-onboard` is never expanded).
 
 The key travels only in the `Authorization` header and is never written to a file. Both
 `/api/setup/*` endpoints refuse a key from another board (`403 wrong_board`); preflight also

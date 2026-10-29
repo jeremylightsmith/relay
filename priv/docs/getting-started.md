@@ -47,10 +47,16 @@ anything.
 
 ## 5. Onboard with your agent
 
-Open Claude Code in your repo and run:
+Open your agent in your repo and run the onboard skill. In Claude Code, run:
 
 ```
 /hamaca-onboard
+```
+
+In Codex, type this (or pick it from `/skills`):
+
+```
+$hamaca-onboard
 ```
 
 It asks a few questions about your project, shows you each change before making it, turns on

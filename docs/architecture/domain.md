@@ -1196,11 +1196,14 @@ sharing behavior.
   (`steps/0`, in order 1–5, 5.1–5.8, 6, 7: `id`, `parent`, `title`, `done_title`, `actor` —
   `actors/0` = `:you_here | :you_terminal | :ai_terminal` — `why`, `what_this_does`,
   `read_only_note`; strings carry `%{template}` / `%{llm}` / `%{skill_dir}` / `%{skill_path}` / `%{pointer_file}`
-  placeholders that only `checklist/1` resolves) and the onboarding LLMs (`onboarding_llms/0`,
+  / `%{onboard_command}` placeholders that only `checklist/1` resolves) and the onboarding LLMs (`onboarding_llms/0`,
   `onboarding_llm/1`: `harness` / `label` read from `Hamaca.Agents.seed_harnesses/0`, plus `cli`,
-  `blurb`, `install`, `skill_dir`, `skill_path`, `pointer_file`, `recommended?`, `enabled?` — Gemini
-  CLI is disabled; `skill_path` is derived from `skill_dir`, and Claude Code's `skill_dir` is
-  `Hamaca.Scaffold.skill_dir/0`). It is also the ONE Elixir definition of the `hamaca.md` pointer
+  `blurb`, `install`, `skill_dir`, `skill_path`, `pointer_file`, `onboard_command`, `recommended?`,
+  `enabled?` — Gemini CLI is disabled; `skill_path` is derived from `skill_dir`, and Claude Code's
+  `skill_dir` is `Hamaca.Scaffold.skill_dir/0`; `onboard_command` is how that CLI invokes the onboard
+  skill, Claude Code `/hamaca-onboard`, Codex `$hamaca-onboard`, and `onboard_command/1` answers it
+  for an LLM, falling back to the default harness's LLM's for a disabled LLM or nil — the wizard's
+  step-4 then row, step-5 copy and step-5 peek all read it). It is also the ONE Elixir definition of the `hamaca.md` pointer
   line (`pointer_line/0`) and of the default-LLM switch flash (`llm_switch_notice/2`, RE457: the
   `./hamaca update --skill-dir … --pointer-file …` command, or nil when the skill dir is unchanged). Storage is one `Schemas.BoardSetupStep` row per `(board, step)`; `start/2` inserts
   all 15 (step 1 done with `"<N> stages · <M> flows · HH:MM"` and the template's name and

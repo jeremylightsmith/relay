@@ -771,7 +771,9 @@ defmodule HamacaWeb.SetupComponentsTest do
     test "steps 5 and 6 peek at their commands; step 5's sub-steps stay" do
       doc = peek_doc(peeks: ["5", "6"])
 
-      assert doc |> only("#c-step-5-peek #c-onboard-command code") |> squish() == "/hamaca-onboard"
+      assert doc |> only("#c-step-5-peek #c-onboard-command code") |> squish() ==
+               Setup.onboarding_llm("claude-code").onboard_command
+
       assert present?(doc, "#c-onboard-command-copy")
       for n <- 1..8, do: assert(present?(doc, "#c-step-5-#{n}"))
 
@@ -782,6 +784,40 @@ defmodule HamacaWeb.SetupComponentsTest do
       # The peek sits before step 5's sub-step list.
       ids = doc |> LazyHTML.query("#c-step-5-peek, #c-step-5-1") |> LazyHTML.attribute("id")
       assert ids == ["c-step-5-peek", "c-step-5-1"]
+    end
+
+    # RE468 scenario 5
+    test "step 5's peek names the codex onboard command on a Codex checklist" do
+      doc = peek_doc(checklist: finished(%{llm: Setup.onboarding_llm("codex")}), peeks: ["5"])
+
+      assert doc |> only("#c-step-5-peek #c-onboard-command code") |> squish() ==
+               Setup.onboarding_llm("codex").onboard_command
+    end
+
+    # RE468 scenario 6
+    test "step 4's then row names the chosen LLM's onboard command" do
+      codex = Setup.onboarding_llm("codex")
+      claude = Setup.onboarding_llm("claude-code")
+
+      then_text = fn llm ->
+        rows = %{"1" => :done, "2" => :done, "3" => :done, "4" => :active}
+
+        (&SetupComponents.setup_checklist/1)
+        |> render_component(
+          id: "c",
+          checklist: Setup.preview_checklist(rows, peek_context(%{llm: llm})),
+          install_command: "curl -fsSL https://x/b/s/install | sh"
+        )
+        |> LazyHTML.from_fragment()
+        |> only("#c-then")
+        |> squish()
+      end
+
+      codex_then = then_text.(codex)
+      assert codex_then =~ "Open codex in the same folder and run #{codex.onboard_command}."
+      refute codex_then =~ claude.onboard_command
+
+      assert then_text.(claude) =~ "Open claude in the same folder and run #{claude.onboard_command}."
     end
 
     # Scenario 10

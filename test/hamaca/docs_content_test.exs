@@ -1,6 +1,8 @@
 defmodule Hamaca.DocsContentTest do
   use ExUnit.Case, async: true
 
+  alias Hamaca.Setup
+
   defp read(file), do: File.read!(Application.app_dir(:hamaca, "priv/docs/#{file}"))
 
   @expected [
@@ -267,6 +269,16 @@ defmodule Hamaca.DocsContentTest do
       refute doc =~ "RELAY_API_KEY", "#{name} still names RELAY_API_KEY"
       refute doc =~ "RELAY_URL", "#{name} still names RELAY_URL"
     end
+  end
+
+  # RE468 task 2 scenario 5
+  test "getting-started section 5 names each agent's onboard command and /skills" do
+    [_, rest] = String.split(read("getting-started.md"), "## 5. Onboard with your agent\n")
+    [section | _] = String.split(rest, "\n## ", parts: 2)
+
+    assert section =~ Setup.onboarding_llm("claude-code").onboard_command
+    assert section =~ Setup.onboarding_llm("codex").onboard_command
+    assert section =~ "/skills"
   end
 
   test "the glossary defines Runner and notes that older mockups use the old word (RE319)" do

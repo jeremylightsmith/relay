@@ -188,6 +188,7 @@ report
 cli=$(field llm.cli)
 skill_dir=$(field llm.skill_dir)
 pointer_file=$(field llm.pointer_file)
+onboard_cmd=$(field llm.onboard_command)
 
 pointer_note=
 has_line "$POINTER" "$pointer_file" || pointer_note=" (+1 line)"
@@ -257,4 +258,4 @@ api_post /api/setup/installed "$body" && [ "$status" = 200 ] ||
 
 say ""
 say "Done. Nothing is committed yet; onboarding does that with you."
-say "Next: open $cli here and run /hamaca-onboard"
+say "Next: open $cli here and run $onboard_cmd"

@@ -91,7 +91,9 @@ defmodule HamacaWeb.Api.SetupControllerTest do
                "cli" => "claude",
                "skill_dir" => ".claude/skills",
                "skill_path" => ".claude/skills/hamaca-onboard/SKILL.md",
-               "pointer_file" => "CLAUDE.md"
+               "pointer_file" => "CLAUDE.md",
+               # RE468: the install script prints the board LLM's own onboard command.
+               "onboard_command" => Setup.onboarding_llm("claude-code").onboard_command
              }
 
       # RE478: the wizard lists the Hamaca-named files — never the ./relay shim or the aliases.

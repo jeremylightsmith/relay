@@ -5,8 +5,8 @@ defmodule Hamaca.Setup do
 
   This module owns the step **catalog** (`steps/0`), the ONE list of step ids, titles, actors,
   *why* and *what this does* lines; every surface renders from it through `checklist/1`, the only
-  place the `%{template}`, `%{llm}`, `%{cli}`, `%{skill_dir}`, `%{skill_path}` and `%{pointer_file}` placeholders
-  resolve. It also owns the onboarding LLMs (`onboarding_llms/0`) step 2 offers.
+  place the `%{template}`, `%{llm}`, `%{cli}`, `%{skill_dir}`, `%{skill_path}`, `%{pointer_file}` and
+  `%{onboard_command}` placeholders resolve. It also owns the onboarding LLMs (`onboarding_llms/0`) step 2 offers.
 
   Storage is one `Schemas.BoardSetupStep` row per `(board, catalog id)`, inserted by `start/2`
   from `Hamaca.Boards.create_board/2` on the template path only — a board with no rows has no
@@ -97,6 +97,7 @@ defmodule Hamaca.Setup do
           skill_dir: String.t() | nil,
           skill_path: String.t() | nil,
           pointer_file: String.t() | nil,
+          onboard_command: String.t() | nil,
           recommended?: boolean(),
           enabled?: boolean()
         }
@@ -261,8 +262,8 @@ defmodule Hamaca.Setup do
                short: "onboard",
                actor: :ai_terminal,
                why:
-                 "Open %{cli} in your repo and run /hamaca-onboard. It works this list until it's green and asks you in the chat when it's stuck.",
-               what_this_does: ["Run /hamaca-onboard in your repo; it works sub-steps 5.1–5.8 below."],
+                 "Open %{cli} in your repo and run %{onboard_command}. It works this list until it's green and asks you in the chat when it's stuck.",
+               what_this_does: ["Run %{onboard_command} in your repo; it works sub-steps 5.1–5.8 below."],
                connect_why:
                  "Pulls the board's flows and checks the Hamaca files are already on origin/main. No interview, no customizing."
              }
@@ -419,7 +420,8 @@ defmodule Hamaca.Setup do
   @advance_statuses [:waiting, :done, :failed, :skipped]
 
   # Onboarding facts per harness key; `harness` and `label` come from `Agents.seed_harnesses/0`.
-  # This map is the only place the per-CLI skill directory and pointer file are written;
+  # This map is the only place the per-CLI skill directory, pointer file and onboard command (how
+  # that CLI invokes the hamaca-onboard skill) are written;
   # `skill_path` is derived from `skill_dir` by `onboarding_llms/0`, never stored here.
   @llm_facts %{
     "claude-code" => %{
@@ -428,6 +430,7 @@ defmodule Hamaca.Setup do
       install: "npm install -g @anthropic-ai/claude-code",
       skill_dir: Scaffold.skill_dir(),
       pointer_file: "CLAUDE.md",
+      onboard_command: "/hamaca-onboard",
       recommended?: true,
       enabled?: true
     },
@@ -437,6 +440,7 @@ defmodule Hamaca.Setup do
       install: "npm install -g @openai/codex",
       skill_dir: ".agents/skills",
       pointer_file: "AGENTS.md",
+      onboard_command: "$hamaca-onboard",
       recommended?: false,
       enabled?: true
     },
@@ -446,6 +450,7 @@ defmodule Hamaca.Setup do
       install: nil,
       skill_dir: nil,
       pointer_file: nil,
+      onboard_command: nil,
       recommended?: false,
       enabled?: false
     }
@@ -459,8 +464,8 @@ defmodule Hamaca.Setup do
 
   @doc """
   The ONE step catalog, in order `1, 2, 3, 4, 5, 5.1 … 5.8, 6, 7`. Sub-steps carry `parent: "5"`.
-  Strings may hold `%{template}`, `%{llm}`, `%{cli}`, `%{skill_dir}`, `%{skill_path}` and `%{pointer_file}`,
-  resolved only by `checklist/1`.
+  Strings may hold `%{template}`, `%{llm}`, `%{cli}`, `%{skill_dir}`, `%{skill_path}`, `%{pointer_file}`
+  and `%{onboard_command}`, resolved only by `checklist/1`.
   """
   @spec steps() :: [step()]
   def steps, do: @steps
@@ -538,6 +543,14 @@ defmodule Hamaca.Setup do
   @doc "The onboarding LLM for a harness key, or nil."
   @spec onboarding_llm(String.t() | nil) :: llm() | nil
   def onboarding_llm(harness_key), do: Enum.find(onboarding_llms(), &(&1.harness == harness_key))
+
+  @doc """
+  How `llm` invokes the onboard skill (`llm.onboard_command`). An LLM with none (a disabled one)
+  or nil answers the default harness's LLM's, as `install_llm/1` falls back.
+  """
+  @spec onboard_command(llm() | nil) :: String.t()
+  def onboard_command(%{onboard_command: command}) when is_binary(command), do: command
+  def onboard_command(_llm), do: onboarding_llm(Agents.default_harness_key()).onboard_command
 
   @doc ~S"""
   The one line a project's pointer file (`CLAUDE.md`, `AGENTS.md`) carries to `hamaca.md`. The ONE
@@ -619,7 +632,7 @@ defmodule Hamaca.Setup do
          %{
            ok: is_nil(failed),
            board: board.name,
-           llm: Map.take(llm, [:harness, :label, :cli, :skill_dir, :skill_path, :pointer_file]),
+           llm: Map.take(llm, [:harness, :label, :cli, :skill_dir, :skill_path, :pointer_file, :onboard_command]),
            relay_files: Scaffold.primary_items(llm.skill_dir),
            checks: checks
          },
@@ -1932,6 +1945,7 @@ defmodule Hamaca.Setup do
       "%{skill_dir}" => to_string(llm.skill_dir),
       "%{skill_path}" => to_string(llm.skill_path),
       "%{pointer_file}" => to_string(llm.pointer_file),
+      "%{onboard_command}" => onboard_command(llm),
       "%{board}" => to_string(context[:board_name])
     }
 

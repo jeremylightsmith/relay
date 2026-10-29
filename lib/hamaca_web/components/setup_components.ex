@@ -82,8 +82,7 @@ defmodule HamacaWeb.SetupComponents do
   # The steps whose peek carries controls, by `Hamaca.Setup.step_id/1` role (RE456).
   @peek_roles [:llm, :key, :install, :onboard, :runner]
 
-  # What step 5 and step 6 have you run.
-  @onboard_command "/hamaca-onboard"
+  # What step 6 has you run.
   @runner_command "./hamaca start"
 
   # ---------------------------------------------------------------- checklist
@@ -467,7 +466,11 @@ defmodule HamacaWeb.SetupComponents do
 
   defp peek_controls(%{role: :onboard} = assigns) do
     ~H"""
-    <.code_row id={"#{@prefix}-onboard-command"} text={onboard_command()} label="Copy command" />
+    <.code_row
+      id={"#{@prefix}-onboard-command"}
+      text={Setup.onboard_command(@checklist.llm)}
+      label="Copy command"
+    />
     """
   end
 
@@ -486,8 +489,6 @@ defmodule HamacaWeb.SetupComponents do
   # Step 3's key as the board knows it: the prefix and the last four, never the token.
   defp masked_key(%{token_prefix: prefix, last_four: last_four}),
     do: "export HAMACA_API_KEY=relay_#{prefix}_••••#{last_four}"
-
-  defp onboard_command, do: @onboard_command
 
   @doc "The command that starts a runner: step 6's code row and the Runners page's empty state."
   @spec runner_command() :: String.t()
@@ -1008,7 +1009,7 @@ defmodule HamacaWeb.SetupComponents do
       </span>
       <span>
         Open <code class="font-mono">{@llm.cli}</code>
-        in the same folder and run <code class="font-mono">{onboard_command()}</code>.
+        in the same folder and run <code class="font-mono">{Setup.onboard_command(@llm)}</code>.
       </span>
     </div>
     """

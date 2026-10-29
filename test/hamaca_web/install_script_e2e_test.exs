@@ -169,7 +169,10 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     assert %{"current" => true, "local_version" => version} = decode_report!(check_out)
     assert is_binary(version)
 
-    assert out |> String.trim_trailing() |> String.ends_with?("Next: open claude here and run /hamaca-onboard")
+    # RE468 task 2 scenario 3
+    assert out
+           |> String.trim_trailing()
+           |> String.ends_with?("Next: open claude here and run #{Setup.onboarding_llm("claude-code").onboard_command}")
   end
 
   # RE457 scenario 4
@@ -221,7 +224,11 @@ defmodule HamacaWeb.InstallScriptE2ETest do
       refute File.read!(path) =~ ctx.token, "#{path} contains the key"
     end
 
-    assert out |> String.trim_trailing() |> String.ends_with?("Next: open codex here and run /hamaca-onboard")
+    # RE468 task 2 scenario 2: `$hamaca-onboard` printed literally, never shell-expanded.
+    assert out
+           |> String.trim_trailing()
+           |> String.ends_with?("Next: open codex here and run #{Setup.onboarding_llm("codex").onboard_command}")
+
     assert out =~ "Hamaca install for board Streaks · default LLM: Codex"
     assert step(ctx.board, "4").status == :done
     assert step(ctx.board, "5").status == :active
@@ -285,12 +292,17 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     assert step(ctx.board, "3").status == :active
   end
 
-  # RE478 task 4 scenario 3: the script a new board hands out names only the Hamaca CLI.
-  test "the rendered script names ./hamaca, /hamaca-onboard and HAMACA_API_KEY, never the relay names", ctx do
+  # RE478 task 4 scenario 3, RE468 task 2 scenario 4: the script a new board hands out names only
+  # the Hamaca CLI, and reads the onboard command from the board instead of naming one.
+  test "the rendered script names ./hamaca and HAMACA_API_KEY, reads the onboard command from the board, never the relay names",
+       ctx do
     script = File.read!(ctx.script)
 
-    for name <- ["./hamaca", "/hamaca-onboard", "HAMACA_API_KEY"], do: assert(script =~ name, "missing #{name}")
-    for name <- ["./relay", "/relay-onboard", "RELAY_API_KEY"], do: refute(script =~ name, "still names #{name}")
+    for name <- ["./hamaca", "HAMACA_API_KEY", "field llm.onboard_command"],
+        do: assert(script =~ name, "missing #{name}")
+
+    for name <- ["/hamaca-onboard", "./relay", "/relay-onboard", "RELAY_API_KEY"],
+        do: refute(script =~ name, "still names #{name}")
   end
 
   defp run_script(ctx) do
