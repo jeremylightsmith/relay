@@ -71,18 +71,28 @@ defmodule Hamaca.Votes do
   Up to `limit` supporters of `card`, most-recent first, plus the total count:
   `{[%User{}], total}`. Drives the drawer's PUBLIC SUPPORT block and the public
   detail modal's supporter list.
+
+  Option `exclude_user_id:` (RE500) drops that user from both the faces and the count — the
+  drawer passes the card's requester so it lists only the *other* supporters. `nil` or absent
+  excludes nobody.
   """
-  def supporters(%Card{id: card_id}, limit) when is_integer(limit) do
+  def supporters(%Card{id: card_id}, limit, opts \\ []) when is_integer(limit) do
+    votes = card_id |> card_votes() |> excluding(Keyword.get(opts, :exclude_user_id))
+
     users =
       Repo.all(
-        from v in Vote,
+        from v in votes,
           join: u in assoc(v, :user),
-          where: v.card_id == ^card_id,
           order_by: [desc: v.inserted_at, desc: v.id],
           limit: ^limit,
           select: u
       )
 
-    {users, count(card_id)}
+    {users, Repo.one(from v in votes, select: count(v.id))}
   end
+
+  defp card_votes(card_id), do: from(v in Vote, where: v.card_id == ^card_id)
+
+  defp excluding(query, nil), do: query
+  defp excluding(query, user_id), do: from(v in query, where: v.user_id != ^user_id)
 end

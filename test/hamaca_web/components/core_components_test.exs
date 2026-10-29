@@ -256,10 +256,160 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert doc |> LazyHTML.query(~s(.card-meta > span[style="flex:1;"])) |> Enum.count() == 0
     end
 
+    test "a user requester renders as a 16px ringless avatar right after the ref, with no name text (RE500)" do
+      doc =
+        render_card(%{
+          ref: "RE513",
+          requester: %{name: "Jeremy Lightsmith", email: "j@x.co", avatar_url: nil},
+          public: false
+        })
+
+      requester = LazyHTML.query(doc, ".card-meta > :nth-child(2)")
+      assert LazyHTML.attribute(requester, "class") == ["card-requester"]
+      assert LazyHTML.attribute(requester, "data-requester") == ["user"]
+      assert LazyHTML.attribute(requester, "title") == ["Requested by Jeremy Lightsmith"]
+
+      [avatar_style] = requester |> LazyHTML.query("[data-avatar]") |> LazyHTML.attribute("style")
+      assert avatar_style =~ "width:16px"
+      refute avatar_style =~ "box-shadow"
+
+      refute doc |> LazyHTML.query("article") |> LazyHTML.text() =~ "Jeremy"
+    end
+
+    test "a public card's requester title notes it came via the public board (RE500)" do
+      doc =
+        render_card(%{
+          requester: %{name: "Dana Kim", email: "dana@acme.co", avatar_url: nil},
+          public: true,
+          vote_count: 4
+        })
+
+      assert doc |> LazyHTML.query(".card-requester") |> LazyHTML.attribute("title") ==
+               ["Requested by Dana Kim · via public board"]
+    end
+
+    test "an agent requester renders the AI avatar titled Requested by Hamaca AI (RE500)" do
+      doc = render_card(%{requester: :ai})
+
+      requester = LazyHTML.query(doc, ~s(.card-requester[data-requester="ai"]))
+      assert LazyHTML.attribute(requester, "title") == ["Requested by Hamaca AI"]
+      assert requester |> LazyHTML.query(~s([data-avatar="ai"])) |> Enum.count() == 1
+    end
+
+    test "a requester without a name is titled by email (RE500)" do
+      doc = render_card(%{requester: %{name: nil, email: "anon@x.co", avatar_url: nil}})
+
+      assert doc |> LazyHTML.query(".card-requester") |> LazyHTML.attribute("title") == ["Requested by anon@x.co"]
+    end
+
+    test "no requester renders no requester avatar and keeps the ref first (RE500)" do
+      doc = render_card(%{})
+
+      assert doc |> LazyHTML.query(".card-requester") |> Enum.count() == 0
+      assert doc |> LazyHTML.query(".card-meta > .card-ref:first-child") |> Enum.count() == 1
+    end
+
+    test "a public Done card shows the outlined ↑1 pill as a span (RE500)" do
+      doc =
+        render_card(%{
+          public: true,
+          vote_count: 1,
+          category: :complete,
+          stage_type: :done,
+          status: :ready,
+          done: true
+        })
+
+      pill = LazyHTML.query(doc, ".card-public-votes")
+      assert Enum.count(pill) == 1
+      assert doc |> LazyHTML.query("span.card-public-votes") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("button.card-public-votes") |> Enum.count() == 0
+      assert LazyHTML.attribute(pill, "data-support-count") == ["1"]
+      assert pill |> LazyHTML.text() |> String.replace(~r/\s+/, "") == "↑1"
+
+      [style] = LazyHTML.attribute(pill, "style")
+      assert style =~ "padding:1px 7px"
+      assert style =~ "border-radius:7px"
+      assert style =~ "font-size:11px"
+      assert style =~ "border:1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100))"
+      assert style =~ "background:var(--color-base-100)"
+    end
+
+    test "a public card shows the outlined pill in every stage category, never the muted badge (RE500)" do
+      for category <- [:unstarted, :planning, :in_progress, :complete] do
+        doc = render_card(%{public: true, vote_count: 12, category: category})
+
+        pill = LazyHTML.query(doc, ".card-public-votes")
+        assert Enum.count(pill) == 1, "expected one public pill for #{category}"
+        assert pill |> LazyHTML.text() |> String.replace(~r/\s+/, "") == "↑12"
+        assert doc |> LazyHTML.query(".card-votes") |> Enum.count() == 0
+      end
+    end
+
+    test "the public pill immediately follows the requester avatar (RE500)" do
+      doc =
+        render_card(%{
+          public: true,
+          vote_count: 2,
+          requester: %{name: "Dana Kim", email: "dana@acme.co", avatar_url: nil}
+        })
+
+      assert doc |> LazyHTML.query(".card-requester + .card-public-votes") |> Enum.count() == 1
+    end
+
+    test "a non-public in-progress card shows no vote badge at all (RE500)" do
+      doc = render_card(%{public: false, vote_count: 3, category: :in_progress})
+
+      assert doc |> LazyHTML.query(".card-votes") |> Enum.count() == 0
+      assert doc |> LazyHTML.query(".card-public-votes") |> Enum.count() == 0
+    end
+
+    test "a non-public unstarted card keeps the muted ↑N badge (RE500)" do
+      doc = render_card(%{public: false, vote_count: 3, category: :unstarted})
+
+      votes = LazyHTML.query(doc, ".card-votes")
+      assert Enum.count(votes) == 1
+      assert votes |> LazyHTML.text() |> String.replace(~r/\s+/, "") == "↑3"
+      assert doc |> LazyHTML.query(".card-public-votes") |> Enum.count() == 0
+    end
+
+    test "a public card's face never says public (RE500)" do
+      doc =
+        render_card(%{
+          public: true,
+          vote_count: 5,
+          tag: "export",
+          requester: %{name: "Dana Kim", email: "dana@acme.co", avatar_url: nil}
+        })
+
+      refute doc |> LazyHTML.query("article") |> LazyHTML.text() |> String.downcase() =~ "public"
+
+      refute doc
+             |> LazyHTML.query("article *")
+             |> Enum.any?(&(&1 |> LazyHTML.text() |> String.trim() |> String.downcase() == "public"))
+    end
+
+    defp render_card(attrs) do
+      (&CoreComponents.board_card/1)
+      |> render_component(Map.merge(%{id: "card-x", ref: "RE500", title: "Requested work"}, attrs))
+      |> LazyHTML.from_fragment()
+    end
+
     defp meta_row_ref(html) do
       html
       |> LazyHTML.from_fragment()
       |> LazyHTML.query("article.board-card > .card-meta:last-child > .card-ref:first-child")
+    end
+  end
+
+  describe "card_requester/1 (RE500)" do
+    test "maps a card to its loaded user, :ai for agent-created or plain maps, nil when not loaded" do
+      user = %Schemas.User{id: 7, name: "A"}
+
+      assert CoreComponents.card_requester(%Schemas.Card{created_by_user_id: 7, created_by_user: user}) == user
+      assert CoreComponents.card_requester(%Schemas.Card{created_by_user_id: nil, created_by_user: nil}) == :ai
+      assert CoreComponents.card_requester(%{title: "plain"}) == :ai
+      assert CoreComponents.card_requester(%Schemas.Card{created_by_user_id: 7}) == nil
     end
   end
 
@@ -1902,7 +2052,7 @@ defmodule HamacaWeb.CoreComponentsTest do
     test "the public description's Save presses to Saving…; Cancel stays idle (RE394)" do
       doc =
         drawer_doc(%{}, %{
-          vote_count: 0,
+          supporter_count: 0,
           public_description: nil,
           editing_public_desc: true,
           public_desc_form: to_form(%{"public_description" => ""})
@@ -2096,7 +2246,143 @@ defmodule HamacaWeb.CoreComponentsTest do
       html = render_component(&CoreComponents.card_drawer/1, attrs)
 
       assert rail_labels(html) ==
-               ["Status", "Blocked by", "Blocks", "Owners", "Tags", "Updated", "Flow", "Links"]
+               ["Status", "Blocked by", "Blocks", "Owners", "Tags", "Requested by", "Updated", "Flow", "Links"]
+    end
+
+    # RE500 — the drawer's Requested by row and the other supporters under it.
+    defp requester_supporters do
+      for n <- 1..5, do: %Schemas.User{id: 100 + n, name: "Supporter #{n}", email: "s#{n}@x.co", avatar_url: nil}
+    end
+
+    defp public_requester_attrs do
+      drawer_attrs(
+        %{
+          created_by_user_id: 3,
+          created_by_user: %{name: "Dana Kim", email: "dana@acme.co", avatar_url: nil},
+          posted_by_user_id: 3,
+          inserted_at: DateTime.add(DateTime.utc_now(:second), -3 * 86_400, :second)
+        },
+        %{supporter_count: 11, supporters: requester_supporters()}
+      )
+    end
+
+    defp member_requester_attrs(extra \\ %{}) do
+      drawer_attrs(
+        %{
+          created_by_user_id: 4,
+          created_by_user: %{name: "Jeremy Lightsmith", email: "jeremy@hamaca.app", avatar_url: nil},
+          posted_by_user_id: nil,
+          inserted_at: ~U[2026-10-26 09:00:00Z]
+        },
+        Map.merge(%{supporter_count: 0}, extra)
+      )
+    end
+
+    defp consecutive?(list, run), do: Enum.any?(Enum.chunk_every(list, length(run), 1, :discard), &(&1 == run))
+
+    defp requested_by(html, selector) do
+      html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-requested-by #{selector}")
+    end
+
+    defp requested_by_text(html, selector), do: html |> requested_by(selector) |> LazyHTML.text() |> String.trim()
+
+    test "RE500: Requested by and Public support sit between Tags and Updated" do
+      html = render_component(&CoreComponents.card_drawer/1, public_requester_attrs())
+
+      assert consecutive?(rail_labels(html), ["Tags", "Requested by", "Public support", "Updated"])
+    end
+
+    test "RE500: a public requester shows name, email, avatar and via public board · ago" do
+      html = render_component(&CoreComponents.card_drawer/1, public_requester_attrs())
+
+      assert [first_label] =
+               html
+               |> LazyHTML.from_fragment()
+               |> LazyHTML.query("#card-drawer-requested-by > span:first-child")
+               |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
+
+      assert first_label == "Requested by"
+      assert requested_by_text(html, ".rail-requester-name") == "Dana Kim"
+      assert requested_by_text(html, ".rail-requester-email") == "dana@acme.co"
+      assert requested_by_text(html, ".rail-requester-meta") == "via public board · 3d ago"
+
+      [meta_class] = html |> requested_by(".rail-requester-meta") |> LazyHTML.attribute("class")
+      assert meta_class =~ "text-[11.5px]"
+      assert meta_class =~ "text-base-content/65"
+
+      [style] = html |> requested_by("[data-avatar]") |> LazyHTML.attribute("style")
+      assert style =~ "width:28px"
+    end
+
+    test "RE500: Public support counts the other supporters" do
+      html = render_component(&CoreComponents.card_drawer/1, public_requester_attrs())
+
+      support = html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer-public-support") |> LazyHTML.text()
+      assert support =~ "11 supporters"
+      assert support =~ "+ 6 more"
+    end
+
+    test "RE500: a member requester shows the creation date and no Public support row" do
+      html = render_component(&CoreComponents.card_drawer/1, member_requester_attrs())
+
+      assert requested_by_text(html, ".rail-requester-meta") == "Oct 26"
+      refute rail_text(html) =~ "via public board"
+      refute present?(html, "#card-drawer-public-support")
+      assert consecutive?(rail_labels(html), ["Tags", "Requested by", "Updated"])
+    end
+
+    test "RE500: an agent card's requester is Hamaca AI with the date and no email" do
+      html =
+        render_component(
+          &CoreComponents.card_drawer/1,
+          drawer_attrs(
+            %{created_by_user_id: nil, created_by_user: nil, inserted_at: ~U[2026-10-26 09:00:00Z]},
+            %{}
+          )
+        )
+
+      assert present?(html, ~s(#card-drawer-requested-by [data-avatar="ai"]))
+      assert requested_by_text(html, ".rail-requester-name") == "Hamaca AI"
+      refute present?(html, "#card-drawer-requested-by .rail-requester-email")
+      assert requested_by_text(html, ".rail-requester-meta") == "Oct 26"
+    end
+
+    test "RE500: a plain card map with no created_by keys reads as Hamaca AI" do
+      html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{}, %{}))
+
+      assert requested_by_text(html, ".rail-requester-name") == "Hamaca AI"
+    end
+
+    test "RE500: a public requester-only card folds Public support into the unused group" do
+      attrs = fn extra ->
+        drawer_attrs(
+          %{
+            created_by_user_id: 3,
+            created_by_user: %{name: "Dana Kim", email: "dana@acme.co", avatar_url: nil},
+            posted_by_user_id: 3
+          },
+          Map.merge(%{supporter_count: 0, supporters: []}, extra)
+        )
+      end
+
+      html = render_component(&CoreComponents.card_drawer/1, attrs.(%{}))
+      refute present?(html, "#card-drawer-public-support")
+      assert present?(html, "#card-drawer-unused-toggle")
+
+      open = render_component(&CoreComponents.card_drawer/1, attrs.(%{unused_fields_open: true}))
+      assert present?(open, "#card-drawer-unused-public-support")
+    end
+
+    test "RE500: no requester byline in the drawer header and no Posted by in the rail" do
+      for attrs <- [public_requester_attrs(), member_requester_attrs(), drawer_attrs(%{}, %{})] do
+        html = render_component(&CoreComponents.card_drawer/1, attrs)
+
+        header_text =
+          html |> LazyHTML.from_fragment() |> LazyHTML.query("#card-drawer header") |> LazyHTML.text()
+
+        refute header_text =~ "Requested by"
+        refute rail_text(html) =~ "Posted by"
+      end
     end
 
     test "RE393: section_label carries the stable section-label class hook" do
@@ -2255,7 +2541,7 @@ defmodule HamacaWeb.CoreComponentsTest do
       html =
         render_component(
           &CoreComponents.card_drawer/1,
-          drawer_attrs(%{}, %{vote_count: 0, public_description: nil})
+          drawer_attrs(%{}, %{supporter_count: 0, public_description: nil})
         )
 
       assert unused_toggle_text(html) == "2 unused fields"
@@ -2284,7 +2570,7 @@ defmodule HamacaWeb.CoreComponentsTest do
       html =
         render_component(
           &CoreComponents.card_drawer/1,
-          drawer_attrs(%{}, %{vote_count: 0, public_description: nil, unused_fields_open: true})
+          drawer_attrs(%{}, %{supporter_count: 0, public_description: nil, unused_fields_open: true})
         )
 
       assert unused_toggle_text(html) == "Hide unused fields"
@@ -2312,7 +2598,7 @@ defmodule HamacaWeb.CoreComponentsTest do
       html =
         render_component(
           &CoreComponents.card_drawer/1,
-          drawer_attrs(%{}, %{vote_count: 0, public_description: "Ship the mobile app"})
+          drawer_attrs(%{}, %{supporter_count: 0, public_description: "Ship the mobile app"})
         )
 
       assert unused_toggle_text(html) == "1 unused field"
@@ -2329,12 +2615,14 @@ defmodule HamacaWeb.CoreComponentsTest do
       html =
         render_component(
           &CoreComponents.card_drawer/1,
-          drawer_attrs(%{}, %{vote_count: 2, supporters: [], public_description: "Ship it"})
+          drawer_attrs(%{}, %{supporter_count: 2, supporters: [], public_description: "Ship it"})
         )
 
       refute present?(html, "#card-drawer-unused-fields")
       refute present?(html, "#card-drawer-unused-toggle")
-      assert Enum.take(rail_labels(html), -2) == ["Public support", "Public description"]
+      # RE500 — Public support moved up under Requested by; Public description stays last.
+      assert consecutive?(rail_labels(html), ["Requested by", "Public support"])
+      assert List.last(rail_labels(html)) == "Public description"
     end
 
     test "RE282: an open description editor stays visible outside the collapsed group" do
@@ -2342,7 +2630,7 @@ defmodule HamacaWeb.CoreComponentsTest do
         render_component(
           &CoreComponents.card_drawer/1,
           drawer_attrs(%{}, %{
-            vote_count: 0,
+            supporter_count: 0,
             public_description: nil,
             editing_public_desc: true,
             public_desc_form: to_form(%{"public_description" => ""})
@@ -2358,7 +2646,7 @@ defmodule HamacaWeb.CoreComponentsTest do
         render_component(
           &CoreComponents.card_drawer/1,
           drawer_attrs(%{}, %{
-            vote_count: 1,
+            supporter_count: 1,
             supporters: [],
             public_description: nil,
             editing_public_desc: true,
@@ -2940,7 +3228,7 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert CoreComponents.rail_unused_fields(0, nil, false) == [:public_support, :public_description]
     end
 
-    test "supporters make public support used" do
+    test "other supporters (the requester excluded, RE500) make public support used" do
       assert CoreComponents.rail_unused_fields(3, nil, false) == [:public_description]
     end
 

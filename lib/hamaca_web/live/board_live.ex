@@ -809,7 +809,7 @@ defmodule HamacaWeb.BoardLive do
         dependency_input={@dependency_input}
         dependency_adding?={@dependency_adding?}
         dependency_suggestions={@dependency_suggestions}
-        vote_count={@drawer_vote_count}
+        supporter_count={@drawer_supporter_count}
         supporters={@drawer_supporters}
         public_description={@selected_card.public_description}
         editing_public_desc={@editing_public_desc}
@@ -1396,7 +1396,7 @@ defmodule HamacaWeb.BoardLive do
       |> assign(:face_runs, face_runs(cards, flows, run_summaries, blocked_by))
       |> assign(:vote_counts, Votes.counts_for_cards(Enum.map(cards, & &1.id)))
       |> assign(:drawer_supporters, [])
-      |> assign(:drawer_vote_count, 0)
+      |> assign(:drawer_supporter_count, 0)
       |> assign(:card_dependencies, [])
       |> assign(:card_dependents, [])
       |> assign(:dependency_options, [])
@@ -1846,7 +1846,8 @@ defmodule HamacaWeb.BoardLive do
         runs = Runs.list_runs_for_card(card)
         latest = List.first(runs)
         default_tab = default_drawer_tab(card, latest)
-        {supporters, vote_count} = Votes.supporters(card, 5)
+        # RE500 — the drawer lists the supporters other than the requester.
+        {supporters, supporter_count} = Votes.supporters(card, 5, exclude_user_id: card.created_by_user_id)
 
         {:noreply,
          socket
@@ -1865,7 +1866,7 @@ defmodule HamacaWeb.BoardLive do
          |> assign(:note_mode, :note)
          |> assign_steer(card)
          |> assign(:drawer_supporters, supporters)
-         |> assign(:drawer_vote_count, vote_count)
+         |> assign(:drawer_supporter_count, supporter_count)
          |> assign(:dependency_input, "")
          |> assign(:dependency_adding?, false)
          |> assign_card_dependencies(card)
@@ -3791,8 +3792,8 @@ defmodule HamacaWeb.BoardLive do
     socket =
       case socket.assigns.selected_card do
         %Card{id: ^card_id} = card ->
-          {supporters, total} = Votes.supporters(card, 5)
-          assign(socket, drawer_supporters: supporters, drawer_vote_count: total)
+          {supporters, supporter_count} = Votes.supporters(card, 5, exclude_user_id: card.created_by_user_id)
+          assign(socket, drawer_supporters: supporters, drawer_supporter_count: supporter_count)
 
         _ ->
           socket

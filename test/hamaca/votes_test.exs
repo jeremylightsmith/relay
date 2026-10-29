@@ -67,4 +67,49 @@ defmodule Hamaca.VotesTest do
       assert first.id == newer.id
     end
   end
+
+  describe "supporters/3 with exclude_user_id:" do
+    setup do
+      card = insert(:card)
+      [r, a, b] = insert_list(3, :user)
+      %{card: card, r: r, a: a, b: b}
+    end
+
+    defp vote_in_order(card, users) do
+      users
+      |> Enum.with_index()
+      |> Enum.each(fn {user, i} ->
+        insert(:vote, card: card, user: user, inserted_at: DateTime.add(~U[2026-01-01 00:00:00Z], i, :day))
+      end)
+    end
+
+    test "drops the excluded requester from the faces and the count", %{card: c, r: r, a: a, b: b} do
+      vote_in_order(c, [r, a, b])
+
+      assert {users, 2} = Votes.supporters(c, 5, exclude_user_id: r.id)
+      assert Enum.map(users, & &1.id) == [b.id, a.id]
+    end
+
+    test "nil or absent exclusion returns every supporter", %{card: c, r: r, a: a, b: b} do
+      vote_in_order(c, [r, a, b])
+
+      assert {users, 3} = Votes.supporters(c, 5)
+      assert length(users) == 3
+      assert {users, 3} = Votes.supporters(c, 5, exclude_user_id: nil)
+      assert length(users) == 3
+    end
+
+    test "a card voted only by the requester has no other supporters", %{card: c, r: r} do
+      vote_in_order(c, [r])
+
+      assert Votes.supporters(c, 5, exclude_user_id: r.id) == {[], 0}
+    end
+
+    test "a requester who never voted excludes nobody", %{card: c, r: r, a: a} do
+      vote_in_order(c, [a])
+
+      assert {[only], 1} = Votes.supporters(c, 5, exclude_user_id: r.id)
+      assert only.id == a.id
+    end
+  end
 end

@@ -22,7 +22,10 @@ defmodule Schemas.Card do
   (RLY-69) is the optional public-board copy, distinct from the internal
   `description`; nullable, cast like `description`. `posted_by_user_id`
   (RLY-225) records the public poster of an idea; nullable, never cast —
-  set programmatically on the public-posting path only. `mockups` (RE370) is the card's HTML
+  set programmatically on the public-posting path only; it alone means "came from the public
+  board" — read it through `public?/1`. `created_by_user_id` (RE500) records the card's
+  **requester** (its creator; nil for an agent-created card); nullable, never cast — set
+  programmatically by `Hamaca.Cards.create_card/3` from the `{:user, id}` actor. `mockups` (RE370) is the card's HTML
   mockup list — nullable, never cast here; written via `Hamaca.Cards.set_mockups/2`.
 
   `story_activity_id` / `story_step_id` / `release_id` (RE265) place the card on the story
@@ -73,6 +76,7 @@ defmodule Schemas.Card do
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
     belongs_to :posted_by_user, Schemas.User
+    belongs_to :created_by_user, Schemas.User
     belongs_to :story_activity, Schemas.StoryActivity
     belongs_to :story_step, Schemas.StoryStep
     belongs_to :release, Schemas.Release
@@ -86,6 +90,14 @@ defmodule Schemas.Card do
 
     timestamps(type: :utc_datetime)
   end
+
+  @doc """
+  Whether the card came from the public board: `true` iff it carries a non-nil
+  `:posted_by_user_id`. Any map without the key (Storybook / test plain maps) is `false`.
+  """
+  @spec public?(map()) :: boolean()
+  def public?(%{posted_by_user_id: poster_id}), do: not is_nil(poster_id)
+  def public?(%{}), do: false
 
   @doc """
   Changeset for user/agent-supplied card attributes (`:title`,

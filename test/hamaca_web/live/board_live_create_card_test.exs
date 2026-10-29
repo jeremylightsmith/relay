@@ -77,6 +77,28 @@ defmodule HamacaWeb.BoardLiveCreateCardTest do
     end
   end
 
+  describe "requester (RE500)" do
+    test "a card created from the board shows its creator as the requester", %{
+      conn: conn,
+      user: user,
+      board: board
+    } do
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      [backlog | _] = board.stages
+
+      render_hook(view, "create_card", %{"stage_id" => "#{backlog.id}", "card" => %{"title" => "Mine"}})
+
+      [card] = Hamaca.Repo.all(Schemas.Card)
+      selector = "article[data-ref='#{Hamaca.Cards.ref(board, card)}'] .card-requester[data-requester='user']"
+
+      assert [title] =
+               view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> LazyHTML.attribute("title")
+
+      assert title == "Requested by #{user.name || user.email}"
+      refute title =~ "via public board"
+    end
+  end
+
   describe "non-embed board — web is untouched" do
     test "keeps the inline composer and renders no header +", %{conn: conn, board: board} do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")

@@ -20,6 +20,9 @@ the MMF design specs).
   (`Schemas.Stage.default_status/1`). The values are generated from the schema into
   [`architecture/state.md`](architecture/state.md).
 - **Card** — a unit of work (`Schemas.Card`) that lives in exactly one stage/substage at a time.
+- **Requester** — the person who asked for a card: its creator, or the public-board poster for a
+  card that came from the public board (`cards.created_by_user_id`, RE500). Hamaca AI is the
+  requester of an agent-created card. Shown as "Requested by". Never "poster" on the private board.
 - **Task** — one independently implementable unit of a card's plan, worked one at a time by the
   Code flow's `foreach` loop. Its **body is its spec**: read it with
   `./hamaca task show <ref> <id>` (`./hamaca tasks list <ref>` lists titles only); write a card's tasks

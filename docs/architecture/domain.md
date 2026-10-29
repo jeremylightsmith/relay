@@ -984,6 +984,9 @@ sharing behavior.
   runner's 30s heartbeat covers it.
 - **Votes** — public upvotes (RLY-69): a unique `(card_id, user_id)` row; `toggle_vote/2`
   toggles and broadcasts `{:vote_changed, card_id}`. A card's supporters are the voting users.
+  `supporters/3` takes `exclude_user_id:` (RE500), which drops that user from both the faces and
+  the count; the drawer passes the card's requester so Public support lists only the *other*
+  supporters.
 - **ValueStream** (`Hamaca.ValueStream`, RE146) — the level-1 value-stream derivation behind the
   card stream map (RE347). Read-only: no processes, no PubSub, no writes — it folds history that
   already exists (transition rows' `from_stage_id` / `to_stage_id`, `:needs_input` →
@@ -1471,6 +1474,7 @@ erDiagram
     BillingAccount ||--o{ BillingNotice : "emails (RE464)"
     Card ||--o{ Vote : upvotes
     User ||--o{ Vote : cast
+    User |o--o{ Card : "requested (created_by_user_id, RE500)"
     Card ||--o| TalkSession : "one Talk session"
     TalkSession ||--o{ TalkTurn : "one per human message"
     TalkTurn ||--o{ TalkEvent : "transcript lines"
@@ -1532,6 +1536,14 @@ A `Card` additionally carries an optional story-map placement — `story_activit
 `story_step_id` and `release_id`, all nilable, all nilified rather than cascaded when the
 structure they point at is deleted. Release is a **new axis orthogonal to stage**: a card has
 both.
+
+A `Card` also carries `created_by_user_id`, its **requester** (RE500): nullable, never cast,
+nilified when the user is deleted. `Cards.create_card/3` stamps it from a `{:user, id}` actor and
+leaves it `nil` for `:agent`; the migration that added it backfilled existing cards from their
+earliest `:created` activity row. `created_by_user` is part of `Cards`' one card preload list, so
+every card read and `{:card_upserted, …}` payload carries it. `posted_by_user_id` alone means
+"came from the public board", read only through `Schemas.Card.public?/1`; a public card's
+requester is its poster.
 
 A `Card` also carries `story_map_position`: its order **within its story-map cell**, nullable
 and independent of `cards.position` (its order within its stage column). The two orderings never

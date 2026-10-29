@@ -88,6 +88,8 @@ defmodule Hamaca.Cards do
     # RE262 — the card's order within its cell. Without it every cell falls back to board order.
     :story_map_position,
     :posted_by_user_id,
+    # RE500 — the requester. Without it the created_by_user preload has nothing to join.
+    :created_by_user_id,
     :rejection,
     :inserted_at,
     :updated_at
@@ -111,7 +113,7 @@ defmodule Hamaca.Cards do
       Repo.transaction(fn ->
         ref_number = allocate_ref_number(stage.board_id)
 
-        case insert_card(stage, ref_number, attrs) do
+        case insert_card(stage, ref_number, attrs, actor) do
           {:ok, card} ->
             {:ok, _entry} = Activity.log(card, %{type: :created, actor: actor})
             preload_owners(card)
@@ -3150,7 +3152,7 @@ defmodule Hamaca.Cards do
   # Cards travel with their owners (+user) and position-ordered sub_tasks, so the
   # board columns, the JSON, and any open drawer (including live-refreshed ones)
   # always have what they render — no downstream re-fetch or NotLoaded guard.
-  defp card_preloads, do: [owners: :user, sub_tasks: from(st in SubTask, order_by: st.position)]
+  defp card_preloads, do: [:created_by_user, owners: :user, sub_tasks: from(st in SubTask, order_by: st.position)]
 
   # Inside set_sub_tasks/2's or add_tasks/2's transaction: insert one task with its
   # programmatic card_id + position; a bad title rolls the whole write back.
@@ -3246,7 +3248,7 @@ defmodule Hamaca.Cards do
     Card |> Repo.get!(card.id) |> Repo.preload(card_preloads())
   end
 
-  defp insert_card(%Stage{} = stage, ref_number, attrs) do
+  defp insert_card(%Stage{} = stage, ref_number, attrs, actor) do
     # ADR 0003 — a card is born with the arrival status for its stage (RE375): a review lane
     # can't hold the schema default :ready. Set on the struct (status is never cast), so create
     # stays one insert with no :status_changed entry or push.
@@ -3254,7 +3256,14 @@ defmodule Hamaca.Cards do
 
     changeset =
       Card.changeset(
-        %Card{board_id: stage.board_id, stage_id: stage.id, position: 0, ref_number: ref_number, status: status},
+        %Card{
+          board_id: stage.board_id,
+          stage_id: stage.id,
+          position: 0,
+          ref_number: ref_number,
+          status: status,
+          created_by_user_id: requester_id(actor)
+        },
         attrs
       )
 
@@ -3266,6 +3275,10 @@ defmodule Hamaca.Cards do
       {:error, _changeset} = error -> error
     end
   end
+
+  # RE500 — the requester is the creating user; an agent-created card has none.
+  defp requester_id({:user, user_id}), do: user_id
+  defp requester_id(:agent), do: nil
 
   # Title + optional public_description from a public submission (string- or atom-keyed).
   # A blank/whitespace public_description stores nil (matches the mockup's `formDesc.trim() || null`).

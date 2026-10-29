@@ -757,12 +757,13 @@ defmodule HamacaWeb.CoreComponents do
   @doc """
   The RLY-69 public-support badge. `variant: :pill` is the public board's interactive
   vote pill (violet-filled when `voted`, outlined otherwise); `variant: :count` is the
-  internal card face's muted `↑ N` label. Presentational only — the caller wires
-  `phx-click` via the global `rest`.
+  internal card face's muted `↑ N` label; `variant: :outlined` (RE500) is the private
+  board's compact, non-interactive outlined pill that marks a public card in every stage.
+  Presentational only — the caller wires `phx-click` via the global `rest`.
   """
   attr :count, :integer, required: true
   attr :voted, :boolean, default: false
-  attr :variant, :atom, values: [:pill, :count], default: :pill
+  attr :variant, :atom, values: [:pill, :count, :outlined], default: :pill
   attr :size, :atom, values: [:sm, :lg], default: :sm
   attr :class, :string, default: nil
   attr :rest, :global
@@ -772,6 +773,20 @@ defmodule HamacaWeb.CoreComponents do
     <span
       class={@class}
       style="display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
+      title="Public supporters"
+      data-support-count={@count}
+      {@rest}
+    >
+      <span style="font-size:11px;line-height:1;">↑</span>{@count}
+    </span>
+    """
+  end
+
+  def support_badge(%{variant: :outlined} = assigns) do
+    ~H"""
+    <span
+      class={@class}
+      style={"display:inline-flex;align-items:center;gap:3px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:600;padding:1px 7px;border-radius:7px;" <> support_pill_colors(false)}
       title="Public supporters"
       data-support-count={@count}
       {@rest}
@@ -795,13 +810,17 @@ defmodule HamacaWeb.CoreComponents do
     """
   end
 
+  # The vote pill's colours, defined once: filled primary when voted, outlined otherwise.
+  # The public board's interactive pill and the card face's `:outlined` badge share them.
+  defp support_pill_colors(true = _voted),
+    do: "color:var(--color-primary-content);background:var(--color-primary);border:1px solid var(--color-primary);"
+
+  defp support_pill_colors(false = _voted),
+    do:
+      "color:color-mix(in oklab, var(--color-primary) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100));"
+
   defp support_pill_style(voted, size) do
-    base =
-      if voted do
-        "color:var(--color-primary-content);background:var(--color-primary);border:1px solid var(--color-primary);"
-      else
-        "color:color-mix(in oklab, var(--color-primary) 65%, var(--color-base-content));background:var(--color-base-100);border:1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100));"
-      end
+    base = support_pill_colors(voted)
 
     dims =
       if size == :lg do
@@ -1605,6 +1624,15 @@ defmodule HamacaWeb.CoreComponents do
     default: true,
     doc: "RE444 false renders draggable=\"false\" — a read-only stage_column's cards can't be picked up"
 
+  attr :requester, :any,
+    default: nil,
+    doc:
+      "RE500 who asked for the card (card_requester/1): a user-shaped map (name, email, avatar_url), :ai, or nil for no avatar"
+
+  attr :public, :boolean,
+    default: false,
+    doc: "RE500 the card came from the public board (Schemas.Card.public?/1) — its ↑ N pill shows in every stage"
+
   def board_card(assigns) do
     # RLY-137: a :done run on an :in_review card is the review-blue treatment — the face
     # tuple alone can't tell (it doesn't know the card's status), so the override lives here.
@@ -1729,6 +1757,35 @@ defmodule HamacaWeb.CoreComponents do
           {@ref}
         </span>
         <span
+          :if={@requester}
+          class="card-requester"
+          data-requester={if(@requester == :ai, do: "ai", else: "user")}
+          title={requester_title(@requester, @public)}
+          style="display:inline-flex;flex:0 0 auto;"
+        >
+          <.avatar
+            :if={@requester == :ai}
+            actor={:ai}
+            size={16}
+            title={requester_title(@requester, @public)}
+          />
+          <.avatar
+            :if={@requester != :ai}
+            src={@requester.avatar_url}
+            name={@requester.name}
+            email={@requester.email}
+            size={16}
+            tint={:identity}
+            title={requester_title(@requester, @public)}
+          />
+        </span>
+        <.support_badge
+          :if={@public}
+          count={@vote_count}
+          variant={:outlined}
+          class="card-public-votes"
+        />
+        <span
           :if={@status == :working and @health == :none and is_nil(@run)}
           class="card-status"
           data-status={@status}
@@ -1766,7 +1823,7 @@ defmodule HamacaWeb.CoreComponents do
           Blocked by {@blocked_count} {if @blocked_count == 1, do: "card", else: "cards"}
         </span>
         <.support_badge
-          :if={@category == :unstarted and @vote_count > 0}
+          :if={!@public and @category == :unstarted and @vote_count > 0}
           count={@vote_count}
           variant={:count}
           class="card-votes"
@@ -1776,6 +1833,24 @@ defmodule HamacaWeb.CoreComponents do
       </div>
     </article>
     """
+  end
+
+  @doc """
+  RE500 — the one place that maps a card to its requester for `board_card/1`'s `requester`:
+  the loaded `created_by_user`, `:ai` for an agent-created card (no `created_by_user_id`, or a
+  plain map without one), and `nil` when the association isn't loaded (render nothing rather
+  than crash).
+  """
+  @spec card_requester(map()) :: map() | :ai | nil
+  def card_requester(%{created_by_user_id: nil}), do: :ai
+  def card_requester(%{created_by_user: %Ecto.Association.NotLoaded{}}), do: nil
+  def card_requester(%{created_by_user: %{} = user}), do: user
+  def card_requester(%{created_by_user_id: _id}), do: nil
+  def card_requester(%{}), do: :ai
+
+  defp requester_title(requester, public) do
+    who = if requester == :ai, do: Hamaca.Brand.agent_name(), else: requester.name || requester.email
+    "Requested by " <> who <> if(public, do: " · via public board", else: "")
   end
 
   # RLY-48: the left-border accent is keyed on status. Amber for the two needs-you
@@ -4631,7 +4706,7 @@ defmodule HamacaWeb.CoreComponents do
     doc:
       "RE320 %{resumes_at} when the card's live run has a queued job and every connected runner is paused at its usage limits — BoardLive's :run_face_meta entry, so the Run tab and the run face agree"
 
-  attr :vote_count, :integer, default: 0, doc: "RLY-69 the card's public-vote total"
+  attr :supporter_count, :integer, default: 0, doc: "RE500 public votes excluding the requester's"
 
   attr :dependencies, :list, default: [], doc: "RE93 [%{ref, title, satisfied?}] — the Blocked by rail"
   attr :dependents, :list, default: [], doc: "RE93 [%{ref, title}] — the read-only Blocks rail"
@@ -4659,7 +4734,7 @@ defmodule HamacaWeb.CoreComponents do
 
   attr :supporters, :list,
     default: [],
-    doc: "RLY-69 up to 5 %Schemas.User{} who voted, most-recent first"
+    doc: "RLY-69 up to 5 %Schemas.User{} who voted, most-recent first — the requester excluded (RE500)"
 
   attr :public_description, :string,
     default: nil,
@@ -4799,9 +4874,12 @@ defmodule HamacaWeb.CoreComponents do
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
       |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
       |> assign(:rail_flow_path, rail_flow_path(assigns.run_flow, assigns.queued_flow))
+      # RE500 — through card_requester/1 and Card.public?/1, which tolerate plain card maps.
+      |> assign(:requester, card_requester(assigns.card))
+      |> assign(:requester_public?, Card.public?(assigns.card))
       |> assign(
         :unused_fields,
-        rail_unused_fields(assigns.vote_count, assigns.public_description, assigns.editing_public_desc)
+        rail_unused_fields(assigns.supporter_count, assigns.public_description, assigns.editing_public_desc)
       )
 
     ~H"""
@@ -6025,8 +6103,9 @@ defmodule HamacaWeb.CoreComponents do
                 @embed && "border-t-0 bg-base-100"
               ]}
             >
-              <%!-- RE282 (Relay Card Detail v5.dc.html, changes 15/21/23): Status → Blocked by → Blocks →
-                   Owners → Tags → Updated → Flow → Links → public fields → unused-fields row.
+              <%!-- RE282 (Relay Card Detail v5.dc.html, changes 15/21/23) + RE500: Status → Blocked by →
+                   Blocks → Owners → Tags → Requested by → Public support (only when used) → Updated →
+                   Flow → Links → Public description → unused-fields row.
                    Every row is a direct-child .rail-section whose first child is its section_label. --%>
               <div class="rail-section flex flex-col gap-1.5">
                 <.section_label>Status</.section_label>
@@ -6233,6 +6312,65 @@ defmodule HamacaWeb.CoreComponents do
                 </div>
               </div>
 
+              <%!-- REQUESTED BY (RE500) — who asked for the card: a person, or Hamaca AI for an
+                   agent-created card; no row when the requester isn't loaded --%>
+              <div
+                :if={@requester}
+                id={"#{@id}-requested-by"}
+                class="rail-section flex flex-col gap-1.5"
+              >
+                <.section_label>Requested by</.section_label>
+                <div class="flex items-center gap-2">
+                  <%= if @requester == :ai do %>
+                    <.avatar size={28} actor={:ai} />
+                    <div class="flex min-w-0 flex-col">
+                      <span class="rail-requester-name text-[13px] font-medium">
+                        {Hamaca.Brand.agent_name()}
+                      </span>
+                    </div>
+                  <% else %>
+                    <.avatar
+                      size={28}
+                      tint={:identity}
+                      src={@requester.avatar_url}
+                      name={@requester.name}
+                      email={@requester.email}
+                    />
+                    <div class="flex min-w-0 flex-col">
+                      <span class="rail-requester-name text-[13px] font-medium">
+                        {@requester.name || @requester.email}
+                      </span>
+                      <span class="rail-requester-email truncate font-mono text-[11px] text-base-content/60">
+                        {@requester.email}
+                      </span>
+                    </div>
+                  <% end %>
+                </div>
+                <span
+                  :if={@requester_public?}
+                  class="rail-requester-meta inline-flex items-center gap-1 text-[11.5px] text-base-content/65"
+                >
+                  via public board · {TimeAgo.ago(@card.inserted_at)}
+                </span>
+                <span
+                  :if={!@requester_public?}
+                  class="rail-requester-meta text-[11.5px] text-base-content/60"
+                >
+                  {Calendar.strftime(@card.inserted_at, "%b %d")}
+                </span>
+              </div>
+
+              <%!-- PUBLIC SUPPORT (RLY-69) — the supporters other than the requester (RE500), directly
+                   under Requested by; with none it waits in the unused-fields group below (RE282) --%>
+              <div
+                :if={:public_support not in @unused_fields}
+                id={"#{@id}-public-support"}
+                class="rail-section flex flex-col gap-1.5"
+              >
+                <.section_label>Public support</.section_label>
+                <.supporters_row supporters={supporter_faces(@supporters)} total={@supporter_count} />
+              </div>
+
               <%!-- UPDATED (RE282) — replaces Dates; Created left the drawer. UTC, artboard format. --%>
               <div class="rail-section flex flex-col gap-1.5">
                 <.section_label>Updated</.section_label>
@@ -6279,17 +6417,6 @@ defmodule HamacaWeb.CoreComponents do
                     <.icon name="hero-arrow-top-right-on-square" class="size-3" /> Review PR ↗
                   </.link>
                 </div>
-              </div>
-
-              <%!-- PUBLIC SUPPORT (RLY-69) — a normal rail row once it has supporters; otherwise it
-                   waits in the unused-fields group below (RE282) --%>
-              <div
-                :if={:public_support not in @unused_fields}
-                id={"#{@id}-public-support"}
-                class="rail-section flex flex-col gap-1.5"
-              >
-                <.section_label>Public support</.section_label>
-                <.supporters_row supporters={supporter_faces(@supporters)} total={@vote_count} />
               </div>
 
               <%!-- PUBLIC DESCRIPTION (RLY-69) — a normal rail row once written or while its editor is open --%>
@@ -6479,13 +6606,18 @@ defmodule HamacaWeb.CoreComponents do
   @doc """
   RE282 change 15 — which of the drawer's public fields are *unused*, in rail order, so they
   fold behind the one dashed "N unused fields" row instead of each taking a slot to say "nothing
-  yet". Public support is unused with no votes; public description is unused when unwritten AND
+  yet". `supporter_count` is the public votes other than the requester's (RE500), so public
+  support is unused with no other supporters — a requester-only public card included; public description is unused when unwritten AND
   its editor is closed — an open editor counts as in use, so the form never vanishes behind a
   collapsed row mid-edit. This is the one definition of "unused"; the rail renders from it.
   """
-  def rail_unused_fields(vote_count, public_description, editing_public_desc) do
+  @spec rail_unused_fields(non_neg_integer(), String.t() | nil, boolean()) :: [atom()]
+  def rail_unused_fields(supporter_count, public_description, editing_public_desc) do
     Enum.filter(
-      [vote_count == 0 && :public_support, is_nil(public_description) && !editing_public_desc && :public_description],
+      [
+        supporter_count == 0 && :public_support,
+        is_nil(public_description) && !editing_public_desc && :public_description
+      ],
       & &1
     )
   end
@@ -8384,6 +8516,8 @@ defmodule HamacaWeb.CoreComponents do
                         stalled?={run_meta_stalled?(@run_meta, card.id)}
                         rate_limited={run_meta_rate_limited(@run_meta, card.id)}
                         vote_count={Map.get(@vote_counts, card.id, 0)}
+                        requester={card_requester(card)}
+                        public={Card.public?(card)}
                         blocked_count={length(Map.get(@blocked_by, card.id, []))}
                         open={open_card?(@open_ref, @board_key, card)}
                         draggable={!@read_only}
@@ -8502,6 +8636,8 @@ defmodule HamacaWeb.CoreComponents do
                     stalled?={run_meta_stalled?(@run_meta, card.id)}
                     rate_limited={run_meta_rate_limited(@run_meta, card.id)}
                     vote_count={Map.get(@vote_counts, card.id, 0)}
+                    requester={card_requester(card)}
+                    public={Card.public?(card)}
                     blocked_count={length(Map.get(@blocked_by, card.id, []))}
                     open={open_card?(@open_ref, @board_key, card)}
                     draggable={!@read_only}

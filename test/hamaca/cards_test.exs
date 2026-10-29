@@ -127,6 +127,66 @@ defmodule Hamaca.CardsTest do
     end
   end
 
+  describe "requester (RE500)" do
+    test "a user-created card records the user as its requester", %{stage: stage} do
+      u = insert(:user)
+
+      assert {:ok, card} = Cards.create_card(stage, %{title: "Mine"}, {:user, u.id})
+
+      assert card.created_by_user_id == u.id
+      assert card.created_by_user.id == u.id
+      assert card.posted_by_user_id == nil
+    end
+
+    test "an agent-created card has no requester, preloaded as nil", %{stage: stage} do
+      assert {:ok, card} = Cards.create_card(stage, %{title: "Agent"}, :agent)
+
+      assert card.created_by_user_id == nil
+      assert card.created_by_user == nil
+    end
+
+    test "created_by_user_id is never cast from attrs", %{stage: stage} do
+      u = insert(:user)
+      other = insert(:user)
+
+      assert {:ok, card} =
+               Cards.create_card(stage, %{"title" => "X", "created_by_user_id" => other.id}, {:user, u.id})
+
+      assert card.created_by_user_id == u.id
+    end
+
+    test "list_cards/2 and get_card_by_ref/2 return the preloaded requester", %{board: board, stage: stage} do
+      u = insert(:user)
+      {:ok, card} = Cards.create_card(stage, %{title: "Mine"}, {:user, u.id})
+
+      assert [listed] = Cards.list_cards(board)
+      assert listed.created_by_user_id == u.id
+      assert listed.created_by_user.email == u.email
+
+      fetched = Cards.get_card_by_ref(board, Card.ref(board, card))
+      assert fetched.created_by_user_id == u.id
+      assert fetched.created_by_user.email == u.email
+    end
+
+    test "the :card_upserted broadcast carries the requester", %{stage: stage} do
+      u = insert(:user)
+      Hamaca.Events.subscribe(stage.board_id)
+
+      {:ok, _card} = Cards.create_card(stage, %{title: "Live"}, {:user, u.id})
+
+      assert_receive {:card_upserted, %Card{title: "Live"} = payload}
+      assert payload.created_by_user.id == u.id
+    end
+  end
+
+  describe "Card.public?/1" do
+    test "is true only for a map with a non-nil posted_by_user_id" do
+      refute Card.public?(%Card{posted_by_user_id: nil})
+      assert Card.public?(%Card{posted_by_user_id: 5})
+      refute Card.public?(%{title: "plain map"})
+    end
+  end
+
   describe "list_cards/1" do
     test "returns the board's cards ordered by stage then position", %{board: board, stage: stage} do
       stage2 = insert(:stage, board: board, position: 2)

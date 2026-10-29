@@ -52,6 +52,16 @@ defmodule Hamaca.CardsPublicIdeaTest do
       assert Votes.voted_card_ids(user, [card.id]) == MapSet.new([card.id])
     end
 
+    test "the poster is also the card's requester, and the card is public", %{board: board} do
+      p = insert(:user)
+
+      {:ok, card} = Cards.post_public_idea(board, p, %{"title" => "Idea"})
+
+      assert card.posted_by_user_id == p.id
+      assert card.created_by_user_id == p.id
+      assert Card.public?(card) == true
+    end
+
     test "blank public description stores nil", %{board: board} do
       user = insert(:user)
       {:ok, card} = Cards.post_public_idea(board, user, %{"title" => "Just a title", "public_description" => "  "})

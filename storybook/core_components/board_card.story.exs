@@ -291,6 +291,54 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           active_owner: :ai,
           owners: [%{actor_type: :user, user: %{name: "Dana Kim"}}, %{actor_type: :agent}]
         }
+      },
+      %Variation{
+        id: :requester_member,
+        attributes: %{
+          id: "story-card-requester-member",
+          ref: "RE513",
+          title: "Export the board as CSV",
+          status: :ready,
+          requester: %{name: "Jeremy Lightsmith", email: "jeremy@example.com", avatar_url: nil}
+        }
+      },
+      %Variation{
+        id: :requester_ai,
+        attributes: %{
+          id: "story-card-requester-ai",
+          ref: "RE514",
+          title: "Split the flaky board test",
+          status: :ready,
+          requester: :ai
+        }
+      },
+      %Variation{
+        id: :public_card,
+        attributes: %{
+          id: "story-card-public",
+          ref: "RE515",
+          title: "Dark mode for the public board",
+          status: :ready,
+          category: :unstarted,
+          public: true,
+          vote_count: 12,
+          requester: %{name: "Dana Kim", email: "dana@example.com", avatar_url: nil}
+        }
+      },
+      %Variation{
+        id: :public_card_done,
+        attributes: %{
+          id: "story-card-public-done",
+          ref: "RE516",
+          title: "Keyboard shortcuts",
+          status: :ready,
+          stage_type: :done,
+          category: :complete,
+          done: true,
+          public: true,
+          vote_count: 1,
+          requester: %{name: "Maya Lee", email: "maya@example.com", avatar_url: nil}
+        }
       }
     ]
   end
