@@ -401,7 +401,9 @@ sharing behavior.
   by [ADR 0004](../adr/0004-card-ownership-and-the-claim-rule.md) — a user owner must hold a
   resolved membership on the card's board, checked in `Hamaca.Cards` via
   `Hamaca.Members.member_user_id?/2` on every owner write (`{:error, :owner_not_member}`, API
-  **422 `owner_not_member`**); derived agent health
+  **422 `owner_not_member`**), and a whole owner list (`set_owners/3`, and its `check_owners/2`
+  pre-flight) may name the agent or people, never both (`{:error, :mixed_owners}`, API
+  **422 `mixed_owners`**); derived agent health
   (`Cards.health/1`, 90s `STALE_AFTER`) and the four-bucket needs-you rollup
   (`needs_input` / `in_review` / `awaiting_human` / `agent_stalled` — RLY-148) surfaced by
   `GET /api/board` and the boards-home badges. A move that would strand a live run

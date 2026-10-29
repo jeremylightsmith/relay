@@ -139,7 +139,15 @@ defmodule HamacaWeb.Browser.DependencyDatalistPickTest do
     })()
     """
 
+    # The input renders before the async drawer body fills the datalist (dependency_options is []
+    # until :load_card_body lands), and the hook only submits a value that IS an option. A real
+    # user can't pick from an empty list, so wait for the option before simulating the pick —
+    # otherwise, under suite load, the pick races the async load and silently submits nothing.
+    # (An <option> in a <datalist> is never visible, so wait for it to be attached.)
+    option = "#card-drawer-dependency-options option[value=#{Jason.encode!(ref)}]"
+
     unwrap(session, fn %{frame_id: frame_id} ->
+      {:ok, _} = Frame.wait_for_selector(frame_id, selector: option, state: "attached", timeout: 5_000)
       {:ok, _} = Frame.evaluate(frame_id, expression: expression, timeout: 2_000)
     end)
   end

@@ -609,6 +609,40 @@ defmodule HamacaWeb.Api.CardControllerTest do
     end
   end
 
+  describe "PATCH owners — mixed agent + human (RE491)" do
+    setup %{board: board, stage: stage} do
+      member = insert(:user)
+      insert(:membership, board: board, user: member, email: member.email)
+      %{card: insert(:card, stage: stage, title: "Original"), member: member}
+    end
+
+    test "agent + a member is 422 mixed_owners and assigns nobody",
+         %{conn: conn, board: board, card: card, member: member} do
+      body =
+        conn
+        |> patch(~p"/api/cards/#{ref(board, card)}", %{owners: ["agent", "user:#{member.id}"]})
+        |> response(422)
+
+      assert Jason.decode!(body) == %{
+               "error" => %{"code" => "mixed_owners", "message" => "owners can be the agent or people, not both"}
+             }
+
+      assert Hamaca.Repo.get_by(Schemas.CardOwner, card_id: card.id) == nil
+    end
+
+    test "a mixed owner list leaves the rest of the PATCH unapplied",
+         %{conn: conn, board: board, card: card, member: member} do
+      assert %{"error" => %{"code" => "mixed_owners"}} =
+               conn
+               |> patch(~p"/api/cards/#{ref(board, card)}", %{title: "changed", owners: ["user:#{member.id}", "agent"]})
+               |> json_response(422)
+
+      assert Hamaca.Repo.get!(Schemas.Card, card.id).title == "Original"
+      assert Hamaca.Repo.get_by(Schemas.CardOwner, card_id: card.id) == nil
+      refute Hamaca.Repo.get_by(Schemas.Activity, card_id: card.id, type: :owners_changed)
+    end
+  end
+
   test "a card moves by the renamed substage's id from GET /api/board (RE385)", %{
     conn: conn,
     board: board,

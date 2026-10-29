@@ -109,6 +109,15 @@ defmodule HamacaWeb.Api.FallbackController do
     |> render(:error, code: "owner_not_member", message: Cards.owner_error_message())
   end
 
+  # RE491 — a whole owner list names the agent or people, never both; the fixed sentence comes
+  # from Hamaca.Cards.
+  def call(conn, {:error, :mixed_owners}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "mixed_owners", message: Cards.mixed_owners_error_message())
+  end
+
   # RE384 — the stage guard rails. Every sentence comes from `Hamaca.Boards.stage_refusal_message/1`,
   # the one rendering Board Settings shares. Losing cards or breaking the board is a 409 conflict
   # with the board's current state; a request that names the wrong kind of stage is a 422.

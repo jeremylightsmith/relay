@@ -1467,12 +1467,18 @@ defmodule Hamaca.Cards do
   Replaces the card's whole owner list with `actors`
   (`:agent | {:user, user_id}`) atomically, attributed to `actor`
   (`:agent | {:user, user_id}`, defaults to `:agent`), returning
-  `{:ok, card}` with owners preloaded, `{:error, :owner_not_member}` when any
+  `{:ok, card}` with owners preloaded, `{:error, :mixed_owners}` when the list names
+  both the agent and a person (rule 2, RE491: the list states the complete set, so there is
+  no signal which should win), `{:error, :owner_not_member}` when any
   `{:user, id}` is not a resolved member of the card's board (RE344), or
   `{:error, changeset}` (nothing changes on error). Logs an `:owners_changed` activity entry (MMF 07)
   with the new owner labels.
   """
   def set_owners(%Card{} = card, actors, actor \\ :agent) when is_list(actors) do
+    if mixed_owners?(actors), do: {:error, :mixed_owners}, else: replace_owners(card, actors, actor)
+  end
+
+  defp replace_owners(card, actors, actor) do
     result =
       Repo.transaction(fn ->
         Repo.delete_all(from o in CardOwner, where: o.card_id == ^card.id)
@@ -1502,14 +1508,19 @@ defmodule Hamaca.Cards do
   def take_over(%Card{} = card, {:user, _id} = actor), do: set_owners(card, [actor], actor)
 
   @doc """
-  Pre-flight for an owner list (RE344): `:ok` when every actor may own `card`, else
-  `{:error, :owner_not_member}`. This is the same `owner_allowed?/2` rule `set_owners/3`
-  enforces on write. The write stays the authority; this lets a caller that applies several
+  Pre-flight for an owner list (RE344): `:ok` when every actor may own `card`,
+  `{:error, :mixed_owners}` when the list names both the agent and a person (RE491 — checked
+  first, with no query), else `{:error, :owner_not_member}`. These are the same
+  `mixed_owners?/1` and `owner_allowed?/2` rules `set_owners/3` enforces on write. The write stays the authority; this lets a caller that applies several
   writes (the API's PATCH) refuse the whole request before touching anything.
   """
-  @spec check_owners(Card.t(), [:agent | {:user, integer()}]) :: :ok | {:error, :owner_not_member}
+  @spec check_owners(Card.t(), [:agent | {:user, integer()}]) :: :ok | {:error, :mixed_owners | :owner_not_member}
   def check_owners(%Card{board_id: board_id}, actors) when is_list(actors) do
-    if Enum.all?(actors, &owner_allowed?(board_id, &1)), do: :ok, else: {:error, :owner_not_member}
+    cond do
+      mixed_owners?(actors) -> {:error, :mixed_owners}
+      Enum.all?(actors, &owner_allowed?(board_id, &1)) -> :ok
+      true -> {:error, :owner_not_member}
+    end
   end
 
   @doc """
@@ -1518,6 +1529,13 @@ defmodule Hamaca.Cards do
   """
   @spec owner_error_message() :: String.t()
   def owner_error_message, do: "owners must be members of this board"
+
+  @doc """
+  The API's sentence for a `:mixed_owners` refusal (RE491): an owner list names the agent or
+  people, never both.
+  """
+  @spec mixed_owners_error_message() :: String.t()
+  def mixed_owners_error_message, do: "owners can be the agent or people, not both"
 
   @doc """
   Adds one owner actor to the card, attributed to `actor`
@@ -3099,6 +3117,11 @@ defmodule Hamaca.Cards do
   defp owner_allowed?(_board_id, :agent), do: true
 
   defp owner_allowed?(board_id, {:user, user_id}) when is_integer(user_id), do: Members.member_user_id?(board_id, user_id)
+
+  # The ONE mixed-owner rule (rule 2, RE491): a whole owner list names the agent or people,
+  # never both — it states the complete set, so there is no signal which should win.
+  @spec mixed_owners?([:agent | {:user, integer()}]) :: boolean()
+  defp mixed_owners?(actors), do: :agent in actors and Enum.any?(actors, &match?({:user, _}, &1))
 
   defp owner_query(%Card{} = card, :agent) do
     from o in CardOwner, where: o.card_id == ^card.id and o.actor_type == ^:agent

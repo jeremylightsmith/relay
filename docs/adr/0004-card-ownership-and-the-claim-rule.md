@@ -29,7 +29,10 @@ where the policy lives.
    - anything else leaves it unowned: a queue, review or done stage, any substage, or an agent
      moving it into a stage no flow works.
 2. **The AI never co-owns.** Assigning the AI removes every human owner; adding a human to an
-   AI-owned card removes the AI. Several humans may co-own a card.
+   AI-owned card removes the AI. Several humans may co-own a card. The whole-list owner write
+   (`Hamaca.Cards.set_owners/3`, and so `PATCH /api/cards/:ref` with `owners`) refuses a list
+   that names both the AI and a person (`{:error, :mixed_owners}`, API 422 `mixed_owners`) and
+   changes nothing: the list states the complete set, so there's no signal which should win.
 3. **Reviews never transfer ownership.** A reviewer approves or rejects; a rejected card comes
    back with the same owner.
 4. **A human-owned card is off-limits to agents.** The scheduler never pulls or resumes one
@@ -58,6 +61,8 @@ owners to the AI or to nobody. None of them changes the card's status.
   that lets the agent continue.
 - Every user owner must be a member of the card's board, checked on every owner write
   (`{:error, :owner_not_member}`).
+- A mixed agent + human owner list is refused rather than resolved (`{:error, :mixed_owners}`).
+  Cards that were already stored mixed are not migrated; they still read as `:ai`.
 
 ## Alternatives considered
 
@@ -66,11 +71,3 @@ owners to the AI or to nobody. None of them changes the card's status.
   and the agent would fight them for it.
 - **Hand ownership back when a card reaches a human stage.** Rejected: it destroys provenance,
   the record of who did the work, which is the point of keeping ownership.
-
-## Open questions
-
-- **The owner-list write doesn't enforce rule 2.** `Hamaca.Cards.set_owners/3`, which
-  `PATCH /api/cards/:ref` with `owners` uses, stores the list it's given, so
-  `["agent", "user:<id>"]` creates a mixed card that reads as `:ai`. `add_owner/3`, `take_over/2`
-  and `assign_ai/2` all enforce exclusivity. Should `set_owners/3` refuse a mixed list, or
-  resolve it?

@@ -209,7 +209,7 @@ agent_working.("Design", "Saved-recipes page", "design", [{"mockups", nil, nil}]
   14
 )
 
-recipe_page = card.(design_review, "Redesign the recipe page", owners: [:agent, {:user, owner.id}])
+recipe_page = card.(design_review, "Redesign the recipe page", owners: [:agent])
 
 {:ok, recipe_page} =
   Cards.set_mockups(recipe_page, [

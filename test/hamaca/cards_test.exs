@@ -1041,7 +1041,7 @@ defmodule Hamaca.CardsTest do
          %{card: card, user: user} do
       {:ok, _card} = Cards.add_owner(card, {:user, user.id})
 
-      assert {:error, :owner_not_member} = Cards.set_owners(card, [:agent, {:user, -1}])
+      assert {:error, :owner_not_member} = Cards.set_owners(card, [{:user, -1}])
 
       assert {:ok, %Card{} = reloaded} = Cards.remove_owner(card, :agent)
       assert [%{actor_type: :user}] = reloaded.owners
@@ -1095,13 +1095,67 @@ defmodule Hamaca.CardsTest do
     end
 
     test "check_owners/2 is the same rule as a pre-flight", %{card: card, member: member, outsider: outsider} do
-      assert :ok = Cards.check_owners(card, [:agent, {:user, member.id}])
+      assert :ok = Cards.check_owners(card, [{:user, member.id}])
+      assert :ok = Cards.check_owners(card, [:agent])
       assert :ok = Cards.check_owners(card, [])
       assert {:error, :owner_not_member} = Cards.check_owners(card, [{:user, member.id}, {:user, outsider.id}])
       assert {:error, :owner_not_member} = Cards.check_owners(card, [{:user, -1}])
     end
 
     test "owner_error_message/0 names nobody" do
+      assert Cards.owner_error_message() == "owners must be members of this board"
+    end
+  end
+
+  describe "mixed owners (RE491)" do
+    setup %{board: board, stage: stage} do
+      {:ok, card} = Cards.create_card(stage, %{title: "Mixed"})
+      %{card: card, member: member!(board)}
+    end
+
+    test "set_owners/3 refuses agent + user and leaves the existing owners untouched",
+         %{card: card, member: member} do
+      {:ok, _card} = Cards.set_owners(card, [{:user, member.id}])
+
+      assert {:error, :mixed_owners} = Cards.set_owners(card, [:agent, {:user, member.id}])
+
+      assert owner_user_ids(card) == [member.id]
+      refute Repo.exists?(from o in Schemas.CardOwner, where: o.card_id == ^card.id and o.actor_type == :agent)
+      assert card |> activities() |> Enum.count(&(&1.type == :owners_changed)) == 1
+    end
+
+    test "set_owners/3 refuses a mixed list with the user first", %{card: card, member: member} do
+      assert {:error, :mixed_owners} = Cards.set_owners(card, [{:user, member.id}, :agent])
+      refute Repo.exists?(from o in Schemas.CardOwner, where: o.card_id == ^card.id)
+    end
+
+    test "check_owners/2 refuses a mixed list in either order", %{card: card, member: member} do
+      assert {:error, :mixed_owners} = Cards.check_owners(card, [:agent, {:user, member.id}])
+      assert {:error, :mixed_owners} = Cards.check_owners(card, [{:user, member.id}, :agent])
+    end
+
+    test "check_owners/2 checks mixed before membership", %{card: card} do
+      assert {:error, :mixed_owners} = Cards.check_owners(card, [:agent, {:user, -1}])
+    end
+
+    test "empty, agent-only and people-only lists are still allowed", %{board: board, card: card, member: m1} do
+      m2 = member!(board)
+
+      assert :ok = Cards.check_owners(card, [])
+      assert {:ok, %Card{owners: []}} = Cards.set_owners(card, [])
+
+      assert :ok = Cards.check_owners(card, [:agent])
+      assert {:ok, %Card{owners: [%{actor_type: :agent}]}} = Cards.set_owners(card, [:agent])
+
+      people = [{:user, m1.id}, {:user, m2.id}]
+      assert :ok = Cards.check_owners(card, people)
+      assert {:ok, %Card{owners: owners}} = Cards.set_owners(card, people)
+      assert Enum.all?(owners, &(&1.actor_type == :user))
+      assert owners |> Enum.map(& &1.user_id) |> Enum.sort() == Enum.sort([m1.id, m2.id])
+    end
+
+    test "mixed_owners_error_message/0 is the fixed refusal sentence" do
+      assert Cards.mixed_owners_error_message() == "owners can be the agent or people, not both"
       assert Cards.owner_error_message() == "owners must be members of this board"
     end
   end
@@ -1266,10 +1320,10 @@ defmodule Hamaca.CardsTest do
     test "set_owners/3 logs the new owner labels", %{stage: stage, user: user} do
       {:ok, card} = Cards.create_card(stage, %{title: "T"})
 
-      {:ok, card} = Cards.set_owners(card, [:agent, {:user, user.id}], {:user, user.id})
+      {:ok, card} = Cards.set_owners(card, [{:user, user.id}], {:user, user.id})
 
       assert [_created, %Schemas.Activity{type: :owners_changed, meta: meta}] = activities(card)
-      assert meta == %{"action" => "set", "owners" => ["AI", "Ada Lovelace"]}
+      assert meta == %{"action" => "set", "owners" => ["Ada Lovelace"]}
     end
   end
 
