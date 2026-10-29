@@ -101,15 +101,6 @@ defmodule Hamaca.MembersTest do
       assert Enum.any?(members, &(&1.user && &1.user.name == "Alice"))
       assert Enum.any?(members, &(&1.user_id == nil and &1.email == "pending@example.com"))
     end
-
-    test "member?/2 is true only for a resolved membership" do
-      board = insert(:board)
-      member = insert(:user)
-      insert(:membership, board: board, user: member, email: member.email)
-
-      assert Members.member?(board, member)
-      refute Members.member?(board, insert(:user))
-    end
   end
 
   describe "remove/1" do

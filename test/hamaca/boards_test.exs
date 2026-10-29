@@ -197,7 +197,7 @@ defmodule Hamaca.BoardsTest do
       user = insert(:user)
       {:ok, board} = Boards.create_board(user, %{name: "Ops"})
 
-      assert Hamaca.Members.member?(board, user)
+      assert Hamaca.Members.member_user_id?(board.id, user.id)
     end
 
     test "creates a named board, derives slug + key, seeds 11 stages (8 mains + 3 sub-lanes)" do

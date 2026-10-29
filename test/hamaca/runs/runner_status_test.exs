@@ -286,22 +286,22 @@ defmodule Hamaca.Runs.RunnerStatusTest do
     defp harnessed(harnesses), do: %Schemas.Runner{harnesses: harnesses}
 
     # Scenario 4
-    test "runner_rate_limited?/2 is true only while every installed harness is paused", %{now: now} do
+    test "active_rate_limit/2 is set only while every installed harness is paused", %{now: now} do
       soon = DateTime.add(now, 60, :second)
       later = DateTime.add(now, 120, :second)
 
-      refute Runs.runner_rate_limited?(harnessed([paused("claude-code", soon), runner_harness("codex")]), now)
-      assert Runs.runner_rate_limited?(harnessed([paused("claude-code", soon), paused("codex", later)]), now)
-      refute Runs.runner_rate_limited?(harnessed([paused("claude-code", soon), paused("codex", now)]), now)
+      refute Runs.active_rate_limit(harnessed([paused("claude-code", soon), runner_harness("codex")]), now)
+      assert Runs.active_rate_limit(harnessed([paused("claude-code", soon), paused("codex", later)]), now)
+      refute Runs.active_rate_limit(harnessed([paused("claude-code", soon), paused("codex", now)]), now)
 
-      refute Runs.runner_rate_limited?(
+      refute Runs.active_rate_limit(
                harnessed([paused("codex", soon, installed: false), runner_harness("claude-code")]),
                now
              )
 
-      refute Runs.runner_rate_limited?(harnessed([paused("codex", soon, installed: false)]), now)
-      refute Runs.runner_rate_limited?(harnessed(nil), now)
-      refute Runs.runner_rate_limited?(harnessed([]), now)
+      refute Runs.active_rate_limit(harnessed([paused("codex", soon, installed: false)]), now)
+      refute Runs.active_rate_limit(harnessed(nil), now)
+      refute Runs.active_rate_limit(harnessed([]), now)
     end
 
     test "harness_pause/2 reads one installed entry's live pause", %{now: now} do

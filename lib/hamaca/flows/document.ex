@@ -10,9 +10,7 @@ defmodule Hamaca.Flows.Document do
   ## The trigger (RE429)
 
   A flow belongs to one stage, so the trigger is `{"stage": "<name>"}`. Pickup and drop-off are
-  worked out from board order and never part of the document. The pre-RE429 three-key trigger
-  (`pulls_from` / `works_in` / `lands_on`) is still accepted: `stage` wins when present, else
-  `works_in` is read as the stage, and `pulls_from` / `lands_on` are ignored.
+  worked out from board order and never part of the document. `stage` is the only trigger key.
 
   ## Sparse out, dense in
 
@@ -29,11 +27,13 @@ defmodule Hamaca.Flows.Document do
   genuine no-op. RE244's `reads`/`writes` follow the same law: they encode as string arrays, an
   empty one is omitted, and an absent or null one decodes back to `[]`.
 
-  `decode/1` also rewrites the pre-RE367 legacy spellings (`sub_tasks`, `card.sub_tasks`,
-  `{sub_task}`, `{sub_task_id}`) to canonical via `Schemas.Flow.Node.normalize_legacy/1`, so
-  `encode/1` only ever emits the canonical `tasks` names. Likewise a node's legacy `model`
-  (RE433) is renamed to `llm`, its value mapped to the agent name (`"opus"` → `"Claude Opus"`,
-  `Schemas.Flow.Node.legacy_models/0`), so `encode/1` never emits `model`.
+  ## Renamed spellings are refused (RE487)
+
+  A spelling that was renamed — the pre-RE367 `sub_tasks` / `card.sub_tasks` / `{sub_task}` /
+  `{sub_task_id}`, the RE433 node `model`, the RE437 `parallel` type, the pre-RE429 trigger keys
+  `works_in` / `pulls_from` / `lands_on` — is never rewritten: `decode/1` returns an
+  `{:error, message}` naming the old and the canonical spelling, so `./hamaca flow-push` fails
+  with a fix-it message and the stored flow is unchanged.
 
   String→atom conversion is driven by the schemas' own source functions
   (`Schemas.Flow.isolation_classes/0`, `Schemas.Flow.Node.types/0`, `Schemas.Flow.Node.roles/0`,
@@ -50,8 +50,21 @@ defmodule Hamaca.Flows.Document do
   # read-only broken-shape block (`Hamaca.Flows.Shape.wire/1`, RE430): a pulled file carries
   # them, so a push accepts them and never reads them.
   @top_level ~w(key version enabled isolation trigger nodes edges derived problem)
-  # `stage` is canonical; the other three are the legacy (pre-RE429) trigger, still accepted.
-  @trigger_keys ~w(stage pulls_from works_in lands_on)
+  @trigger_keys ~w(stage)
+
+  # RE487 — every renamed spelling → its canonical one, the ONE copy. Used only to word a
+  # refusal, never to rewrite. The placeholders count only as exact-brace literals.
+  @renamed %{
+    # {old, new, hint}: the hint follows the rename in the message.
+    node_fields: [{"model", "llm", ~s| (an agent name, e.g. "Claude Opus")|}],
+    contract_fields: [{"sub_tasks", "tasks"}],
+    foreach_sources: [{"card.sub_tasks", "card.tasks"}],
+    placeholders: [{"{sub_task_id}", "{task_id}"}, {"{sub_task}", "{task}"}],
+    types: [{"parallel", "fan_out"}],
+    trigger_keys: [{"works_in", "stage"}],
+    # Not renamed but gone: pickup / drop-off are derived from board order (RE429).
+    removed_trigger_keys: [{"pulls_from", "pickup"}, {"lands_on", "drop-off"}]
+  }
 
   # Marks "the document did not carry this key" — distinct from "carried null".
   @absent :__absent__
@@ -185,14 +198,27 @@ defmodule Hamaca.Flows.Document do
   end
 
   defp trigger_stage(trigger) do
-    with :ok <- reject_unknown(Map.keys(trigger), @trigger_keys, "trigger key") do
-      key = if Map.has_key?(trigger, "stage"), do: "stage", else: "works_in"
-
-      case Map.get(trigger, key) do
+    with :ok <- reject_renamed_trigger_keys(trigger),
+         :ok <- reject_unknown(Map.keys(trigger), @trigger_keys, "trigger key") do
+      case Map.get(trigger, "stage") do
         name when is_binary(name) or is_nil(name) -> {:ok, %{stage: name}}
-        _other -> {:error, "trigger.#{key} must be a stage name or null"}
+        _other -> {:error, "trigger.stage must be a stage name or null"}
       end
     end
+  end
+
+  defp reject_renamed_trigger_keys(trigger) do
+    renamed =
+      for {old, new} <- @renamed.trigger_keys,
+          Map.has_key?(trigger, old),
+          do: ~s(trigger key "#{old}" was renamed to "#{new}")
+
+    removed =
+      for {old, what} <- @renamed.removed_trigger_keys,
+          Map.has_key?(trigger, old),
+          do: ~s(trigger key "#{old}" was removed — #{what} is derived from board order; use "stage")
+
+    first_refusal(renamed ++ removed)
   end
 
   defp decode_list(doc, key, caster) do
@@ -226,12 +252,11 @@ defmodule Hamaca.Flows.Document do
 
   defp cast_item(_item, _caster, key, index), do: {:error, "#{key}[#{index}] must be an object"}
 
-  # RE367: legacy contract spellings (`sub_tasks`, `card.sub_tasks`, `{sub_task_id}`) are
-  # normalized BEFORE validation, so a pushed legacy flow saves — and pulls back — canonical.
-  defp node_attrs(raw) do
-    node = Flow.Node.normalize_legacy(raw)
-
-    with :ok <- reject_unknown(Map.keys(node), field_names(Flow.Node.fields()), "node field"),
+  # The renamed-spelling check runs first, so a `model` key reports its rename rather than
+  # `unknown node field: model`.
+  defp node_attrs(node) do
+    with :ok <- reject_renamed_node_spellings(node),
+         :ok <- reject_unknown(Map.keys(node), field_names(Flow.Node.fields()), "node field"),
          {:ok, _key} <- required_string(node, "key"),
          {:ok, type} <- required_enum(node, "type", Flow.Node.types()),
          {:ok, role} <- optional_enum(node, "role", Flow.Node.roles()),
@@ -243,6 +268,36 @@ defmodule Hamaca.Flows.Document do
        |> Map.merge(%{type: type, role: role, reads: reads, writes: writes})}
     end
   end
+
+  defp reject_renamed_node_spellings(node) do
+    first_refusal(
+      for(
+        {old, new, hint} <- @renamed.node_fields,
+        Map.has_key?(node, old),
+        do: ~s(node field "#{old}" was renamed to "#{new}") <> hint
+      ) ++
+        for({old, new} <- @renamed.types, node["type"] == old, do: ~s(node type "#{old}" was renamed to "#{new}")) ++
+        for(
+          {old, new} <- @renamed.foreach_sources,
+          node["foreach"] == old,
+          do: ~s(foreach "#{old}" was renamed to "#{new}")
+        ) ++
+        for(
+          field <- ~w(reads writes),
+          {old, new} <- @renamed.contract_fields,
+          is_list(node[field]) and old in node[field],
+          do: ~s("#{old}" in #{field} was renamed to "#{new}")
+        ) ++
+        for(
+          {old, new} <- @renamed.placeholders,
+          is_binary(node["run"]) and String.contains?(node["run"], old),
+          do: ~s(run placeholder "#{old}" was renamed to "#{new}")
+        )
+    )
+  end
+
+  defp first_refusal([]), do: :ok
+  defp first_refusal([message | _rest]), do: {:error, message}
 
   defp edge_attrs(edge) do
     with :ok <- reject_unknown(Map.keys(edge), field_names(Flow.Edge.fields()), "edge field"),

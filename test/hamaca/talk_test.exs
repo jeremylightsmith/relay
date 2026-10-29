@@ -25,6 +25,8 @@ defmodule Hamaca.TalkTest do
         plan: "## Task 1: A\n\n## Task 2: B\n"
       )
 
+    for title <- ~w(A B), do: insert(:sub_task, card: card, title: title)
+
     author = insert(:user)
 
     runner =
@@ -53,6 +55,12 @@ defmodule Hamaca.TalkTest do
     assert session.seed_summary =~ "plan 2 steps"
     assert Enum.any?(session.seed_fields, &(&1["label"] == "description"))
     assert Enum.any?(session.seed_fields, &(&1["label"] == "plan"))
+  end
+
+  test "a plan's `## Task` headings are not steps — a card with no tasks has no plan yet (RE487)", ctx do
+    card = insert(:card, board: ctx.board, stage: ctx.stage, plan: "## Task 1: A\n\n## Task 2: B\n")
+
+    assert Talk.session_for_card(card).seed_summary =~ "no plan yet"
   end
 
   test "a header-only plan counts the card's tasks, not its headings (RE357)", ctx do

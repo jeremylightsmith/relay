@@ -181,7 +181,7 @@
 
 /* RE394 pending actions — begin */
 /* The client-side pressed face for <.button pending> and every other `pending-action`
-   (HamacaWeb.CoreComponents.button/1, action_group/1). "Pressed" keys off the element's OWN
+   (HamacaWeb.CoreComponents.button/1, an `action-group` wrapper). "Pressed" keys off the element's OWN
    LiveView loading class — never an ancestor's: the phx-click-loading: variant's
    `.phx-click-loading &` form would light up e.g. a Retry chip inside a clicked board card.
    Unlayered on purpose, so these beat daisyUI's layered .btn rules (including its grey

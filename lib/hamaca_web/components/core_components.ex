@@ -120,6 +120,8 @@ defmodule HamacaWeb.CoreComponents do
   the faces while LiveView's own `phx-click-loading` / `phx-submit-loading` class is on the
   button, so it reacts in the click's frame and the width never changes. Ignored on links.
   Don't combine it with `phx-disable-with`, which replaces the button's text and wipes the faces.
+  Put the class `action-group` on the wrapper of a cluster of controls and, while one of its
+  pending buttons is pressed, the rest go inert, so e.g. Approve and Reject can't race.
   """
   attr :rest, :global, include: ~w(href navigate patch method download name value disabled)
   attr :class, :any
@@ -167,32 +169,6 @@ defmodule HamacaWeb.CoreComponents do
         </button>
         """
     end
-  end
-
-  @doc """
-  Marks one cluster of action controls (RE394). While any `pending-action` inside it is pressed
-  (see `button/1`'s `pending`), the group's other buttons, links, inputs and menu rows go inert —
-  dimmed, no pointer events — so e.g. Approve and Reject can't race. A caller may instead put the
-  literal class `action-group` on an existing wrapper; the effect is the same.
-
-  ## Examples
-
-      <.action_group class="flex gap-2">
-        <.button phx-click="review_approve" pending="Approving…">Approve</.button>
-        <.button phx-click="open_reject">Request changes</.button>
-      </.action_group>
-  """
-  attr :id, :string, default: nil
-  attr :class, :any, default: nil
-  attr :rest, :global
-  slot :inner_block, required: true
-
-  def action_group(assigns) do
-    ~H"""
-    <div id={@id} class={["action-group", @class]} {@rest}>
-      {render_slot(@inner_block)}
-    </div>
-    """
   end
 
   @doc """
@@ -492,35 +468,6 @@ defmodule HamacaWeb.CoreComponents do
         </div>
       </li>
     </ul>
-    """
-  end
-
-  @doc """
-  Renders the Human/AI owner pill — who holds the baton for a stage.
-
-  Human maps to the primary (blue) theme token, AI to the secondary
-  (violet) one, per the daisyUI theme in `assets/css/app.css`.
-
-  ## Examples
-
-      <.owner_pill owner={:human} />
-      <.owner_pill owner={:ai} />
-  """
-  attr :owner, :atom, values: [:human, :ai], required: true
-  attr :class, :any, default: nil
-
-  def owner_pill(assigns) do
-    ~H"""
-    <span
-      class={[
-        "owner-pill badge badge-sm font-medium",
-        if(@owner == :human, do: "badge-primary", else: "badge-secondary"),
-        @class
-      ]}
-      data-owner={@owner}
-    >
-      {if @owner == :human, do: "Human", else: "AI"}
-    </span>
     """
   end
 
@@ -2267,6 +2214,10 @@ defmodule HamacaWeb.CoreComponents do
   @doc false
   # `card_drawer/1`'s `screenshot_href` default (an attr default must be a remote capture).
   def screenshot_query(n), do: "?screenshot=#{n}"
+
+  @doc false
+  # `card_drawer/1`'s `mockup_href` default (RE487).
+  def mockup_query(id), do: "?mockup=#{id}"
 
   # RE427 — the Notes composer attaches images only on the web board, with uploads allowed.
   defp note_attach_enabled?(%{embed: embed, uploads: uploads}),
@@ -4759,10 +4710,10 @@ defmodule HamacaWeb.CoreComponents do
   attr :talk_events, :any, default: nil, doc: "RE268: the @streams.talk_events assign"
 
   attr :mockup_href, :any,
-    default: &HamacaWeb.attachment_view_path/1,
+    default: &HamacaWeb.CoreComponents.mockup_query/1,
     doc:
       "RE380: attachment id -> the URL a Mockups tile patches to. BoardLive always passes its " <>
-        "viewer-URL closure; the default exists for Storybook and component tests"
+        "viewer-URL closure; the default (`?mockup=<id>`) exists for Storybook and component tests"
 
   attr :screenshot_href, :any,
     default: &HamacaWeb.CoreComponents.screenshot_query/1,

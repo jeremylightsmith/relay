@@ -1,8 +1,6 @@
 defmodule Hamaca.RunsTest do
   use Hamaca.DataCase, async: true
 
-  import ExUnit.CaptureLog
-
   alias Hamaca.Repo
   alias Hamaca.Runs
   alias Hamaca.Runs.Capacity
@@ -13,7 +11,7 @@ defmodule Hamaca.RunsTest do
   alias Schemas.Run
   alias Schemas.SubTask
 
-  # Seeds foreach runs through the legacy plan-parse fallback, which logs a deprecation (RE357).
+  # The engine warns on refused run transitions, which several races here provoke on purpose.
   @moduletag :capture_log
 
   setup do
@@ -242,13 +240,6 @@ defmodule Hamaca.RunsTest do
       refute_receive {:card_moved, _, _}, 100
       refute_receive {:card_upserted, _}, 100
       assert Hamaca.Cards.get_card(board, card_id).stage_id == next_up_id
-    end
-
-    test "a flow with no foreach node never marks its run tasks_from_plan (RE368)", %{board: board} do
-      flow = enabled_spec_flow(board)
-      card = card_in(board, "Next up")
-
-      assert {:ok, %Run{tasks_from_plan: false}} = Runs.start_run(card, flow)
     end
 
     test "runs a spec-shaped flow start → done, moving the card and broadcasting each transition",
@@ -806,13 +797,13 @@ defmodule Hamaca.RunsTest do
   # so it decides "is this run a leak?" from one consistent read of run → card → stage (exactly
   # like close_orphaned_runs/0) and can never be fooled by a card stage read separately from the
   # run — the skew that let a concurrent Spec:Done → Plan dispatch cancel a fresh plan run.
-  describe "leaked?/1" do
+  describe "leak_reason/1 single-snapshot leak predicate" do
     test "true for an active run whose card sits in a terminal (Done) stage", %{board: board} do
       done = Enum.find(board.stages, &(&1.name == "Done"))
       card = insert(:card, stage: done)
       run = insert(:run, card: card, status: :running)
 
-      assert Runs.leaked?(run)
+      assert Runs.leak_reason(run)
     end
 
     test "true for a parked run whose card sits in a Done sub-lane", %{board: board} do
@@ -820,7 +811,7 @@ defmodule Hamaca.RunsTest do
       card = insert(:card, stage: spec_done)
       run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
 
-      assert Runs.leaked?(run)
+      assert Runs.leak_reason(run)
     end
 
     test "false for an active run whose card sits in a non-terminal work stage (the RE239 race)",
@@ -829,7 +820,7 @@ defmodule Hamaca.RunsTest do
       card = insert(:card, stage: plan)
       run = insert(:run, card: card, status: :running)
 
-      refute Runs.leaked?(run)
+      refute Runs.leak_reason(run)
     end
 
     test "false for an already-terminal run even under a Done card", %{board: board} do
@@ -837,7 +828,7 @@ defmodule Hamaca.RunsTest do
       card = insert(:card, stage: done)
       run = insert(:run, card: card, status: :cancelled)
 
-      refute Runs.leaked?(run)
+      refute Runs.leak_reason(run)
     end
 
     test "true for an active run whose card is archived in a non-terminal stage, false once unarchived",
@@ -846,11 +837,11 @@ defmodule Hamaca.RunsTest do
       card = insert(:card, stage: code, archived_at: DateTime.truncate(DateTime.utc_now(), :second))
       run = insert(:run, card: card, status: :parked, parked_reason: :needs_input)
 
-      assert Runs.leaked?(run)
+      assert Runs.leak_reason(run)
 
       {1, _} = Repo.update_all(from(c in Card, where: c.id == ^card.id), set: [archived_at: nil])
 
-      refute Runs.leaked?(run)
+      refute Runs.leak_reason(run)
     end
   end
 
@@ -1601,7 +1592,8 @@ defmodule Hamaca.RunsTest do
   end
 
   # A board + enabled foreach flow + a card sitting in the flow's pulls-from stage,
-  # carrying `plan`. Mirrors this file's existing flow fixtures. The card factory
+  # carrying `plan` and the task titles in `tasks` (written the way the planner writes them,
+  # `Hamaca.Cards.add_tasks/2`). Mirrors this file's existing flow fixtures. The card factory
   # derives board_id from the stage, so pass only `stage:`.
   defp setup_foreach(opts) do
     board = insert(:board)
@@ -1612,7 +1604,12 @@ defmodule Hamaca.RunsTest do
 
     {:ok, flow} = Hamaca.Flows.create_flow(board, attrs)
     {:ok, flow} = Hamaca.Flows.enable_flow(flow)
-    card = insert(:card, stage: pulls, plan: Keyword.fetch!(opts, :plan))
+    card = insert(:card, stage: pulls, plan: Keyword.get(opts, :plan, "# Goal\n\nHeader only.\n"))
+
+    case Keyword.get(opts, :tasks, []) do
+      [] -> :ok
+      titles -> {:ok, _tasks} = Hamaca.Cards.add_tasks(card, Enum.map(titles, &%{title: &1}))
+    end
 
     %{board: board, flow: flow, card: card}
   end
@@ -1627,9 +1624,9 @@ defmodule Hamaca.RunsTest do
 
   describe "foreach: the engine owns the task list (W13)" do
     test "a foreach job's vars carry {task} and {task_id} for the bound task (RE357, RE367)" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+      %{flow: flow, card: card} = setup_foreach(tasks: ["Alpha", "Beta"])
 
-      capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
+      assert {:ok, _run} = Runs.start_run(card, flow)
 
       run = Repo.one!(from r in Run, where: r.card_id == ^card.id)
       alpha = Repo.one!(from st in SubTask, where: st.card_id == ^card.id and st.title == "Alpha")
@@ -1650,58 +1647,28 @@ defmodule Hamaca.RunsTest do
       assert rendered == "./relay task show #{vars["ref"]} #{alpha.id}"
     end
 
-    test "the legacy plan-parse fallback still seeds, and logs a deprecation (RE357)" do
-      %{board: board, flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
-
-      log = capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
-
-      assert ["Alpha"] = Repo.all(from st in SubTask, where: st.card_id == ^card.id, select: st.title)
-      assert log =~ "deprecated"
-      assert log =~ "hamaca tasks add"
-      refute log =~ "relay tasks add"
-      assert log =~ "/hamaca-doctor"
-      refute log =~ "/relay-doctor"
-      assert log =~ Hamaca.Cards.ref(board, card)
-      assert log =~ flow.key
-    end
-
-    test "a run whose tasks were seeded by the plan-parse fallback is marked tasks_from_plan (RE368)" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
-
-      capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
-
-      assert %Run{tasks_from_plan: true} = Repo.one!(from r in Run, where: r.card_id == ^card.id)
-    end
-
-    test "a run on a card that already had tasks is not marked tasks_from_plan (RE368)" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
+    test "a card with tasks starts its foreach run (RE487)" do
+      %{flow: flow, card: card} = setup_foreach(plan: "# Goal\n\nHeader only.\n")
       {:ok, _tasks} = Hamaca.Cards.add_tasks(card, [%{title: "Alpha", body: "Do alpha."}])
 
-      assert {:ok, %Run{tasks_from_plan: false}} = Runs.start_run(card, flow)
+      assert {:ok, %Run{}} = Runs.start_run(card, flow)
     end
 
-    test "a card with pre-written tasks never parses the plan and logs no deprecation (RE357)" do
-      %{board: board, flow: flow, card: card} = setup_foreach(plan: "# Goal\n\nHeader only.\n")
-      {:ok, _tasks} = Hamaca.Cards.add_tasks(card, [%{title: "Alpha", body: "Do alpha."}])
-
-      log = capture_log(fn -> assert {:ok, _run} = Runs.start_run(card, flow) end)
-
-      # capture_log sees every process's log, and this module is async: the sibling
-      # fallback test logs its own "deprecated: <ref>" concurrently. Scope to this card.
-      refute log =~ "deprecated: #{Hamaca.Cards.ref(board, card)} "
-    end
-
-    test "the no-tasks block names the fix when a plan is present (RE357)" do
-      %{flow: flow, card: card} = setup_foreach(plan: "# Just prose\n\nNo tasks in here.")
+    test "a card with no tasks never starts, even when its plan has `## Task` headings (RE487)" do
+      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n### Task 2: Beta\n")
 
       assert {:error, :no_plan_tasks} = Runs.start_run(card, flow)
 
+      refute Repo.exists?(from r in Run, where: r.card_id == ^card.id)
+      assert Hamaca.Cards.task_count(card) == 0
+      assert Repo.get!(Card, card.id).status == :needs_input
+
       question = question_on(card)
       assert question =~ "hamaca tasks add"
-      refute question =~ "relay tasks add"
       assert question =~ "/hamaca-doctor"
-      refute question =~ "/relay-doctor"
-      assert question =~ "`## Task N:` headings"
+      refute question =~ "## Task"
+      refute question =~ "fallback"
+      refute question =~ "legacy"
     end
 
     test "the no-tasks block names the fix when the plan is blank (RE357)" do
@@ -1710,29 +1677,20 @@ defmodule Hamaca.RunsTest do
       assert {:error, :no_plan_tasks} = Runs.start_run(card, flow)
 
       question = question_on(card)
-      assert question =~ "no plan"
+      assert question =~ "no tasks and no plan"
       assert question =~ "hamaca tasks add"
       refute question =~ "relay tasks add"
       assert question =~ "/hamaca-doctor"
       refute question =~ "/relay-doctor"
     end
 
-    test "start_run parses the card's plan into sub_tasks" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
-
-      assert {:ok, _run} = Runs.start_run(card, flow)
-
-      assert ["Alpha", "Beta"] =
-               Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: :position, select: st.title)
-    end
-
-    test "refuses to start a foreach run when the plan yields no tasks, and flags the card" do
-      # RLY-165: an unparseable plan used to seed zero sub_tasks and start anyway. The first
-      # foreach guard then read `remaining == 0` as :foreach_exhausted and routed straight
-      # PAST every implement lap to precommit — which passes trivially on an empty diff —
-      # then reviews, smoke and `merge`. An unreadable plan would have merged an empty branch.
-      # Zero tasks is a defect, not a finished loop: no run, and the card blocks on a human so
-      # the scheduler stops re-pulling it.
+    test "refuses to start a foreach run on a card with no tasks, and flags the card" do
+      # RLY-165: a card with zero sub_tasks used to start anyway. The first foreach guard then
+      # read `remaining == 0` as :foreach_exhausted and routed straight PAST every implement
+      # lap to precommit — which passes trivially on an empty diff — then reviews, smoke and
+      # `merge`. A card with no work would have merged an empty branch. Zero tasks is a defect,
+      # not a finished loop: no run, and the card blocks on a human so the scheduler stops
+      # re-pulling it.
       %{flow: flow, card: card} = setup_foreach(plan: "# Just prose\n\nNo tasks in here.")
 
       assert {:error, :no_plan_tasks} = Runs.start_run(card, flow)
@@ -1741,9 +1699,9 @@ defmodule Hamaca.RunsTest do
       assert Repo.get!(Card, card.id).status == :needs_input
     end
 
-    test "a non-foreach flow with an unparseable plan is unaffected", %{board: board} do
-      # The guard is specific to flows that iterate the plan; spec/plan have no foreach node
-      # and must still start on a card whose plan has no task headings.
+    test "a non-foreach flow on a card with no tasks is unaffected", %{board: board} do
+      # The guard is specific to flows that iterate tasks; spec/plan have no foreach node and
+      # must still start on a card that has none.
       flow = enabled_spec_flow(board)
       card = card_in(board, "Next up")
 
@@ -1751,7 +1709,7 @@ defmodule Hamaca.RunsTest do
     end
 
     test "start_run leaves existing sub_tasks alone" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
+      %{flow: flow, card: card} = setup_foreach(tasks: ["Alpha"])
       {:ok, _card} = Hamaca.Cards.set_sub_tasks(card, [%{title: "Written by the Plan stage"}])
 
       assert {:ok, _run} = Runs.start_run(card, flow)
@@ -1761,7 +1719,7 @@ defmodule Hamaca.RunsTest do
     end
 
     test "entering the foreach node stamps the first undone sub_task, and the payload names it" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+      %{flow: flow, card: card} = setup_foreach(tasks: ["Alpha", "Beta"])
       {:ok, run} = Runs.start_run(card, flow)
 
       execution = Repo.one!(from e in NodeExecution, where: e.run_id == ^run.id)
@@ -1775,7 +1733,7 @@ defmodule Hamaca.RunsTest do
     end
 
     test "the loop tail checks the sub_task off, then routes on the recomputed remaining count" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+      %{flow: flow, card: card} = setup_foreach(tasks: ["Alpha", "Beta"])
       {:ok, run} = Runs.start_run(card, flow)
       [alpha, beta] = Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: :position)
 
@@ -1801,7 +1759,7 @@ defmodule Hamaca.RunsTest do
     end
 
     test "the check-off broadcasts {:card_upserted, card} after commit, with the done sub_task preloaded" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
+      %{flow: flow, card: card} = setup_foreach(tasks: ["Alpha"])
       {:ok, run} = Runs.start_run(card, flow)
       [alpha] = Repo.all(from st in SubTask, where: st.card_id == ^card.id)
       Hamaca.Events.subscribe(card.board_id)
@@ -1815,7 +1773,7 @@ defmodule Hamaca.RunsTest do
     end
 
     test "a failed iteration does NOT check its sub_task off" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n")
+      %{flow: flow, card: card} = setup_foreach(tasks: ["Alpha"])
       {:ok, run} = Runs.start_run(card, flow)
       [alpha] = Repo.all(from st in SubTask, where: st.card_id == ^card.id)
 
@@ -1825,7 +1783,7 @@ defmodule Hamaca.RunsTest do
     end
 
     test "resuming a parked foreach node re-enters bound to its own iteration, not an earlier one at this node" do
-      %{board: board, flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n\n### Task 2: Beta\n")
+      %{board: board, flow: flow, card: card} = setup_foreach(tasks: ["Alpha", "Beta"])
       # setup_foreach mints its own board (distinct from this file's `setup` block's), so
       # subscribe to ITS topic — the outer subscription is watching the wrong board.
       :ok = Runs.subscribe(board.id)
@@ -1862,7 +1820,7 @@ defmodule Hamaca.RunsTest do
     end
 
     test "a failed iteration that retries (the :retry inherit path) stays bound to the same sub_task" do
-      %{flow: flow, card: card} = setup_foreach(plan: "### Task 1: Alpha\n", head_max_retries: 1)
+      %{flow: flow, card: card} = setup_foreach(tasks: ["Alpha"], head_max_retries: 1)
       {:ok, run} = Runs.start_run(card, flow)
       [alpha] = Repo.all(from st in SubTask, where: st.card_id == ^card.id)
 
@@ -1877,7 +1835,7 @@ defmodule Hamaca.RunsTest do
       assert hd(Runs.active_jobs(run)).payload["vars"]["findings"] == "boom"
     end
 
-    test "an unparseable plan never routes past the loop — no node ever runs (RLY-165)" do
+    test "a card with no tasks never routes past the loop — no node ever runs (RLY-165)" do
       # This test previously asserted the OPPOSITE ("runs straight past the loop"), which is
       # the defect the first live Code dogfood hit: past the loop means past every implement
       # lap, into precommit (green on an empty diff), reviews, smoke and `merge`. The

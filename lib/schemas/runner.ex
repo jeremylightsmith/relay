@@ -60,7 +60,7 @@ defmodule Schemas.Runner do
     # RE433: the harness inventory the runner last reported on a heartbeat — see
     # `normalize_harnesses/1`. No default: nil means "never reported", which claims read as
     # "only the legacy harness" (`installed_harness_keys/1`). RE436: each entry carries that
-    # harness's last usage reading; `Hamaca.Runs.runner_rate_limited?/2` reads the runner as rate
+    # harness's last usage reading; `Hamaca.Runs.active_rate_limit/2` reads the runner as rate
     # limited only when every installed harness is paused, and a pause whose `resets_at` has
     # passed reads as not paused before the next beat clears it.
     field :harnesses, {:array, :map}

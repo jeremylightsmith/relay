@@ -1942,7 +1942,6 @@
     "audit_checks": [
       "findings_dropped",
       "verdict_flipped",
-      "planner_not_migrated",
       "outcomeless_attempts"
     ],
     "audit_severities": [

@@ -56,6 +56,14 @@ defmodule Hamaca.AgentsTest do
       assert length(harnesses) == 3 and length(agents) == 3
     end
 
+    test "default_agent_names/0 maps each seed model to the agent name every board gets" do
+      assert Agents.default_agent_names() == %{
+               "opus" => "Claude Opus",
+               "sonnet" => "Claude Sonnet",
+               "haiku" => "Claude Haiku"
+             }
+    end
+
     test "a board that already has agents keeps its agents and default untouched" do
       board = seeded_board()
       sonnet = agent(board, "Claude Sonnet")

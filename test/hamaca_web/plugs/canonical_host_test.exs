@@ -62,7 +62,6 @@ defmodule HamacaWeb.Plugs.CanonicalHostTest do
 
   test "attachment paths answer in place on an extra host" do
     assert_untouched(call(:get, "/attachments/abc", "relayboard.fly.dev"))
-    assert_untouched(call(:get, "/attachments/abc/view", "relayboard.fly.dev"))
   end
 
   test "pass-through matches the first path segment, not a string prefix" do

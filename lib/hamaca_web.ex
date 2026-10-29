@@ -62,14 +62,6 @@ defmodule HamacaWeb do
   end
 
   @doc """
-  Legacy RE370 link; redirects to the BoardLive viewer. `MockupViewerLive` serves it as a
-  membership-scoped redirect to the card's drawer URL plus `mockup=<id>` (RE380), so old links
-  keep working; nothing in Hamaca's UI links here any more. `HamacaWeb.AttachmentPathTest` pins it
-  to the router.
-  """
-  def attachment_view_path(id), do: attachment_path(id) <> "/view"
-
-  @doc """
   RE370 — the sandbox token list an HTML mockup runs under: scripts on, and nothing else — no
   `allow-same-origin` (opaque origin: no cookies, no parent access), no `allow-top-navigation`,
   `allow-popups` or `allow-forms`. The ONE definition: `AttachmentController.html_csp/0` puts it

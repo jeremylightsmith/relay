@@ -134,7 +134,7 @@ became comment-free JSON (RLY-241). Keyed by node.
   "which task is next" is derived server-side; `{task}` names the task in the prompt and
   `{task_id}` lets the node fetch its body with `relay task show {ref} {task_id}` (RE357;
   canonical since RE367 — the legacy `{sub_task}` / `{sub_task_id}` / `card.sub_tasks`
-  spellings are normalized on load). `implement`, `spec_review`, `quality_review` and
+  spellings are refused on push, naming the rename). `implement`, `spec_review`, `quality_review` and
   `fix_findings` all declare `reads: [tasks]`.
 - **`agent` on a node** — names a `.claude/agents/<name>.md` definition: the runner appends
   `--agent <name>` to `claude -p`, so the file supplies the system prompt while `run` stays the
@@ -206,8 +206,8 @@ became comment-free JSON (RLY-241). Keyed by node.
   `acceptance_criteria`, writes `plan` + `tasks`; `code·branch` reads `plan`, writes `branch`;
   `code·post` writes `ai_result`; `code·merge` writes `pr_url`. Every other node declares
   neither — its output is commits. The four per-task Code nodes read `tasks`; nothing in the
-  Code flow writes it (the legacy plan-parse fallback still seeds tasks from `card.plan` at run
-  start for a planner that has not migrated, RLY-165). Existing boards pick the contract up automatically:
+  Code flow writes it: the planner's tasks are its only source, and a Code run on a card with
+  none does not start (RLY-165). Existing boards pick the contract up automatically:
   `Hamaca.Flows.sync_defaults!/0` runs at deploy (`Hamaca.Release.migrate/0`) and re-syncs every
   **library-managed** (`version == 1`) flow to the new default, so the contract and the run
   strings that satisfy it land together in one transaction. A **hand-customized** flow

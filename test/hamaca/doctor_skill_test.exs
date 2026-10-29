@@ -3,6 +3,11 @@ defmodule Hamaca.DoctorSkillTest do
 
   @skill Path.join([File.cwd!(), ".claude", "skills", "hamaca-doctor", "SKILL.md"])
 
+  # RE487 retired the audit check and the run flag; built, not typed, so neither name appears
+  # anywhere outside migrations.
+  @retired_check "planner_" <> "not_migrated"
+  @retired_flag "tasks_" <> "from_plan"
+
   setup do
     {:ok, doc: File.read!(@skill)}
   end
@@ -61,16 +66,16 @@ defmodule Hamaca.DoctorSkillTest do
       end
     end
 
-    test "detection covers the planner, the task nodes, legacy spellings and the audit", %{doc: doc} do
+    test "detection covers the planner, the task nodes, legacy spellings and the blocked card", %{doc: doc} do
       detect = flat(subsection(migration(doc), "#### Detect"))
 
       assert detect =~ "relay tasks add"
       assert detect =~ "relay task show"
       assert detect =~ "`card.sub_tasks`"
       assert detect =~ "`{sub_task_id}`"
-      assert detect =~ "`planner_not_migrated`"
-      # Rule 4 alone is stale history, not a pending migration.
-      assert detect =~ "If rules 1–3 all pass, report the migration **applied**"
+      refute detect =~ @retired_check
+      # RE487: with the plan-parse fallback gone, a planner that writes no tasks blocks the card.
+      assert detect =~ "could not start: this card has no tasks"
     end
 
     test "the plan-side recipe writes a header, clears stale tasks, adds them in one call", %{doc: doc} do
@@ -109,8 +114,8 @@ defmodule Hamaca.DoctorSkillTest do
       verify = flat(subsection(migration(doc), "#### Verify"))
 
       assert verify =~ "**applied**"
-      assert verify =~ "tasks_from_plan"
-      assert verify =~ "planner_not_migrated"
+      refute verify =~ @retired_flag
+      refute verify =~ @retired_check
     end
 
     test "names the reference implementation as a worked example", %{doc: doc} do
@@ -148,10 +153,10 @@ defmodule Hamaca.DoctorSkillTest do
   end
 
   describe "board health and the report" do
-    test "the audit table has a planner_not_migrated row pointing at tasks-cutover", %{doc: doc} do
+    test "the audit table has no row for the retired planner check (RE487)", %{doc: doc} do
       table = section(doc, "## Board health (the audit)")
 
-      assert table =~ ~r/^\| `planner_not_migrated` \(WARNING\) \|.*`tasks-cutover`.*\|$/m
+      refute table =~ @retired_check
     end
 
     test "the summary line counts pending migrations", %{doc: doc} do
@@ -171,7 +176,7 @@ defmodule Hamaca.DoctorSkillTest do
   test "outside the legacy-spellings rule, the skill speaks only the canonical tasks names",
        %{doc: doc} do
     [before, rest] = String.split(doc, "3. **Legacy spellings in a repo flow file.**", parts: 2)
-    [_rule3, after_rule] = String.split(rest, "4. **The audit says so.**", parts: 2)
+    [_rule3, after_rule] = String.split(rest, "4. **A card blocked with no tasks.**", parts: 2)
 
     refute before <> after_rule =~ ~r/sub[_-]tasks?/i
   end

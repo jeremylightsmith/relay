@@ -59,9 +59,10 @@ contract (signatures, schemas, `Consumes` / `Produces`) and behavior scenarios, 
   reviewer's verdict scopes to one iteration, and a human or agent can fix one task without
   touching the rest.
 - Repairing a task's text is a CLI or API action; the drawer only toggles done.
-- Legacy read path: a card with a `plan` but no task rows is still parsed into tasks at run start
-  (`Hamaca.Runs.PlanTasks`), with a deprecation warning, `runs.tasks_from_plan` set, and the
-  board audit's `planner_not_migrated` finding. It goes when that finding stays empty.
+- Tasks written by the planner (`hamaca tasks add`) are the only source of a `foreach` node's
+  work: the plan is never parsed for them. A `foreach` flow on a card with no tasks does not
+  start — the card blocks on a human via `request_input`, naming `hamaca tasks add` and
+  `/hamaca-doctor`.
 - The runner still materializes the header as a file per run (`$HAMACA_PLAN`, also exported as
   `$RELAY_PLAN`), written by the Code flow's `branch` node, and the `## Verification` lines are
   read by eye by four agents (`plan-implementer`, the gates, `smoke-tester`,

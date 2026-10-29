@@ -6,9 +6,6 @@ defmodule Hamaca.Runs.RunServerTest do
   alias Schemas.NodeExecution
   alias Schemas.SubTask
 
-  # Seeds foreach runs through the legacy plan-parse fallback, which logs a deprecation (RE357).
-  @moduletag :capture_log
-
   setup do
     # Supervisor started FIRST, before any card/run exists: its boot-time `resume_all/0`
     # reconciliation task queries `:running` runs exactly once, asynchronously. Starting it
@@ -48,7 +45,7 @@ defmodule Hamaca.Runs.RunServerTest do
     }
   end
 
-  # A board + enabled code-shaped flow + a card carrying a THREE-task plan, run started.
+  # A board + enabled code-shaped flow + a card carrying THREE tasks, run started.
   # Mirrors runs_test.exs's setup_foreach/1; the card factory derives board_id from the stage.
   defp start_three_task_run do
     board = insert(:board)
@@ -60,7 +57,8 @@ defmodule Hamaca.Runs.RunServerTest do
     {:ok, flow} = Hamaca.Flows.create_flow(board, Map.put(code_shaped_flow_attrs(), :stage_id, works.id))
     {:ok, flow} = Hamaca.Flows.enable_flow(flow)
 
-    card = insert(:card, stage: pulls, plan: "### Task 1: Alpha\n\n### Task 2: Beta\n\n### Task 3: Gamma\n")
+    card = insert(:card, stage: pulls, plan: "# Goal\n\nHeader only.\n")
+    {:ok, _tasks} = Hamaca.Cards.add_tasks(card, Enum.map(~w(Alpha Beta Gamma), &%{title: &1}))
 
     {:ok, run} = Runs.start_run(card, flow)
     tasks = Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: :position)

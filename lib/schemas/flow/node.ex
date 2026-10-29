@@ -22,25 +22,9 @@ defmodule Schemas.Flow.Node do
   tasks. `foreach_sources/0` (`"card.tasks"`) is the only accepted source. Nodes inside the
   loop name the bound task with the `{task}` (title) and `{task_id}` (id) placeholders.
 
-  ## Legacy aliases (RE367)
-
-  `tasks` is the canonical flow-contract name for a card's plan units. The pre-RE367 spellings
-  are accepted as **deprecated aliases** and rewritten to canonical by `normalize_legacy/1`,
-  which runs wherever a flow enters the system (`changeset/2`, `Hamaca.Flows.Document.decode/1`),
-  so a stored or served flow is always canonical:
-
-  | concept | canonical | legacy alias |
-  |---|---|---|
-  | contract field in `reads` / `writes` | `tasks` | `sub_tasks` |
-  | `foreach` source | `card.tasks` | `card.sub_tasks` |
-  | `run` placeholder: task title | `{task}` | `{sub_task}` |
-  | `run` placeholder: task id | `{task_id}` | `{sub_task_id}` |
-  | the node's LLM (RE433) | `llm` (an agent name) | `model` (`legacy_models/0`) |
-  | node `type` (RE437) | `fan_out` | `parallel` |
-
-  A legacy `model` **key** is renamed to `llm`, its value mapped through `legacy_models/0`
-  (`"opus"` → `"Claude Opus"`); a value outside the table is carried through verbatim so
-  `Hamaca.Flows` refuses it loudly as an unknown agent. An explicit `llm` always wins.
+  `tasks` / `card.tasks` / `{task}` / `{task_id}` / `llm` / `fan_out` are the only spellings: a
+  renamed one (`sub_tasks`, `model`, `parallel`, …) is never rewritten (RE487) —
+  `Hamaca.Flows.Document.decode/1` refuses it, naming the rename.
 
   `agent` (agent nodes only) names a `.claude/agents/<name>.md` definition: the
   runner appends `--agent <name>` to its `claude -p` call, so the file supplies
@@ -96,17 +80,6 @@ defmodule Schemas.Flow.Node do
   @work_fields [:run, :agent, :llm, :effort, :max_retries, :timeout_minutes]
   @roles [:do, :check, :fix]
   @foreach_sources ["card.tasks"]
-
-  # RE367 — legacy spelling → canonical spelling, the ONE copy of the alias table (the data
-  # migration that rewrote stored rows carries its own frozen copy, by migration convention).
-  @legacy_contract_fields [sub_tasks: :tasks]
-  @legacy_foreach_sources %{"card.sub_tasks" => "card.tasks"}
-  @legacy_placeholders %{"{sub_task}" => "{task}", "{sub_task_id}" => "{task_id}"}
-  # RE433 — the pre-agents `model` value → the agent name every board is seeded with.
-  @legacy_models %{"opus" => "Claude Opus", "sonnet" => "Claude Sonnet", "haiku" => "Claude Haiku"}
-  # RE437 — the never-run `parallel` type became `fan_out`, keeping the value's type (string or
-  # atom). The data migration that rewrote stored rows carries its own frozen copy.
-  @legacy_types %{"parallel" => "fan_out", parallel: :fan_out}
 
   @primary_key false
   embedded_schema do
@@ -166,13 +139,6 @@ defmodule Schemas.Flow.Node do
   def work_fields, do: @work_fields
 
   @doc """
-  RE433 — the legacy node `model` value → the board agent name it became, the ONE copy (the data
-  migration carries a frozen duplicate). `Hamaca.Agents.ensure_seeded!/1` seeds one agent per entry.
-  """
-  @spec legacy_models() :: %{String.t() => String.t()}
-  def legacy_models, do: @legacy_models
-
-  @doc """
   RE444 — true for an **inline prompt**: an `:agent` node with no subagent (`agent` nil or `""`),
   so its `run` text is the whole prompt (the template flows' "no skills" shape). The ONE copy of
   that predicate: the flow editor's "inline · no skill" tag and the example board's node panel
@@ -184,59 +150,10 @@ defmodule Schemas.Flow.Node do
   @doc "The closed set of accepted `foreach` sources (RE367: `\"card.tasks\"`). Read by `changeset/2` and the docs."
   def foreach_sources, do: @foreach_sources
 
-  @doc """
-  A node attrs map (string or atom keys, as given) with every legacy alias rewritten to its
-  canonical spelling — see the moduledoc's alias table. Canonical input and unrelated text are
-  returned unchanged; `run` is rewritten only at the exact-brace placeholder literals. A struct is
-  returned as-is (it was already cast).
-  """
-  def normalize_legacy(%_{} = struct), do: struct
-
-  def normalize_legacy(attrs) when is_map(attrs) do
-    attrs
-    |> rename_model_to_llm()
-    |> Map.new(fn {key, value} -> {key, normalize_attr(to_string(key), value)} end)
-  end
-
-  # RE433: `model` → `llm`, keeping the attrs' key type. An explicit `llm` wins over `model`.
-  defp rename_model_to_llm(attrs) do
-    Enum.reduce([{"model", "llm"}, {:model, :llm}], attrs, fn {model_key, llm_key}, acc ->
-      case Map.pop(acc, model_key) do
-        {nil, ^acc} -> acc
-        {model, rest} -> Map.update(rest, llm_key, legacy_llm(model), &(&1 || legacy_llm(model)))
-      end
-    end)
-  end
-
-  defp legacy_llm(model) when is_binary(model), do: Map.get(@legacy_models, model, model)
-  defp legacy_llm(model), do: model
-
-  defp normalize_attr(key, values) when key in ["reads", "writes"] and is_list(values),
-    do: Enum.map(values, &canonical_contract_field/1)
-
-  defp normalize_attr("foreach", source) when is_binary(source), do: Map.get(@legacy_foreach_sources, source, source)
-
-  defp normalize_attr("type", type) when is_map_key(@legacy_types, type), do: Map.fetch!(@legacy_types, type)
-
-  defp normalize_attr("run", run) when is_binary(run),
-    do: String.replace(run, Map.keys(@legacy_placeholders), &Map.fetch!(@legacy_placeholders, &1))
-
-  defp normalize_attr(_key, value), do: value
-
-  defp canonical_contract_field(field) do
-    Enum.find_value(@legacy_contract_fields, field, fn {legacy, canonical} ->
-      cond do
-        field == legacy -> canonical
-        field == Atom.to_string(legacy) -> Atom.to_string(canonical)
-        true -> nil
-      end
-    end)
-  end
-
   @doc "Validates one node; graph-level rules (key uniqueness) live on Schemas.Flow."
   def changeset(node, attrs) do
     node
-    |> cast(normalize_legacy(attrs), @fields)
+    |> cast(attrs, @fields)
     |> validate_required([:key, :type])
     |> validate_exclusion(:key, ["start", "done", "needs_input"], message: "is a reserved sentinel name")
     |> validate_number(:max_retries, greater_than: 0)

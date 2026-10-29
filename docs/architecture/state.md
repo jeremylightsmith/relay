@@ -219,11 +219,6 @@ human can. A retry revives the SAME run row rather than starting a new one, so t
 stay append-only and "it failed here, then a human retried" is fully reconstructable from
 `node_executions` plus the `retries` counter.
 
-`tasks_from_plan` (RE368) is a second non-engine fact on the run row: `true` only on the run
-whose start seeded the card's tasks through the legacy plan-parse fallback. A later run on the
-same card finds the tasks already present and stays `false`. It feeds the audit's
-`planner_not_migrated` check.
-
 A run is closed `:cancelled` — never relabelled `:done` — when its card reaches a terminal-type
 stage (`Schemas.Stage.terminal_types/0`) **or is archived** (`archived_at` set, RE335) while the
 run is still active (`running`/`parked`, any `parked_reason`, RLY-233): the card-event `Hamaca.Runs.Listener`'s first reconcile rule closes it within one event,
@@ -233,7 +228,7 @@ moves off the stage, so it is never selected by either path and never relabelled
 (`Hamaca.Runs.start_run/3`) moves the card into the flow's work lane and inserts the run row in one
 transaction, so no committed state ever has an active run sitting on a terminal-type stage except
 a genuine leak. Both paths judge that leak from a single `run → card → stage` snapshot
-(`Hamaca.Runs.leaked?/1`, the reaper's join) — never a card stage read apart from the run — so a
+(`Hamaca.Runs.leak_reason/1`, the reaper's join) — never a card stage read apart from the run — so a
 concurrent `Spec:Done → Plan` dispatch landing between two reads can't make the Listener mistake a
 freshly-dispatched run for a leak and cancel it (RLY-233 / RE239). No grace window or time
 threshold is needed to tell the two apart.

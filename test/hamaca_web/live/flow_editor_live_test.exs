@@ -727,7 +727,7 @@ defmodule HamacaWeb.FlowEditorLiveTest do
       assert canvas_llm(view, "implement", "default") == "default · Claude Opus"
     end
 
-    test "4. a pushed node carrying a legacy model selects the matching agent",
+    test "4. a pushed node carrying an llm selects the matching agent",
          %{conn: conn, board: board} do
       sonnet = agent_named(board, "Claude Sonnet")
 
@@ -735,7 +735,7 @@ defmodule HamacaWeb.FlowEditorLiveTest do
         "key" => "legacy",
         "isolation" => "shared_clean",
         "trigger" => %{"stage" => "Deploy"},
-        "nodes" => [%{"key" => "a", "type" => "agent", "run" => "/x {ref}", "model" => "sonnet"}],
+        "nodes" => [%{"key" => "a", "type" => "agent", "run" => "/x {ref}", "llm" => "Claude Sonnet"}],
         "edges" => [%{"from" => "start", "to" => "a"}, %{"from" => "a", "to" => "done", "on" => "succeeded"}]
       }
 

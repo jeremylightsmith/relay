@@ -14,7 +14,7 @@ defmodule Hamaca.Flows.DocumentTest do
   @minimal %{
     "key" => "tiny",
     "isolation" => "shared_clean",
-    "trigger" => %{"pulls_from" => "Next up", "works_in" => "Spec", "lands_on" => nil},
+    "trigger" => %{"stage" => "Spec"},
     "nodes" => [%{"key" => "a", "type" => "agent", "run" => "/x {ref}"}],
     "edges" => [%{"from" => "start", "to" => "a"}, %{"from" => "a", "to" => "done", "on" => "succeeded"}]
   }
@@ -107,7 +107,7 @@ defmodule Hamaca.Flows.DocumentTest do
       assert hd(attrs.edges).on == nil
     end
 
-    test "reads a legacy three-key trigger's works_in as the stage" do
+    test "reads the trigger's stage" do
       {:ok, attrs} = Document.decode(@minimal)
       assert attrs.trigger == %{stage: "Spec"}
     end
@@ -195,13 +195,7 @@ defmodule Hamaca.Flows.DocumentTest do
       assert Document.decode!(reencoded) == Document.decode!(doc)
     end
 
-    test "27. legacy triggers read works_in; stage wins; bad keys and values are refused" do
-      legacy = %{"pulls_from" => "X", "works_in" => "Code", "lands_on" => "Y"}
-      assert {:ok, %{trigger: %{stage: "Code"}}} = Document.decode(%{@minimal | "trigger" => legacy})
-
-      both = %{"stage" => "Deploy", "works_in" => "Code"}
-      assert {:ok, %{trigger: %{stage: "Deploy"}}} = Document.decode(%{@minimal | "trigger" => both})
-
+    test "27. bad trigger keys and values are refused" do
       assert {:error, "unknown trigger key: from"} = Document.decode(%{@minimal | "trigger" => %{"from" => "X"}})
 
       assert {:error, "trigger.stage must be a stage name or null"} =
@@ -423,53 +417,66 @@ defmodule Hamaca.Flows.DocumentTest do
     end
   end
 
-  describe "legacy sub_tasks spellings (RE367)" do
-    @legacy_node %{
-      "key" => "a",
-      "type" => "agent",
-      "run" => "work {sub_task} ({sub_task_id})",
-      "foreach" => "card.sub_tasks",
-      "reads" => ["sub_tasks"],
-      "writes" => ["plan", "sub_tasks"]
-    }
+  # RE487: a renamed spelling is refused with a message naming old → canonical, never rewritten.
+  describe "renamed spellings are refused" do
+    defp decode_node(node), do: Document.decode(%{@minimal | "nodes" => [node]})
+    defp decode_trigger(trigger), do: Document.decode(%{@minimal | "trigger" => trigger})
 
-    test "decode/1 normalizes every legacy alias to canonical" do
-      assert {:ok, %{nodes: [node]}} = Document.decode(Map.put(@minimal, "nodes", [@legacy_node]))
-
-      assert node.foreach == "card.tasks"
-      assert node.reads == [:tasks]
-      assert node.writes == [:plan, :tasks]
-      assert node.run == "work {task} ({task_id})"
+    # Scenario 3
+    test "a node model names its rename to llm" do
+      assert Document.decode(%{@minimal | "nodes" => [%{"key" => "a", "type" => "agent", "model" => "opus"}]}) ==
+               {:error, ~s|nodes[0]: node field "model" was renamed to "llm" (an agent name, e.g. "Claude Opus")|}
     end
 
-    test "a legacy document, saved, encodes back canonical" do
-      board = library_board()
-      doc = @minimal |> Map.put("nodes", [@legacy_node]) |> Map.put("trigger", %{"stage" => "Deploy"})
+    # Scenario 4
+    test "sub_tasks in reads or writes names its rename to tasks" do
+      assert decode_node(%{"key" => "a", "type" => "agent", "reads" => ["sub_tasks"]}) ==
+               {:error, ~s(nodes[0]: "sub_tasks" in reads was renamed to "tasks")}
 
-      assert {:ok, :created, _flow} = Flows.upsert_from_document(board, "tiny", doc)
-
-      encoded = encoded(board, "tiny")
-      refute Jason.encode!(encoded) =~ "sub_task"
-
-      assert [%{"foreach" => "card.tasks", "reads" => ["tasks"], "writes" => ["plan", "tasks"], "run" => run}] =
-               encoded["nodes"]
-
-      assert run == "work {task} ({task_id})"
-    end
-  end
-
-  describe "legacy node model → llm (RE433)" do
-    defp decoded_node(node) do
-      {:ok, attrs} = Document.decode(put_in(@minimal, ["nodes"], [node]))
-      hd(attrs.nodes)
+      assert decode_node(%{"key" => "a", "type" => "agent", "writes" => ["plan", "sub_tasks"]}) ==
+               {:error, ~s(nodes[0]: "sub_tasks" in writes was renamed to "tasks")}
     end
 
-    # Scenario 13
-    test "a pushed model is renamed to llm through the legacy table" do
-      node = decoded_node(%{"key" => "a", "type" => "agent", "model" => "sonnet"})
+    # Scenario 5
+    test "a card.sub_tasks foreach names its rename to card.tasks" do
+      assert decode_node(%{"key" => "a", "type" => "agent", "foreach" => "card.sub_tasks"}) ==
+               {:error, ~s(nodes[0]: foreach "card.sub_tasks" was renamed to "card.tasks")}
+    end
 
-      assert node.llm == "Claude Sonnet"
-      refute Map.has_key?(node, :model)
+    # Scenario 6
+    test "an exact-brace sub_task placeholder in run names its rename" do
+      assert decode_node(%{"key" => "a", "type" => "agent", "run" => "show {sub_task_id}"}) ==
+               {:error, ~s(nodes[0]: run placeholder "{sub_task_id}" was renamed to "{task_id}")}
+
+      assert decode_node(%{"key" => "a", "type" => "agent", "run" => "show {sub_task}"}) ==
+               {:error, ~s(nodes[0]: run placeholder "{sub_task}" was renamed to "{task}")}
+    end
+
+    test "sub_tasks in run prose is not a placeholder, so it decodes" do
+      assert {:ok, _attrs} = decode_node(%{"key" => "a", "type" => "agent", "run" => "the sub_tasks table"})
+    end
+
+    # Scenario 7
+    test "a parallel node type names its rename to fan_out" do
+      assert decode_node(%{"key" => "a", "type" => "parallel"}) ==
+               {:error, ~s(nodes[0]: node type "parallel" was renamed to "fan_out")}
+    end
+
+    # Scenario 8
+    test "a works_in trigger names its rename to stage" do
+      assert decode_trigger(%{"works_in" => "Code"}) == {:error, ~s(trigger key "works_in" was renamed to "stage")}
+    end
+
+    test "a pulls_from or lands_on trigger key is refused as removed" do
+      assert decode_trigger(%{"stage" => "Code", "pulls_from" => "X"}) ==
+               {:error, ~s(trigger key "pulls_from" was removed — pickup is derived from board order; use "stage")}
+
+      assert decode_trigger(%{"stage" => "Code", "lands_on" => "Y"}) ==
+               {:error, ~s(trigger key "lands_on" was removed — drop-off is derived from board order; use "stage")}
+    end
+
+    test "a stage-only trigger decodes" do
+      assert {:ok, %{trigger: %{stage: "Code"}}} = decode_trigger(%{"stage" => "Code"})
     end
 
     test "encode emits llm and never model" do
@@ -478,19 +485,10 @@ defmodule Hamaca.Flows.DocumentTest do
       assert Enum.find(nodes, &(&1["key"] == "implement"))["llm"] == "Claude Opus"
       refute Enum.any?(nodes, &Map.has_key?(&1, "model"))
     end
-
-    # Scenario 14
-    test "an explicit llm wins over a legacy model" do
-      assert decoded_node(%{"key" => "a", "type" => "agent", "model" => "opus", "llm" => "Codex GPT"}).llm == "Codex GPT"
-    end
-
-    test "a model outside the table is carried through verbatim, for validation to refuse" do
-      assert decoded_node(%{"key" => "a", "type" => "agent", "model" => "gpt-4"}).llm == "gpt-4"
-    end
   end
 
-  # Scenario 22 (RE437): the never-run `parallel` type is a legacy alias of `fan_out`.
-  describe "legacy parallel → fan_out (RE437)" do
+  # RE437: a fan_out panel round-trips through the document.
+  describe "fan_out panel (RE437)" do
     defp string_keyed(map), do: Map.new(map, fn {k, v} -> {Atom.to_string(k), json_scalar(v)} end)
     defp json_scalar(v) when is_atom(v) and not is_nil(v), do: Atom.to_string(v)
     defp json_scalar(v), do: v
@@ -505,21 +503,12 @@ defmodule Hamaca.Flows.DocumentTest do
       }
     end
 
-    defp legacy_panel_doc do
-      Hamaca.FanOutFixtures.panel_nodes()
-      |> Hamaca.FanOutFixtures.put_node("fo", %{type: :parallel})
-      |> panel_doc()
-    end
-
-    test "decode/1 reads a parallel node as fan_out" do
-      assert {:ok, %{nodes: nodes}} = Document.decode(legacy_panel_doc())
-      assert %{type: :fan_out, max_parallel: nil} = Enum.find(nodes, &(&1.key == "fo"))
-    end
-
-    test "a saved legacy panel encodes fan_out, with max_parallel only when set" do
+    test "a saved panel encodes fan_out, with max_parallel only when set" do
       board = library_board()
 
-      assert {:ok, :created, _flow} = Flows.upsert_from_document(board, "panel", legacy_panel_doc())
+      assert {:ok, :created, _flow} =
+               Flows.upsert_from_document(board, "panel", panel_doc(Hamaca.FanOutFixtures.panel_nodes()))
+
       nodes = encoded(board, "panel")["nodes"]
 
       assert Enum.find(nodes, &(&1["key"] == "fo")) == %{"key" => "fo", "type" => "fan_out"}

@@ -7,26 +7,6 @@ defmodule HamacaWeb.CoreComponentsTest do
   alias HamacaWeb.CardMedia
   alias HamacaWeb.CoreComponents
 
-  describe "owner_pill/1" do
-    test "renders the Human pill with the primary token" do
-      html = render_component(&CoreComponents.owner_pill/1, owner: :human)
-
-      assert html =~ "badge-primary"
-      assert html =~ "Human"
-      assert html =~ ~s(data-owner="human")
-      refute html =~ "badge-secondary"
-    end
-
-    test "renders the AI pill with the secondary token" do
-      html = render_component(&CoreComponents.owner_pill/1, owner: :ai)
-
-      assert html =~ "badge-secondary"
-      assert html =~ "AI"
-      assert html =~ ~s(data-owner="ai")
-      refute html =~ "badge-primary"
-    end
-  end
-
   describe "copy_button/1 (RE324)" do
     test "renders an icon button carrying the exact text to copy and an accessible name" do
       html =
@@ -4333,6 +4313,28 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert tile |> LazyHTML.query("iframe") |> Enum.count() == 1
       assert tile |> LazyHTML.query("img") |> Enum.count() == 0
     end
+
+    # RE487 scenario 7 — with the RE370 `/attachments/:id/view` route gone, the default tile
+    # href is the drawer-relative viewer query, as for screenshots and images.
+    test "without mockup_href, a tile patches to ?mockup=<id>" do
+      id = Ecto.UUID.generate()
+
+      card =
+        Map.put(%{drawer_assigns(nil).card | ai_result: nil}, :mockups, [
+          %{"url" => "/attachments/#{id}", "caption" => "Home"}
+        ])
+
+      hrefs =
+        (&CoreComponents.card_drawer/1)
+        |> render_component(
+          Map.put(%{drawer_assigns(nil) | card: card, id: "card-drawer"}, :attachment_types, %{id => "text/html"})
+        )
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#card-drawer-mockups a[data-phx-link=patch]")
+        |> LazyHTML.attribute("href")
+
+      assert hrefs == ["?mockup=#{id}"]
+    end
   end
 
   describe "card_drawer/1 ai_result shape tolerance" do
@@ -6300,23 +6302,6 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert doc |> LazyHTML.query("a") |> LazyHTML.attribute("href") == ["/"]
       assert text_of(doc, "a") == "Home"
       refute html =~ "pending-"
-    end
-  end
-
-  describe "action_group/1 (RE394)" do
-    test "wraps its slot in a div marked action-group plus the caller's classes" do
-      assigns = %{}
-
-      html =
-        rendered_to_string(~H"""
-        <CoreComponents.action_group id="g1" class="flex gap-2">
-          <button>A</button>
-        </CoreComponents.action_group>
-        """)
-
-      doc = LazyHTML.from_fragment(html)
-      assert doc |> LazyHTML.query("div#g1") |> LazyHTML.attribute("class") == ["action-group flex gap-2"]
-      assert doc |> LazyHTML.query("div#g1 > button") |> LazyHTML.text() == "A"
     end
   end
 

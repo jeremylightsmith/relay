@@ -206,9 +206,9 @@ sharing behavior.
   nil = the board default. `create_flow/2`, `update_flow/2`, `upsert_from_document/3` and
   `seed_default_flows!/1` refuse a name that is not an agent on the board
   (`node "<key>" names LLM "<name>", which is not an agent on this board`). The pre-RE433 node
-  `model` is a legacy alias (`Schemas.Flow.Node.legacy_models/0`, `"opus"` → `"Claude Opus"`)
-  renamed by `normalize_legacy/1`; the `RenameNodeModelToLlm` migration rewrote stored `flows` and
-  `flow_versions`, raising on an unknown model.
+  `model` key is refused by `Document.decode/1` (`node field "model" was renamed to "llm"`); the
+  `RenameNodeModelToLlm` migration rewrote stored `flows` and `flow_versions`. The seed model →
+  agent-name map every board gets is `Hamaca.Agents.default_agent_names/0`.
   **The shape rule (RE430):** `Hamaca.Flows.Shape` is the ONE owner of whether a flow's board
   shape can work and of every word explaining a broken one. `Shape.problems/2` (pure, over the
   ordered stages and every flow, enabled or not) built on `neighbours/2` gives a broken flow
@@ -284,9 +284,12 @@ sharing behavior.
   (dense: every node/edge field present, filled from the schema default, so `customized?/1`'s
   field-by-field comparison against the embedded structs stays exact). `decode ∘ encode` is a
   fixed point, which is what makes pull → push unchanged a no-op. The trigger serializes as
-  one stage **name**, `{"stage": "<name>"}`, not an id, so a document is portable across boards;
-  a legacy three-key trigger (`pulls_from` / `works_in` / `lands_on`) still decodes, reading only
-  `works_in`. `Document.derived/1` is the read-only `{"pulls_from", "lands_on"}` name pair the
+  one stage **name**, `{"stage": "<name>"}`, not an id, so a document is portable across boards.
+  **Renamed spellings are refused, never rewritten (RE487):** a node `model`, a `parallel` type,
+  `sub_tasks` in `reads`/`writes`, a `card.sub_tasks` foreach, a `{sub_task}` / `{sub_task_id}`
+  `run` placeholder, or a `works_in` / `pulls_from` / `lands_on` trigger key makes `decode/1`
+  return an error naming the old and the canonical spelling (its private `@renamed` table is the
+  one copy); the `CanonicalizeRe367FlowSpellings` migration re-swept stored rows first. `Document.derived/1` is the read-only `{"pulls_from", "lands_on"}` name pair the
   API puts beside the document (`GET /api/flows[/:key]` and the `PUT` response:
   `"derived"`); `encode/1` never emits it and `decode/1` accepts and ignores it — and likewise a
   read-only `"problem"` key (RE430) — so a pulled file pushes back unchanged.
@@ -370,7 +373,7 @@ sharing behavior.
   **The read side**: `list_runs_for_card/1`, `latest_run/1`, `run_summaries_for_board/1`,
   `run_summary_for_card/1`, `happy_path/1`, `queued_flow/5`, `face_summary/5` — one shared
   private builder, so the summary shape is defined exactly once; a summary carries `branches` (the open region entry's tally and per-branch bars, nil when no region is open — one batched query per board, RE440). `RunDetail` groups each fan-out region entry into one `:region` timeline row with a lane per branch, and exposes the branch partition once as `branch_bar/1`, `branch_tally/1` and `bar_states/0` (RE440; see [runtime.md](runtime.md#fan-out-regions-re437)). `list_runs_for_card/1` join-preloads each run's `flow: :stage` in the runs query (no per-run N+1), so `RunDetail` carries `stage_name` — the run's work stage's name, nil when the flow or its work stage is gone (RE426). Flow metrics read each execution's work / rework / rewind class from ONE function, `execution_spans_for_flow/2` (RE348; see [runner.md](runner.md)). The four metrics roll-ups (`node_metrics_for_flow/2`, `node_waits_for_flow/2`, `execution_spans_for_flow/2`, `flow_metrics_summary/2`) take `card_id:` (one card, RE235) or `card_ids:` (a list — RE349's Last-N population, `card_id:` winning when both are given); either drops the window. `first_node_queue_wait/2` (RE349) is the mean `claimed_at − inserted_at` of the `NodeJob.flow_kinds/0` job bound to each in-population run's first execution — the value stream's queue triangle.
-  **The board-health audit** (RE249): `Hamaca.Runs.audit/2` / `Hamaca.Runs.Audit.findings/2`, a pure function over runs (`:node_executions` and `card: :board` preloaded) on the metrics' `metric_windows/0` vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory. Four checks — `findings_dropped`, `verdict_flipped`, `planner_not_migrated` (RE368), reading the `runs.tasks_from_plan` fact `start_run` sets when the legacy plan-parse fallback seeded the card's tasks, and `outcomeless_attempts` (RE410), one WARNING per `{run, node, visit}` with at least `Hamaca.Runs.max_outcomeless_reentries/0` outcome-nil executions.
+  **The board-health audit** (RE249): `Hamaca.Runs.audit/2` / `Hamaca.Runs.Audit.findings/2`, a pure function over runs (`:node_executions` preloaded) on the metrics' `metric_windows/0` vocabulary, answering *is this board's history clean?*; owns `severities/0`/`checks/0`, advisory. Three checks — `findings_dropped`, `verdict_flipped` and `outcomeless_attempts` (RE410), one WARNING per `{run, node, visit}` with at least `Hamaca.Runs.max_outcomeless_reentries/0` outcome-nil executions.
   **Steer now** (RE358): `steer/4`, `steer_state/1`, `steer_receipts/1`; the server-only `:steered` outcome (`NodeExecution.server_only_outcomes/0`) — see [runner.md](runner.md#steer-now-re358).
   **The dispatcher seam**: the `Hamaca.Runs.Dispatcher` behaviour, resolved through `Hamaca.Runs.Instance` (`config :hamaca, :runs_dispatcher` in production, a per-test instance under test — RE298 / ADR 0009).
   Card writes go through `Hamaca.Cards`, so ADR 0003/0004 rules apply automatically.
@@ -475,10 +478,10 @@ sharing behavior.
   Precedence is `mockup` > `screenshot` > `image`; a cold `?image=` waits for the async body fill
   (the conversation), then an unknown or malformed id, an unlinked upload, a mockup, or another
   card's note image falls back to the drawer.
-  `/attachments/:id/view` (`HamacaWeb.MockupViewerLive`, `HamacaWeb.attachment_view_path/1`) is the
-  legacy RE370 link: an authenticated, membership-scoped redirect to that viewer URL in the
-  `:require_authenticated` live_session; it 404s for a non-member, an unknown id, or a non-HTML
-  attachment. Hamaca's UI never links to a raw HTML attachment as a top-level page.
+  The board viewer URL (`/board/:slug?card=<ref>&mockup=<id>`) is the only mockup link:
+  `/attachments/:id/view` is not a route and 404s like any unknown path (the RE370 links stored in
+  card text, task bodies and comments were rewritten to the viewer URL by the RE487 data
+  migration). Hamaca's UI never links to a raw HTML attachment as a top-level page.
   Archive and restore (`Cards.archive_card/2` / `Cards.unarchive_card/2`) are reachable from the
   board-key API as `POST /api/cards/:ref/archive` and `POST /api/cards/:ref/unarchive` (RE318,
   `./hamaca archive` / `unarchive`), attributed to `:agent`. The API archive refuses a card with
@@ -1023,9 +1026,7 @@ sharing behavior.
   roll-up with `card_ids:` from `done_card_ids/2`. An unknown flow key redirects to level 1 with
   a flash. Realtime: `Hamaca.Runs.subscribe/1`, recomputing on `{:run_changed, card_id}`.
 
-  `flow_agent_secs/3` reconciles agent time with
-  `Runs.node_metrics_for_flow/2` (equal when a card's executions don't overlap, smaller when they
-  do). `flow_stream/2` (RE348) is level 2 — one flow's `node_metrics_for_flow/2` rows plus its
+  `flow_stream/2` (RE348) is level 2 — one flow's `node_metrics_for_flow/2` rows plus its
   **send-backs** (a `failed` execution followed by a different node, grouped by
   `from → to → returns_to` with `laps`, `to_secs`, `rewind_secs`, `secs`) and its **foreach**
   N and per-copy spread, all from one read of `Runs.execution_spans_for_flow/2`, the data behind

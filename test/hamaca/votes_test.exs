@@ -11,11 +11,11 @@ defmodule Hamaca.VotesTest do
 
       assert {:ok, :added} = Votes.toggle_vote(user, card)
       assert Votes.count(card.id) == 1
-      assert Votes.voted?(user, card)
+      assert Votes.voted_card_ids(user, [card.id]) == MapSet.new([card.id])
 
       assert {:ok, :removed} = Votes.toggle_vote(user, card)
       assert Votes.count(card.id) == 0
-      refute Votes.voted?(user, card)
+      assert Votes.voted_card_ids(user, [card.id]) == MapSet.new()
     end
 
     test "broadcasts {:vote_changed, card_id} on the board topic" do

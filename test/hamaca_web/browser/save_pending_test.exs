@@ -64,7 +64,7 @@ defmodule HamacaWeb.Browser.SavePendingTest do
     end)
     |> latency_off()
 
-    {:ok, _} = board.id |> Boards.get_board_by_id!() |> Boards.update_board(%{name: original})
+    {:ok, _} = Schemas.Board |> Hamaca.Repo.get!(board.id) |> Boards.update_board(%{name: original})
   end
 
   test "a Description editor's Save presses in place without daisyUI's disabled grey; Cancel inert", %{

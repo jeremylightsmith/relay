@@ -195,7 +195,7 @@ defmodule HamacaWeb.AuthTest do
       user = Hamaca.Factory.insert(:user, email: "join@example.com")
       Auth.log_in_user(conn, user)
 
-      assert Hamaca.Members.member?(board, user)
+      assert Hamaca.Members.member_user_id?(board.id, user.id)
     end
   end
 

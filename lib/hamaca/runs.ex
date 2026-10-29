@@ -46,7 +46,6 @@ defmodule Hamaca.Runs do
   alias Hamaca.Runs.Capacity
   alias Hamaca.Runs.Engine
   alias Hamaca.Runs.Instance
-  alias Hamaca.Runs.PlanTasks
   alias Hamaca.Runs.Policy
   alias Hamaca.Runs.Preflight
   alias Hamaca.Runs.RunDetail
@@ -734,10 +733,9 @@ defmodule Hamaca.Runs do
 
   @doc """
   The flow's runs within `opts[:window]` (one of `metric_windows/0`, default `default_window/0`)
-  with `:node_executions` and `card: :board` preloaded, ordered `started_at` ASC then `id` ASC,
-  executions ordered by `id`. `Hamaca.Runs.Audit` reasons about "the next execution", so a stable
-  order is part of the contract, not a convenience. The card and board let `Hamaca.Runs.Audit`
-  name cards (`Hamaca.Cards.ref/2`) without a query.
+  with `:node_executions` preloaded, ordered `started_at` ASC then `id` ASC, executions ordered
+  by `id`. `Hamaca.Runs.Audit` reasons about "the next execution", so a stable order is part of
+  the contract, not a convenience.
   """
   def recent_runs_for_flow(%Flow{} = flow, opts \\ []) do
     since = opts |> Keyword.get(:window, default_window()) |> metric_window_since()
@@ -748,7 +746,7 @@ defmodule Hamaca.Runs do
       on: c.id == r.card_id,
       where: c.board_id == ^flow.board_id and r.flow_key == ^flow.key,
       order_by: [asc: r.started_at, asc: r.id],
-      preload: [node_executions: ^executions, card: :board]
+      preload: [node_executions: ^executions]
     )
     |> filter_runs_since(since)
     |> Repo.all()
@@ -1047,17 +1045,12 @@ defmodule Hamaca.Runs do
   @run_stale_after_s 300
 
   @doc """
-  The run's last forward progress: the newest `node_executions.inserted_at`, falling back to the
-  run's `inserted_at`. Forward progress only — `node_jobs.updated_at` is bumped by the very
-  revoke/requeue loop that was the RLY-191 failure, so a run wedged in that loop (which makes no
-  new executions) keeps this clock running, which is the point.
+  Each board run's last forward progress: `%{run_id => DateTime.t()}`, the newest
+  `node_executions.inserted_at`, in one grouped query (no N+1). Runs with no executions are absent
+  (the caller falls back to run start). Forward progress only — `node_jobs.updated_at` is bumped by
+  the very revoke/requeue loop that was the RLY-191 failure, so a run wedged in that loop (which
+  makes no new executions) keeps this clock running, which is the point.
   """
-  @spec last_progress_at(Run.t()) :: DateTime.t()
-  def last_progress_at(%Run{id: run_id, inserted_at: inserted_at}) do
-    Repo.one(from ne in NodeExecution, where: ne.run_id == ^run_id, select: max(ne.inserted_at)) || inserted_at
-  end
-
-  @doc "Bulk `last_progress_at/1` for a board: `%{run_id => DateTime.t()}`, one grouped query (no N+1). Runs with no executions are absent (the caller falls back to run start)."
   @spec last_progress_by_run(Board.t()) :: %{term() => DateTime.t()}
   def last_progress_by_run(%Board{} = board) do
     from(ne in NodeExecution,
@@ -1301,41 +1294,46 @@ defmodule Hamaca.Runs do
   # Today that leaves out only `:human`.
   defp startable_types, do: Flow.Node.runnable_types() ++ Flow.Node.control_types()
 
+  # A `foreach` flow iterates the card's tasks, which the planner writes (`hamaca tasks add`,
+  # RE357) — they are its only source. A `foreach` flow on a card with none MUST NOT start
+  # (RLY-165): with zero sub_tasks the first foreach guard reads `remaining == 0` as
+  # `:foreach_exhausted` and routes straight past every implement lap to `precommit` —
+  # trivially green on an empty diff — then reviews, smoke and `merge`, merging an empty branch
+  # as though the work were done. `:foreach_exhausted` must mean "I finished the work", never
+  # "I found none".
   defp do_start_run(card, flow, start_target, context) do
-    case maybe_seed_sub_tasks(card, flow) do
-      {:ok, source} -> start_seeded_run(card, flow, start_target, context, source == :plan_parse)
-      {:error, :no_plan_tasks} -> block_on_unusable_plan(card, flow)
+    if foreach_flow?(flow) and not Repo.exists?(from st in SubTask, where: st.card_id == ^card.id) do
+      block_on_missing_tasks(card, flow)
+    else
+      start_tasked_run(card, flow, start_target, context)
     end
   end
 
+  defp foreach_flow?(flow), do: Enum.any?(flow.nodes, &(not is_nil(&1.foreach)))
+
   # No run is created, and the card blocks on a human: a `:needs_input` card is skipped by
   # the scheduler by rule, so this reports the defect once instead of the scheduler re-pulling
-  # a card it can never work. The text is self-service (RE357): the usual cause is a planner
-  # that has not migrated to `hamaca tasks add`, and the owner can fix that themselves.
-  defp block_on_unusable_plan(card, flow) do
-    {:ok, _card} = Cards.request_input(card, unusable_plan_message(card, flow), :agent)
+  # a card it can never work. The text is self-service (RE357): the owner can re-plan or add the
+  # tasks themselves.
+  defp block_on_missing_tasks(card, flow) do
+    {:ok, _card} = Cards.request_input(card, missing_tasks_message(card, flow), :agent)
     {:error, :no_plan_tasks}
   end
 
-  defp unusable_plan_message(card, flow) do
-    why =
-      if is_nil(card.plan) or String.trim(card.plan) == "" do
-        "this card has no tasks and no plan, so its `foreach` node has nothing to implement."
-      else
-        "this card has no tasks, and its plan has no `## Task N:` headings for the legacy " <>
-          "plan-parse fallback to read — the planner has not migrated to `hamaca tasks add`."
-      end
+  defp missing_tasks_message(card, flow) do
+    missing = if is_nil(card.plan) or String.trim(card.plan) == "", do: "no tasks and no plan", else: "no tasks"
 
-    "The #{flow.key} flow could not start: #{why} Run `/hamaca-doctor` to migrate the planner, " <>
-      "then re-plan the card (or add its tasks directly with " <>
-      "`hamaca tasks add <ref> --task \"<title>\" @<body-file>`) and move the card back to re-run."
+    "The #{flow.key} flow could not start: this card has #{missing}, so its `foreach` node has " <>
+      "nothing to implement. Re-plan the card, or add its tasks with " <>
+      "`hamaca tasks add <ref> --task \"<title>\" @<body-file>`, then move the card back to re-run. " <>
+      "If the planner doesn't write tasks, run `/hamaca-doctor`."
   end
 
-  defp start_seeded_run(card, flow, start_target, context, tasks_from_plan) do
+  defp start_tasked_run(card, flow, start_target, context) do
     result =
       Repo.transaction(fn ->
         card = move_into_work_lane(card, flow)
-        run = insert_run(card, flow, start_target, context, tasks_from_plan)
+        run = insert_run(card, flow, start_target, context)
         sub_task_id = if start_target == foreach_node_key(flow), do: next_sub_task_id(run)
         {finished, started} = enter_start_node!(run, flow, start_target, sub_task_id)
         {card, run, finished, started}
@@ -1366,7 +1364,7 @@ defmodule Hamaca.Runs do
     end
   end
 
-  # The start node's rows, inside start_seeded_run's transaction: `{finished, started}` — the
+  # The start node's rows, inside start_tasked_run's transaction: `{finished, started}` — the
   # control executions resolved on the way (the `fan_out` when the start edge opens a region,
   # RE437) and every `{execution, job}` to dispatch.
   defp enter_start_node!(run, flow, start_target, sub_task_id) do
@@ -1380,7 +1378,7 @@ defmodule Hamaca.Runs do
   end
 
   # RLY-233 Part 1: move the card into the flow's work lane and set it :working BEFORE the run
-  # row is inserted, inside start_seeded_run's single transaction. This guarantees no committed
+  # row is inserted, inside start_tasked_run's single transaction. This guarantees no committed
   # state ever has an active run while the card still sits at its (often :done-type) pull stage,
   # so "active run + terminal stage" becomes an unambiguous leak signal (Part 2). Moving first
   # also sidesteps stranded_run/2 — there is no active run at move time.
@@ -1404,56 +1402,7 @@ defmodule Hamaca.Runs do
     working
   end
 
-  # A `foreach` flow iterates the card's sub_tasks. The planner writes them (`relay tasks add`,
-  # RE357); a card that has none falls back to parsing them out of `card.plan` at RUN START
-  # (never on re-entry — that would wipe done-state), with a deprecation warning. A card whose
-  # sub_tasks were already written is left alone: the authored list wins over the parsed one.
-  #
-  # Returns `{:ok, :plan_parse}` when THIS call seeded the tasks from the plan — the run that
-  # starts is then marked `tasks_from_plan` (RE368), and the audit's `planner_not_migrated`
-  # check is the telemetry for deleting this path — and `{:ok, :existing}` otherwise.
-  #
-  # Returns `{:error, :no_plan_tasks}` when the flow iterates the plan but no task list can
-  # be produced. That case MUST NOT start the run (RLY-165): with zero sub_tasks the first
-  # foreach guard reads `remaining == 0` as `:foreach_exhausted` and routes straight past
-  # every implement lap to `precommit` — trivially green on an empty diff — then reviews,
-  # smoke and `merge`. An unreadable plan would merge an empty branch as though the work
-  # were done. `:foreach_exhausted` must mean "I finished the work", never "I found none".
-  defp maybe_seed_sub_tasks(card, flow) do
-    cond do
-      not Enum.any?(flow.nodes, &(not is_nil(&1.foreach))) ->
-        {:ok, :existing}
-
-      Repo.exists?(from st in SubTask, where: st.card_id == ^card.id) ->
-        {:ok, :existing}
-
-      true ->
-        case PlanTasks.parse(card.plan) do
-          [_ | _] = tasks ->
-            {:ok, _card} = Cards.set_sub_tasks(card, tasks)
-            log_plan_parse_fallback(card, flow, length(tasks))
-            {:ok, :plan_parse}
-
-          [] ->
-            {:error, :no_plan_tasks}
-        end
-    end
-  end
-
-  # RE357: parsing `card.plan` is the LEGACY path — a migrated planner writes the tasks itself
-  # with `hamaca tasks add`, so the card already has sub_tasks and this never runs. It is kept
-  # for boards whose customized flows still write monolithic plans; the warning is how we
-  # learn when it is safe to delete.
-  defp log_plan_parse_fallback(card, flow, count) do
-    ref = Cards.ref(Repo.get!(Board, card.board_id), card)
-
-    Logger.warning(
-      "deprecated: #{ref} (#{flow.key} flow): seeded #{count} sub_tasks by parsing card.plan; " <>
-        "migrate the planner to `hamaca tasks add` (run /hamaca-doctor)"
-    )
-  end
-
-  defp insert_run(card, flow, start_target, context, tasks_from_plan) do
+  defp insert_run(card, flow, start_target, context) do
     %Run{
       card_id: card.id,
       flow_id: flow.id,
@@ -1461,7 +1410,6 @@ defmodule Hamaca.Runs do
       status: :running,
       current_node: start_target,
       context: context,
-      tasks_from_plan: tasks_from_plan,
       started_at: now()
     }
     |> Run.changeset()
@@ -1835,7 +1783,7 @@ defmodule Hamaca.Runs do
   first rule — so the two always log the same text.
 
   Decided in ONE `run → card → stage` query (the same `leaked_runs_query/0` the sweep reads), so
-  the verdict is a single consistent snapshot. Atomic dispatch (`start_seeded_run/5` moves the
+  the verdict is a single consistent snapshot. Atomic dispatch (`start_tasked_run/4` moves the
   card into the work lane *before* inserting the run, in one transaction) guarantees no committed
   state ever pairs an active run with a card still at its (often `:done`-type) pull stage, so a
   freshly dispatched run is never a leak — only a genuinely stranded one is. Reading the card
@@ -1854,13 +1802,7 @@ defmodule Hamaca.Runs do
     end
   end
 
-  @doc """
-  True if `run` is a leak: still `active` while its card is archived or sits in a terminal-type
-  stage. Exactly `leak_reason/1` is non-nil — see it for the single-snapshot guarantee.
-  """
-  def leaked?(%Run{} = run), do: leak_reason(run) != nil
-
-  # RE335 — THE leak definition, read by leak_reason/1 (so leaked?/1) and close_orphaned_runs/0,
+  # RE335 — THE leak definition, read by leak_reason/1 and close_orphaned_runs/0,
   # so the per-run predicate and the sweep can never drift apart. `:card` is a named binding so
   # both readers can select the card's `archived_at` for the close reason.
   defp leaked_runs_query do
@@ -2095,19 +2037,13 @@ defmodule Hamaca.Runs do
   defp signed_in(_entry), do: :na
 
   @doc """
-  Whether `runner` is rate limited at `now` (RE320, per harness since RE436): it reported at least
-  one installed harness on its last heartbeat and EVERY installed one has a live
-  `harness_pause/2`. A runner with one harness still running claims that harness's work, so it is
-  not rate limited. A runner that never reported (`harnesses` nil) or reported none is not. The
-  single home of that predicate.
-  """
-  @spec runner_rate_limited?(Runner.t(), DateTime.t()) :: boolean()
-  def runner_rate_limited?(%Runner{} = runner, %DateTime{} = now), do: installed_pauses(runner, now) != nil
-
-  @doc """
   The runner's live usage pause at `now` — the `harness_pause/2` map that lifts EARLIEST, since that
-  is when the runner can claim again — or nil when `runner_rate_limited?/2` is false. Every
-  consumer reads `.resets_at` from it.
+  is when the runner can claim again — or nil when it is not rate limited. A runner is rate limited
+  (RE320, per harness since RE436) when it reported at least one installed harness on its last
+  heartbeat and EVERY installed one has a live `harness_pause/2`. A runner with one harness still
+  running claims that harness's work, so it is not rate limited. A runner that never reported
+  (`harnesses` nil) or reported none is not. The single home of that predicate; every consumer
+  reads `.resets_at` from it.
   """
   @spec active_rate_limit(Runner.t(), DateTime.t()) :: map() | nil
   def active_rate_limit(%Runner{} = runner, %DateTime{} = now) do
@@ -4473,8 +4409,8 @@ defmodule Hamaca.Runs do
   `abandon_unresumable_runs/1` fails the run outright so the ordinary `:failed` hatch applies
   (RE297). The older "RLY-199 auto-resumes those" rationale was wrong: nothing bounded the wait.
 
-  The board-scoped consumers — the bulk sweep (`restart_stalled/2`), the board's stalled badge
-  (`restartable_count/1`), and the restart dialog (`stalled_cards/1`) — all read this same rule
+  The board-scoped consumers — the bulk sweep (`restart_stalled/2`) and the restart dialog
+  plus its header badge count (`stalled_cards/1`) — all read this same rule
   through `restartable_runs/1`, which ADDITIONALLY excludes cards already in a terminal-type
   stage (`Stage.terminal_types/0`, RE247): a run can be `restartable?/1` true while its card has
   since moved to Done, and the board-scoped consumers correctly skip it where this function
@@ -4784,9 +4720,6 @@ defmodule Hamaca.Runs do
       end
     end)
   end
-
-  @doc "How many runs on `board` are `restartable?/1`, excluding cards already in a terminal-type stage — the board-header badge count (RLY-228)."
-  def restartable_count(%Board{} = board), do: board |> restartable_runs() |> length()
 
   @doc """
   The board's stalled cards, as the restart dialog renders them (RE247): one entry per
@@ -5121,14 +5054,6 @@ defmodule Hamaca.Runs do
     Repo.get!(NodeJob, job.id)
   end
 
-  @doc """
-  LEGACY fallback: how many `## Task N:` headings a monolithic plan declares, via the same
-  `Hamaca.Runs.PlanTasks` parser the run-start fallback uses. `Hamaca.Talk`'s seed line calls it
-  only for a card with no tasks; a migrated plan is header-only and its steps are the card's
-  tasks (`Hamaca.Cards.task_count/1`, RE357).
-  """
-  def plan_task_count(plan), do: plan |> PlanTasks.parse() |> length()
-
   # Exclusive runs have absolute runner affinity (ADR 0006 §5): the machine that
   # claims a run's first job is persisted as the run's `pinned_runner_name`
   # (`maybe_pin_run/2`), and every later job — the next node after an advance, a
@@ -5427,8 +5352,8 @@ defmodule Hamaca.Runs do
   # {task} lets a foreach node's prompt name the exact task it is working
   # instead of saying "the next unchecked one"; {task_id} lets it FETCH that
   # task (`relay task show {ref} {task_id}`, RE357; canonical names since RE367 —
-  # the legacy {sub_task}/{sub_task_id} are rewritten on flow load, so no stored
-  # flow still uses them). Both are nil outside a foreach binding, and the runner
+  # a flow push spelling the old {sub_task}/{sub_task_id} is refused, RE487, and no
+  # stored flow still uses them). Both are nil outside a foreach binding, and the runner
   # drops nil vars, so the placeholder survives literally there — use them only in
   # nodes inside the loop.
   defp sub_task_title(nil), do: nil

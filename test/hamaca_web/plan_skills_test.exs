@@ -91,7 +91,8 @@ defmodule Hamaca.PlanSkillsTest do
 
     test "drops the machine-parsed heading contract and the checkbox-flipping note", %{doc: doc} do
       refute doc =~ "## Task N"
-      refute doc =~ "PlanTasks"
+      # Built, not typed, so the retired parser's module name appears nowhere outside migrations.
+      refute doc =~ "Plan" <> "Tasks"
       refute doc =~ "em-dash"
       refute doc =~ "flips them"
     end

@@ -46,7 +46,7 @@ defmodule Hamaca.UserApiTokensTest do
     assert :error = Accounts.authenticate_user_api_token("garbage")
     assert :error = Accounts.authenticate_user_api_token("relayu_deadbeef_nope")
 
-    assert {:ok, _} = Accounts.revoke_user_api_token(record)
+    assert {:ok, _} = Repo.delete(record)
     assert :error = Accounts.authenticate_user_api_token(token)
   end
 

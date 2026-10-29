@@ -230,21 +230,6 @@ defmodule Hamaca.CardsTest do
     end
   end
 
-  describe "count_cards/1" do
-    test "counts the board's non-archived cards, excluding archived and other boards",
-         %{board: board, stage: stage} do
-      insert(:card, stage: stage)
-      insert(:card, stage: stage)
-      archived = insert(:card, stage: stage)
-      {:ok, _} = Cards.archive_card(archived)
-
-      other = insert(:board)
-      insert(:card, stage: insert(:stage, board: other))
-
-      assert Cards.count_cards(board) == 2
-    end
-  end
-
   describe "list_cards/2 with :exclude_stage_ids" do
     test "omits cards in the excluded stages and keeps the rest", %{board: board, stage: stage} do
       other = insert(:stage, board: board, position: 2)

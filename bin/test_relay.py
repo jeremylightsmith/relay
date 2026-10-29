@@ -12171,10 +12171,6 @@ class FlowPullPushTest(unittest.TestCase):
     def test_no_derived_block_renders_the_stage_alone(self):
         self.assertEqual(relay._trigger_chain(self._without_derived()), "Code")
 
-    def test_a_legacy_three_key_trigger_renders_its_works_in_stage(self):
-        doc = self._without_derived(trigger={"pulls_from": "A", "works_in": "Code", "lands_on": "B"})
-        self.assertEqual(relay._trigger_chain(doc), "Code")
-
     def test_a_null_trigger_and_no_derived_renders_a_dash(self):
         self.assertEqual(relay._trigger_chain(self._without_derived(trigger=None)), "—")
 

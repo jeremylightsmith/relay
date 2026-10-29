@@ -148,7 +148,7 @@ defmodule Hamaca.Runs.RestartTest do
     end
   end
 
-  describe "restart_stalled/2 + restartable_count/1" do
+  describe "restart_stalled/2 + stalled_cards/1" do
     # A flow whose failed edge parks the run on needs_input (the RLY-194 shape), so a
     # reported :failed produces a real escalation park the sweep can revive in place.
     defp park_flow(board) do
@@ -195,7 +195,7 @@ defmodule Hamaca.Runs.RestartTest do
       assert Runs.get_run!(died.id).status == :parked
       assert Runs.get_run!(ask.id).status == :parked
 
-      assert Runs.restartable_count(ctx.board) == 1
+      assert length(Runs.stalled_cards(ctx.board)) == 1
 
       summary = Runs.restart_stalled(ctx.board, :agent)
 
@@ -203,7 +203,7 @@ defmodule Hamaca.Runs.RestartTest do
       assert Runs.get_run!(died.id).status == :running
       assert Runs.get_run!(ask.id).status == :parked
       assert Runs.get_run!(ask.id).parked_reason == :needs_input
-      assert Runs.restartable_count(ctx.board) == 0
+      assert Runs.stalled_cards(ctx.board) == []
     end
 
     # RE253 / AC4 — reviving an escalation park must leave the card agreeing with the run. A card
@@ -234,7 +234,7 @@ defmodule Hamaca.Runs.RestartTest do
 
       working = clean_failed(ctx.stage)
 
-      assert Runs.restartable_count(ctx.board) == 1
+      assert length(Runs.stalled_cards(ctx.board)) == 1
       assert [%{card: listed}] = Runs.stalled_cards(ctx.board)
       assert listed.id == working.card_id
 
@@ -254,7 +254,7 @@ defmodule Hamaca.Runs.RestartTest do
 
       working = clean_failed(ctx.stage)
 
-      assert Runs.restartable_count(ctx.board) == 1
+      assert length(Runs.stalled_cards(ctx.board)) == 1
       assert [%{card: listed}] = Runs.stalled_cards(ctx.board)
       assert listed.id == working.card_id
     end
@@ -276,15 +276,6 @@ defmodule Hamaca.Runs.RestartTest do
       assert second.reason == "Failed at brainstorm"
 
       assert first.card.ref_number < second.card.ref_number
-    end
-
-    test "it lists exactly the runs restartable_count/1 counts", ctx do
-      _escalated = escalation_park(ctx.stage)
-      _failed = clean_failed(ctx.stage)
-      _question = genuine_question(ctx.stage)
-
-      assert length(Runs.stalled_cards(ctx.board)) == Runs.restartable_count(ctx.board)
-      assert Runs.restartable_count(ctx.board) == 2
     end
   end
 

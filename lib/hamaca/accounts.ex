@@ -251,9 +251,6 @@ defmodule Hamaca.Accounts do
 
   def authenticate_user_api_token(_raw_token), do: :error
 
-  @doc "Revokes (deletes) a user token. It stops authenticating immediately."
-  def revoke_user_api_token(%UserApiToken{} = token), do: Repo.delete(token)
-
   @doc """
   Sets whether `user` hides the board setup checklist's *what this does* explanations (RE443).
   """

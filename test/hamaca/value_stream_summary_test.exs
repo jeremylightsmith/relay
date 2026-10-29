@@ -154,37 +154,6 @@ defmodule Hamaca.ValueStreamSummaryTest do
     assert ValueStream.stream_summary(s.board.id, last: 1).cards_per_week == nil
   end
 
-  describe "flow_agent_secs/3" do
-    test "equals Flow Metrics' Σ duration_total for a card whose executions don't overlap", %{s: s, a: a} do
-      flow = code_flow(s.board)
-
-      metrics_total =
-        flow |> Runs.node_metrics_for_flow(card_id: a.id) |> Enum.map(& &1.duration_total) |> Enum.sum()
-
-      assert metrics_total == 110
-      assert ValueStream.flow_agent_secs(s.board.id, "code", card_id: a.id) == metrics_total
-    end
-
-    test "counts overlapping executions once — never more than the Flow Metrics sum", %{s: s} do
-      flow = code_flow(s.board)
-      card = card_in(s.done, at(0))
-      walk(card, [{s.next_up, 0}, {s.code, 10}, {s.done, 500}])
-      executed(card, "implement", at(0), at(100))
-      executed(card, "implement", at(50), at(150))
-
-      metrics_total =
-        flow |> Runs.node_metrics_for_flow(card_id: card.id) |> Enum.map(& &1.duration_total) |> Enum.sum()
-
-      assert metrics_total == 200
-      assert ValueStream.flow_agent_secs(s.board.id, "code", card_id: card.id) == 150
-    end
-
-    test "without card_id it sums over the same card set as the summary", %{s: s} do
-      assert ValueStream.flow_agent_secs(s.board.id, "code", last: 20) == 110
-      assert ValueStream.flow_agent_secs(s.board.id, "other", last: 20) == 0
-    end
-  end
-
   test "Runs.metric_window_since/1 is the one window → cutoff mapping" do
     assert Runs.metric_window_since("all") == nil
     assert_in_delta DateTime.diff(DateTime.utc_now(), Runs.metric_window_since("7d")), 7 * 86_400, 5

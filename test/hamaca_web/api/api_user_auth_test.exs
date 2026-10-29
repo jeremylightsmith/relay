@@ -23,7 +23,7 @@ defmodule HamacaWeb.ApiUserAuthTest do
     assert conn |> auth("garbage") |> get(~p"/api/all/feed") |> json_response(401)
     assert conn |> auth("relayu_deadbeef_nope") |> get(~p"/api/all/feed") |> json_response(401)
 
-    {:ok, _} = Accounts.revoke_user_api_token(record)
+    {:ok, _} = Hamaca.Repo.delete(record)
     assert conn |> auth(token) |> get(~p"/api/all/feed") |> json_response(401)
   end
 

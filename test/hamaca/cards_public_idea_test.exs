@@ -49,7 +49,7 @@ defmodule Hamaca.CardsPublicIdeaTest do
       assert card.stage_id == stage.id
       assert card.posted_by_user_id == user.id
       assert Votes.count(card.id) == 1
-      assert Votes.voted?(user, card)
+      assert Votes.voted_card_ids(user, [card.id]) == MapSet.new([card.id])
     end
 
     test "blank public description stores nil", %{board: board} do

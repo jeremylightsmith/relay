@@ -142,7 +142,7 @@ defmodule Hamaca.FlowsTest do
       assert %{when: :foreach_remaining} = Enum.find(flow.edges, &(&1.to == "work" and &1.from == "work"))
     end
 
-    test "a flow created with legacy sub_tasks spellings is stored canonical (RE367)" do
+    test "a flow created with the old sub_tasks spellings is refused, not rewritten (RE487)" do
       %{board: board} = board_with_stages()
 
       attrs =
@@ -159,8 +159,8 @@ defmodule Hamaca.FlowsTest do
           ]
         })
 
-      assert {:ok, flow} = create_flow(board, attrs)
-      assert %{foreach: "card.tasks", reads: [:tasks], run: "a {task_id}"} = Enum.find(flow.nodes, &(&1.key == "work"))
+      assert {:error, cs} = create_flow(board, attrs)
+      assert [%{foreach: [~s(must be "card.tasks")], reads: [_]}, %{}] = errors_on(cs).nodes
     end
 
     test "still rejects two UNGUARDED edges on one route" do
@@ -859,8 +859,8 @@ defmodule Hamaca.FlowsTest do
       assert ~s{fan_in "fi" closes more than one fan_out ("fo", "fo3")} in panel_messages(nodes: nodes, edges: edges)
     end
 
-    # Scenario 21
-    test "a legacy parallel node type, string-keyed, is stored as fan_out" do
+    # Scenario 21 (RE437), refused since RE487
+    test "a legacy parallel node type, string-keyed, is refused, not stored as fan_out" do
       %{board: board, works: works} = board_with_stages()
 
       nodes =
@@ -882,9 +882,8 @@ defmodule Hamaca.FlowsTest do
         "edges" => edges
       }
 
-      assert {:ok, flow} = Flows.create_flow(board, attrs)
-
-      assert %{type: :fan_out} = Enum.find(flow.nodes, &(&1.key == "fo"))
+      assert {:error, cs} = Flows.create_flow(board, attrs)
+      assert Enum.any?(errors_on(cs).nodes, &Map.has_key?(&1, :type))
     end
 
     test "rejects non-positive max_retries and max_loops" do
@@ -1299,12 +1298,12 @@ defmodule Hamaca.FlowsTest do
       assert copy.key == "code-qa-2"
     end
 
-    test "28. upsert_from_document/3 resolves the trigger stage (legacy triggers too)", ctx do
+    test "28. upsert_from_document/3 resolves the trigger stage", ctx do
       doc =
         ctx.board
         |> Flows.get_flow_with_stages("code")
         |> Hamaca.Flows.Document.encode()
-        |> Map.put("trigger", %{"pulls_from" => "X", "works_in" => "Code", "lands_on" => "Y"})
+        |> Map.put("trigger", %{"stage" => "Code"})
 
       assert {:ok, :updated, flow} = Flows.upsert_from_document(ctx.board, "code", doc)
       assert flow.stage_id == ctx.stages["Code"].id

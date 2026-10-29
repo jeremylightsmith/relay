@@ -2,7 +2,7 @@ defmodule HamacaWeb.PendingActionCssTest do
   @moduledoc """
   RE394 — the shared client-side "pressed face" for action buttons is one unlayered CSS block in
   app.css, mirrored byte-for-byte into storybook.css. These tests pin the contract the
-  `<.button pending>` / `<.action_group>` markup relies on.
+  `<.button pending>` / `action-group` markup relies on.
   """
   use ExUnit.Case, async: true
 

@@ -575,11 +575,6 @@ defmodule Hamaca.Cards do
     Repo.aggregate(from(c in Card, where: c.board_id == ^board_id and not is_nil(c.archived_at)), :count)
   end
 
-  @doc "How many non-archived cards the board has (the boards-home tile count)."
-  def count_cards(%Board{id: board_id}) do
-    Repo.aggregate(from(c in Card, where: c.board_id == ^board_id and is_nil(c.archived_at)), :count)
-  end
-
   @doc "Delegates to `Schemas.Card.format_ref/2`, the single definition of the ref format (RE417)."
   defdelegate format_ref(key, ref_number), to: Card
 
@@ -664,7 +659,7 @@ defmodule Hamaca.Cards do
   Tasks are addressable one row at a time through `get_task/2`, `add_tasks/2`, `update_task/3`
   and `delete_task/2`. None of them rewrites another row's id, title, body or `done`, so a
   surviving row keeps every `node_executions.sub_task_id` bound to it — unlike
-  `set_sub_tasks/2`, the legacy full replace, which deletes and re-inserts the whole set.
+  `set_sub_tasks/2`, the full replace (`./hamaca sub-tasks`), which deletes and re-inserts the whole set.
   """
   def list_tasks(%Card{} = card) do
     Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: st.position)
@@ -2022,7 +2017,7 @@ defmodule Hamaca.Cards do
   Returns `[%{card: card, question: latest_question_string | nil, questions: structured | nil}]`
   — `question`/`questions` come from the card's newest `:needs_input` activity meta (one extra
   indexed query for the whole feed, the pattern `needs_input_questions/1` uses) and are `nil` for
-  `:in_review` rows and for legacy string-only questions.
+  `:in_review` rows and for plain string questions (`./hamaca needs-input <ref> "…"`).
   """
   def needs_you_feed(%User{} = user) do
     board_ids = user |> Boards.list_boards() |> Enum.map(& &1.id)
@@ -2638,18 +2633,6 @@ defmodule Hamaca.Cards do
     do: Repo.get_by(Stage, id: target_id, board_id: stage.board_id) || Boards.previous_main_stage(stage)
 
   @doc """
-  Marks the card `:ready` in place (the drawer's "Mark done") and clears any open rejection —
-  a card parked at the terminal stage then derives as Done. Returns `{:ok, card}` or
-  `{:error, changeset}`.
-  """
-  def mark_done(%Card{} = card, actor \\ :agent) do
-    case set_status(card, %{status: :ready}, actor) do
-      {:ok, updated} -> {:ok, clear_rejection(updated)}
-      {:error, changeset} -> {:error, changeset}
-    end
-  end
-
-  @doc """
   Blocks the card on a human (MMF 14): sets status `:needs_input` — which
   stamps `blocked_since` (see `Schemas.Card.status_changeset/2`) — posts
   the question(s) as a comment from `actor`, and logs a `:needs_input` activity
@@ -2766,7 +2749,7 @@ defmodule Hamaca.Cards do
   end
 
   # Numbered, human-readable rendering of the normalized questions — the comment body and the
-  # back-compat meta["question"] value. Options are lettered a) b) c)…
+  # plain-form `meta["question"]` value. Options are lettered a) b) c)…
   defp flatten_questions(normalized) do
     normalized
     |> Enum.with_index(1)

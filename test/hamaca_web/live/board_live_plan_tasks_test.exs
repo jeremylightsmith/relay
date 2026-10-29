@@ -1,4 +1,4 @@
-defmodule HamacaWeb.BoardLivePlanTasksTest do
+defmodule HamacaWeb.BoardLivePlanAndTasksTest do
   use HamacaWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest

@@ -31,8 +31,8 @@ defmodule HamacaWeb.AttachmentController do
   - **No `allow-top-navigation`, `allow-popups`, `allow-forms`**, and `form-action 'none'`.
   - **Residual risk: same-domain phishing** — a fake login rendered under Hamaca's host that
     exfiltrates typed input by navigating itself. Mitigated by never presenting a mockup as a
-    bare top-level page from Hamaca's UI (the drawer and `/attachments/:id/view` always frame it
-    under Hamaca chrome) and by `frame-ancestors 'self'`. A separate user-content origin is a
+    bare top-level page from Hamaca's UI (the drawer and the board's mockup viewer always frame
+    it under Hamaca chrome) and by `frame-ancestors 'self'`. A separate user-content origin is a
     documented follow-up, out of scope.
   - A busy-loop script only freezes its frame/tab — accepted.
   """

@@ -109,9 +109,6 @@ defmodule HamacaWeb.Router do
       # RE460 — the board owner's plan: Free board count, card, payments, cancel/resume. 404 while billing
       # is disabled (a self-hosted install).
       live "/account/billing", BillingLive
-      # RE370 legacy mockup link (HamacaWeb.attachment_view_path/1): a membership-scoped redirect to
-      # BoardLive's same-tab mockup viewer, /board/:slug?card=<ref>&mockup=<id> (RE380).
-      live "/attachments/:id/view", MockupViewerLive
       live "/board/:slug", BoardLive
       # RE264 — the story map is a second lens on the SAME board, and clicking a card must open
       # the full card drawer in place. The drawer's ~50 assigns and ~40 events live in

@@ -32,6 +32,7 @@ defmodule Hamaca.Agents do
   alias Schemas.HarnessUsage.Window
 
   @default_harness_key "claude-code"
+  @default_agent_names %{"opus" => "Claude Opus", "sonnet" => "Claude Sonnet", "haiku" => "Claude Haiku"}
 
   @seed_harnesses [
     %{
@@ -130,8 +131,15 @@ defmodule Hamaca.Agents do
   def seed_harnesses, do: @seed_harnesses
 
   @doc """
+  The seed harness model → the agent name every board is seeded with, the ONE copy (migrations
+  freeze their own). "Claude Opus" is the default.
+  """
+  @spec default_agent_names() :: %{String.t() => String.t()}
+  def default_agent_names, do: @default_agent_names
+
+  @doc """
   Idempotently seeds `board`: inserts each seed harness whose `key` the board lacks. A board with
-  **no agents** also gets one `claude-code` agent per `Schemas.Flow.Node.legacy_models/0` entry,
+  **no agents** also gets one `claude-code` agent per `default_agent_names/0` entry,
   and "Claude Opus" becomes its default. A board that already has agents keeps them and its
   default untouched. Serialized on the board row, so concurrent callers can't double-seed.
   """
@@ -156,7 +164,7 @@ defmodule Hamaca.Agents do
   # Ordered by the claude-code seed's model list, so "Claude Opus" (the default) comes first.
   defp seed_agents!(board_id) do
     harness = Repo.get_by!(Harness, board_id: board_id, key: @default_harness_key)
-    names = Schemas.Flow.Node.legacy_models()
+    names = @default_agent_names
     [%{models: models}] = Enum.filter(@seed_harnesses, &(&1.key == @default_harness_key))
 
     [default | _] =

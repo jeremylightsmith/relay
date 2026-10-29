@@ -297,8 +297,6 @@ defmodule Hamaca.StoryMap do
   `{:card_upserted, card}` per card the activity change actually moved — exactly the contract
   `update_step/2` already honours. A cross-board target is rejected with `{:error, changeset}`
   by `validate_activity_on_board/2`, which this inherits.
-
-  `reorder_steps/2` stays the primitive this renumbers through.
   """
   def move_step(%StoryStep{} = step, target_activity_id, ordered_step_ids) when is_list(ordered_step_ids) do
     changeset =
@@ -339,9 +337,6 @@ defmodule Hamaca.StoryMap do
   def delete_step(%StoryStep{} = step) do
     guarded_delete(step, :story_step_id, step.id, step.board_id)
   end
-
-  @doc "Rewrites the given steps' `position` to `1..n`; ids not on this board are ignored."
-  def reorder_steps(board, ids) when is_list(ids), do: reorder(StoryStep, board_id(board), ids)
 
   @doc "Creates a release (swimlane) on `board`."
   def create_release(board, attrs) do

@@ -61,8 +61,8 @@ USAGE = None   # the running `hamaca start`'s HarnessUsageBook (RE436); None out
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 97
-RUNNER_FINGERPRINT = "6174935f36ac4f00a49f08d1c73ae6f6a79ed005d5df75a3669a5f58b7096db8"
+RUNNER_VERSION = 98
+RUNNER_FINGERPRINT = "9771fd477a3f908b8ce061be7091d123bcf53e76e3db9d9d783f467ab0175959"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -1618,10 +1618,10 @@ def _read_file(path):
 def _trigger_chain(doc):
     """`pulls_from → stage → lands_on` (RE429). The trigger names ONE stage; pickup and drop-off
     are worked out from board order and come from the server's read-only `derived` block. A
-    document without `derived` prints the stage alone; a legacy three-key trigger's `works_in`
-    is its stage. Key names pinned by runner_contract.json's "flows" section."""
+    document without `derived` prints the stage alone. Key names pinned by runner_contract.json's
+    "flows" section."""
     t = doc.get("trigger") or {}
-    stage = t.get("stage") or t.get("works_in") or "—"
+    stage = t.get("stage") or "—"
     derived = doc.get("derived")
     if not isinstance(derived, dict):
         return stage

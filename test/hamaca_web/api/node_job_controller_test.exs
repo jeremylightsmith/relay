@@ -1014,7 +1014,7 @@ defmodule HamacaWeb.Api.NodeJobControllerTest do
              }
 
       refute Map.has_key?(Map.from_struct(runner), :rate_limit)
-      assert Runs.runner_rate_limited?(runner, DateTime.utc_now())
+      assert Runs.active_rate_limit(runner, DateTime.utc_now())
     end
 
     test "RE436: the next beat's paused: null clears the pause", %{conn: conn, board: board} do
@@ -1033,7 +1033,7 @@ defmodule HamacaWeb.Api.NodeJobControllerTest do
         Hamaca.Repo.get_by!(Schemas.Runner, board_id: board.id, name: "exec-clear")
       end
 
-      assert Runs.runner_rate_limited?(
+      assert Runs.active_rate_limit(
                beat.(%{
                  "label" => "5h",
                  "used_pct" => 95,
@@ -1044,7 +1044,7 @@ defmodule HamacaWeb.Api.NodeJobControllerTest do
                DateTime.utc_now()
              )
 
-      refute Runs.runner_rate_limited?(beat.(nil), DateTime.utc_now())
+      refute Runs.active_rate_limit(beat.(nil), DateTime.utc_now())
     end
   end
 

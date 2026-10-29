@@ -166,11 +166,6 @@ defmodule Hamaca.Runs.NodeJobKindTest do
     assert finished.finished_at
   end
 
-  test "plan_task_count counts the plan's task headings" do
-    assert Runs.plan_task_count(nil) == 0
-    assert Runs.plan_task_count("## Task 1: A\n\n## Task 2: B\n") == 2
-  end
-
   test "a talk changeset carrying a run_id or node_execution_id is invalid", ctx do
     changeset =
       NodeJob.changeset(%NodeJob{

@@ -41,11 +41,6 @@ defmodule Hamaca.Votes do
     result
   end
 
-  @doc "True when `user` has voted on `card`."
-  def voted?(%User{id: user_id}, %Card{id: card_id}) do
-    Repo.exists?(from v in Vote, where: v.user_id == ^user_id and v.card_id == ^card_id)
-  end
-
   @doc "The subset of `card_ids` that `user` has voted on, as a MapSet (board render helper)."
   def voted_card_ids(%User{id: user_id}, card_ids) when is_list(card_ids) do
     from(v in Vote,

@@ -572,14 +572,8 @@ defmodule Hamaca.Talk do
     %{summary: summary, fields: rows}
   end
 
-  # RE357: a planned card's steps are its tasks — its plan is only a header now. A legacy card
-  # with no tasks still counts the `## Task N:` headings of its monolithic plan.
-  defp plan_steps(card) do
-    case Cards.task_count(card) do
-      0 -> Runs.plan_task_count(card.plan)
-      count -> count
-    end
-  end
+  # RE357: a planned card's steps are its tasks — its plan is only a header.
+  defp plan_steps(card), do: Cards.task_count(card)
 
   # The seed line is the first thing a person reads in the pane, so "1 fields" is a small lie in
   # a prominent place. One definition, used by every count on the line.

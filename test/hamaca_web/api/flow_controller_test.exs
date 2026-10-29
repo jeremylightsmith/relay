@@ -63,33 +63,24 @@ defmodule HamacaWeb.Api.FlowControllerTest do
   end
 
   describe "PUT /api/flows/:key" do
-    test "a push spelled with the legacy sub_tasks names saves and pulls back canonical (RE367)", %{conn: conn} do
+    test "a push spelled with the old sub_tasks names is refused and leaves the flow unchanged (RE487)",
+         %{conn: conn, board: board} do
+      before_nodes = Flows.get_flow!(board, "code").nodes
+
       legacy =
         conn
         |> pull("code")
-        |> Map.delete("version")
-        |> Map.put("key", "legacy-code")
-        # A stage holds one flow (RE429): `code` already sits on Code, so the copy goes on Deploy.
-        |> Map.put("trigger", %{"stage" => "Deploy"})
         |> Jason.encode!()
         |> String.replace("card.tasks", "card.sub_tasks")
         |> String.replace(~s("tasks"), ~s("sub_tasks"))
-        |> String.replace("{task_id}", "{sub_task_id}")
-        |> String.replace("{task}", "{sub_task}")
         |> Jason.decode!()
 
-      assert Jason.encode!(legacy) =~ "card.sub_tasks"
-      assert Jason.encode!(legacy) =~ "{sub_task_id}"
+      body = conn |> push_doc("code", legacy) |> json_response(422)
 
-      assert conn |> push_doc("legacy-code", legacy) |> json_response(201)
-
-      pulled = pull(conn, "legacy-code")
-      refute Jason.encode!(pulled) =~ "sub_task"
-
-      implement = Enum.find(pulled["nodes"], &(&1["key"] == "implement"))
-      assert implement["foreach"] == "card.tasks"
-      assert "tasks" in implement["reads"]
-      assert implement["run"] =~ "{task_id}"
+      assert body["error"]["code"] == "invalid_document"
+      assert body["error"]["message"] =~ "sub_tasks"
+      assert body["error"]["message"] =~ ~s(tasks")
+      assert Flows.get_flow!(board, "code").nodes == before_nodes
     end
 
     test "an unchanged push is a no-op: same version, no new snapshot row", %{conn: conn, board: board} do
@@ -358,12 +349,20 @@ defmodule HamacaWeb.Api.FlowControllerTest do
       assert conn |> get(~p"/api/flows/qa") |> json_response(404)
     end
 
-    test "4. a legacy three-key trigger still pushes: only works_in is read", %{conn: conn, board: board, stages: stages} do
+    test "4. a legacy three-key trigger is refused, naming the rename (RE487)", %{
+      conn: conn,
+      board: board,
+      stages: stages
+    } do
       legacy = conn |> pull("code") |> Map.put("trigger", %{"pulls_from" => "X", "works_in" => "Code", "lands_on" => "Y"})
 
-      body = conn |> push_doc("code", legacy) |> json_response(200) |> Map.fetch!("data")
+      body = conn |> push_doc("code", legacy) |> json_response(422)
 
-      assert body["trigger"] == %{"stage" => "Code"}
+      assert body["error"] == %{
+               "code" => "invalid_document",
+               "message" => ~s(trigger key "works_in" was renamed to "stage")
+             }
+
       assert Flows.get_flow!(board, "code").stage_id == stages["Code"].id
     end
 

@@ -130,7 +130,7 @@ These are the only places the machines are coupled:
   failed, so it can be retried.
 - **Leak.** An active run whose card has reached a terminal-type stage or been archived is
   cancelled, never relabelled `done`. The listener and the reaper's sweep judge this from one
-  run → card → stage snapshot (`Hamaca.Runs.leaked?/1`), so a dispatch landing between two reads
+  run → card → stage snapshot (`Hamaca.Runs.leak_reason/1`), so a dispatch landing between two reads
   can't be mistaken for a leak.
 - **Lost outcome.** The runner retries its outcome report, and the server takes the first report
   for a job. A job the runner no longer runs is requeued. A node that keeps re-entering without

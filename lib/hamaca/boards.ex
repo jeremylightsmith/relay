@@ -655,9 +655,6 @@ defmodule Hamaca.Boards do
   defp order_board_stages(nil), do: nil
   defp order_board_stages(%Board{} = board), do: %{board | stages: order_stages(board.stages)}
 
-  @doc "System-wide (non-scoped) board lookup by id, raising when missing. Used by Hamaca.Runs."
-  def get_board_by_id!(id), do: Repo.get!(Board, id)
-
   @doc "Every non-archived board's id (non-scoped) — the scheduler bootstrap enumerates these."
   def list_board_ids do
     Repo.all(from b in Board, where: is_nil(b.archived_at), select: b.id)

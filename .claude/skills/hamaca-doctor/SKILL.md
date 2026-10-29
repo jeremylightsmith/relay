@@ -180,7 +180,6 @@ the evidence, the fix — and split in two:
 | `verdict_flipped` (WARNING, ERROR at two nodes in one run) | the same node, same visit, same `git_sha` went `failed` → `succeeded` on a retry: a retry laundered a failure into a pass |
 | `outcomeless_attempts` (WARNING) | one node in one visit was entered `max_outcomeless_reentries` (3)+ times without any attempt reporting an outcome — something keeps killing its job (a server restart from inside the flow?) |
 | `ci_parity` (WARNING) | `.github/workflows/*.yml` requires a verify command that **no enabled flow's gate node runs** — every gate can pass and the PR still fails required CI |
-| `planner_not_migrated` (WARNING) | a run in the window had its tasks seeded by parsing `## Task N:` headings out of `card.plan` (the legacy fallback; the run is marked `tasks_from_plan`) — the plan node's skill doesn't write tasks with `relay tasks add`. The run-history signal for the `tasks-cutover` migration: see [Factory migrations](#factory-migrations) |
 
 `ci_parity` is a **heuristic about the files in *this* working directory** — a line-based read
 of the workflow YAML, because `./hamaca` is stdlib-only. Say so in the finding, exactly as
@@ -225,10 +224,10 @@ any other fix.
 ### Migration `tasks-cutover` (RE357)
 
 **Why.** The planner must write the plan header with `relay plan` and each task as a standalone
-body with `relay tasks add`; executors fetch ONE task by id with `relay task show`. Until a repo
-migrates, the board seeds a run's tasks by parsing `## Task N:` headings out of `card.plan` — a
-legacy fallback slated for deletion — marks the run `tasks_from_plan`, and the audit reports
-`planner_not_migrated`. Runs keep working meanwhile; they just depend on the fallback.
+body with `relay tasks add`; executors fetch ONE task by id with `relay task show`. A card's
+tasks are the only source of a `foreach` node's work: the board never reads them out of
+`card.plan`. Until a repo migrates, every card its planner plans arrives with no tasks, and the
+Code flow refuses to start it — the card blocks on a human instead.
 
 **The plan node** is any agent node that declares `writes` containing `plan`, or whose evidence
 file (see "Where doctor looks for evidence") contains `relay plan`. **A task node** is a
@@ -247,12 +246,13 @@ Pending if ANY of these holds:
    `{relay}` to `./hamaca`).
 3. **Legacy spellings in a repo flow file.** A repo-local flow file (`docs/designs/flows/*.json`,
    or wherever this repo keeps its flows) still says a legacy spelling: `sub_tasks`,
-   `card.sub_tasks`, `{sub_task}` or `{sub_task_id}` (all legacy). The board normalizes these
-   to the `tasks` names whenever it loads or pushes a flow, so a pulled flow never shows them — only repo files can.
-4. **The audit says so.** `./hamaca audit --json` has a `planner_not_migrated` finding. On its
-   own this can be stale history — old runs still inside the audit window. If rules 1–3 all
-   pass, report the migration **applied** with a note that the finding will age out of the
-   window, not pending.
+   `card.sub_tasks`, `{sub_task}` or `{sub_task_id}` (all legacy). The board refuses a push
+   carrying these (`./hamaca flow-push` fails naming the rename), so only repo files can still hold them.
+4. **A card blocked with no tasks.** The human came here because a card is `needs_input` with
+   the question "The <flow> flow could not start: this card has no tasks…" — the board's own
+   pointer at this migration. It is rule 1's symptom on a real card, and on its own it can be
+   stale (a card planned before the repo migrated). If rules 1–3 all pass, report the migration
+   **applied** with a note to re-plan that card, not pending.
 
 #### Plan-side recipe
 
@@ -288,8 +288,8 @@ Applied to the plan node's skill or command file:
 
 Re-run this migration's detection — it should now read **applied**. Then tell the human how to
 confirm it on the next real card: once that card runs plan → code, `./hamaca tasks list <ref>`
-shows the planner's tasks, the run is not marked `tasks_from_plan`, and the next `./hamaca audit`
-attributes no new `planner_not_migrated` card to it.
+shows the planner's tasks and the Code flow starts instead of blocking the card with "could not
+start: this card has no tasks".
 
 **Reference implementation.** In the Relay repo itself: `.claude/commands/write-plan.md`
 ("Writing it to the card") and `docs/designs/flows/code.json` (the `implement`, `spec_review`,

@@ -7,7 +7,7 @@ defmodule HamacaWeb.Browser.MockupsTest do
   the card shrinks to a ~340px left sheet and the sandboxed frame sits under a header that names the
   mockup (RE392), which sits directly under the top bar.
   ←/→ switch mockups (never while typing), a half-written reject note survives switching, Esc and
-  one browser Back return to the drawer, and the RE370 `/attachments/:id/view` link redirects in.
+  one browser Back return to the drawer.
 
   `render_keydown/3` and `live/2` never run the client-side key guard, the history stack or the
   layout, so only a real browser proves these.
@@ -245,21 +245,6 @@ defmodule HamacaWeb.Browser.MockupsTest do
 
     assert visible?(session, "#card-drawer-panel")
     refute search(session) =~ "mockup"
-  end
-
-  # Scenario 9.
-  test "an RE370 /attachments/:id/view link lands on the same-tab viewer", ctx do
-    [_id0, id1, _id2] = ctx.ids
-
-    session =
-      ctx.conn
-      |> visit("/dev/login")
-      |> assert_has("body .phx-connected")
-      |> visit(HamacaWeb.attachment_view_path(id1))
-      |> assert_has("#mockup-viewer")
-      |> assert_has(~s(#mockup-viewer-mockup-1-open[aria-current="true"]))
-
-    assert search(session) =~ "mockup=#{id1}"
   end
 
   defp open_drawer(conn, board, ref) do

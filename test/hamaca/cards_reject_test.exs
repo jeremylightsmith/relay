@@ -177,16 +177,6 @@ defmodule Hamaca.CardsRejectTest do
       assert approved.stage_id == code.id
       assert approved.rejection == nil
     end
-
-    test "mark_done clears the rejection", %{review: review, code: code} do
-      card = insert(:card, stage: review)
-      {:ok, sent} = Cards.reject(card, "fix it", :agent)
-      assert sent.stage_id == code.id
-
-      {:ok, done} = Cards.mark_done(sent, :agent)
-      assert done.status == :ready
-      assert done.rejection == nil
-    end
   end
 
   describe "reject/4 with image_ids (RE428)" do

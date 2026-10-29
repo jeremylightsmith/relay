@@ -282,12 +282,12 @@ never 403s):
   server derives "rate limited" from the readings stored in `runners.harnesses`.
   `Hamaca.Runs.harness_pause/2` reads one entry's live pause: the entry is `installed`, its
   `usage.paused` is set, and that pause's `resets_at` is still ahead. A stored pause past its
-  reset reads as not paused before the next beat clears it. `Hamaca.Runs.runner_rate_limited?/2`
-  is the one predicate: the runner reported at least one installed harness and **every**
-  installed one is paused (a nil or `[]` inventory is not rate limited). A partly paused runner
-  is not rate limited: it still counts as connected and claims its other harnesses' work, and
-  the claim's `harnesses` keeps the paused one's jobs away from it (see Harness routing).
-  `Hamaca.Runs.active_rate_limit/2` returns the pause that lifts first, as
+  reset reads as not paused before the next beat clears it. `Hamaca.Runs.active_rate_limit/2`
+  is the one predicate: non-nil only when the runner reported at least one installed harness and
+  **every** installed one is paused (a nil or `[]` inventory is not rate limited). A partly paused
+  runner is not rate limited: it still counts as connected and claims its other harnesses' work,
+  and the claim's `harnesses` keeps the paused one's jobs away from it (see Harness routing).
+  It returns the pause that lifts first, as
   `%{harness, window, used_pct, pause_at, resets_at, reason}`, since that is when the runner
   can claim again; `list_board_runners/1` selects `harnesses` for it. RE436 retired the
   runner-wide `runners.rate_limit` column, `Schemas.RunnerRateLimit` and the heartbeat's
@@ -346,11 +346,9 @@ never 403s):
   `Hamaca.Runs.audit/2` (`Hamaca.Runs.Audit.findings/2` over `Hamaca.Runs.recent_runs_for_flow/2`).
   Returns `flow_key`, the echoed `window`, the `runs` count examined, and a `findings` array of
   `severity` / `check` / `flow_key` / `node_key` / `run_id` / `summary` / `evidence` / `fix`.
-  Four checks today: `findings_dropped` (a foreach cursor advanced past a failed review),
-  `verdict_flipped` (a retry turned `failed` into `succeeded` at the same `git_sha`),
-  `planner_not_migrated` (RE368 — one WARNING per flow when a run's tasks were seeded by the
-  legacy plan-parse fallback, read from `runs.tasks_from_plan`; names the affected-card count
-  and most recent refs, fix `/hamaca-doctor`), and `outcomeless_attempts` (RE410 — one WARNING
+  Three checks today: `findings_dropped` (a foreach cursor advanced past a failed review),
+  `verdict_flipped` (a retry turned `failed` into `succeeded` at the same `git_sha`), and
+  `outcomeless_attempts` (RE410 — one WARNING
   per `{run, node, visit}` with at least `Hamaca.Runs.max_outcomeless_reentries/0` executions
   that never reported an outcome: something keeps killing the node's job). The check ids are
   pinned as `vocabulary.audit_checks` in the runner contract fixture. The
@@ -376,8 +374,11 @@ never 403s):
   graph validation, `save_definition/2`'s version-bump semantics (an unchanged push bumps
   nothing — pull → push is a genuine no-op), and `enable_flow/1`/`disable_flow/1`'s arming rules.
   The response renders through the same view as `GET`, `derived` included. `derived` on input is
-  accepted and ignored (a pulled file pushes back unchanged); a legacy three-key trigger is
-  accepted, reading only `works_in`.
+  accepted and ignored (a pulled file pushes back unchanged). A renamed spelling (`model`,
+  `parallel`, `sub_tasks`, `card.sub_tasks`, `{sub_task}` / `{sub_task_id}`, or a `works_in` /
+  `pulls_from` / `lands_on` trigger key) is a `422 invalid_document` whose message names the old
+  and the canonical spelling, e.g. `nodes[3]: "sub_tasks" in reads was renamed to "tasks"`; the
+  stored flow is unchanged (RE487).
   `201` on create, `200` on update. Refusals: `422 invalid_document` / `key_mismatch` /
   `unknown_stages` / `stage_occupied` (the named stage already holds another key's flow —
   `error.stage` / `error.flow` name it) / `invalid`, and `409 stale_version` when the document carries a `version`
@@ -894,11 +895,11 @@ A `foreach` node (`foreach: card.tasks`) iterates the card's tasks — the `sub_
 every execution under it carries the id of the task its iteration is bound to
 (`node_executions.sub_task_id`). The job payload hands that binding to the node as the vars
 `task` (title) and `task_id` (id), which a prompt references as `{task}` / `{task_id}`. These are
-the canonical flow-contract names since RE367: the legacy spellings `card.sub_tasks`,
-`sub_tasks` (in `reads`/`writes`) and `{sub_task}` / `{sub_task_id}` are rewritten by
-`Schemas.Flow.Node.normalize_legacy/1` wherever a flow enters (`Schemas.Flow.Node.changeset/2`,
-`Hamaca.Flows.Document.decode/1`), and the RE367 data migration rewrote every stored `flows` /
-`flow_versions` row, so the engine only ever sees canonical names.
+the canonical flow-contract names since RE367: the old spellings `card.sub_tasks`,
+`sub_tasks` (in `reads`/`writes`) and `{sub_task}` / `{sub_task_id}` are refused by
+`Hamaca.Flows.Document.decode/1` (a flow push fails naming the rename; RE487), and the RE367 /
+RE487 data migrations rewrote every stored `flows` / `flow_versions` row, so the engine only ever
+sees canonical names.
 
 "Which task is next" is **derived, never persisted**: `Hamaca.Runs.next_sub_task_id/1` returns
 the first `sub_task` in position order whose `done` is false, so a crashed-and-resumed run
@@ -917,8 +918,9 @@ Those `sub_tasks` rows are also addressable one at a time (RE355):
 `PATCH /api/cards/:ref/tasks/:id` (`title` / `body` only) and `DELETE /api/cards/:ref/tasks/:id`
 (later tasks move up one), wrapped by `hamaca tasks add|list` and `hamaca task show|update|rm`. None
 of them replaces the set, so a surviving row keeps its id — and every `node_executions.sub_task_id`
-bound to it. `done` is not writable there; the toggle route below owns it. Nothing in the engine
-calls these routes yet: `Hamaca.Runs.PlanTasks` still seeds the rows at run start.
+bound to it. `done` is not writable there; the toggle route below owns it. These rows are the
+only source of a `foreach` node's work: the engine never parses them out of `card.plan`, and
+`start_run` refuses a `foreach` flow on a card with none (failures.md B1).
 
 But `done` is not a private engine field. Three writers set it: the loop tail's check-off
 (`RunServer.check_off_sub_task/3`), the card drawer's checkbox, and `relay check <ref> <id>`

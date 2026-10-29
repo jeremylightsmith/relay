@@ -43,7 +43,6 @@ defmodule Storybook.CoreComponents do
   def entry("notification_settings"), do: [icon: {:fa, "bell", :thin}]
   def entry("notification_toast"), do: [icon: {:fa, "message-exclamation", :thin}]
   def entry("owner_avatars"), do: [icon: {:fa, "user-group", :thin}]
-  def entry("owner_pill"), do: [icon: {:fa, "tag", :thin}]
   def entry("page_heading"), do: [icon: {:fa, "heading", :thin}]
   def entry("plan_tasks"), do: [icon: {:fa, "list-check", :thin}]
   def entry("section_label"), do: [icon: {:fa, "heading", :thin}]

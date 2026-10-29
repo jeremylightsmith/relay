@@ -70,7 +70,7 @@ closed** (the burden of proof is on the claimant).
 
 | # | Failure | Trigger | Handling | Ends as |
 | --- | --- | --- | --- | --- |
-| B1 | **Empty plan** | flow has a `foreach`, the card has no tasks, and the legacy plan-parse fallback (`PlanTasks.parse`) finds no `## Task N:` headings | **no run created**; `block_on_unusable_plan` calls `request_input` telling the owner the planner has not migrated to `hamaca tasks add` and to run `/hamaca-doctor`, re-plan (or `hamaca tasks add`), and move the card back — prevents merging an empty branch as "done". When the fallback DOES seed, `maybe_seed_sub_tasks` logs a `deprecated:` warning naming the card and flow (RE357) and the run is marked `tasks_from_plan`, which `hamaca audit` reports as `planner_not_migrated` (RE368) | card `needs_input`, no run |
+| B1 | **No tasks** | flow has a `foreach` and the card has no tasks (the planner writes them with `hamaca tasks add`; the plan is never parsed for them) | **no run created**; `block_on_missing_tasks` calls `request_input` ("could not start: this card has no tasks", or "no tasks and no plan") telling the owner to re-plan or `hamaca tasks add`, move the card back, and run `/hamaca-doctor` if the planner doesn't write tasks — prevents merging an empty branch as "done" | card `needs_input`, no run |
 
 ## C. Scheduling & capacity (diagnostic — the card waits, no run fails)
 

@@ -48,23 +48,13 @@ defmodule HamacaWeb.AttachmentPathTest do
     end
   end
 
-  describe "attachment_view_path/1 (RE370)" do
-    test "is the attachment path plus /view, which is not itself an attachment path" do
-      id = Ecto.UUID.generate()
-      assert HamacaWeb.attachment_view_path(id) == HamacaWeb.attachment_path(id) <> "/view"
-      refute HamacaWeb.attachment_path?(HamacaWeb.attachment_view_path(id))
-    end
+  describe "the retired RE370 mockup link (RE487)" do
+    # Scenario 6
+    test "/attachments/:id/view is not a route, and its path helper is gone" do
+      path = "/attachments/#{Ecto.UUID.generate()}/view"
 
-    test "the router serves it with MockupViewerLive, which redirects to the BoardLive viewer" do
-      info =
-        Phoenix.Router.route_info(
-          HamacaWeb.Router,
-          "GET",
-          HamacaWeb.attachment_view_path(Ecto.UUID.generate()),
-          "localhost"
-        )
-
-      assert elem(info.phoenix_live_view, 0) == HamacaWeb.MockupViewerLive
+      assert Phoenix.Router.route_info(HamacaWeb.Router, "GET", path, "localhost") == :error
+      refute function_exported?(HamacaWeb, :attachment_view_path, 1)
     end
   end
 

@@ -10,15 +10,16 @@ defmodule Hamaca.Runs.LastProgressTest do
     {:ok, board: board, works: works}
   end
 
-  test "falls back to run start when there are no executions", %{works: works} do
+  test "a run with no executions is absent (the caller falls back to run start)",
+       %{board: board, works: works} do
     card = insert(:card, stage: works)
-    run = insert(:run, card: card, inserted_at: DateTime.truncate(DateTime.utc_now(), :second))
+    _run = insert(:run, card: card, inserted_at: DateTime.truncate(DateTime.utc_now(), :second))
 
-    assert Runs.last_progress_at(run) == run.inserted_at
+    assert Runs.last_progress_by_run(board) == %{}
   end
 
   test "is the newest execution's inserted_at, and a requeue (no new execution) does not reset it",
-       %{works: works} do
+       %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
     old = DateTime.add(now, -900, :second)
     card = insert(:card, stage: works)
@@ -27,26 +28,17 @@ defmodule Hamaca.Runs.LastProgressTest do
     # The revoke/requeue loop: the job churns, but no NEW node_executions row appears.
     insert(:node_job, node_execution: exec, state: :queued, runner_name: nil, claimed_at: nil)
 
-    assert Runs.last_progress_at(run) == old
+    assert Runs.last_progress_by_run(board) == %{run.id => old}
   end
 
-  test "advances when a newer execution row is inserted", %{works: works} do
+  test "advances when a newer execution row is inserted", %{board: board, works: works} do
     now = DateTime.truncate(DateTime.utc_now(), :second)
     card = insert(:card, stage: works)
     run = insert(:run, card: card)
     insert(:node_execution, run: run, node_key: "a", inserted_at: DateTime.add(now, -600, :second))
     insert(:node_execution, run: run, node_key: "b", inserted_at: DateTime.add(now, -60, :second))
 
-    assert Runs.last_progress_at(run) == DateTime.add(now, -60, :second)
-  end
-
-  test "the bulk variant matches the per-run one", %{board: board, works: works} do
-    now = DateTime.truncate(DateTime.utc_now(), :second)
-    card = insert(:card, stage: works)
-    run = insert(:run, card: card)
-    insert(:node_execution, run: run, node_key: "a", inserted_at: DateTime.add(now, -120, :second))
-
-    assert Runs.last_progress_by_run(board) == %{run.id => Runs.last_progress_at(run)}
+    assert Runs.last_progress_by_run(board) == %{run.id => DateTime.add(now, -60, :second)}
   end
 
   test "working_run_ids includes a claimed job on a live runner, excludes a queued one",
@@ -83,7 +75,7 @@ defmodule Hamaca.Runs.LastProgressTest do
     working? = MapSet.member?(Runs.working_run_ids(board, now), run.id)
 
     assert working?
-    refute Runs.run_stalled?(Runs.last_progress_at(run), working?, now)
+    refute Runs.run_stalled?(Runs.last_progress_by_run(board)[run.id], working?, now)
   end
 
   test "working_run_ids excludes a claimed job on a stale runner, which does read stalled",
@@ -106,7 +98,7 @@ defmodule Hamaca.Runs.LastProgressTest do
     working? = MapSet.member?(Runs.working_run_ids(board, now), run.id)
 
     refute working?
-    assert Runs.run_stalled?(Runs.last_progress_at(run), working?, now)
+    assert Runs.run_stalled?(Runs.last_progress_by_run(board)[run.id], working?, now)
   end
 
   # The invariant that would have caught this bug: pinned behaviourally against

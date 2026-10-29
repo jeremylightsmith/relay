@@ -263,8 +263,7 @@ defmodule Schemas.Card do
   `Schemas.Flow.Node.expects_commits`, a separate field with a separate guard (RLY-194).
 
   `:tasks` (RE367) is the contract name for the card's `sub_tasks` association — the schema and
-  table keep their legacy name. The old contract spelling `sub_tasks` is a deprecated alias that
-  `Schemas.Flow.Node.normalize_legacy/1` rewrites on the way in; it is not a value here.
+  table keep their legacy name.
   """
   def contract_fields do
     [:description, :spec, :acceptance_criteria, :plan, :tasks, :branch, :pr_url, :ai_result, :mockups]

@@ -218,17 +218,6 @@ defmodule Hamaca.StoryMapTest do
       assert Repo.get(StoryStep, step.id) == nil
     end
 
-    test "reorder_steps/2 rewrites positions to 1..n", %{board: board} do
-      activity = insert(:story_activity, board: board)
-      a = insert(:story_step, story_activity: activity, position: 1)
-      b = insert(:story_step, story_activity: activity, position: 2)
-
-      assert :ok = StoryMap.reorder_steps(board, [b.id, a.id])
-
-      assert Repo.get!(StoryStep, b.id).position == 1
-      assert Repo.get!(StoryStep, a.id).position == 2
-    end
-
     test "create/update/delete/reorder releases", %{board: board} do
       {:ok, release} = StoryMap.create_release(board, %{name: "Beta", position: 4})
       assert release.board_id == board.id
@@ -702,10 +691,7 @@ defmodule Hamaca.StoryMapTest do
       {:ok, _} = StoryMap.update_activity(activity, %{name: "Onboarding"})
       assert_receive {:story_map_changed, ^board_id}
 
-      {:ok, step} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
-      assert_receive {:story_map_changed, ^board_id}
-
-      :ok = StoryMap.reorder_steps(board, [step.id])
+      {:ok, _step} = StoryMap.create_step(activity, %{name: "Sign in", position: 1})
       assert_receive {:story_map_changed, ^board_id}
 
       {:ok, _} = StoryMap.delete_activity(activity)

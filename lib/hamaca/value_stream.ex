@@ -4,7 +4,7 @@ defmodule Hamaca.ValueStream do
   executions into **spans** — the card's time from the board's stream start (`Next up` on RE)
   to `Done`, split by stream state and by who holds the baton (`batons/0`). The data source
   for the card stream map (RE347); nothing here renders. `stream_summary/2` averages spans over
-  a set of done cards; `flow_agent_secs/3` reconciles agent time with Flow Metrics.
+  a set of done cards.
   `flow_stream/2` is level 2 (RE348): one flow's per-node rows plus its send-back hops and
   foreach spread, all built on `Hamaca.Runs.execution_spans_for_flow/2`.
 
@@ -168,41 +168,6 @@ defmodule Hamaca.ValueStream do
     board_id
     |> selected_done_cards(board_context(board_id), opts)
     |> Enum.map(fn {card, _rows, _done_at} -> card.id end)
-  end
-
-  @doc """
-  Agent seconds on `flow_key` for a card set — `card_id:` for one card, else the same
-  `last:` / `window:` set as `stream_summary/2` — reading the same
-  `node_executions.started_at/finished_at` columns `Hamaca.Runs.node_metrics_for_flow/2` sums
-  (finished executions only). Per card it is the **union** of the intervals, so it equals Flow
-  Metrics' `Σ duration_total` when a card's executions don't overlap and can only be smaller,
-  never larger, when they do. Exists for the criterion-4 reconciliation; it is not another
-  metric.
-  """
-  def flow_agent_secs(board_id, flow_key, opts \\ []) when is_integer(board_id) and is_binary(flow_key) do
-    card_ids =
-      case Keyword.get(opts, :card_id) do
-        nil ->
-          done_card_ids(board_id, opts)
-
-        card_id ->
-          [card_id]
-      end
-
-    from(ne in NodeExecution,
-      join: r in Run,
-      on: r.id == ne.run_id,
-      join: c in Card,
-      on: c.id == r.card_id,
-      where:
-        c.board_id == ^board_id and r.flow_key == ^flow_key and c.id in ^card_ids and
-          not is_nil(ne.started_at) and not is_nil(ne.finished_at),
-      select: {c.id, ne.started_at, ne.finished_at}
-    )
-    |> Repo.all()
-    |> Enum.group_by(&elem(&1, 0), fn {_id, started, finished} -> {unix(started), unix(finished)} end)
-    |> Enum.map(fn {_id, intervals} -> intervals |> union() |> total() end)
-    |> Enum.sum()
   end
 
   @doc """
