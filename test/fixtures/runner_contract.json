@@ -260,6 +260,15 @@
     }
   },
   "mockups": {
+    "append_path": "/api/cards/<ref>/mockups",
+    "append_request": {
+      "mockups": [
+        {
+          "caption": "Variant",
+          "url": "/attachments/<attachment-id>"
+        }
+      ]
+    },
     "card_mockups": [
       {
         "caption": "Empty state",
@@ -274,6 +283,7 @@
       "text/html"
     ],
     "download_path": "/api/attachments/<attachment-id>",
+    "remove_path": "/api/cards/<ref>/mockups/<attachment-id>",
     "request": {
       "mockups": [
         {

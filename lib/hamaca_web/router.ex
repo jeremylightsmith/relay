@@ -274,6 +274,8 @@ defmodule HamacaWeb.Router do
     post "/cards/:ref/tasks", TaskController, :create
     patch "/cards/:ref/tasks/:id", TaskController, :update
     delete "/cards/:ref/tasks/:id", TaskController, :delete
+    post "/cards/:ref/mockups", CardController, :append_mockups
+    delete "/cards/:ref/mockups/:attachment_id", CardController, :remove_mockup
     get "/stages", StageController, :index
     post "/stages", StageController, :create
     patch "/stages/:id", StageController, :update

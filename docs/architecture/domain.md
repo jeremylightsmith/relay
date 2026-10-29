@@ -412,10 +412,16 @@ sharing behavior.
   **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
   the raw error.
   A card's `mockups` (RE370) is a nullable `{:array, :map}` column of
-  `%{"url", "caption"}` entries, written only through `Hamaca.Cards.set_mockups/2`: a full
-  REPLACE, validated so every url is an `/attachments/<id>` path of an **HTML or image
-  attachment on the same card** (`Schemas.Attachment.mockup_types/0`, RE390; `422
-  invalid_mockups` over the API), broadcast as `{:card_upserted, card}`.
+  `%{"url", "caption"}` entries, written only through `Hamaca.Cards.set_mockups/2` (a full
+  REPLACE — `PATCH /api/cards/:ref {"mockups": …}`), `append_mockups/2`
+  (`POST /api/cards/:ref/mockups`, RE499) and `remove_mockup/2`
+  (`DELETE /api/cards/:ref/mockups/:attachment_id`, RE499; unlists only — the attachment
+  stays). All three share one entry validator so every url is an `/attachments/<id>` path of
+  an **HTML or image attachment on the same card** (`Schemas.Attachment.mockup_types/0`,
+  RE390; `422 invalid_mockups` over the API); append also refuses an attachment already listed
+  or repeated in the request. Append and remove lock the card row `FOR UPDATE` and rewrite the
+  LOCKED row's list, so concurrent writers never clobber each other. All three broadcast
+  `{:card_upserted, card}`.
   `:mockups` is a flow contract field (`writes: ["mockups"]`), blank when nil/empty. It is
   distinct from `ai_result.screens` (run-result screenshots).
   The drawer renders mockups in a **Mockups** section above Description as a wrapping row of 80px

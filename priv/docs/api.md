@@ -218,6 +218,46 @@ The `url` must be an HTML or image file already attached to this card; anything 
 `fonts.gstatic.com`). Every other request is blocked. Opening a mockup that uses Google Fonts
 sends a request to Google, which sees the viewer's IP address, but nothing about Hamaca.
 
+### POST /api/cards/:ref/mockups
+
+Add mockups to the end of a card's list without sending the whole list again. The body is the
+same as PATCH's `mockups`. Returns the card.
+
+```
+curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
+  -d '{"mockups":[{"url":"/attachments/135e5539-…","caption":"Error state"}]}' \
+  https://hamaca.app/api/cards/RLY-12/mockups
+```
+
+```json
+{ "data": { "ref": "RLY-12", "mockups": [
+    { "url": "/attachments/8f2c1a40-…", "caption": "Empty state" },
+    { "url": "/attachments/135e5539-…", "caption": "Error state" }
+] } }
+```
+
+The same rules as PATCH apply to each entry. A file that's already one of the card's mockups,
+the same file twice, or an empty list is `422 invalid_mockups`. A missing or non-list `mockups`
+is `400`. Two agents adding mockups at once both land: neither overwrites the other.
+
+### DELETE /api/cards/:ref/mockups/:attachment_id
+
+Take one mockup off a card's list. `attachment_id` is the id at the end of its
+`/attachments/<id>` url. The file itself stays attached to the card. Returns the card.
+
+```
+curl -X DELETE -H "Authorization: Bearer $HAMACA_API_KEY" \
+  https://hamaca.app/api/cards/RLY-12/mockups/135e5539-…
+```
+
+```json
+{ "data": { "ref": "RLY-12", "mockups": [
+    { "url": "/attachments/8f2c1a40-…", "caption": "Empty state" }
+] } }
+```
+
+An id that isn't in the list is `404 not_found`.
+
 ### POST /api/cards/:ref/move
 
 Move a card. `stage` is a stage id or name. `position` starts at 1; leave it out to put the card

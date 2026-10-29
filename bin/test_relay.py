@@ -1348,13 +1348,24 @@ class MockupsCommandTest(unittest.TestCase):
         self._api = relay.api
         self.addCleanup(setattr, relay, "api", self._api)
         self.sent = []
+        # The card's list as the server holds it; GET reads it, POST …/mockups appends to it,
+        # DELETE …/mockups/<id> unlists one, PATCH replaces it.
+        self.card_mockups = []
 
         def fake_api(method, path, body=None, **kwargs):
             self.sent.append((method, path, body))
             if path.endswith("/attachments"):
                 n = sum(1 for m, p, _b in self.sent if p.endswith("/attachments"))
                 return {"data": {"id": f"id{n}", "url": f"/attachments/id{n}", "markdown": "-"}}
-            return {"data": {"ref": "RLY-1", "mockups": body["mockups"]}}
+            if method == "POST" and path == "/api/cards/RLY-1/mockups":
+                self.card_mockups = self.card_mockups + body["mockups"]
+            elif method == "DELETE" and path.startswith("/api/cards/RLY-1/mockups/"):
+                gone = path.rsplit("/", 1)[-1]
+                self.card_mockups = [m for m in self.card_mockups
+                                     if relay.attachment_id(m["url"]) != gone]
+            elif method == "PATCH":
+                self.card_mockups = body["mockups"]
+            return {"data": {"ref": "RLY-1", "mockups": self.card_mockups}}
 
         relay.api = fake_api
 
@@ -1366,9 +1377,9 @@ class MockupsCommandTest(unittest.TestCase):
             f.write("<!doctype html><p>hi</p>")
         return path
 
-    def args(self, files, caption=None, clear=False, json=False, pull=None):
+    def args(self, files, caption=None, clear=False, json=False, pull=None, add=False, remove=None):
         return argparse.Namespace(ref="RLY-1", files=files, caption=caption, clear=clear,
-                                  json=json, field=None, pull=pull)
+                                  json=json, field=None, pull=pull, add=add, remove=remove)
 
     def test_uploads_each_file_as_html_then_sets_the_list_in_one_patch(self):
         a, b = self.html("a.html"), self.html("b.html")
@@ -1463,6 +1474,108 @@ class MockupsCommandTest(unittest.TestCase):
         self.assertEqual(set(body), set(CONTRACT["mockups"]["request"]))
         self.assertEqual(set(body["mockups"][0]), set(CONTRACT["mockups"]["request"]["mockups"][0]))
         self.assertEqual(set(CONTRACT["mockups"]["card_mockups"][0]), {"url", "caption"})
+
+    # RE499 — --add appends with one POST; --remove unlists by index or id, one GET + one DELETE each.
+
+    ABC = [{"url": "/attachments/a", "caption": "A"}, {"url": "/attachments/b", "caption": "B"},
+           {"url": "/attachments/c", "caption": "C"}]
+
+    def test_append_and_remove_paths_match_the_runner_contract(self):
+        self.assertEqual(relay.mockups_append_path("<ref>"), CONTRACT["mockups"]["append_path"])
+        self.assertEqual(relay.mockup_remove_path("<ref>", "<attachment-id>"),
+                         CONTRACT["mockups"]["remove_path"])
+        body = relay.mockups_body([("/attachments/x", "c")])
+        self.assertEqual(set(body), set(CONTRACT["mockups"]["append_request"]))
+        self.assertEqual(set(body["mockups"][0]),
+                         set(CONTRACT["mockups"]["append_request"]["mockups"][0]))
+
+    def test_add_uploads_then_appends_with_one_post_and_no_patch_or_get(self):
+        self.card_mockups = self.ABC[:2]
+        c = self.html("c.html")
+
+        out = capture(relay.cmd_mockups, self.args([c], caption=["C"], add=True))
+
+        self.assertEqual([(m, p) for m, p, _b in self.sent], [
+            ("POST", "/api/cards/RLY-1/attachments"), ("POST", "/api/cards/RLY-1/mockups")])
+        self.assertEqual(self.sent[-1][2], {"mockups": [{"url": "/attachments/id1", "caption": "C"}]})
+        self.assertIn("RLY-1: 3 mockups (added 1)", out)
+        self.assertIn("  A  /attachments/a", out)
+        self.assertIn("  C  /attachments/id1", out)
+
+    def test_remove_by_index_gets_once_then_deletes_that_id(self):
+        self.card_mockups = list(self.ABC)
+
+        out = capture(relay.cmd_mockups, self.args([], remove=["2"]))
+
+        self.assertEqual(self.sent, [("GET", "/api/cards/RLY-1", None),
+                                     ("DELETE", "/api/cards/RLY-1/mockups/b", None)])
+        self.assertIn("RLY-1: 2 mockups (removed 1)\n  A  /attachments/a\n  C  /attachments/c", out)
+
+    def test_remove_by_url_and_bare_id_deletes_each_in_order(self):
+        self.card_mockups = list(self.ABC)
+
+        out = capture(relay.cmd_mockups, self.args([], remove=["/attachments/c", "a"]))
+
+        self.assertEqual(self.sent, [("GET", "/api/cards/RLY-1", None),
+                                     ("DELETE", "/api/cards/RLY-1/mockups/c", None),
+                                     ("DELETE", "/api/cards/RLY-1/mockups/a", None)])
+        self.assertIn("RLY-1: 1 mockup (removed 2)", out)
+
+    def test_removing_the_last_mockup_says_zero(self):
+        self.card_mockups = self.ABC[:1]
+        out = capture(relay.cmd_mockups, self.args([], remove=["1"]))
+        self.assertIn("RLY-1: 0 mockups (removed 1)", out)
+
+    def test_remove_of_an_unknown_index_or_id_dies_after_the_get_and_deletes_nothing(self):
+        for bad in ("99", "0", "zzz"):
+            self.sent, self.card_mockups = [], self.ABC[:2]
+            err = io.StringIO()
+            with self.subTest(bad=bad), self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+                relay.cmd_mockups(self.args([], remove=[bad]))
+            self.assertIn(bad, err.getvalue())
+            self.assertEqual(self.sent, [("GET", "/api/cards/RLY-1", None)])
+
+    def test_remove_naming_one_mockup_twice_dies_before_any_delete(self):
+        self.card_mockups = self.ABC[:2]
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+            relay.cmd_mockups(self.args([], remove=["1", "/attachments/a"]))
+        self.assertNotIn("DELETE", [m for m, _p, _b in self.sent])
+        self.assertIn("/attachments/a", err.getvalue())
+
+    def test_add_and_remove_conflicts_die_before_any_request_naming_the_conflict(self):
+        a = self.html("a.html")
+        cases = [
+            (self.args([a], add=True, clear=True), "--clear"),
+            (self.args([], add=True), "--add"),
+            (self.args([a], add=True, remove=["1"]), "--add"),
+            (self.args([a], remove=["1"]), "FILE"),
+            (self.args([], remove=["1"], caption=["X"]), "--caption"),
+            (self.args([], remove=["1"], clear=True), "--clear"),
+            (self.args([], pull=True, add=True), "--add"),
+            (self.args([], pull=True, remove=["1"]), "--remove"),
+        ]
+        for args, conflict in cases:
+            err = io.StringIO()
+            with self.subTest(args=args), self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+                relay.cmd_mockups(args)
+            self.assertIn(conflict, err.getvalue())
+        self.assertEqual(self.sent, [])
+
+    def test_add_json_prints_the_resulting_list(self):
+        self.card_mockups = self.ABC[:1]
+        out = capture(relay.cmd_mockups, self.args([self.html("a.html")], add=True, json=True))
+        self.assertEqual(json.loads(out), [{"url": "/attachments/a", "caption": "A"},
+                                           {"url": "/attachments/id1", "caption": "a.html"}])
+
+    def test_parser_takes_add_and_repeated_remove(self):
+        parse = relay.build_parser().parse_args
+        self.assertIs(parse(["mockups", "RLY-1", "c.html", "--add"]).add, True)
+        self.assertEqual(parse(["mockups", "RLY-1", "--remove", "2", "--remove", "abc"]).remove,
+                         ["2", "abc"])
+        bare = parse(["mockups", "RLY-1", "a.html"])
+        self.assertIs(bare.add, False)
+        self.assertIsNone(bare.remove)
 
 
 def setup_step(id, title, status="pending", parent=None, evidence=None, error=None, children=()):
@@ -1934,9 +2047,10 @@ class MockupsPullTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir)
         self.dest = os.path.join(self.dir, "out")
 
-    def args(self, pull=True, files=None, caption=None, clear=False, json=False):
+    def args(self, pull=True, files=None, caption=None, clear=False, json=False, add=False,
+             remove=None):
         return argparse.Namespace(ref="RLY-1", files=files or [], caption=caption, clear=clear,
-                                  pull=pull, json=json, field=None)
+                                  pull=pull, json=json, field=None, add=add, remove=remove)
 
     def read(self, name):
         with open(os.path.join(self.dest, name), "rb") as f:

@@ -85,4 +85,97 @@ defmodule HamacaWeb.Api.CardMockupsTest do
   test "a non-list mockups is 400", %{conn: conn, ref: ref} do
     assert conn |> patch_mockups(ref, "nope") |> json_response(400)
   end
+
+  # RE499 — append one or more mockups, or unlist one, without re-sending the list.
+  describe "POST /api/cards/:ref/mockups and DELETE /api/cards/:ref/mockups/:attachment_id" do
+    defp post_mockups(conn, ref, body), do: post(conn, ~p"/api/cards/#{ref}/mockups", Jason.encode!(body))
+
+    defp delete_mockup(conn, ref, id), do: delete(conn, ~p"/api/cards/#{ref}/mockups/#{id}")
+
+    defp shown_mockups(conn, ref),
+      do: conn |> get(~p"/api/cards/#{ref}") |> json_response(200) |> get_in(["data", "mockups"])
+
+    defp id_of(url), do: url |> Schemas.Attachment.id_from_path() |> elem(1)
+
+    setup %{conn: conn, ref: ref} do
+      {:ok, a: upload(conn, ref, "a.html"), b: upload(conn, ref, "b.html")}
+    end
+
+    test "POST appends to the list", %{conn: conn, ref: ref, a: a, b: b} do
+      conn |> patch_mockups(ref, [%{"url" => a, "caption" => "One"}]) |> json_response(200)
+
+      body = conn |> post_mockups(ref, %{"mockups" => [%{"url" => b, "caption" => "X"}]}) |> json_response(200)
+
+      expected = [%{"url" => a, "caption" => "One"}, %{"url" => b, "caption" => "X"}]
+      assert body["data"]["mockups"] == expected
+      assert shown_mockups(conn, ref) == expected
+    end
+
+    test "re-POSTing an attachment already listed is 422 and nothing changes", %{conn: conn, ref: ref, a: a, b: b} do
+      conn |> patch_mockups(ref, [%{"url" => a, "caption" => "One"}]) |> json_response(200)
+      conn |> post_mockups(ref, %{"mockups" => [%{"url" => b, "caption" => "X"}]}) |> json_response(200)
+
+      body = conn |> post_mockups(ref, %{"mockups" => [%{"url" => b, "caption" => "X"}]}) |> json_response(422)
+
+      assert body["error"]["code"] == "invalid_mockups"
+      assert body["error"]["message"] =~ b
+      assert shown_mockups(conn, ref) == [%{"url" => a, "caption" => "One"}, %{"url" => b, "caption" => "X"}]
+    end
+
+    test "an empty list is 422; a missing or non-list mockups is 400", %{conn: conn, ref: ref} do
+      assert conn |> post_mockups(ref, %{"mockups" => []}) |> json_response(422) |> get_in(["error", "code"]) ==
+               "invalid_mockups"
+
+      # The API-wide 400 code is "invalid" (priv/docs/api.md), the same PATCH's non-list mockups
+      # returns — chosen over the task body's "invalid_request" by human guidance on RE499.
+      assert conn |> post_mockups(ref, %{}) |> json_response(400) |> get_in(["error", "code"]) == "invalid"
+
+      assert conn |> post_mockups(ref, %{"mockups" => "x"}) |> json_response(400) |> get_in(["error", "code"]) ==
+               "invalid"
+    end
+
+    test "DELETE unlists one; repeating it is 404", %{conn: conn, ref: ref, a: a, b: b} do
+      conn |> patch_mockups(ref, [%{"url" => a}, %{"url" => b}]) |> json_response(200)
+
+      body = conn |> delete_mockup(ref, id_of(a)) |> json_response(200)
+      assert body["data"]["mockups"] == [%{"url" => b, "caption" => nil}]
+
+      assert conn |> delete_mockup(ref, id_of(a)) |> json_response(404) |> get_in(["error", "code"]) == "not_found"
+    end
+
+    test "an unknown card is 404 for both", %{conn: conn, board: board, a: a} do
+      unknown = board.key <> "9999"
+
+      assert conn
+             |> post_mockups(unknown, %{"mockups" => [%{"url" => a}]})
+             |> json_response(404)
+             |> get_in(["error", "code"]) ==
+               "not_found"
+
+      assert conn |> delete_mockup(unknown, id_of(a)) |> json_response(404) |> get_in(["error", "code"]) == "not_found"
+    end
+
+    test "another board's key gets a 404 for both and nothing changes", %{conn: conn, ref: ref, a: a, b: b} do
+      conn |> patch_mockups(ref, [%{"url" => a}]) |> json_response(200)
+
+      other = insert(:board)
+      {:ok, %{token: other_token}} = Hamaca.ApiKeys.create_key(other, other.owner)
+
+      other_conn =
+        build_conn()
+        |> put_req_header("authorization", "Bearer " <> other_token)
+        |> put_req_header("content-type", "application/json")
+
+      assert other_conn
+             |> post_mockups(ref, %{"mockups" => [%{"url" => b}]})
+             |> json_response(404)
+             |> get_in(["error", "code"]) ==
+               "not_found"
+
+      assert other_conn |> delete_mockup(ref, id_of(a)) |> json_response(404) |> get_in(["error", "code"]) ==
+               "not_found"
+
+      assert shown_mockups(conn, ref) == [%{"url" => a, "caption" => nil}]
+    end
+  end
 end

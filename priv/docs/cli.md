@@ -59,7 +59,7 @@ Hamaca AI. Every command takes `--json`, and `./hamaca <command> -h` lists its o
 | `./hamaca pr RLY-12 <url>` | Record the card's pull request |
 | `./hamaca comment RLY-12 "…"` | Comment on a card |
 | `./hamaca attach RLY-12 shot.png` | Upload a file and print markdown that shows it |
-| `./hamaca mockups RLY-12 a.html` | Attach HTML or image mockups, replacing the card's list. An HTML mockup must be one self-contained file; the only thing it can load is Google Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`). `--pull` downloads them; `--clear` removes them |
+| `./hamaca mockups RLY-12 a.html` | Attach HTML or image mockups, replacing the card's list. An HTML mockup must be one self-contained file; the only thing it can load is Google Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`). `--add` appends the files instead of replacing the list; `--remove 2` (an index, or an attachment id) unlists one and keeps the file. `--pull` downloads them; `--clear` removes them |
 | `./hamaca result RLY-12 @result.json` | Set the summary, changes and screenshots shown on the card. See [The card's result](#the-cards-result) |
 
 **Hand the baton**

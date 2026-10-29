@@ -124,6 +124,140 @@ defmodule Hamaca.CardsMockupsTest do
     end
   end
 
+  # RE499 — append and remove one mockup without re-sending the list, atomically under a lock
+  # on the card row (so a stale %Card{} never clobbers a concurrent write).
+  describe "append_mockups/2" do
+    setup %{card: card} do
+      {:ok, a: upload(card, "a.html"), b: upload(card, "b.html"), c: upload(card, "c.html")}
+    end
+
+    test "appends after the existing entries", %{card: card, a: a, b: b, c: c} do
+      {:ok, card} = Cards.set_mockups(card, [%{"url" => a, "caption" => "One"}, %{"url" => b, "caption" => "Two"}])
+
+      expected = [
+        %{"url" => a, "caption" => "One"},
+        %{"url" => b, "caption" => "Two"},
+        %{"url" => c, "caption" => "Three"}
+      ]
+
+      assert {:ok, %Card{mockups: ^expected}} = Cards.append_mockups(card, [%{"url" => c, "caption" => "Three"}])
+      assert Repo.get!(Card, card.id).mockups == expected
+    end
+
+    test "onto no mockups, in request order, a blank caption is nil", %{card: card, a: a, b: b} do
+      assert {:ok, %Card{mockups: mockups}} =
+               Cards.append_mockups(card, [%{"url" => a}, %{"url" => b, "caption" => "  "}])
+
+      assert mockups == [%{"url" => a, "caption" => nil}, %{"url" => b, "caption" => nil}]
+    end
+
+    test "a stale struct re-reads the locked row and does not clobber", %{card: stale, a: a, b: b} do
+      assert stale.mockups == nil
+      {:ok, _card} = Cards.append_mockups(stale, [%{"url" => a}])
+      {:ok, _card} = Cards.append_mockups(stale, [%{"url" => b}])
+
+      assert Repo.get!(Card, stale.id).mockups == [%{"url" => a, "caption" => nil}, %{"url" => b, "caption" => nil}]
+    end
+
+    test "an attachment already in the list is refused", %{card: card, a: a} do
+      {:ok, card} = Cards.set_mockups(card, [%{"url" => a}])
+
+      assert {:error, {:invalid_mockups, message}} = Cards.append_mockups(card, [%{"url" => a}])
+      assert message =~ "mockups[0]"
+      assert message =~ a
+      assert Repo.get!(Card, card.id).mockups == [%{"url" => a, "caption" => nil}]
+    end
+
+    test "the same attachment twice in one request names the later index", %{card: card, b: b} do
+      assert {:error, {:invalid_mockups, message}} = Cards.append_mockups(card, [%{"url" => b}, %{"url" => b}])
+      assert message =~ "mockups[1]"
+      assert Repo.get!(Card, card.id).mockups == nil
+    end
+
+    test "an HTML attachment on ANOTHER card is refused", %{card: card, stage: stage, a: a} do
+      {:ok, card} = Cards.set_mockups(card, [%{"url" => a}])
+      theirs = upload(insert(:card, stage: stage), "theirs.html")
+
+      assert {:error, {:invalid_mockups, message}} = Cards.append_mockups(card, [%{"url" => theirs}])
+      assert message =~ "mockups[0]"
+      assert message =~ "attachment on this card"
+      assert Repo.get!(Card, card.id).mockups == [%{"url" => a, "caption" => nil}]
+    end
+
+    test "an unknown key is refused with set_mockups/2's message", %{card: card, a: a, b: b} do
+      {:ok, card} = Cards.set_mockups(card, [%{"url" => a}])
+
+      assert {:error, {:invalid_mockups, message}} = Cards.append_mockups(card, [%{"url" => b, "image" => "x"}])
+      assert message =~ ~s(unknown key "image")
+      assert Repo.get!(Card, card.id).mockups == [%{"url" => a, "caption" => nil}]
+    end
+
+    test "nothing to add is refused", %{card: card} do
+      assert {:error, {:invalid_mockups, _message}} = Cards.append_mockups(card, [])
+      assert Repo.get!(Card, card.id).mockups == nil
+    end
+
+    test "an append and a remove each broadcast the upsert", %{card: card, a: a} do
+      Hamaca.Events.subscribe(card.board_id)
+      card_id = card.id
+      {:ok, a_id} = Attachment.id_from_path(a)
+
+      {:ok, card} = Cards.append_mockups(card, [%{"url" => a}])
+      assert_receive {:card_upserted, %Card{id: ^card_id, mockups: [_]}}
+
+      {:ok, _card} = Cards.remove_mockup(card, a_id)
+      assert_receive {:card_upserted, %Card{id: ^card_id, mockups: nil}}
+    end
+  end
+
+  describe "remove_mockup/2" do
+    setup %{card: card} do
+      a = upload(card, "a.html")
+      b = upload(card, "b.html")
+      c = upload(card, "c.html")
+      ids = for url <- [a, b, c], do: url |> Attachment.id_from_path() |> elem(1)
+      [a_id, b_id, c_id] = ids
+      {:ok, a: a, b: b, c: c, a_id: a_id, b_id: b_id, c_id: c_id}
+    end
+
+    test "unlists one entry; the attachment stays in storage", %{card: card, a: a, b: b, c: c, b_id: b_id} do
+      {:ok, card} =
+        Cards.set_mockups(card, [
+          %{"url" => a, "caption" => "One"},
+          %{"url" => b, "caption" => "Two"},
+          %{"url" => c, "caption" => "Three"}
+        ])
+
+      expected = [%{"url" => a, "caption" => "One"}, %{"url" => c, "caption" => "Three"}]
+      assert {:ok, %Card{mockups: ^expected}} = Cards.remove_mockup(card, b_id)
+      assert Repo.get!(Card, card.id).mockups == expected
+      assert %Attachment{} = Attachments.get_attachment(b_id)
+    end
+
+    test "removing the last entry stores nil", %{card: card, a: a, a_id: a_id} do
+      {:ok, card} = Cards.set_mockups(card, [%{"url" => a}])
+
+      assert {:ok, %Card{mockups: nil}} = Cards.remove_mockup(card, a_id)
+      assert Repo.get!(Card, card.id).mockups == nil
+    end
+
+    test "an id not in the list, or not a uuid, is not_found", %{card: card, a: a} do
+      {:ok, card} = Cards.set_mockups(card, [%{"url" => a}])
+
+      assert {:error, :not_found} = Cards.remove_mockup(card, Ecto.UUID.generate())
+      assert {:error, :not_found} = Cards.remove_mockup(card, "not-a-uuid")
+      assert Repo.get!(Card, card.id).mockups == [%{"url" => a, "caption" => nil}]
+    end
+
+    test "a stale struct re-reads the locked row", %{card: card, a: a, b: b, c: c, a_id: a_id} do
+      {:ok, stale} = Cards.set_mockups(card, [%{"url" => a}, %{"url" => b}])
+      {:ok, _fresh} = Cards.append_mockups(Repo.get!(Card, card.id), [%{"url" => c}])
+
+      {:ok, _card} = Cards.remove_mockup(stale, a_id)
+      assert Repo.get!(Card, card.id).mockups == [%{"url" => b, "caption" => nil}, %{"url" => c, "caption" => nil}]
+    end
+  end
+
   describe "the writes contract (RE244)" do
     test ":mockups is a contract field, blank until set", %{card: card} do
       assert :mockups in Card.contract_fields()

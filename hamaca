@@ -61,8 +61,8 @@ USAGE = None   # the running `hamaca start`'s HarnessUsageBook (RE436); None out
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 96
-RUNNER_FINGERPRINT = "69a4782fdea3514b67624dce0d2cda1e138fb1f1f5b939bd870bfbf8aeb6115e"
+RUNNER_VERSION = 97
+RUNNER_FINGERPRINT = "6174935f36ac4f00a49f08d1c73ae6f6a79ed005d5df75a3669a5f58b7096db8"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -1121,6 +1121,25 @@ def set_mockups(ref, entries):
     return api("PATCH", f"/api/cards/{ref}", mockups_body(entries))["data"]
 
 
+# RE499: append to / unlist one from a card's mockups, atomically server-side. Both paths are
+# pinned by runner_contract.json's `mockups.append_path` / `mockups.remove_path`; the POST body
+# is `mockups_body` (pinned by `mockups.append_request`).
+def mockups_append_path(ref):
+    return f"/api/cards/{ref}/mockups"
+
+
+def mockup_remove_path(ref, attachment_id):
+    return f"/api/cards/{ref}/mockups/{attachment_id}"
+
+
+def append_mockups(ref, entries):
+    return api("POST", mockups_append_path(ref), mockups_body(entries))["data"]
+
+
+def remove_mockup(ref, attachment_id):
+    return api("DELETE", mockup_remove_path(ref, attachment_id))["data"]
+
+
 # RE373: where a board key downloads an attachment's raw bytes. Pinned by runner_contract.json's
 # `mockups.download_path` (Schemas.Attachment.api_path/1 on the server).
 ATTACHMENT_DOWNLOAD_PREFIX = "/api/attachments/"
@@ -2078,11 +2097,18 @@ def cmd_attach(args):
     emit(args, {**data, "markdown": md}, md)
 
 
-def format_mockups(ref, mockups):
-    if not mockups:
-        return f"{ref}: mockups cleared"
+def format_mockups(ref, mockups, added=0, removed=0):
+    """The card's resulting mockups: `N mockups set` after a replace, `N mockups (added K)` /
+    `(removed K)` after --add / --remove (RE499) — always followed by the full list."""
     noun = "mockup" if len(mockups) == 1 else "mockups"
-    lines = [f"{ref}: {len(mockups)} {noun} set"]
+    if added or removed:
+        change = f"added {added}" if added else f"removed {removed}"
+        head = f"{ref}: {len(mockups)} {noun} ({change})"
+    elif not mockups:
+        return f"{ref}: mockups cleared"
+    else:
+        head = f"{ref}: {len(mockups)} {noun} set"
+    lines = [head]
     lines += [f'  {m.get("caption") or "-"}  {m.get("url", "")}' for m in mockups]
     return "\n".join(lines)
 
@@ -2122,26 +2148,74 @@ def cmd_images(args):
     emit(args, pulled, format_images_pulled(args.ref, dest, pulled))
 
 
+def resolve_mockup_removals(mockups, xs):
+    """The attachment ids `--remove X…` names on a card holding `mockups` (RE499), in order. An
+    all-digit X is a 1-based index; anything else is an attachment id or `/attachments/<id>`
+    url. Dies naming the X that matches nothing, or the mockup named twice."""
+    ids = [attachment_id(m["url"]) for m in mockups]
+    resolved = []
+    for x in xs:
+        if x.isdigit():
+            if not 1 <= int(x) <= len(ids):
+                die(f"--remove {x}: no mockup #{x} — the card has {len(ids)}")
+            resolved.append(ids[int(x) - 1])
+        elif attachment_id(x) in ids:
+            resolved.append(attachment_id(x))
+        else:
+            die(f"--remove {x}: not one of the card's mockups")
+    for mid in resolved:
+        named = [x for x, r in zip(xs, resolved) if r == mid]
+        if len(named) > 1:
+            die(f"--remove names one mockup {len(named)} times ({', '.join(named)}) — "
+                "name each once")
+    return resolved
+
+
+def cmd_mockups_remove(args, xs):
+    """hamaca mockups REF --remove X… (RE499): unlist mockups by 1-based index or attachment
+    id/url — one GET resolves every X to an id (dying before any DELETE when one doesn't
+    resolve), then one DELETE per id. The attachments themselves stay in storage."""
+    ids = resolve_mockup_removals(get_card(args.ref).get("mockups") or [], xs)
+    card = {}
+    for mid in ids:
+        card = remove_mockup(args.ref, mid)
+    mockups = card.get("mockups") or []
+    emit(args, mockups, format_mockups(args.ref, mockups, removed=len(ids)))
+
+
 def cmd_mockups(args):
-    """hamaca mockups REF FILE… [--caption T…] | --clear | --pull [DIR] (RE370, RE373).
+    """hamaca mockups REF FILE… [--caption T…] [--add] | --clear | --remove X… | --pull [DIR]
+    (RE370, RE373, RE499).
 
     Uploads each file through the attachments endpoint, typed by its extension through
     MOCKUP_TYPES (RE390: .html or an image — anything else dies up front), then REPLACES the
-    card's mockups with ONE PATCH. Captions pair with files in order; a file without one is
-    captioned with its filename. Every argument error dies before the first request, so a bad
-    call never leaves half-uploaded files behind."""
-    files, captions = args.files or [], args.caption or []
+    card's mockups with ONE PATCH — or, with --add, appends them with ONE POST. Captions pair
+    with files in order; a file without one is captioned with its filename. --remove unlists
+    mockups instead. Every argument error dies before the first request, so a bad call never
+    leaves half-uploaded files behind."""
+    files, captions, removes = args.files or [], args.caption or [], args.remove or []
     if args.pull is not None:
         conflicts = [name for name, on in (("FILE arguments", files), ("--caption", captions),
-                                           ("--clear", args.clear)) if on]
+                                           ("--clear", args.clear), ("--add", args.add),
+                                           ("--remove", removes)) if on]
         if conflicts:
             die(f"--pull can't be combined with {', '.join(conflicts)} — it only downloads "
                 "the card's mockups")
         return cmd_mockups_pull(args)
+    if removes:
+        conflicts = [name for name, on in (("--add", args.add), ("FILE arguments", files),
+                                           ("--caption", captions), ("--clear", args.clear)) if on]
+        if conflicts:
+            die(f"--remove can't be combined with {', '.join(conflicts)} — it only unlists "
+                "mockups already on the card")
+        return cmd_mockups_remove(args, removes)
+    if args.add and args.clear:
+        die("--add can't be combined with --clear — --add keeps the card's mockups")
     if args.clear and files:
         die("--clear takes no files — it empties the card's mockups")
     if not args.clear and not files:
-        die("name at least one mockup file (.html or an image), or pass --clear")
+        die("--add needs at least one mockup file (.html or an image) to append" if args.add
+            else "name at least one mockup file (.html or an image), or pass --clear")
     not_mockups = [path for path in files if mockup_type(path) is None]
     if not_mockups:
         die(f"not a mockup file: {', '.join(not_mockups)} — a mockup is one of "
@@ -2152,6 +2226,9 @@ def cmd_mockups(args):
     for i, path in enumerate(files):
         url = attach(args.ref, path, content_type=mockup_type(path))["url"]
         entries.append((url, captions[i] if i < len(captions) else os.path.basename(path)))
+    if args.add:
+        mockups = append_mockups(args.ref, entries).get("mockups") or []
+        return emit(args, mockups, format_mockups(args.ref, mockups, added=len(entries)))
     mockups = set_mockups(args.ref, entries).get("mockups") or []
     emit(args, mockups, format_mockups(args.ref, mockups))
 
@@ -7677,7 +7754,7 @@ COMMANDS = (
     ("Cards", "depends", "replace a card's blockers (none clears them)"),
     ("Cards", "comment", "comment on a card"),
     ("Cards", "attach", "upload a file to a card and print its markdown"),
-    ("Cards", "mockups", "attach HTML or image mockups to a card, replacing its list (--clear empties it, --pull downloads them)"),
+    ("Cards", "mockups", "attach HTML or image mockups to a card, replacing its list (--add appends, --remove unlists one, --clear empties it, --pull downloads them)"),
     ("Cards", "images", "download the images attached to a card's notes (--pull [DIR])"),
     ("Cards", "needs-input", "park a card on questions for a human"),
     ("Cards", "own", "take the baton on a card"),
@@ -7895,6 +7972,11 @@ def build_parser():
     mk.add_argument("--caption", action="append",
                     help="a caption, paired with the files in order (repeat; default: the filename)")
     mk.add_argument("--clear", action="store_true", help="empty the card's mockups instead")
+    mk.add_argument("--add", action="store_true",
+                    help="append the files to the card's mockups instead of replacing them")
+    mk.add_argument("--remove", action="append", metavar="N|ID",
+                    help="unlist a mockup by 1-based index or attachment id/url instead "
+                         "(repeat; the file stays in storage)")
     mk.add_argument("--pull", nargs="?", const=True, metavar="DIR",
                     help="download the card's mockups into DIR instead "
                          "(default: tmp/<REF>/mockups/)")

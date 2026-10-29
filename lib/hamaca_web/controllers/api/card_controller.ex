@@ -80,6 +80,46 @@ defmodule HamacaWeb.Api.CardController do
     end
   end
 
+  # RE499 — append to the card's mockups (same entry shape as PATCH's "mockups") without
+  # re-sending the list; the duplicate and locking rules live in Hamaca.Cards.append_mockups/2.
+  def append_mockups(conn, %{"ref" => ref} = params) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, mockups} <- mockups_param(params),
+         {:ok, card} <- Cards.append_mockups(card, mockups) do
+      render_card(conn, board, card)
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # RE499 — unlist one mockup by its attachment id; the attachment itself stays in storage.
+  def remove_mockup(conn, %{"ref" => ref, "attachment_id" => attachment_id}) do
+    board = conn.assigns.current_board
+
+    with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
+         {:ok, card} <- Cards.remove_mockup(card, attachment_id) do
+      render_card(conn, board, card)
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp mockups_param(%{"mockups" => mockups}) when is_list(mockups), do: {:ok, mockups}
+  defp mockups_param(_params), do: {:error, :invalid_request}
+
+  defp render_card(conn, board, card) do
+    render(conn, :show,
+      board: board,
+      card: card,
+      stages: Boards.list_stages(board),
+      timeline: Activity.list_timeline(card)
+    )
+  end
+
   defp update_fields(card, params) do
     case Map.take(params, [
            "title",

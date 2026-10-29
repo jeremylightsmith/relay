@@ -171,6 +171,7 @@ first works.)
 ```
 
 `mockups` **replaces the card's whole list** — the card shows the current round, not a museum.
+(`--add` appends a variant mid-round without re-uploading the rest; replace stays the per-round default.)
 The history lives in comments, so **every round posts one** (`./hamaca comment <ref>
 @"$S/round.md"`) recording briefly: **what the rejection note or answers asked for**, **what
 you changed and why**, **what you deliberately left alone**, and **what you tried and

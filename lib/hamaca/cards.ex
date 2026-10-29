@@ -1222,26 +1222,139 @@ defmodule Hamaca.Cards do
   def set_mockups(%Card{} = card, mockups) when is_list(mockups) do
     with {:ok, entries} <- validate_mockups(card, mockups) do
       card
-      |> Ecto.Changeset.change(mockups: if(entries == [], do: nil, else: entries))
+      |> Ecto.Changeset.change(mockups: stored_mockups(entries))
       |> Repo.update()
       |> preload_owners_result()
       |> broadcast_upserted()
     end
   end
 
-  defp validate_mockups(%Card{} = card, mockups) do
+  @doc """
+  APPENDS `mockups` to the card's list (RE499) — the same string-keyed entries as
+  `set_mockups/2`, validated by the same rules with the same messages, stored as
+  `existing ++ new` in request order.
+
+  Runs in a transaction that locks the card row `FOR UPDATE` and appends to the LOCKED row's
+  list, never to the caller's possibly-stale `card.mockups`, so two concurrent writers cannot
+  wipe each other's mockups. Also refused as `{:error, {:invalid_mockups, message}}`: `[]`
+  (nothing to add), an attachment already in the card's list, and the same attachment twice in
+  one request (the viewer addresses mockups by attachment id, so a duplicate is ambiguous).
+  On success returns `{:ok, card}` (owners preloaded) and broadcasts `{:card_upserted, card}`.
+  """
+  def append_mockups(%Card{}, []), do: invalid_mockups("mockups must list at least one mockup to add")
+
+  def append_mockups(%Card{} = card, mockups) when is_list(mockups) do
+    fn ->
+      locked = lock_card_row!(card)
+      existing = locked.mockups || []
+
+      with {:ok, entries} <- validate_mockup_entries(card, mockups),
+           :ok <- refuse_listed_mockups(entries, existing),
+           :ok <- refuse_repeated_mockups(entries) do
+        write_mockups!(locked, existing ++ Enum.map(entries, &stored_mockup/1))
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end
+    |> Repo.transaction()
+    |> preload_owners_result()
+    |> broadcast_upserted()
+  end
+
+  @doc """
+  UNLISTS the mockup whose url names attachment `attachment_id` (RE499); the attachment row and
+  its bytes stay in storage. Like `append_mockups/2` it rewrites the card row's list under a
+  `FOR UPDATE` lock, so a stale `card` cannot clobber a concurrent write. An emptied list is
+  stored as `nil`. An id that is not in the list (including a non-UUID) → `{:error, :not_found}`.
+  On success returns `{:ok, card}` (owners preloaded) and broadcasts `{:card_upserted, card}`.
+  """
+  def remove_mockup(%Card{} = card, attachment_id) when is_binary(attachment_id) do
+    case Ecto.UUID.cast(attachment_id) do
+      {:ok, id} ->
+        fn -> unlist_mockup!(card, id) end
+        |> Repo.transaction()
+        |> preload_owners_result()
+        |> broadcast_upserted()
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  # Inside remove_mockup/2's transaction: drop the entry naming attachment `id` from the
+  # LOCKED row's list, or roll back with :not_found when no entry names it.
+  defp unlist_mockup!(%Card{} = card, id) do
+    locked = lock_card_row!(card)
+
+    case Enum.split_with(locked.mockups || [], &(stored_mockup_id(&1) == {:ok, id})) do
+      {[], _kept} -> Repo.rollback(:not_found)
+      {_removed, kept} -> write_mockups!(locked, kept)
+    end
+  end
+
+  # The one entry validator set_mockups/2 and append_mockups/2 share: parses every entry, then
+  # checks each url is a mockup-type attachment on `card`. Returns the parsed entries
+  # (`%{index:, id:, url:, caption:}`).
+  defp validate_mockup_entries(%Card{} = card, mockups) do
     with {:ok, entries} <- mockup_entries(mockups) do
       mockup_ids = card_mockup_attachment_ids(card, Enum.map(entries, & &1.id))
 
       case Enum.find(entries, &(&1.id not in mockup_ids)) do
         nil ->
-          {:ok, Enum.map(entries, &%{"url" => &1.url, "caption" => &1.caption})}
+          {:ok, entries}
 
         %{index: index} ->
           invalid_mockups(
             ~s(mockups[#{index}]: "url" must be an HTML or image attachment on this card — upload it with `hamaca mockups` and use the /attachments/… path it prints)
           )
       end
+    end
+  end
+
+  defp validate_mockups(%Card{} = card, mockups) do
+    with {:ok, entries} <- validate_mockup_entries(card, mockups) do
+      {:ok, Enum.map(entries, &stored_mockup/1)}
+    end
+  end
+
+  defp stored_mockup(entry), do: %{"url" => entry.url, "caption" => entry.caption}
+
+  defp stored_mockups([]), do: nil
+  defp stored_mockups(entries), do: entries
+
+  # The attachment id a STORED entry's url names, cast like mockup_attachment_id/2 casts it.
+  defp stored_mockup_id(%{"url" => url}) do
+    with {:ok, id} <- Attachment.id_from_path(url), do: Ecto.UUID.cast(id)
+  end
+
+  defp stored_mockup_id(_entry), do: :error
+
+  defp refuse_listed_mockups(entries, existing) do
+    listed = MapSet.new(existing, &stored_mockup_id/1)
+
+    case Enum.find(entries, &MapSet.member?(listed, {:ok, &1.id})) do
+      nil -> :ok
+      %{index: index, url: url} -> invalid_mockups(~s(mockups[#{index}]: "#{url}" is already one of this card's mockups))
+    end
+  end
+
+  defp refuse_repeated_mockups(entries) do
+    entries
+    |> Enum.reduce_while(MapSet.new(), fn %{id: id} = entry, seen ->
+      if MapSet.member?(seen, id), do: {:halt, entry}, else: {:cont, MapSet.put(seen, id)}
+    end)
+    |> case do
+      %{index: index, url: url} -> invalid_mockups(~s(mockups[#{index}]: "#{url}" appears twice in this request))
+      %MapSet{} -> :ok
+    end
+  end
+
+  # Inside append_mockups/2's or remove_mockup/2's transaction: write `mockups` onto the locked
+  # row; a failed update rolls the transaction back.
+  defp write_mockups!(%Card{} = locked, mockups) do
+    case locked |> Ecto.Changeset.change(mockups: stored_mockups(mockups)) |> Repo.update() do
+      {:ok, card} -> card
+      {:error, changeset} -> Repo.rollback(changeset)
     end
   end
 
@@ -3068,6 +3181,12 @@ defmodule Hamaca.Cards do
   # so two writers can't interleave. The lock is released when the transaction ends.
   defp lock_card!(%Card{id: id}) do
     Repo.one!(from c in Card, where: c.id == ^id, lock: "FOR UPDATE", select: c.id)
+  end
+
+  # lock_card!/1's sibling for writers that need the locked row itself (RE499: append/remove a
+  # mockup read `mockups` under the lock, never from the caller's possibly-stale struct).
+  defp lock_card_row!(%Card{id: id}) do
+    Repo.one!(from c in Card, where: c.id == ^id, lock: "FOR UPDATE")
   end
 
   defp next_task_position(%Card{id: id}) do

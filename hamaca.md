@@ -59,7 +59,7 @@ or `@path`.
 | `./hamaca sub-tasks RLY-12 @file` | Legacy: replace the whole task list |
 | `./hamaca branch` · `./hamaca pr` · `./hamaca result RLY-12 …` | Record branch / PR url / AI result |
 | `./hamaca attach RLY-12 shot.png` | Upload a file; `--field url` gives its `/attachments/…` path |
-| `./hamaca mockups RLY-12 a.html b.png` · `--pull` | Replace the card's mockups · download them |
+| `./hamaca mockups RLY-12 a.html b.png` · `--add` · `--remove 2` · `--pull` | Replace the card's mockups · append to them · unlist one (by index or attachment id) · download them |
 | `./hamaca images RLY-12 --pull [DIR]` | Download the images attached to the card's notes (default `tmp/<REF>/images/`) |
 | `./hamaca depends RLY-12 RLY-13` | Replace the card's blocker set |
 | `./hamaca comment RLY-12 "…"` · `./hamaca needs-input RLY-12 "…"` | Comment · ask a human (blocks) |

@@ -261,6 +261,44 @@ defmodule HamacaWeb.Api.RunnerContractTest do
     {:ok, mockup_id} = Schemas.Attachment.id_from_path(mockup_url)
     assert exclusive.conn |> get(Schemas.Attachment.api_path(mockup_id)) |> response(200) == mockup_html
 
+    # RE499 — `./hamaca mockups --add` uploads, then POSTs only the new entries to the append
+    # path; `--remove` DELETEs one attachment id off the remove path. The recorded templates are
+    # the ones these real routes answered, with the real ref / id substituted in.
+    mockups_append_path = "/api/cards/<ref>/mockups"
+    mockup_remove_path = "/api/cards/<ref>/mockups/<attachment-id>"
+
+    %{"data" => %{"url" => variant_url}} =
+      exclusive.conn
+      |> post(
+        ~p"/api/cards/#{mockups_ref}/attachments",
+        Jason.encode!(%{mockup_upload | "filename" => "variant.html"})
+      )
+      |> json_response(201)
+
+    {:ok, variant_id} = Schemas.Attachment.id_from_path(variant_url)
+    mockups_append_request = %{"mockups" => [%{"url" => variant_url, "caption" => "Variant"}]}
+
+    mockups_append_response =
+      exclusive.conn
+      |> post(
+        String.replace(mockups_append_path, "<ref>", mockups_ref),
+        Jason.encode!(mockups_append_request)
+      )
+      |> json_response(200)
+
+    assert length(mockups_append_response["data"]["mockups"]) == 2
+
+    mockup_remove_response =
+      exclusive.conn
+      |> delete(
+        mockup_remove_path
+        |> String.replace("<ref>", mockups_ref)
+        |> String.replace("<attachment-id>", variant_id)
+      )
+      |> json_response(200)
+
+    assert length(mockup_remove_response["data"]["mockups"]) == 1
+
     # RE384 — `./relay stages` / `./relay stage …` read stage objects off `/api/stages`; the key
     # set is recorded from the real route, never typed.
     [stage_object | _] = exclusive.conn |> get(~p"/api/stages") |> json_response(200) |> Map.fetch!("data")
@@ -343,7 +381,10 @@ defmodule HamacaWeb.Api.RunnerContractTest do
         # RE390 — what a mockup may be; `./relay`'s MOCKUP_TYPES values must equal it.
         "content_types" => Enum.sort(Schemas.Attachment.mockup_types()),
         "request" => mockup_placeholders(mockups_request),
-        "card_mockups" => mockup_placeholders(mockups_response["data"]["mockups"])
+        "card_mockups" => mockup_placeholders(mockups_response["data"]["mockups"]),
+        "append_request" => mockup_placeholders(mockups_append_request),
+        "append_path" => mockups_append_path,
+        "remove_path" => mockup_remove_path
       },
       "vocabulary" => %{
         # RE433 — `./relay`'s HARNESS_PLACEHOLDERS must equal Schemas.Harness.placeholders/0.
