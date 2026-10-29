@@ -5649,7 +5649,7 @@ class RunNodeJobTest(unittest.TestCase):
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
 
         agent_job = job(node_type="agent", run="review it", id="nj-9", run_id="r1",
-                        vars={"ref": "RLY-9"})
+                        vars={"ref": "RLY-9", "prior_detail": "earlier node output"})
         relay.run_node_job(agent_job, "/tmp/wt", self.control)
         # Assert the instruction the agent must actually follow, not an implementation detail:
         # since RLY-175 the contract tells it to run `relay outcome`, not to write the file.
@@ -5661,8 +5661,10 @@ class RunNodeJobTest(unittest.TestCase):
         # unrendered postamble would quietly reintroduce it.
         self.assertNotIn("{relay}", seen["prompt"])
         self.assertIn(relay.HERE, seen["prompt"])
-        # Explanatory placeholders that are NOT vars must survive verbatim.
-        self.assertIn("{prior.detail}", seen["prompt"])
+        # Explanatory placeholders must survive verbatim — even when the job carries that var
+        # (RE490): the contract names `{prior_detail}`, it does not inline the previous output.
+        self.assertIn("{prior_detail}", seen["prompt"])
+        self.assertNotIn("earlier node output", seen["prompt"])
 
         shell_job = job(node_type="shell", run="true", id="nj-10", run_id="r1",
                         vars={"ref": "RLY-10"})
@@ -5916,6 +5918,50 @@ class FindingsContractTest(unittest.TestCase):
         model literally — the unexpanded-placeholder bug RLY-135 caught in run_node_job."""
         self.assertNotIn("{", relay.FINDINGS_CONTRACT_HEAD)
         self.assertNotIn("{", relay.FINDINGS_CONTRACT_TAIL)
+
+
+class OutcomeContractVocabularyTest(unittest.TestCase):
+    """RE490: the contract appended to every agent prompt lists every outcome the engine accepts,
+    generated from NODE_OUTCOMES (never re-typed), explains `partial` and `needs_input`, and names
+    the real placeholder `{prior_detail}` verbatim rather than inlining the previous node's
+    detail."""
+
+    def _prompt(self, **extra):
+        # `relay` is not a server-sent var (job() refuses it); run_node_job adds it before
+        # composing, so the vars handed to compose_node_prompt carry it the same way.
+        j = job(node_type="agent", vars={"ref": "RE1", **extra})
+        return relay.compose_node_prompt(j, "x", {**j["vars"], "relay": "./hamaca"})
+
+    def test_the_valid_outcomes_line_is_every_node_outcome(self):
+        lines = [l for l in self._prompt().splitlines() if l.startswith("Valid outcomes:")]
+        self.assertEqual(len(lines), 1)
+        listed = lines[0][len("Valid outcomes: "):].split(".", 1)[0]
+        self.assertEqual(listed, " | ".join(relay.NODE_OUTCOMES))
+
+    def test_the_outcome_list_is_not_typed_into_the_runner_source(self):
+        with open(RELAY_PATH, encoding="utf-8") as f:
+            source = f.read()
+        self.assertNotIn("succeeded | failed | partial | needs_input", source)
+
+    def test_prior_detail_reaches_the_agent_verbatim(self):
+        prompt = self._prompt(prior_detail="PREVIOUS NODE SAID HI")
+        self.assertIn("{prior_detail}", prompt)
+        self.assertNotIn("{prior.detail}", prompt)
+        self.assertNotIn("PREVIOUS NODE SAID HI", prompt)
+        self.assertNotIn("{relay}", prompt)
+        self.assertNotIn("{ref}", prompt)
+        self.assertIn("./hamaca outcome succeeded --detail", prompt)
+        self.assertIn("./hamaca needs-input RE1 --questions", prompt)
+
+    def test_partial_is_explained_with_its_failed_fallback(self):
+        lines = self._prompt().splitlines()
+        self.assertTrue(any("partial" in l and "failed" in l and not l.startswith("Valid outcomes:")
+                            for l in lines), "no line explains partial's fallback to failed")
+
+    def test_needs_input_is_explained_as_the_needs_input_command(self):
+        lines = self._prompt().splitlines()
+        self.assertTrue(any("needs_input" in l and "needs-input" in l for l in lines),
+                        "no line points needs_input at the needs-input command")
 
 
 class GuidanceContractTest(unittest.TestCase):

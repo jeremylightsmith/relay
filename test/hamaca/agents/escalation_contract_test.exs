@@ -156,8 +156,8 @@ defmodule Hamaca.Agents.EscalationContractTest do
     body = agent("plan-implementer")
 
     refute body =~ "BLOCKED",
-           "plan-implementer.md must not declare a BLOCKED status — the runner reads only " <>
-             "succeeded | failed | needs_input"
+           "plan-implementer.md must not declare a BLOCKED status — the runner reads only the " <>
+             "outcomes the outcome contract at the end of the prompt lists"
 
     refute body =~ "NEEDS_CONTEXT",
            "plan-implementer.md must not declare a NEEDS_CONTEXT status"

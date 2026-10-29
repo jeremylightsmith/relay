@@ -61,8 +61,8 @@ USAGE = None   # the running `hamaca start`'s HarnessUsageBook (RE436); None out
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 95
-RUNNER_FINGERPRINT = "52c1afcca51c614ebb69d5b11b4b24bdf269f124c46cd026bce3661297afdb5f"
+RUNNER_VERSION = 96
+RUNNER_FINGERPRINT = "69a4782fdea3514b67624dce0d2cda1e138fb1f1f5b939bd870bfbf8aeb6115e"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -2727,7 +2727,9 @@ def plan_path(slot_path, ref):
 # Lifecycle vocabulary — pinned to the Elixir source (Schemas.*) through
 # test/fixtures/runner_contract.json and asserted by RunnerVocabularyContractTest in
 # bin/test_relay.py (RLY-203). Change a member here only alongside the owning Ecto enum.
-# (NODE_OUTCOMES is defined near the CLI below and is pinned the same way.)
+# NODE_OUTCOMES (what an agent may declare) is pinned the same way, as
+# vocabulary.agent_outcomes; it lives here, above OUTCOME_CONTRACT, which lists it.
+NODE_OUTCOMES = ("succeeded", "failed", "partial", "needs_input")
 ACTIVE_RUN_STATES = ("running", "parked")
 TERMINAL_RUN_STATES = ("done", "failed", "cancelled")
 ISOLATION_CLASSES = ("shared_clean", "exclusive")
@@ -5126,6 +5128,9 @@ def check_branch_attached(slot_path, isolation, branch, cmd):
 # depend on each flow's node prompt or each skill author remembering it — determine_agent_outcome
 # now fails a node that writes nothing, so a node never told about the file would always fail.
 # Shell/gate nodes are exempt: their exit code is already an unambiguous verdict.
+# The "Valid outcomes" list is generated from NODE_OUTCOMES (RE490) — spliced in with .replace,
+# not an f-string or .format, because the text carries literal JSON braces and the {relay}/{ref}
+# placeholders that render() fills per job.
 OUTCOME_CONTRACT = """
 
 ---
@@ -5135,15 +5140,17 @@ file for this node — write findings/logs there, not to an invented /tmp path. 
     {relay} outcome succeeded --detail "one line on what you did"
     {relay} outcome failed    --detail @$HAMACA_NODE_SCRATCH
 
-Valid outcomes: succeeded | failed. Use `--detail @file` for anything long or
+Valid outcomes: <NODE_OUTCOMES>. Use `--detail @file` for anything long or
 containing quotes or newlines — do NOT hand-write the JSON yourself; this command writes it.
+`partial` — some of the work is done and the card should go back; with no `partial` edge it is `failed`.
+`needs_input` — declare it with the `needs-input` command described below, not with `outcome`.
 
 If this node's work turns out to be ALREADY COMMITTED — you were sent back, the change is on the
 branch, and there is genuinely nothing left to change — add `--no-changes` to `succeeded`. The
 server verifies that claim against this run's history and rejects it unless this node really did
 already commit for this task.
 
-`detail` is handed to the next node as {prior.detail}, so make it useful: for a review, the
+`detail` is handed to the next node as {prior_detail}, so make it useful: for a review, the
 actual findings; for a failure, why. Exiting without declaring anything is reported as `failed`,
 because a node that declares nothing cannot be distinguished from one that did nothing.
 
@@ -5176,7 +5183,13 @@ everything you need in ONE call rather than asking twice. `prompt` is required, 
 rendered as markdown; `options` are full self-contained sentences (the human sees buttons with no
 surrounding prose) and `[]` means a genuinely open ask; `allow_text` defaults to true and MUST be
 true unless `options` is non-empty. The human's answers land on the card timeline — read them
-with `{relay} card {ref}` when this node runs again."""
+with `{relay} card {ref}` when this node runs again.""".replace("<NODE_OUTCOMES>", " | ".join(NODE_OUTCOMES))
+
+# Placeholders the contract NAMES for the agent's benefit rather than fills: render() substitutes
+# every var it is given, so the server-sent `prior_detail` would otherwise inline the previous
+# node's whole detail where the contract only means to tell the agent what the next node gets.
+# compose_node_prompt renders the contract without these vars, so they reach the agent verbatim.
+OUTCOME_CONTRACT_LITERALS = ("prior_detail",)
 
 
 # The heredoc body inside OUTCOME_CONTRACT's needs-input block. The example lives in exactly one
@@ -5290,7 +5303,9 @@ def compose_node_prompt(job, cmd, vars):
     unambiguous verdict."""
     if job.get("node_type") != "agent":
         return cmd
-    return cmd + findings_block(vars) + guidance_block(vars) + render(OUTCOME_CONTRACT, vars)
+    contract_vars = {k: v for k, v in vars.items() if k not in OUTCOME_CONTRACT_LITERALS}
+    return (cmd + findings_block(vars) + guidance_block(vars)
+            + render(OUTCOME_CONTRACT, contract_vars))
 
 
 NO_HARNESS_REFUSAL = "this job carries no harness — the server and runner disagree; update both"
@@ -6717,7 +6732,6 @@ def cmd_start(args):
             f"{required_version} — restart to pick up current code")
 
 
-NODE_OUTCOMES = ("succeeded", "failed", "partial", "needs_input")
 # RE308: what the RUNNER may report — NODE_OUTCOMES (what an agent may declare, pinned as
 # vocabulary.agent_outcomes) plus the runner-only `blocked`. Pinned: vocabulary.outcomes.
 RUNNER_OUTCOMES = NODE_OUTCOMES + (NODE_OUTCOME_BLOCKED,)

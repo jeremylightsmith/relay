@@ -49,7 +49,7 @@ defmodule Hamaca.Markdown do
     |> open_web_links_in_new_tab()
   end
 
-  # The one copy of the flow-prompt placeholder grammar: `{ref}`, `{relay}`, `{prior.detail}`.
+  # The one copy of the flow-prompt placeholder grammar: `{ref}`, `{relay}`, `{prior_detail}`.
   # A lowercase identifier plus zero or more `.segment`s, so JSON (`{"a": 1}`), `{ }`, `{}` and
   # `{Ref}` are never mistaken for one.
   @placeholder ~r/\{[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*\}/

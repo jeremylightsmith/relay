@@ -95,9 +95,9 @@ at the end of your prompt** (that copy is already rendered with the right execut
 this run), then **stop without declaring an outcome**. Never retype a placeholder token you saw
 in a flow definition — this file is a static system prompt and is not passed through the
 runner's renderer, so a placeholder would reach the model literally. A prose status word is
-not an escalation: the runner reads only `succeeded | failed | needs_input`, so a
-"stuck" report that declares success routes onward as success, and one that declares nothing is
-reported as failed.
+not an escalation: the runner reads only the outcomes the outcome contract at the end of your
+prompt lists, so a "stuck" report that declares success routes onward as success, and one that
+declares nothing is reported as failed.
 
 The outcome contract carries the payload shape as well as the command — one authoritative copy,
 already rendered for this run. Write your question to
