@@ -348,6 +348,23 @@ off the claim it just granted, not by `Hamaca.Runs.claim_next_job/1` — the run
 job and only Talk knows a job can carry a turn. Only a `:queued` turn moves, so a claim landing
 just after Stop cannot drag a `:stopped` turn back to live.
 
+### Talk isolation (RE366)
+
+Each turn's job payload carries `"isolation"` — a `Schemas.Flow.isolation_classes/0` value chosen
+at post time by `Hamaca.Runs.talk_isolation/1`: `exclusive` when the card has an active run of an
+`exclusive` flow or a runner on the board declares it holds the card's worktree, else
+`shared_clean`. `talk_sessions.claude_session_isolation` (nullable `Ecto.Enum` over the same
+classes) is the class the stored `claude_session_id` was created under; `finish_turn/3` writes it
+together with the session id on `:done` (and leaves it alone when the job's payload has no
+`isolation`). The migration backfilled `exclusive` for every row that already had a session id.
+
+| Stored session | Chosen isolation | Turn's `resume_session` | Server line |
+| --- | --- | --- | --- |
+| no `claude_session_id` | any | `nil` | none |
+| same class | — | the stored id | none |
+| different class | the other | `nil` (fresh session; the pin stays) | one `:out`, dim line naming the tree |
+| pin gone (RE493) + different class | the other | `nil` | ONE `:error` line: the RE493 text + the switch sentence |
+
 ## Node outcomes
 
 Every node declares exactly one outcome. This is the contract between a node and the engine:

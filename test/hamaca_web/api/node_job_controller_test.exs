@@ -105,7 +105,8 @@ defmodule HamacaWeb.Api.NodeJobControllerTest do
           "name" => "fake",
           "host" => "fake",
           "interval" => 30,
-          "version" => Runs.min_runner_version()
+          # A fully current runner (RE366): able to take `shared_clean` talk turns too.
+          "version" => Runs.shared_talk_min_version()
         },
         "capacity" => capacity,
         "running" => running

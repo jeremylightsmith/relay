@@ -112,6 +112,79 @@ defmodule Hamaca.Runs.NodeJobKindTest do
     assert Runs.talk_capable?(%Schemas.Runner{version: Runs.min_runner_version()})
   end
 
+  describe "shared_clean talk (RE366)" do
+    setup ctx do
+      current =
+        insert(:runner,
+          board: ctx.board,
+          name: "mac-now",
+          capacity: %{"shared_clean" => 1, "exclusive" => 1},
+          version: Runs.shared_talk_min_version()
+        )
+
+      %{current: current}
+    end
+
+    test "an unpinned shared_clean talk job needs free shared capacity", ctx do
+      job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1, "isolation" => "shared_clean"}, nil)
+
+      assert {:ok, nil} = Runs.claim_next_job(ctx.current, %{shared_clean: 0, exclusive: 1})
+      assert {:ok, claimed} = Runs.claim_next_job(ctx.current, %{shared_clean: 1, exclusive: 0})
+      assert claimed.id == job.id
+    end
+
+    test "an unpinned exclusive talk job still bypasses capacity", ctx do
+      job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1, "isolation" => "exclusive"}, nil)
+
+      assert {:ok, claimed} = Runs.claim_next_job(ctx.current, %{shared_clean: 0, exclusive: 0})
+      assert claimed.id == job.id
+    end
+
+    test "an unpinned talk job with no isolation key still bypasses capacity", ctx do
+      job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
+
+      assert {:ok, claimed} = Runs.claim_next_job(ctx.current, %{shared_clean: 0, exclusive: 0})
+      assert claimed.id == job.id
+    end
+
+    test "a runner below the shared-talk floor is never offered shared_clean talk", ctx do
+      older =
+        insert(:runner,
+          board: ctx.board,
+          name: "mac-older",
+          capacity: %{"shared_clean" => 1, "exclusive" => 1},
+          version: Runs.shared_talk_min_version() - 1
+        )
+
+      assert older.version >= Runs.min_runner_version()
+
+      shared = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1, "isolation" => "shared_clean"}, nil)
+      assert {:ok, nil} = Runs.claim_next_job(older, %{shared_clean: 1, exclusive: 1})
+
+      other = insert(:card, board: ctx.board, stage: insert(:stage, board: ctx.board))
+      exclusive = Runs.insert_talk_job!(other, %{"turn_id" => 2, "isolation" => "exclusive"}, nil)
+      assert {:ok, claimed} = Runs.claim_next_job(older, %{shared_clean: 1, exclusive: 1})
+      assert claimed.id == exclusive.id
+
+      Repo.update_all(from(j in NodeJob, where: j.id == ^shared.id), set: [runner_name: "mac-older"])
+      assert {:ok, nil} = Runs.claim_next_job(older, %{shared_clean: 1, exclusive: 1})
+    end
+
+    test "a shared_clean talk job pinned to a current runner bypasses capacity", ctx do
+      job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1, "isolation" => "shared_clean"}, "mac-now")
+
+      assert {:ok, claimed} = Runs.claim_next_job(ctx.current, %{shared_clean: 0, exclusive: 0})
+      assert claimed.id == job.id
+    end
+
+    test "shared-talk capability is a version floor above the runner floor" do
+      refute Runs.shared_talk_capable?(%Schemas.Runner{version: nil})
+      refute Runs.shared_talk_capable?(%Schemas.Runner{version: Runs.shared_talk_min_version() - 1})
+      assert Runs.shared_talk_capable?(%Schemas.Runner{version: Runs.shared_talk_min_version()})
+      assert Runs.shared_talk_min_version() > Runs.min_runner_version()
+    end
+  end
+
   test "a talk job is never reported through the flow outcome path", ctx do
     job = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1}, nil)
     {:ok, claimed} = Runs.claim_next_job(ctx.runner)

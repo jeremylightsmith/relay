@@ -130,7 +130,10 @@ defmodule HamacaWeb.Api.RunnerContractTest do
       Hamaca.Cards.create_card(exclusive.next_up, %{title: "Talk card", description: "Why is this stuck?"})
 
     {:ok, talk_turn} = Hamaca.Talk.post_message(talk_card, talk_author, "why is this stuck?")
-    talk_job = claim(exclusive, %{"exclusive" => 1})
+    # RE366 — the talk card has no run and no runner holds it, so its turn is `shared_clean`
+    # and needs free shared capacity (an exclusive talk turn still bypasses capacity).
+    talk_job = claim(exclusive, %{"shared_clean" => 1})
+    assert talk_job["isolation"] == "shared_clean"
 
     talk_events_request = %{
       "events" => [
@@ -625,10 +628,11 @@ defmodule HamacaWeb.Api.RunnerContractTest do
   end
 
   # One place builds the `runner` dict for both claim and heartbeat, mirroring ./relay's
-  # runner_ident (RLY-184). The version tracks `min_runner_version/0` so the fixture always
-  # depicts a CURRENT runner — a literal would start 409ing the moment the minimum moves. It
-  # also makes the fixture talk-capable: it claims a talk job, which `Hamaca.Runs.talk_capable?/1`
-  # hides from a runner below that same floor.
+  # runner_ident (RLY-184). The version tracks `shared_talk_min_version/0` (RE366) so the fixture
+  # always depicts a CURRENT runner — a literal would start 409ing the moment the minimum moves.
+  # That makes it talk-capable (`Hamaca.Runs.talk_capable?/1`, at `min_runner_version/0`) AND
+  # able to take the `shared_clean` talk turn it claims, which
+  # `Hamaca.Runs.shared_talk_capable?/1` hides from a runner below the shared-talk floor.
   #
   # `cli` (RE478) is the name the runner runs as — `"hamaca"` or `"relay"`; the server stores it
   # on `runners.cli` through `Schemas.Runner.normalize_cli/1` (RE486).
@@ -637,7 +641,7 @@ defmodule HamacaWeb.Api.RunnerContractTest do
       "name" => "fixture",
       "host" => "fixture-host",
       "interval" => 30,
-      "version" => Runs.min_runner_version(),
+      "version" => Runs.shared_talk_min_version(),
       "cli" => "hamaca"
     }
   end

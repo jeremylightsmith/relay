@@ -61,8 +61,8 @@ USAGE = None   # the running `hamaca start`'s HarnessUsageBook (RE436); None out
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 98
-RUNNER_FINGERPRINT = "9771fd477a3f908b8ce061be7091d123bcf53e76e3db9d9d783f467ab0175959"
+RUNNER_VERSION = 99
+RUNNER_FINGERPRINT = "5f57e0790b1f70547838314d58e4107cc43ee65b20d252b3cc2c845ad0ed7331"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -3006,6 +3006,13 @@ class RunnerPool:
             return (f"shared_clean {self.shared_used}/{self.cap_shared} busy; "
                     f"exclusive: {', '.join(held) if held else 'idle'}")
 
+    def exclusive_holders(self):
+        """The holdings() entries that occupy an exclusive slot — every one but a `retained`
+        tree, which holds no partition (RE366). For naming who holds the slots when a talk
+        turn can't be placed; the states come from the same derivation, never a second copy."""
+        with self.lock:
+            return [h for h in self._holdings_locked() if h["state"] != "retained"]
+
     # ---- assign ---------------------------------------------------------
     def assign(self, job):
         """Reserve a worktree for `job`; return (slot_name, reset?) or None if none is free.
@@ -3139,8 +3146,14 @@ class RunnerPool:
         `{"run_id": None, "state": "active", ...}` too — the identical shape, with no "talk"
         marker. Retiring on run_id alone mistook a recovered worktree for talk-only and retired
         (stashed + hard-reset) it out from under its resuming job, whose commits were supposed to
-        survive untouched."""
+        survive untouched.
+
+        A shared `<ns>-clean` slot (RE366, `assign_shared_talk`) has no record at all, so it is
+        handled FIRST: the record lookup below would return None and leak the slot silently."""
         with self.lock:
+            if slot == self.shared_name:
+                self.shared_used = max(0, self.shared_used - 1)
+                return
             rec = self.wts.get(slot)
             if rec is None:
                 return
@@ -3156,6 +3169,22 @@ class RunnerPool:
                 self._finish_locked(slot, rec, pending)
             elif rec.get("talk") and rec["run_id"] is None and rec["state"] == "active":
                 self._retire_talk_only_locked(slot, rec)
+
+    def assign_shared_talk(self):
+        """Take one shared `<ns>-clean` slot for a READ-ONLY talk turn (RE366): the server sends
+        `isolation: shared_clean` for a card with no live per-card work. Same `shared_used`
+        accounting as assign()'s shared branch; returns (slot_name, False) — the shared tree is
+        never reset for a talk turn, other cards' jobs are reading it — or None when every
+        shared slot is busy.
+
+        Deliberately touches no `wts` record, `talk_users` or partition: a record would make
+        holdings() report the shared tree as a held per-card worktree, and the server would then
+        read the card as holding a tree and flip its next turn to exclusive."""
+        with self.lock:
+            if self.shared_used >= self.cap_shared:
+                return None
+            self.shared_used += 1
+            return self.shared_name, False
 
     def assign_talk(self, ref):
         """Reserve the CARD'S OWN worktree for a talk turn (ADR 0014 §2): attach to the live one
@@ -4676,7 +4705,7 @@ def claim_line(job):
     payload: `ref`, `node_id`, `run_id`, `isolation`, `kind`."""
     ref = job_ref(job)
     if job.get("kind") == "talk":
-        return f"claimed talk turn for {ref}"
+        return f"claimed talk turn for {ref} ({talk_isolation(job)})"
     return (f"claimed {ref} · {job.get('node_id')} "
             f"(run {job.get('run_id')}, {job.get('isolation')})")
 
@@ -5517,6 +5546,27 @@ In this step you must NOT change anything: do not edit files, do not commit, do 
 not modify the card. If you are asked to change something, say plainly that you cannot yet.
 """
 
+# RE366: the same terminal framing and CLI lines, for a turn running in the shared clean
+# checkout. It must not claim the tree is the card's — the card's branch and uncommitted work are
+# not here — and the read-only rule is enforced by the tools (TALK_SHARED_COMMAND).
+TALK_SHARED_PREAMBLE = """You are attached to a Hamaca card as a terminal session.
+
+This is a TERMINAL, not a chat. There is no message frame and no partner persona: you answer,
+you run commands, you print what you find. Be direct and short.
+
+You may read any file in this working tree and run read-only commands. The tree is a clean
+checkout of the base branch, shared with other jobs running on this machine — it is not the
+card's own worktree, so the card's branch and any uncommitted work on it are not here.
+
+To learn what the card's runs actually did, use the Hamaca CLI rather than guessing:
+  ./hamaca why  {ref}    — why the card is where it is, including rejections
+  ./hamaca runs {ref}    — the card's run history and per-node outcomes
+  ./hamaca card {ref}    — the card's current fields
+
+This session is read-only: you must not change anything, and the tools refuse every write. If
+you are asked to change something, say plainly that this session is read-only.
+"""
+
 
 # Talk stays on `claude` (RE433 leaves it out of scope), expanded like any harness template.
 # Auto mode, not --dangerously-skip-permissions: its classifier denies a risky action (an
@@ -5526,6 +5576,52 @@ TALK_RESUME_COMMAND = ("claude -p --resume {session} {prompt} --permission-mode 
                        "--output-format stream-json")
 TALK_SESSION_PATH = ".session_id"
 
+# RE366: a `shared_clean` turn runs in the shared `<ns>-clean` checkout other cards' jobs are
+# reading, so it is read-only BY THE TOOLS, not by the preamble's say-so. `dontAsk` denies every
+# tool not pre-approved below instead of prompting (checked against claude 2.1.314: a Write, a
+# `touch x`, and an allowlisted command with a `>` redirect or a `; touch` tail were all denied;
+# `git log` ran). TALK_READONLY_TOOLS is the ONE allowlist — the commands are built from it.
+TALK_READONLY_TOOLS = (
+    "Read", "Grep", "Glob",
+    "Bash(git log:*)", "Bash(git show:*)", "Bash(git diff:*)", "Bash(git status:*)",
+    "Bash(git blame:*)", "Bash(git branch:*)", "Bash(git rev-parse:*)",
+    "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
+    "Bash(./hamaca why:*)", "Bash(./hamaca runs:*)", "Bash(./hamaca card:*)",
+)
+# Quoted so expand_command's shlex split keeps `Bash(git log:*)` (it has a space) one token; the
+# allowlist carries no braces, so it cannot smuggle a placeholder into the template.
+_TALK_READONLY_FLAGS = ("--permission-mode dontAsk "
+                        f"--allowedTools {shlex.quote(','.join(TALK_READONLY_TOOLS))} "
+                        "--disallowedTools Edit,Write,NotebookEdit "
+                        "--verbose --output-format stream-json")
+TALK_SHARED_COMMAND = "claude -p {prompt} " + _TALK_READONLY_FLAGS
+TALK_SHARED_RESUME_COMMAND = "claude -p --resume {session} {prompt} " + _TALK_READONLY_FLAGS
+
+
+def talk_isolation(job):
+    """The isolation a talk turn runs under (RE366): `shared_clean` only when the server says so;
+    anything else — `exclusive`, an unknown value, or no key at all (a server older than RE366)
+    — is exclusive, today's behaviour."""
+    return "shared_clean" if job.get("isolation") == "shared_clean" else "exclusive"
+
+
+def talk_rejection_detail(pool, isolation):
+    """What an unplaceable talk turn tells the person (RE366) — reject() writes it into the
+    transcript. Names who holds the slots (pool.exclusive_holders(), the one holdings
+    derivation) and the fix, instead of a bare capacity dict."""
+    if isolation == "shared_clean":
+        return (f"No free shared_clean slot for this read-only talk turn: "
+                f"{pool.shared_used}/{pool.cap_shared} busy. Raise capacity.shared_clean in "
+                "runner.json or wait for a job to finish.")
+    holders = pool.exclusive_holders()
+    fix = "Raise capacity.exclusive in runner.json or cancel a run."
+    if not holders:
+        return (f"No free exclusive slot for this talk turn: capacity.exclusive is "
+                f"{pool.max_worktrees}. {fix}")
+    held = ", ".join(f"{h['ref']} ({h['state']})" for h in holders)
+    return (f"No free exclusive slot for this talk turn: all {pool.max_worktrees} are held by "
+            f"{held}. {fix}")
+
 
 def talk_prompt(job):
     """preamble + seed block + the human's text, in that order.
@@ -5534,7 +5630,8 @@ def talk_prompt(job):
     "why does {ref} appear twice?" must see those characters reach the model unchanged, and a
     person's typing must never reach into a var namespace."""
     seed = job.get("seed") or {}
-    lines = [TALK_PREAMBLE.replace("{ref}", str(job.get("ref") or "")), "<card>"]
+    preamble = TALK_SHARED_PREAMBLE if talk_isolation(job) == "shared_clean" else TALK_PREAMBLE
+    lines = [preamble.replace("{ref}", str(job.get("ref") or "")), "<card>"]
     lines.append(f"ref          {job.get('ref')}")
     for f in seed.get("fields") or []:
         lines.append(f"{str(f.get('label', '')).ljust(12)} {f.get('value', '')}")
@@ -5696,8 +5793,11 @@ def run_talk_job(job, slot_path, control, sender):
             sender.enqueue(line["kind"], line["text"], line["dim"])
 
     resume = job.get("resume_session")
-    argv = expand_command(TALK_RESUME_COMMAND if resume else TALK_COMMAND,
-                          {"prompt": talk_prompt(job), "session": resume})
+    if talk_isolation(job) == "shared_clean":       # RE366: read-only, enforced by the tools
+        template = TALK_SHARED_RESUME_COMMAND if resume else TALK_SHARED_COMMAND
+    else:
+        template = TALK_RESUME_COMMAND if resume else TALK_COMMAND
+    argv = expand_command(template, {"prompt": talk_prompt(job), "session": resume})
     ok, session_id, _report = _stream_agent_job(
         argv, cwd=slot_path, tag=tag, session_id_path=TALK_SESSION_PATH,
         on_proc=control.register, on_event=on_event, mirror=False)
@@ -6747,7 +6847,9 @@ def cmd_start(args):
         assigned, malformed = None, False
         for placement_try in range(PLACEMENT_ATTEMPTS):
             try:
-                if job.get("kind") == "talk":
+                if job.get("kind") == "talk" and talk_isolation(job) == "shared_clean":
+                    assigned = pool.assign_shared_talk()      # RE366: read-only, <ns>-clean
+                elif job.get("kind") == "talk":
                     assigned = pool.assign_talk(job["ref"])
                 else:
                     assigned = pool.assign(job)
@@ -6767,11 +6869,10 @@ def cmd_start(args):
             wake.clear()
             continue
         if assigned is None:                        # no free slot for this job's isolation
-            # A talk job carries no "isolation" key (that's a node-job field) — assign_talk
-            # always wants an exclusive per-card slot, so name that rather than printing the
-            # nonsense `no free None slot ...` (RE268).
+            # A talk turn's rejection lands in the person's transcript, so it names who holds the
+            # slots and the fix (RE366) — never the nonsense `no free None slot ...` (RE268).
             if job.get("kind") == "talk":
-                reject(job, f"no free exclusive slot for a talk turn advertised {cap}")
+                reject(job, talk_rejection_detail(pool, talk_isolation(job)))
             else:
                 reject(job, f"no free {job.get('isolation')!r} slot advertised {cap}")
             if args.once:
@@ -6780,6 +6881,9 @@ def cmd_start(args):
             wake.clear()
             continue
         slot, reset = assigned
+        if job.get("kind") == "talk":
+            read_only = " (read-only)" if talk_isolation(job) == "shared_clean" else ""
+            log(f"{job_ref(job)}: talk turn placed in {slot}{read_only}", ref=job_ref(job))
         control = JobControl()
         t = threading.Thread(target=worker, args=(job, slot, reset, control), daemon=True)
         with lock:

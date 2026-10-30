@@ -132,6 +132,41 @@ defmodule Hamaca.Runs do
   end
 
   @doc """
+  RE366 — where a talk turn on `card` runs, decided per turn at post time: `:exclusive` (the
+  card's own worktree, an exclusive slot) when the card has live per-card work, else
+  `:shared_clean` (read-only in the runner's shared clean checkout, a shared slot).
+
+  Live per-card work is either an active run (`active_run/1`) whose flow is `:exclusive`, or any
+  runner on the card's board declaring it holds the card's worktree in any of
+  `Schemas.Runner.holding_states/0` (`Runner.held_refs/1`, `retained` included). A stale runner
+  row still listing the ref keeps the card exclusive — conservative by design. A run whose flow
+  no longer loads does not by itself force exclusive.
+  """
+  @spec talk_isolation(Card.t()) :: :shared_clean | :exclusive
+  def talk_isolation(%Card{} = card) do
+    if exclusive_run?(card) or worktree_held?(card), do: :exclusive, else: :shared_clean
+  end
+
+  defp exclusive_run?(card) do
+    with %Run{} = run <- active_run(card),
+         {:ok, %Flow{isolation: :exclusive}} <- load_flow(run) do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  # One query for the board's runners' declarations — `held` only (`list_board_runners/1`
+  # deliberately leaves it out).
+  defp worktree_held?(%Card{board_id: board_id} = card) do
+    ref = Cards.ref(Repo.get!(Board, board_id), card)
+
+    from(r in Runner, where: r.board_id == ^board_id, select: r.held)
+    |> Repo.all()
+    |> Enum.any?(&(ref in Runner.held_refs(&1)))
+  end
+
+  @doc """
   RE356 — the sub_task the card's agent is on right now: the latest binding of the foreach node
   (`current_sub_task_id/2`) in the card's **active** run (`active_run/1`, i.e.
   `Schemas.Run.active_statuses/0`). `nil` when there is no active run, the run's flow row is gone,
@@ -1879,6 +1914,20 @@ defmodule Hamaca.Runs do
   @spec first_hamaca_runner_version() :: pos_integer()
   def first_hamaca_runner_version, do: @first_hamaca_runner_version
 
+  # RE366: the RUNNER_VERSION that first runs a `shared_clean` talk turn — read-only, in the
+  # runner's shared clean checkout, holding a shared slot. A fixed fact about `./hamaca`, NOT
+  # `@min_runner_version`: an older runner still runs EXCLUSIVE talk correctly, so it keeps
+  # claiming everything else. Below this a runner ignores `isolation` and would run a shared
+  # turn writable in the card's own worktree (and take an exclusive slot it was never offered),
+  # so `claim_next_job/4` never offers it one. Must equal the RUNNER_VERSION `./hamaca` shipped
+  # the shared talk lane at — never above what the served scaffold carries, or no runner could
+  # ever take a shared turn.
+  @shared_talk_runner_version 99
+
+  @doc "The first RUNNER_VERSION that runs a `shared_clean` talk turn (RE366) — a fact, not the base floor."
+  @spec shared_talk_min_version() :: pos_integer()
+  def shared_talk_min_version, do: @shared_talk_runner_version
+
   @doc """
   Whether this runner is new enough to RUN a talk turn, not merely new enough to claim
   flow work (RE268). `claim_next_job/4` narrows a runner below `min_runner_version/0` to
@@ -1899,6 +1948,18 @@ defmodule Hamaca.Runs do
   def talk_capable?(%Runner{version: version}) when is_integer(version), do: version >= min_runner_version()
 
   def talk_capable?(%Runner{}), do: false
+
+  @doc """
+  Whether this runner can run a `shared_clean` talk turn (RE366): `version >=
+  shared_talk_min_version/0`. A shared turn is offered to no other runner, pinned or not — a
+  runner below the floor reads a missing-or-unknown `isolation` as exclusive and would run the
+  turn writable in the card's own worktree. `false` for a runner reporting no version, which
+  predates every floor.
+  """
+  @spec shared_talk_capable?(Runner.t()) :: boolean()
+  def shared_talk_capable?(%Runner{version: version}) when is_integer(version), do: version >= shared_talk_min_version()
+
+  def shared_talk_capable?(%Runner{}), do: false
 
   # RE304: the version a runner can actually FETCH is the `RUNNER_VERSION` of the
   # `./relay` this app SERVES at /api/scaffold — truthful by construction, which is exactly
@@ -2310,13 +2371,18 @@ defmodule Hamaca.Runs do
     # RE268 — a talk job is only visible to a runner that can actually run one
     # (`talk_capable?/1`); an older runner still sees the flow kinds it handles correctly.
     kinds = if talk_capable?(runner), do: NodeJob.kinds(), else: NodeJob.flow_kinds()
+    # RE366 — a `shared_clean` talk turn only to a runner that runs it read-only in its shared
+    # tree (`shared_talk_capable?/1`), pinned or not.
+    shared_talk? = shared_talk_capable?(runner)
     # RE433: a runner that never reported its harnesses predates them — it can run Claude Code.
     installed = Runner.installed_harness_keys(runner) || [Agents.default_harness_key()]
     # RE436: the claim names the harnesses it will run NOW (installed minus paused at a usage
     # limit); nil = not narrowed. Only ever narrows — a key the runner never reported installed
     # stays unclaimable.
     installed = if is_list(claimable), do: Enum.filter(installed, &(&1 in claimable)), else: installed
-    result = Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds, held_refs, installed) end)
+
+    result =
+      Repo.transaction(fn -> do_claim_next_job(board_id, name, allowed, kinds, held_refs, installed, shared_talk?) end)
 
     # RE446: the board's first claim ticks setup step 7 — observed after the claim committed, so
     # a setup write never rolls a claim back and the setup board lock never nests in the job lock.
@@ -2331,7 +2397,7 @@ defmodule Hamaca.Runs do
     for {class, n} <- capacity, is_integer(n) and n > 0, do: to_string(class)
   end
 
-  defp do_claim_next_job(board_id, name, allowed, kinds, held_refs, installed) do
+  defp do_claim_next_job(board_id, name, allowed, kinds, held_refs, installed, shared_talk?) do
     query =
       from j in NodeJob,
         join: c in Card,
@@ -2352,24 +2418,30 @@ defmodule Hamaca.Runs do
         # go missing (a retry that released a dead pin) while the holding never does. That
         # bypass is EXCLUSIVE-only: a `shared_clean` job runs in the shared worktree and must
         # still respect shared capacity, or the bypass would oversubscribe the shared pool.
-        # An unpinned TALK job also bypasses (ADR 0014 §3): a turn runs in the card's own
-        # worktree and advertises no isolation class, and the FIRST turn on a card is what
-        # CREATES the runner pin, so refusing it for want of an advertised slot would mean a
-        # card nobody has talked to can never be talked to on a busy runner. The exemption is
-        # the SERVER's: `assign_talk` in `./relay` still refuses a turn once the runner is
-        # at `max_worktrees`. Everything else needs advertised free capacity in its class.
+        # An unpinned EXCLUSIVE talk job also bypasses (ADR 0014 §3): it runs in the card's
+        # own worktree, and the FIRST turn on a card is what CREATES the runner pin, so refusing
+        # it for want of an advertised slot would mean a card nobody has talked to can never be
+        # talked to on a busy runner. "Exclusive" is `isolation` absent (a job posted before
+        # RE366) or `"exclusive"`. A `shared_clean` talk turn (RE366) takes a shared slot and
+        # frees it when the turn ends, so it is NOT exempt: it needs advertised free
+        # `shared_clean` capacity like any shared job, and waits queued otherwise. The exemption
+        # is the SERVER's: `assign_talk` in `./hamaca` still refuses an exclusive turn once the
+        # runner is at `max_worktrees`. Everything else needs advertised free capacity in its
+        # class. The two exclusive bypasses share one test: `coalesce` reads a talk job's
+        # missing `isolation` as exclusive (a flow job always carries one), and talk carries
+        # `ref` at the top level, so the held-ref half never matches talk — only the kind does.
         where:
           j.runner_name == ^name or
             (is_nil(j.runner_name) and
-               (j.kind == ^NodeJob.talk_kind() or
-                  fragment("?->>'isolation'", j.payload) in ^allowed or
-                  (fragment("?->>'isolation'", j.payload) == "exclusive" and
-                     fragment("?->'vars'->>'ref'", j.payload) in ^held_refs))),
+               (fragment("?->>'isolation'", j.payload) in ^allowed or
+                  (fragment("coalesce(?->>'isolation', 'exclusive')", j.payload) == "exclusive" and
+                     (j.kind == ^NodeJob.talk_kind() or
+                        fragment("?->'vars'->>'ref'", j.payload) in ^held_refs)))),
         order_by: [asc: j.id],
         limit: 1,
         lock: "FOR UPDATE SKIP LOCKED"
 
-    case Repo.one(query) do
+    case query |> offer_shared_talk(shared_talk?) |> Repo.one() do
       nil ->
         nil
 
@@ -2379,6 +2451,20 @@ defmodule Hamaca.Runs do
         notify_flow_claim(board_id, claimed)
         refresh_job_guidance!(claimed)
     end
+  end
+
+  # RE366 — a runner below `shared_talk_min_version/0` is never offered a `shared_clean` talk
+  # turn, not even one pinned to it: it would run the turn writable in the card's own worktree.
+  # `coalesce` because a talk job posted before RE366 has no `isolation` (and is exclusive).
+  defp offer_shared_talk(query, true), do: query
+
+  defp offer_shared_talk(query, false) do
+    where(
+      query,
+      [j],
+      not (j.kind == ^NodeJob.talk_kind() and
+             fragment("coalesce(?->>'isolation', 'exclusive')", j.payload) == "shared_clean")
+    )
   end
 
   # RE358: a flow job's claim changes what the card shows (a steer's "Stopping…" strip ends, its
@@ -2437,15 +2523,16 @@ defmodule Hamaca.Runs do
   # On claiming an exclusive run's job, persist the holder on the run row so BOTH
   # readers — the claim layer (exclusive_holder/2) and the scheduler (active_runs/1) —
   # derive the same pin from ONE column (RLY-199). Idempotent: a re-claim by the same
-  # holder rewrites the same name. shared_clean runs are never pinned. A talk payload never
-  # matches `%{"isolation" => "exclusive"}`, so this is a no-op for talk — the TALK pin is
-  # written by `Hamaca.Talk.finish_turn/3` onto the session row instead, one column, one
-  # writer, per RLY-199's rule.
+  # holder rewrites the same name. shared_clean runs are never pinned. A talk job has no run
+  # (an exclusive talk payload carries `"isolation" => "exclusive"` since RE366, hence the
+  # `run_id` guard), so this is a no-op for talk — the TALK pin is written by
+  # `Hamaca.Talk.finish_turn/3` onto the session row instead, one column, one writer, per
+  # RLY-199's rule.
   #
   # RE437: a run inside a `fan_out` region has several queued jobs at once. Pinning the run pins
   # its unpinned queued siblings with it, so every branch runs on the run's runner — the one
   # holding its worktree — and no other runner can take one in between.
-  defp maybe_pin_run(%NodeJob{run_id: run_id, payload: %{"isolation" => "exclusive"}}, name) do
+  defp maybe_pin_run(%NodeJob{run_id: run_id, payload: %{"isolation" => "exclusive"}}, name) when is_integer(run_id) do
     Repo.update_all(from(r in Run, where: r.id == ^run_id), set: [pinned_runner_name: name])
 
     Repo.update_all(

@@ -59,21 +59,32 @@ rendered line, append-only).
    turn never parks the card: it never calls `Hamaca.Cards.request_input/3`, because parking
    blocks the card's flow.
 
-2. **A turn runs in the card's own worktree, and that tree outlives runs.** A turn always uses
-   the card's exclusive per-card worktree `<ns>-<ref>`, whatever the card's flow isolation:
+2. **A card with live work is talked to in its own worktree; any other card, read-only in the
+   shared clean checkout.** The server picks each turn's isolation when the turn is posted and
+   sends it on the claim as `isolation`. A card has live per-card work when it has an active run
+   of an `exclusive` flow, or any runner on the board holds its worktree (in any state,
+   `retained` included):
 
-   | The card's situation | What the turn uses |
-   | --- | --- |
-   | A node job holds the card's worktree | Attach to it as it is — dirty, mid-edit. |
-   | The card's last run failed and its tree was retained | Reuse it as it is. |
-   | No tree (run torn down, `shared_clean` flow, or never run — Backlog, Someday) | Create `<ns>-<ref>` on the card's branch, or the base branch if it has none. |
+   | The card's situation | Isolation | What the turn uses |
+   | --- | --- | --- |
+   | A node job holds the card's worktree | `exclusive` | Attach to it as it is — dirty, mid-edit. |
+   | The card's last run failed and its tree was retained | `exclusive` | Reuse it as it is. |
+   | A runner still holds a talk-created tree for the card | `exclusive` | Reuse it as it is. |
+   | No live per-card work (run torn down, a `shared_clean` flow — every Spec/Plan card — or never run) | `shared_clean` | A shared slot in `<ns>-clean`, read-only (§5). |
 
-   Reading the tree dirty is the point: it is what a second terminal on your own machine would
-   see, and the work in progress is often exactly what is being asked about. A turn **never**
-   uses the shared `<ns>-clean` tree, which other cards' jobs are running in. A talk-created
-   tree is never torn down because a run ended — the session spans runs — and is retired like
-   a failed run's leftover once it goes idle, so a card that was only ever talked to does not
-   hold an exclusive slot forever.
+   Reading the tree dirty is the point when there is one: it is what a second terminal on your
+   own machine would see, and the work in progress is often exactly what is being asked about.
+   When there is none, a clean checkout of the base branch answers the same questions without
+   taking an exclusive slot, so a question never waits behind, or evicts, a Code run. A turn in
+   `<ns>-clean` takes a `shared_clean` slot like any shared job and frees it when the turn ends,
+   however it ends; the shared tree is never reset, re-baselined or checked out onto a branch
+   for a turn, because other cards' jobs are running in it. An exclusive turn on a card with no
+   tree (an older server, which sends no `isolation`) creates `<ns>-<ref>` on the card's branch,
+   or the base branch if it has none. A talk-created tree is never torn down because a run
+   ended — the session spans runs — and is retired like a failed run's leftover once it goes
+   idle, so a card that was only ever talked to does not hold an exclusive slot forever. A turn
+   that cannot be placed fails with a transcript line naming who holds the slots and what to
+   change.
 
 3. **A turn runs on the runner that holds the card's session.** The session records the
    runner that finished its last `done` turn as `pinned_runner_name`, and every later turn's job
@@ -82,10 +93,10 @@ rendered line, append-only).
    old scrollback, which is worse than an error. For the same reason the orphan reaper never
    requeues a talk job; a turn whose runner dies stays `claimed` until the person presses Stop.
    **The first turn is the exception, and it creates the pin**: a card with no session yet is
-   claimable by any Talk-capable runner, and it bypasses the advertised-capacity filter, because
-   it advertises no isolation class and refusing it on a busy runner would mean a card nobody
-   has talked to can never be talked to. The runner itself still refuses it when it is out of
-   worktrees.
+   claimable by any Talk-capable runner. An `exclusive` first turn bypasses the
+   advertised-capacity filter, because refusing it on a busy runner would mean a card nobody has
+   talked to can never be talked to; a `shared_clean` one needs a free shared slot and waits
+   queued otherwise. The runner itself still refuses a turn it cannot place.
    **A pin to a gone runner is released.** The holder is gone when the board has no runner of
    that name, or it has been silent longer than both the exclusive reclaim window and its own
    stale threshold — the same rule that parks an exclusive run as `runner_gone`, so the two can
@@ -110,8 +121,13 @@ rendered line, append-only).
    connected repo. Talk always runs Claude Code, whatever harnesses the board routes flow nodes
    to. The preamble lets the agent read any file, run read-only commands and query the card
    through the CLI (`why`, `runs`, `card`), and tells it not to edit files, commit, push or
-   change the card. `claude` runs with `--permission-mode auto`, not
-   `--dangerously-skip-permissions`, so its classifier denies risky actions on its own.
+   change the card. In the shared clean checkout read-only is **enforced by the tools**: `claude`
+   runs deny-by-default (`--permission-mode dontAsk`) with one read-only allowlist — reading and
+   searching files, read-only `git`, and the three CLI queries — and `Edit`, `Write` and
+   `NotebookEdit` disallowed, and its preamble says the tree is a clean base checkout, not the
+   card's worktree. In the card's own worktree it runs with `--permission-mode auto`, not
+   `--dangerously-skip-permissions`, so its classifier denies risky actions on its own; that
+   stays until Talk can write.
 
 6. **The baton does not move.** A talk turn does not change who holds the card. Ownership
    tracks who is responsible for the card's progress through its flow, not who touched it last,
@@ -149,9 +165,12 @@ the claim payload, worktree occupancy, event mapping and delivery — are in
 - A pre-Talk runner must never see a talk job, so talk claims are gated on
   `Hamaca.Runs.min_runner_version/0` (`talk_capable?/1`).
 - A turn stranded on a dead runner needs a person to press Stop; nothing recovers it.
-- Read-only rests on the prompt and the auto-mode classifier, not on a tool restriction. Talk
+- In the card's own worktree, read-only rests on the prompt and the auto-mode classifier, not
+  on a tool restriction; only a turn in the shared clean checkout is tool-restricted. Talk
   cannot change the card or steer the agent working it; steering a running node is the Detail
   tab's *Steer now*, and the pane points there.
+- A card that switches isolation between turns (a run starts, or its tree is released) starts a
+  fresh `claude` session, because a session lives under one tree's directory. The pane says so.
 - Talk and flow runs draw on the same model usage, so a busy conversation can slow the pipeline.
   Accepted deliberately.
 
@@ -168,8 +187,13 @@ making every query over the table kind-aware.
 **Synthesising a `Run` per turn.** Reuses even more, but every card with an open conversation
 would read as having an active run, corrupting scheduling, metrics and the baton.
 
-**Talk in its own clean checkout.** Avoids two processes in one tree, but hides the uncommitted
-work in progress that is often exactly what is being asked about.
+**Talk always in its own clean checkout.** Avoids two processes in one tree, but hides the
+uncommitted work in progress that is often exactly what is being asked about. Talk uses the
+clean checkout only for a card that has no such work.
+
+**Talk always in the card's own worktree.** What Talk first shipped with. A question about a
+Spec or Plan card took an exclusive slot and created a worktree, so on a busy runner it waited
+behind, or failed against, Code runs that genuinely needed the slots.
 
 **Refusing Talk while a run is in flight.** A card that looks stuck mid-run is precisely when
 someone wants to ask.

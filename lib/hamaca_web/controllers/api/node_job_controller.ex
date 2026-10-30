@@ -451,7 +451,11 @@ defmodule HamacaWeb.Api.NodeJobController do
       author: payload["author"],
       branch: payload["branch"],
       seed: payload["seed"] || %{},
-      resume_session: payload["resume_session"]
+      resume_session: payload["resume_session"],
+      # RE366: where the turn runs — `"shared_clean"` (read-only, the shared clean checkout) or
+      # `"exclusive"` (the card's own worktree). Absent on a job posted before RE366; the runner
+      # reads that as exclusive.
+      isolation: payload["isolation"]
     }
   end
 

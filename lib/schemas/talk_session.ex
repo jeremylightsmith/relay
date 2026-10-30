@@ -13,6 +13,12 @@ defmodule Schemas.TalkSession do
   is meaningless off its holder's disk — so the next turn starts fresh on any runner and
   whichever finishes it becomes the new holder.
 
+  `claude_session_isolation` is the isolation class (`Schemas.Flow.isolation_classes/0`) that
+  `claude_session_id` was created under — written with it by `Hamaca.Talk.finish_turn/3` from the
+  finished job's payload (RE366). A turn chosen under a different class cannot resume it (the
+  session's working directory is a different tree), so `post_message/3` starts that turn fresh and
+  says so. Nil until a turn records one; rows that predate RE366 were backfilled `:exclusive`.
+
   `last_event_seq` is the session's monotonic render-order counter; `cleared_through_seq` is
   how `/clear` HIDES scrollback — nothing is ever deleted.
   """
@@ -24,6 +30,7 @@ defmodule Schemas.TalkSession do
 
   schema "talk_sessions" do
     field :claude_session_id, :string
+    field :claude_session_isolation, Ecto.Enum, values: Schemas.Flow.isolation_classes()
     field :pinned_runner_name, :string
     field :seed_summary, :string
     field :seed_fields, {:array, :map}, default: []
@@ -38,7 +45,14 @@ defmodule Schemas.TalkSession do
   @doc "Validates a programmatically-built session row. All fields are programmatic — nothing here is ever cast from user input."
   def changeset(session, attrs \\ %{}) do
     session
-    |> cast(attrs, [:claude_session_id, :pinned_runner_name, :seed_summary, :seed_fields, :cleared_through_seq])
+    |> cast(attrs, [
+      :claude_session_id,
+      :claude_session_isolation,
+      :pinned_runner_name,
+      :seed_summary,
+      :seed_fields,
+      :cleared_through_seq
+    ])
     |> validate_required([:card_id])
     |> unique_constraint(:card_id)
     |> foreign_key_constraint(:card_id)

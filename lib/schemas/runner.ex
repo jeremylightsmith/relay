@@ -342,4 +342,17 @@ defmodule Schemas.Runner do
   end
 
   def active_held_refs(_held), do: []
+
+  @doc """
+  Every ref the runner declares it holds a worktree for, in ANY of `holding_states/0` —
+  `retained` included (RE366). Wider than `active_held_refs/1` on purpose: a retained tree holds
+  no partition, but it is still the card's own worktree on that machine, which is what makes a
+  talk turn on the card exclusive.
+  """
+  @spec held_refs(list() | term()) :: [String.t()]
+  def held_refs(held) when is_list(held) do
+    for %{"ref" => ref, "state" => state} <- held, state in @holding_states, do: ref
+  end
+
+  def held_refs(_held), do: []
 end

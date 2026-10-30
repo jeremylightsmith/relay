@@ -798,7 +798,8 @@ that stays server-side.
 - **Talk rides the same claim, a different transport (RE268 / ADR 0014).** Every
   `POST /api/node-jobs/claim` reply now carries **`kind`** (`"node"` or `"talk"`), so the
   runner can branch without a second endpoint. A `"talk"` claim carries exactly
-  `{id, kind, ref, turn_id, prompt, author, branch, seed, resume_session}` —
+  `{id, kind, ref, turn_id, prompt, author, branch, seed, resume_session, isolation}` (RE366
+  added `isolation`, `"shared_clean"` or `"exclusive"`; see the shared-talk gate below) —
   `HamacaWeb.Api.NodeJobController.claim_payload/1`'s talk-only clause — never the flow shape's
   `run_id`/`node_id`/`vars`. A talk turn's outcome does **not** go through
   `POST /api/node-jobs/:id/outcome`: that route finalises a job through the run lifecycle via
@@ -1704,8 +1705,57 @@ instead of `execute_one`, and `reject()` reports a rejected talk job through
 route — a talk job has no `run_id` for that route to accept. No second thread: it is the same
 claim/execute/report loop, one more branch.
 
-- **Worktree.** A talk turn always runs in the card's own exclusive per-card worktree
-  `<ns>-<ref>` — **never** the shared `<ns>-clean` tree, which other cards' jobs are using.
+- **Placement (RE366).** The claim's `isolation` key picks the slot: `talk_isolation(job)` is
+  `"shared_clean"` only when the server sent exactly that, and `"exclusive"` otherwise (a
+  missing key — an older server — included). A `shared_clean` turn takes a shared slot via
+  `RunnerPool.assign_shared_talk()` and runs **read-only** in `<ns>-clean` (see *Read-only
+  shared turns* below); every other turn takes the card's exclusive worktree via
+  `assign_talk/1` exactly as before. Once placed, the loop logs
+  `<ref>: talk turn placed in <slot>` (plus ` (read-only)` for a shared turn), and the claim line
+  names the isolation: `claimed talk turn for <ref> (shared_clean)`.
+- **Read-only shared turns (RE366).** A `shared_clean` turn is a card with no live per-card work
+  (every Spec/Plan card, by construction), so there is no dirty tree worth attaching to and no
+  reason to spend an exclusive slot. `assign_shared_talk()` mirrors `assign()`'s shared branch —
+  `shared_used += 1`, or `None` at `capacity.shared_clean` — and returns `reset=False`, so
+  `execute_talk` never calls `create_or_rebaseline`, `checkout_talk_branch` or the prepare hook
+  on `<ns>-clean`: other cards' jobs are running in it. It records nothing in `wts`, no
+  `talk_users`, no partition, so `holdings()` never reports the shared tree as held (that would
+  flip the card's next turn to exclusive server-side). `release_talk(slot)` checks
+  `slot == shared_name` **first** (a shared slot has no record, so the record lookup would leak
+  it) and decrements `shared_used`, floored at 0; `execute_talk`'s `finally` frees the slot on
+  done, stopped, failed and crash alike. `refresh_idle_shared` is untouched: it still only
+  fast-forwards `<ns>-clean` once `shared_used == 0`, so a talk turn holds that off like any
+  shared job.
+
+  Read-only is enforced by **the tools**, not the preamble: `run_talk_job` runs
+  `TALK_SHARED_COMMAND` / `TALK_SHARED_RESUME_COMMAND`, which add
+  `--permission-mode dontAsk --allowedTools <TALK_READONLY_TOOLS> --disallowedTools
+  Edit,Write,NotebookEdit`. `TALK_READONLY_TOOLS` is the one allowlist (`Read`, `Grep`, `Glob`,
+  read-only `git` subcommands, `ls`/`cat`/`head`/`tail`/`wc`, and `./hamaca why|runs|card`), and
+  the commands are built from it, shell-quoted so `Bash(git log:*)` stays one argv element.
+  **Why `dontAsk`, not `plan`:** checked against `claude` 2.1.314 in `-p` mode, `dontAsk` denies
+  every tool not pre-approved instead of prompting — a `Write`, a `touch x`, and an allowlisted
+  command carrying a `>` redirect or a `; touch` tail were all refused (they show up in the
+  result's `permission_denials`) — while `git log` ran. That is exactly deny-by-default, and
+  unlike `plan` it does not change how the agent behaves. An exclusive turn keeps
+  `TALK_COMMAND` / `TALK_RESUME_COMMAND` (`--permission-mode auto`) byte-for-byte until writable
+  Talk exists. A shared turn's `claude` session lives under `<ns>-clean`'s cwd; the server drops
+  `--resume` when a card switches isolation (see the shared-talk gate below), so the runner keeps
+  no session logic of its own.
+- **Rejection (RE366).** When placement still fails after the bounded retry,
+  `reject(job, talk_rejection_detail(pool, isolation))` reports the turn `failed` and writes the
+  detail into the person's transcript. It names who holds the slots — rendered from
+  `RunnerPool.exclusive_holders()`, the `holdings()` entries that occupy an exclusive slot (every
+  state but `retained`), through the same `_holding_state` derivation — and the fix:
+  - exclusive, holders present: `No free exclusive slot for this talk turn: all 2 are held by
+    TO32 (running), TO52 (running). Raise capacity.exclusive in runner.json or cancel a run.`
+  - exclusive, none (e.g. `exclusive: 0`): `No free exclusive slot for this talk turn:
+    capacity.exclusive is 0. Raise capacity.exclusive in runner.json or cancel a run.`
+  - shared: `No free shared_clean slot for this read-only talk turn: 1/1 busy. Raise
+    capacity.shared_clean in runner.json or wait for a job to finish.`
+- **Worktree (exclusive turns).** An exclusive talk turn runs in the card's own exclusive
+  per-card worktree `<ns>-<ref>` — **never** the shared `<ns>-clean` tree, which
+  other cards' jobs are using.
   `RunnerPool.assign_talk/1` attaches to a live worktree a node job already holds (dirty
   reads are the point — the tree may be mid-edit, and that is often exactly what is being asked
   about), reuses a retained failed one as-is (post-mortem is what people ask about), or creates
@@ -1804,7 +1854,11 @@ claim/execute/report loop, one more branch.
   itself and must behave identically on every connected repo. It is the preamble (names the
   pane, the read-only rule, and `./hamaca why`/`runs`/`card`) + the card's seed fields + the
   human's text, spliced in **verbatim and last** — never passed through `render()`, so a
-  person's `{ref}`-shaped typing can never reach into the var namespace.
+  person's `{ref}`-shaped typing can never reach into the var namespace. A `shared_clean` turn
+  gets `TALK_SHARED_PREAMBLE` instead (RE366): the same framing and CLI lines, but it says the
+  tree is a clean checkout of the base branch shared with other jobs — not the card's own
+  worktree, so the card's branch and uncommitted work are not there — and that the session is
+  read-only.
 - **Event mapping.** `_stream_agent_job` (then `_stream_claude_job`) gained an `on_event=None` callback, invoked with each
   parsed stream-json event as it arrives — this is what lets a turn's transcript stream *while
   the turn is still working*, not all at once at the end. `talk_events_from(ev)` maps one event
@@ -1864,6 +1918,21 @@ for in-process callers). Without it a pre-Talk runner would happily claim the fi
 (deliberately unpinned, capacity-exempt) turn on a card, `KeyError` on the `isolation` key a
 talk payload does not carry, and reject it to the flow-only outcome route — a 404 that leaves
 the turn `claimed` forever and wedges Talk for the whole board ([failures.md](failures.md) D4t).
+
+**The shared-talk gate (RE366).** The server picks each turn's isolation at post time
+(`Hamaca.Runs.talk_isolation/1`) and sends it as the talk claim's `isolation` key: `"exclusive"`
+when the card has live per-card work (an active run of an `exclusive` flow, or any runner on the
+board declaring it holds the card's worktree in any holding state, `retained` included), else
+`"shared_clean"` — read-only in the runner's shared clean checkout, taking a shared slot. Only an
+**exclusive** talk turn (`isolation` `"exclusive"`, or absent on a job posted before RE366) keeps
+the unpinned capacity bypass; an unpinned `shared_clean` turn needs advertised free
+`shared_clean` capacity and waits queued otherwise (a pin still bypasses capacity). And a
+`shared_clean` turn is offered — pinned or not — only to a runner at or above
+`Hamaca.Runs.shared_talk_min_version/0` (`shared_talk_capable?/1`, beside `talk_capable?/1`),
+the `RUNNER_VERSION` that first runs one read-only. That is a second, narrower gate, **not** a
+raise of `min_runner_version/0`: an older runner still runs exclusive talk and flow work
+correctly, it just would run a shared turn writable in the card's own worktree. `RUNNER_VERSION`
+99 is that runner (the read-only shared placement above).
 
 ### Declaring an outcome
 

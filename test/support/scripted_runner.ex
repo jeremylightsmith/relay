@@ -30,7 +30,8 @@ defmodule Hamaca.Runs.Scheduler.ScriptedRunner do
           "name" => name,
           "host" => "scripted",
           "interval" => 30,
-          "version" => Hamaca.Runs.min_runner_version()
+          # A fully current runner (RE366): able to take `shared_clean` talk turns too.
+          "version" => Hamaca.Runs.shared_talk_min_version()
         },
         "capacity" => capacity
       })

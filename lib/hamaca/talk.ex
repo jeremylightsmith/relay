@@ -150,6 +150,10 @@ defmodule Hamaca.Talk do
       Repo.rollback(:turn_in_flight)
     end
 
+    # RE366: where this turn runs. Read the switch off the session BEFORE a gone-pin release,
+    # which clears `claude_session_id` — after it, a release and a switch could never merge.
+    isolation = Runs.talk_isolation(card)
+    switched = switched_isolation(locked, isolation)
     {locked, released} = release_gone_pin(locked, card)
 
     turn =
@@ -160,7 +164,12 @@ defmodule Hamaca.Talk do
     # The human's own line is `client_seq: 0`; the runner numbers its lines from 1, so the
     # two writers of one turn's transcript can never collide on the unique index.
     [event] = insert_events!(locked, turn, [%{"client_seq" => 0, "kind" => "user", "text" => prompt, "dim" => false}])
-    notices = if released, do: insert_lines!(locked, turn, [notice_line(released)]), else: []
+
+    notices =
+      case post_notice(released, switched) do
+        nil -> []
+        line -> insert_lines!(locked, turn, [line])
+      end
 
     payload = %{
       "turn_id" => turn.id,
@@ -168,7 +177,8 @@ defmodule Hamaca.Talk do
       "prompt" => prompt,
       "author" => author.name || author.email,
       "branch" => card.branch,
-      "resume_session" => locked.claude_session_id,
+      "resume_session" => if(switched, do: nil, else: locked.claude_session_id),
+      "isolation" => Atom.to_string(isolation),
       "seed" => %{"summary" => locked.seed_summary, "fields" => locked.seed_fields}
     }
 
@@ -176,6 +186,29 @@ defmodule Hamaca.Talk do
     turn = turn |> TalkTurn.changeset(%{node_job_id: job.id}) |> Repo.update!()
     {turn, [event | notices]}
   end
+
+  # RE366: the isolation this turn switches TO, or nil. A session with no id yet has nothing to
+  # resume, so a first turn never switches whatever its stored class. The pin is untouched — the
+  # same machine still holds the session; only `--resume` is dropped.
+  defp switched_isolation(%TalkSession{claude_session_id: nil}, _isolation), do: nil
+  defp switched_isolation(%TalkSession{claude_session_isolation: isolation}, isolation), do: nil
+  defp switched_isolation(%TalkSession{}, isolation), do: isolation
+
+  # At most ONE server line per turn (the unique `(talk_turn_id, client_seq)` index): a gone-pin
+  # release and an isolation switch on the same turn share the release's `:error` line.
+  defp post_notice(nil, nil), do: nil
+  defp post_notice(released, nil), do: notice_line(released)
+
+  defp post_notice(nil, switched),
+    do: %{client_seq: @notice_client_seq, kind: :out, text: switch_text(switched), dim: true}
+
+  defp post_notice(released, switched),
+    do: %{notice_line(released) | text: notice_text(released) <> " " <> switch_text(switched)}
+
+  defp switch_text(:shared_clean),
+    do: "Started a fresh session — this turn reads a clean checkout of the base branch (read-only)."
+
+  defp switch_text(:exclusive), do: "Started a fresh session — this turn runs in the card's own worktree."
 
   # RE493: a pin naming a gone runner (`Runs.affinity_holder_gone?/3`) is released before the
   # job is built, so the turn goes to any runner as a fresh session instead of waiting forever
@@ -440,10 +473,13 @@ defmodule Hamaca.Talk do
     {:ok, updated}
   end
 
+  # RE366: the session id is recorded WITH the isolation it was created under (the job's
+  # payload). A job posted before RE366 carries no `isolation`, so the stored class is left as is.
   defp persist_session(session, job, attrs) do
     session
     |> TalkSession.changeset(%{
       claude_session_id: attrs[:session_id] || session.claude_session_id,
+      claude_session_isolation: Map.get(job.payload, "isolation", session.claude_session_isolation),
       pinned_runner_name: job.runner_name || session.pinned_runner_name
     })
     |> Repo.update!()

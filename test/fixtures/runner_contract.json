@@ -112,7 +112,7 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 88
+      "version": 99
     },
     "running": []
   },
@@ -242,7 +242,7 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 88
+        "version": 99
       },
       "running": [],
       "sessions": {
@@ -520,6 +520,7 @@
       "author": "Test User",
       "branch": null,
       "id": "<node-job-id>",
+      "isolation": "shared_clean",
       "kind": "talk",
       "prompt": "why is this stuck?",
       "ref": "CB2",

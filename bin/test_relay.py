@@ -331,7 +331,7 @@ class TalkContractKeysTest(unittest.TestCase):
     claim is: the runner reads these keys without any test naming them."""
 
     TOP_LEVEL = {"id", "kind", "ref", "turn_id", "prompt", "author", "branch", "seed",
-                 "resume_session"}
+                 "resume_session", "isolation"}
 
     def test_the_talk_claim_has_exactly_the_keys_the_runner_reads(self):
         payload = CONTRACT["talk_claim"]["first_turn"]
@@ -5001,6 +5001,40 @@ class TalkCommandTest(unittest.TestCase):
         self.assertEqual(argv[argv.index("--resume") + 1], "s-5")
         self.assertIn("why?", argv)
 
+    # ---- RE366: a shared_clean turn is read-only, enforced by the tools -----------------
+    def _assert_read_only(self, argv):
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
+        self.assertEqual(argv[argv.index("--allowedTools") + 1], ",".join(relay.TALK_READONLY_TOOLS))
+        self.assertEqual(argv[argv.index("--disallowedTools") + 1], "Edit,Write,NotebookEdit")
+        self.assertIn("stream-json", argv)
+
+    def test_a_shared_talk_turn_runs_deny_by_default_with_the_read_only_allowlist(self):
+        argv = relay.expand_command(relay.TALK_SHARED_COMMAND, {"prompt": "why?"})
+        self.assertEqual(argv[:3], ["claude", "-p", "why?"])
+        self._assert_read_only(argv)
+        self.assertNotIn("--dangerously-skip-permissions", argv)
+
+    def test_a_resumed_shared_talk_turn_names_its_session_and_stays_read_only(self):
+        argv = relay.expand_command(relay.TALK_SHARED_RESUME_COMMAND,
+                                    {"prompt": "why?", "session": "s-5"})
+        self.assertEqual(argv[argv.index("--resume") + 1], "s-5")
+        self.assertIn("why?", argv)
+        self._assert_read_only(argv)
+
+    def test_exclusive_talk_commands_are_unchanged(self):
+        for template, values in ((relay.TALK_COMMAND, {"prompt": "why?"}),
+                                 (relay.TALK_RESUME_COMMAND, {"prompt": "why?", "session": "s-5"})):
+            argv = relay.expand_command(template, values)
+            self.assertEqual(argv[argv.index("--permission-mode") + 1], "auto")
+            self.assertNotIn("--allowedTools", argv)
+
+    def test_the_read_only_allowlist_reads_and_never_writes(self):
+        for tool in ("Read", "Grep", "Glob"):
+            self.assertIn(tool, relay.TALK_READONLY_TOOLS)
+        for entry in relay.TALK_READONLY_TOOLS:
+            for writer in ("Edit", "Write", "NotebookEdit"):
+                self.assertNotIn(writer, entry)
+
 
 class ClaudeFailureClassificationTest(unittest.TestCase):
     """RE308: `classify_claude_failure` — structured signals first, a phrase fallback second,
@@ -7475,12 +7509,14 @@ class ExecuteTalkTest(unittest.TestCase):
         def __init__(self, hook_err=None):
             self.released = []
             self.created = []
+            self.hooked = []
             self._hook_err = hook_err
 
         def create_or_rebaseline(self, slot):
             self.created.append(slot)
 
         def run_prepare_hook(self, slot_path, ref, branch):
+            self.hooked.append(slot_path)
             return self._hook_err
 
         def release_talk(self, slot):
@@ -7488,7 +7524,8 @@ class ExecuteTalkTest(unittest.TestCase):
 
     def setUp(self):
         self._saved = {k: getattr(relay, k) for k in
-                       ("_stream_agent_job", "report_talk_outcome", "worktree_path", "DRY", "api")}
+                       ("_stream_agent_job", "report_talk_outcome", "worktree_path", "DRY", "api",
+                        "checkout_talk_branch")}
         self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
         relay.DRY = False
         relay.worktree_path = lambda name: "/tmp/" + name
@@ -7519,6 +7556,38 @@ class ExecuteTalkTest(unittest.TestCase):
         fake.session_id = session_id
         relay._stream_agent_job = fake
         return fake
+
+    # ---- RE366: a shared_clean turn runs in <ns>-clean and never prepares it ------------
+    def _record_checkouts(self):
+        checkouts = []
+        relay.checkout_talk_branch = lambda path, branch: checkouts.append((path, branch))
+        return checkouts
+
+    def test_a_shared_turn_is_released_and_never_prepares_the_shared_tree(self):
+        self._stub_stream(ok=True)
+        checkouts = self._record_checkouts()
+        pool = self._Pool()
+        relay.execute_talk(self._job(isolation="shared_clean"), "exec-clean", False,
+                           relay.JobControl(), pool)
+        self.assertEqual(self.reported[0][:2], (7, "done"))
+        self.assertEqual(pool.released, ["exec-clean"])
+        self.assertEqual(pool.created, [])
+        self.assertEqual(pool.hooked, [])
+        self.assertEqual(checkouts, [])
+
+    def test_a_crashed_shared_turn_reports_failed_and_still_frees_the_shared_slot(self):
+        def boom(*a, **k):
+            raise RuntimeError("stream died")
+        relay._stream_agent_job = boom
+        checkouts = self._record_checkouts()
+        pool = self._Pool()
+        relay.execute_talk(self._job(isolation="shared_clean"), "exec-clean", False,
+                           relay.JobControl(), pool)
+        self.assertEqual(self.reported[0][:2], (7, "failed"))
+        self.assertEqual(pool.released, ["exec-clean"])
+        self.assertEqual(pool.created, [])
+        self.assertEqual(pool.hooked, [])
+        self.assertEqual(checkouts, [])
 
     def test_a_clean_turn_reports_done(self):
         self._stub_stream(ok=True)
@@ -7768,9 +7837,19 @@ class ClaimLineTest(unittest.TestCase):
         self.assertEqual(relay.claim_line(j),
                          f"claimed RLY-9 · {j['node_id']} (run r1, exclusive)")
 
-    def test_a_talk_turn_gets_the_talk_wording(self):
+    def test_a_talk_turn_gets_the_talk_wording_and_names_its_isolation(self):
         turn = json.loads(json.dumps(CONTRACT["talk_claim"]["first_turn"]))
-        self.assertEqual(relay.claim_line(turn), "claimed talk turn for CB2")
+        self.assertEqual(turn["isolation"], "shared_clean")
+        self.assertEqual(relay.claim_line(turn), "claimed talk turn for CB2 (shared_clean)")
+
+    def test_a_shared_talk_turn_names_shared_clean(self):
+        self.assertEqual(
+            relay.claim_line({"kind": "talk", "ref": "CB2", "isolation": "shared_clean"}),
+            "claimed talk turn for CB2 (shared_clean)")
+
+    def test_a_talk_turn_with_no_isolation_is_named_exclusive(self):
+        self.assertEqual(relay.claim_line({"kind": "talk", "ref": "CB2"}),
+                         "claimed talk turn for CB2 (exclusive)")
 
     def test_job_ref_prefers_vars_ref_then_ref_then_the_job_id(self):
         self.assertEqual(relay.job_ref({"vars": {"ref": "A"}, "ref": "B", "id": "C"}), "A")
@@ -8458,6 +8537,109 @@ class ExecuteLoopTest(unittest.TestCase):
 
         self.assertNotIn("None", talk_reports[0])
         self.assertIn("talk", talk_reports[0])
+
+    # ---- RE366: shared_clean talk placement and the holder-naming rejection --------------
+    def _cfg(self, **capacity):
+        relay.load_runner_config = lambda: {
+            "name": "box", "namespace": "exec", "capacity": capacity,
+            "poll_timeout": 1, "heartbeat_interval": 60}
+
+    def _seed_pool(self, prepare):
+        """cmd_start builds its own pool; `ensure` (stubbed) is the hook that hands it to us."""
+        pools = []
+
+        def ensure(pool):
+            pools.append(pool)
+            prepare(pool)
+        relay.RunnerPool.ensure = ensure
+        return pools
+
+    def _hold_exclusive(self, pool):
+        for ref in ("TO32", "TO52"):
+            pool.assign(job("exclusive_shell", vars={"ref": ref}))
+
+    def _talk(self, **overrides):
+        j = {"id": "tj-9", "kind": "talk", "ref": "DE3", "turn_id": 91, "prompt": "why?",
+             "seed": {"fields": []}, "resume_session": None}
+        j.update(overrides)
+        return j
+
+    def _capture(self):
+        lines, details = [], []
+        relay.log = lambda msg, **k: lines.append(msg)
+        relay.report_talk_outcome = lambda tid, status, sid, detail: (
+            details.append((tid, status, detail)) or status)
+        relay.report_outcome = lambda *a: self.fail("must not use the node-job outcome route")
+        transcript = []
+        relay.urllib.request.urlopen = lambda req, *a, **k: (
+            transcript.extend(json.loads(req.data or b"{}").get("events", []))
+            or _FakeResp(b"{}"))
+        return lines, details, transcript
+
+    def _run(self):
+        relay.cmd_start(argparse.Namespace(once=True, dry_run=False, interval=None, name=None))
+
+    def test_a_shared_talk_turn_runs_in_the_clean_tree_while_every_exclusive_slot_is_busy(self):
+        self._cfg(shared_clean=2, exclusive=2)
+        pools = self._seed_pool(self._hold_exclusive)
+        relay.claim_node_job = lambda *a, **k: self._talk(ref="CB2", isolation="shared_clean")
+        self.addCleanup(setattr, relay, "_stream_agent_job", relay._stream_agent_job)
+        cwds = []
+        relay._stream_agent_job = lambda argv, cwd, **k: (
+            cwds.append(cwd) or (True, "sess-9", relay.ClaudeRunReport()))
+        lines, details, _transcript = self._capture()
+
+        self._run()
+
+        self.assertEqual(details, [(91, "done", "")])
+        self.assertFalse(any("rejecting claimed job" in line for line in lines), lines)
+        self.assertTrue(any("talk turn placed in exec-clean" in line for line in lines), lines)
+        self.assertEqual(cwds, [relay.worktree_path("exec-clean")])
+        self.assertEqual(pools[0].shared_used, 0)               # freed when the turn ended
+
+    def test_an_exclusive_talk_turn_with_every_slot_held_names_the_holders(self):
+        self._cfg(shared_clean=2, exclusive=2)
+        self._seed_pool(self._hold_exclusive)
+        relay.claim_node_job = lambda *a, **k: self._talk(isolation="exclusive")
+        _lines, details, transcript = self._capture()
+
+        self._run()
+
+        expected = ("No free exclusive slot for this talk turn: all 2 are held by TO32 (running), "
+                    "TO52 (running). Raise capacity.exclusive in runner.json or cancel a run.")
+        self.assertEqual(details, [(91, "failed", expected)])
+        self.assertEqual([e["text"] for e in transcript], [expected])
+
+    def test_a_talk_turn_with_no_isolation_is_placed_exclusive(self):
+        self._cfg(shared_clean=1, exclusive=0)
+        self._seed_pool(lambda pool: None)
+        relay.claim_node_job = lambda *a, **k: self._talk()          # no "isolation" key
+        _lines, details, _transcript = self._capture()
+
+        self._run()
+
+        self.assertEqual(details, [(91, "failed",
+                                    "No free exclusive slot for this talk turn: capacity.exclusive "
+                                    "is 0. Raise capacity.exclusive in runner.json or cancel a run.")])
+
+    def test_a_shared_talk_turn_with_no_free_shared_slot_names_the_busy_count(self):
+        self._cfg(shared_clean=1, exclusive=0)
+        pools = self._seed_pool(lambda pool: None)
+
+        def claim(*a, **k):
+            # A pinned turn arrives while the one shared slot is taken: occupy it after the
+            # loop has decided to claim (with it busy up front the loop would not claim at all).
+            pools[0].assign(job("shared_clean_agent"))
+            return self._talk(isolation="shared_clean")
+        relay.claim_node_job = claim
+        _lines, details, _transcript = self._capture()
+
+        self._run()
+
+        self.assertEqual(details, [(91, "failed",
+                                    "No free shared_clean slot for this read-only talk turn: 1/1 "
+                                    "busy. Raise capacity.shared_clean in runner.json or wait for "
+                                    "a job to finish.")])
 
     def _two_slot_config(self):
         relay.load_runner_config = lambda: {
@@ -13287,6 +13469,93 @@ class TalkPromptTest(unittest.TestCase):
         self.job["prompt"] = "why does {ref} appear twice?"
         self.assertIn("{ref}", relay.talk_prompt(self.job))
 
+    # RE366: the preamble must not tell a shared_clean turn it is in the card's own tree.
+    @staticmethod
+    def _flat(text):
+        return " ".join(text.split())
+
+    def test_a_shared_turn_is_told_it_reads_a_clean_base_checkout_not_the_cards_worktree(self):
+        self.job.update(ref="CB2", isolation="shared_clean")
+        p = relay.talk_prompt(self.job)
+        flat = self._flat(p)
+        self.assertIn("./hamaca why  CB2", p)
+        self.assertIn("./hamaca runs CB2", p)
+        self.assertIn("./hamaca card CB2", p)
+        self.assertIn("clean checkout of the base branch", flat)
+        self.assertIn("not the card's own worktree", flat)
+        self.assertIn("read-only", flat)
+        self.assertNotIn("card's own worktree and may be dirty", flat)
+
+    def test_an_exclusive_turn_keeps_todays_preamble(self):
+        self.job.update(ref="CB2", isolation="exclusive")
+        p = relay.talk_prompt(self.job)
+        self.assertTrue(p.startswith(relay.TALK_PREAMBLE.replace("{ref}", "CB2")))
+        self.assertIn("card's own worktree and may be dirty", self._flat(p))
+
+    def test_a_turn_with_no_isolation_keeps_todays_preamble(self):
+        self.job.pop("isolation", None)
+        self.job["ref"] = "CB2"
+        self.assertTrue(relay.talk_prompt(self.job).startswith(
+            relay.TALK_PREAMBLE.replace("{ref}", "CB2")))
+
+
+class TalkCommandSelectionTest(unittest.TestCase):
+    """RE366: run_talk_job picks the read-only templates for a shared_clean turn and today's
+    auto-mode ones otherwise — a missing `isolation` (an older server) is exclusive."""
+
+    def setUp(self):
+        self._saved = relay._stream_agent_job
+        self.addCleanup(setattr, relay, "_stream_agent_job", self._saved)
+        self.argvs = []
+
+        def fake(argv, cwd, tag="", session_id_path=None, on_proc=None, on_event=None, mirror=True):
+            self.argvs.append(argv)
+            return True, "sess-1", relay.ClaudeRunReport()
+        relay._stream_agent_job = fake
+
+    class _Sender:
+        def enqueue(self, *a):
+            pass
+
+        def flush(self):
+            return True
+
+    def _argv(self, **overrides):
+        j = {"turn_id": 7, "ref": "CB2", "prompt": "why?", "resume_session": None,
+             "seed": {"fields": []}}
+        j.update(overrides)
+        if "isolation" in j and j["isolation"] is None:
+            del j["isolation"]
+        relay.run_talk_job(j, "/tmp/exec-x", relay.JobControl(), self._Sender())
+        return self.argvs[-1]
+
+    def _expected(self, template, job, session=None):
+        return relay.expand_command(template, {"prompt": relay.talk_prompt(job), "session": session})
+
+    def test_a_shared_job_runs_the_shared_command(self):
+        j = {"turn_id": 7, "ref": "CB2", "prompt": "why?", "resume_session": None,
+             "seed": {"fields": []}, "isolation": "shared_clean"}
+        self.assertEqual(self._argv(isolation="shared_clean"),
+                         self._expected(relay.TALK_SHARED_COMMAND, j))
+
+    def test_an_exclusive_or_unmarked_job_runs_todays_command(self):
+        j = {"turn_id": 7, "ref": "CB2", "prompt": "why?", "resume_session": None,
+             "seed": {"fields": []}}
+        for iso in ("exclusive", None):
+            self.assertEqual(self._argv(isolation=iso), self._expected(relay.TALK_COMMAND, j))
+
+    def test_a_resumed_shared_job_runs_the_shared_resume_command(self):
+        j = {"turn_id": 7, "ref": "CB2", "prompt": "why?", "resume_session": "s-1",
+             "seed": {"fields": []}, "isolation": "shared_clean"}
+        self.assertEqual(self._argv(isolation="shared_clean", resume_session="s-1"),
+                         self._expected(relay.TALK_SHARED_RESUME_COMMAND, j, "s-1"))
+
+    def test_a_resumed_exclusive_job_runs_todays_resume_command(self):
+        j = {"turn_id": 7, "ref": "CB2", "prompt": "why?", "resume_session": "s-1",
+             "seed": {"fields": []}, "isolation": "exclusive"}
+        self.assertEqual(self._argv(isolation="exclusive", resume_session="s-1"),
+                         self._expected(relay.TALK_RESUME_COMMAND, j, "s-1"))
+
 
 class TalkEventMappingTest(unittest.TestCase):
     """The recorded stream-json seam (ADR 0014): assistant text -> :out, tool
@@ -13434,9 +13703,10 @@ class TalkEventSenderTest(unittest.TestCase):
 
 
 class TalkWorktreeTest(unittest.TestCase):
-    """ADR 0014 §2: a turn always uses the card's exclusive per-card worktree, attaching to the
-    live one when there is one. NEVER the shared <ns>-clean tree, which other cards' jobs are
-    using."""
+    """ADR 0014 §2: an exclusive turn uses the card's exclusive per-card worktree, attaching to
+    the live one when there is one — never the shared <ns>-clean tree, which other cards' jobs
+    are using. A shared_clean turn (RE366) takes a read-only shared slot instead, and touches no
+    per-card record."""
 
     def _pool(self, **cfg):
         base = {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2},
@@ -13474,6 +13744,89 @@ class TalkWorktreeTest(unittest.TestCase):
         pool.assign_talk("DE3")
         pool.release_held("DE3", "done")   # talk-created tree — must NOT be torn down
         self.assertIn("exec-DE3", pool.wts)
+
+    # ---- RE366: a read-only talk turn takes a shared_clean slot --------------------------
+    def _hold_exclusive(self, pool, *refs):
+        for ref in refs:
+            self.assertIsNotNone(pool.assign(job("exclusive_shell", vars={"ref": ref})))
+
+    def test_a_shared_talk_turn_takes_one_shared_slot_and_nothing_else(self):
+        pool = self._pool()
+        self.assertEqual(pool.assign_shared_talk(), ("exec-clean", False))
+        self.assertEqual(pool.shared_used, 1)
+        self.assertEqual(pool.wts, {})                       # no per-card record, no holding
+        self.assertEqual(pool.free_partitions, ["1", "2"])   # no partition taken
+        self.assertEqual(pool.capacity(), {"shared_clean": 1, "exclusive": 2})
+
+    def test_a_shared_talk_turn_is_refused_when_every_shared_slot_is_busy(self):
+        pool = self._pool(capacity={"shared_clean": 1, "exclusive": 2})
+        self.assertIsNotNone(pool.assign(job("shared_clean_agent")))
+        self.assertIsNone(pool.assign_shared_talk())
+
+    def test_releasing_a_shared_talk_slot_frees_it_and_never_goes_negative(self):
+        pool = self._pool()
+        pool.assign_shared_talk()
+        pool.release_talk("exec-clean")
+        self.assertEqual(pool.shared_used, 0)
+        pool.release_talk("exec-clean")
+        self.assertEqual(pool.shared_used, 0)
+
+    def test_exclusive_pressure_never_blocks_a_shared_talk_turn(self):
+        pool = self._pool()
+        self._hold_exclusive(pool, "TO32", "TO52")
+        self.assertEqual(pool.assign_shared_talk(), ("exec-clean", False))
+
+    def test_exclusive_holders_names_each_occupying_tree_with_its_holding_state(self):
+        pool = self._pool()
+        self._hold_exclusive(pool, "TO52", "TO32")
+        self.assertEqual(pool.exclusive_holders(),
+                         [{"ref": "TO32", "state": "running"}, {"ref": "TO52", "state": "running"}])
+
+    def test_exclusive_holders_leaves_out_a_retained_tree(self):
+        pool = self._pool()
+        self._hold_exclusive(pool, "TO32")
+        pool.wts["exec-DE3"] = {"ref": "DE3", "run_id": None, "state": "retained", "live": 0,
+                                "partition": None}
+        self.assertEqual(pool.exclusive_holders(), [{"ref": "TO32", "state": "running"}])
+
+
+class TalkRejectionDetailTest(unittest.TestCase):
+    """RE366: an unplaceable talk turn says who holds the slots and what to do about it. The
+    detail lands in the person's transcript (reject() writes it), so the wording is pinned."""
+
+    def _pool(self, **capacity):
+        return relay.RunnerPool({"namespace": "exec", "capacity": capacity,
+                                 "max_retained_failed": 3})
+
+    def test_exclusive_names_every_holder_and_the_capacity_fix(self):
+        pool = self._pool(shared_clean=2, exclusive=2)
+        for ref in ("TO52", "TO32"):
+            pool.assign(job("exclusive_shell", vars={"ref": ref}))
+        self.assertEqual(
+            relay.talk_rejection_detail(pool, "exclusive"),
+            "No free exclusive slot for this talk turn: all 2 are held by TO32 (running), "
+            "TO52 (running). Raise capacity.exclusive in runner.json or cancel a run.")
+
+    def test_exclusive_with_no_holders_names_the_configured_capacity(self):
+        pool = self._pool(shared_clean=1, exclusive=0)
+        self.assertEqual(
+            relay.talk_rejection_detail(pool, "exclusive"),
+            "No free exclusive slot for this talk turn: capacity.exclusive is 0. "
+            "Raise capacity.exclusive in runner.json or cancel a run.")
+
+    def test_shared_names_the_busy_count_and_the_shared_capacity_fix(self):
+        pool = self._pool(shared_clean=1, exclusive=0)
+        pool.assign_shared_talk()
+        self.assertEqual(
+            relay.talk_rejection_detail(pool, "shared_clean"),
+            "No free shared_clean slot for this read-only talk turn: 1/1 busy. "
+            "Raise capacity.shared_clean in runner.json or wait for a job to finish.")
+
+    def test_talk_isolation_is_shared_only_when_the_server_says_so(self):
+        self.assertEqual(relay.talk_isolation({"isolation": "shared_clean"}), "shared_clean")
+        self.assertEqual(relay.talk_isolation({"isolation": "exclusive"}), "exclusive")
+        self.assertEqual(relay.talk_isolation({}), "exclusive")          # older server
+        self.assertEqual(relay.talk_isolation({"isolation": "bogus"}), "exclusive")
 
 
 class TalkOccupancyTest(unittest.TestCase):

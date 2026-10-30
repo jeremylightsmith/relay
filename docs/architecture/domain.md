@@ -1179,7 +1179,8 @@ sharing behavior.
   stopped | failed`; `queued → claimed` is written by the claim endpoint via
   `Talk.mark_claimed/1`, so the claim path itself needs no knowledge of *turns* — `Hamaca.Runs`
   knows only that a job can carry `kind: :talk`, via `insert_talk_job!/3`, `revoke_talk_job/1`,
-  `release_talk_job/1`, `finish_talk_job!/1` and the `talk_capable?/1` floor on the claim),
+  `release_talk_job/1`, `finish_talk_job!/1`, the `talk_capable?/1` floor and the
+  `shared_talk_capable?/1` gate on the claim, and `talk_isolation/1`),
   `Schemas.TalkEvent` (one per rendered transcript line, append-only). **The
   pin**: `finish_turn/3` records the claiming runner's name onto the session **on `:done`
   only** — a `:stopped` or `:failed` turn never finished, so it cannot vouch for the session id
@@ -1198,7 +1199,19 @@ sharing behavior.
   is gone the same way — guarded by `Runs.release_talk_job/1` (`state == :queued`, so a job
   claimed in the meantime rolls the whole release back), one notice on that turn, then
   `{:talk_event, notice}` and `{:run_changed, card_id}` to wake the claim long-poll. Claimed jobs
-  are never touched, and a second sweep finds nothing. **Ordering is
+  are never touched, and a second sweep finds nothing. **Isolation per turn** (RE366):
+  `do_post/4` asks `Runs.talk_isolation/1` where the turn runs — `:exclusive` (the card's own
+  worktree) when the card has an active run of an `exclusive` flow or any runner on the board
+  holds its worktree (`Schemas.Runner.held_refs/1`, `retained` included), else `:shared_clean`
+  (read-only in the runner's shared clean checkout, a shared slot) — and writes it into the job
+  payload as `"isolation"`. The session records the class its `claude_session_id` was created
+  under (`claude_session_isolation`, written by `finish_turn/3` from the finished job's payload
+  on `:done`; a payload without the key leaves it unchanged). A turn chosen under a different
+  class than a stored session id starts fresh (`resume_session: nil`; the pin stays) and gets one
+  server line — `:out`, dim, `client_seq: -1`, naming the tree it now runs in; merged into the
+  RE493 `:error` line when a gone-pin release fires on the same turn. On the claim, an unpinned
+  talk job bypasses capacity only when exclusive; a `shared_clean` one needs free shared capacity
+  and a runner at `Runs.shared_talk_min_version/0` or newer ([runner.md](runner.md)). **Ordering is
   `seq`, never a timestamp** — `append_events/2` assigns it inside one transaction locking the
   session row, so two concurrent batches can't collide; delivery is at-least-once and
   `(talk_turn_id, client_seq)` is unique, so a replayed batch stores and broadcasts nothing new.

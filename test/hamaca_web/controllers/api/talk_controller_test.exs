@@ -126,7 +126,7 @@ defmodule HamacaWeb.Api.TalkControllerTest do
   end
 
   test "a talk job is refused by the flow outcome route", ctx do
-    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"shared_clean" => 1, "exclusive" => 1})
     {:ok, job} = Hamaca.Runs.claim_next_job(runner)
     body = %{"outcome" => "succeeded", "detail" => "", "git_sha" => nil, "session_id" => nil}
 

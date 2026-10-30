@@ -33,8 +33,8 @@ defmodule Hamaca.TalkTest do
       insert(:runner,
         board: board,
         name: "mac-1",
-        capacity: %{"exclusive" => 1},
-        version: Runs.min_runner_version()
+        capacity: %{"shared_clean" => 1, "exclusive" => 1},
+        version: Runs.shared_talk_min_version()
       )
 
     %{board: board, stage: stage, card: card, author: author, runner: runner}
@@ -476,8 +476,8 @@ defmodule Hamaca.TalkTest do
         insert(:runner,
           board: ctx.board,
           name: "mac-2",
-          capacity: %{"exclusive" => 1},
-          version: Runs.min_runner_version()
+          capacity: %{"shared_clean" => 1, "exclusive" => 1},
+          version: Runs.shared_talk_min_version()
         )
 
       job_id = turn.node_job_id
@@ -498,6 +498,139 @@ defmodule Hamaca.TalkTest do
 
       assert Talk.get_session(ctx.card).pinned_runner_name == nil
       assert error_events(turn) == []
+    end
+  end
+
+  describe "talk isolation per turn (RE366)" do
+    @to_shared "Started a fresh session — this turn reads a clean checkout of the base branch (read-only)."
+    @to_exclusive "Started a fresh session — this turn runs in the card's own worktree."
+
+    test "a turn on a card with no runs is posted shared_clean", ctx do
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hi")
+
+      assert Runs.get_job(turn.node_job_id).payload["isolation"] == "shared_clean"
+    end
+
+    test "a turn on a card with an active exclusive run is posted exclusive", ctx do
+      exclusive_run!(ctx)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hi")
+
+      assert Runs.get_job(turn.node_job_id).payload["isolation"] == "exclusive"
+    end
+
+    test "a switch from shared to exclusive starts fresh and says so", ctx do
+      pin_session!(ctx.card, "mac-1", "s-1", :shared_clean)
+      exclusive_run!(ctx)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      job = Runs.get_job(turn.node_job_id)
+
+      assert job.payload["isolation"] == "exclusive"
+      assert job.payload["resume_session"] == nil
+
+      assert [
+               %TalkEvent{kind: :user, client_seq: 0, text: "hello"},
+               %TalkEvent{kind: :out, dim: true, client_seq: -1, text: @to_exclusive}
+             ] = turn_events(turn)
+    end
+
+    test "a switch from exclusive to shared starts fresh and says so", ctx do
+      pin_session!(ctx.card, "mac-1", "s-1", :exclusive)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      job = Runs.get_job(turn.node_job_id)
+
+      assert job.payload["isolation"] == "shared_clean"
+      assert job.payload["resume_session"] == nil
+
+      assert [
+               %TalkEvent{kind: :user, client_seq: 0},
+               %TalkEvent{kind: :out, dim: true, client_seq: -1, text: @to_shared}
+             ] = turn_events(turn)
+    end
+
+    test "a switch keeps the pin — the same machine still holds the session", ctx do
+      pin_session!(ctx.card, "mac-1", "s-1", :exclusive)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+
+      assert Runs.get_job(turn.node_job_id).runner_name == "mac-1"
+    end
+
+    test "an unchanged isolation resumes the session with no notice", ctx do
+      pin_session!(ctx.card, "mac-1", "s-1", :shared_clean)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+
+      assert Runs.get_job(turn.node_job_id).payload["resume_session"] == "s-1"
+      assert [%TalkEvent{kind: :user, client_seq: 0}] = turn_events(turn)
+    end
+
+    test "a first turn never announces a switch, whatever the stored isolation", ctx do
+      pin_session!(ctx.card, nil, nil, :exclusive)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+
+      assert Runs.get_job(turn.node_job_id).payload["resume_session"] == nil
+      assert [%TalkEvent{kind: :user, client_seq: 0}] = turn_events(turn)
+    end
+
+    test "a gone pin and a switch on one turn share ONE error notice", ctx do
+      pin_session!(ctx.card, "ghost-runner", "s-1", :exclusive)
+
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "hello")
+      job = Runs.get_job(turn.node_job_id)
+
+      gone =
+        ~s(Runner "ghost-runner" is gone — this message starts a fresh session on the next available runner. It won't remember earlier turns.)
+
+      assert job.runner_name == nil
+      assert job.payload["resume_session"] == nil
+
+      assert [%TalkEvent{kind: :user}, notice] = turn_events(turn)
+      assert %TalkEvent{kind: :error, dim: false, client_seq: -1} = notice
+      assert notice.text == gone <> " " <> @to_shared
+    end
+
+    test "a finished turn records the isolation its session was created under", ctx do
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+      {:ok, claimed} = Runs.claim_next_job(ctx.runner)
+      assert claimed.payload["isolation"] == "shared_clean"
+
+      {:ok, _} = Talk.finish_turn(turn, :done, %{session_id: "s-9"})
+
+      session = Talk.get_session(ctx.card)
+      assert session.claude_session_id == "s-9"
+      assert session.claude_session_isolation == :shared_clean
+    end
+
+    test "a finished job posted before the isolation key existed leaves the stored isolation alone", ctx do
+      pin_session!(ctx.card, "mac-1", "s-1", :exclusive)
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+
+      Repo.update_all(from(j in Schemas.NodeJob, where: j.id == ^turn.node_job_id),
+        set: [payload: %{"turn_id" => turn.id, "prompt" => "one"}]
+      )
+
+      {:ok, _} = Runs.claim_next_job(ctx.runner)
+      {:ok, _} = Talk.finish_turn(turn, :done, %{session_id: "s-9"})
+
+      session = Talk.get_session(ctx.card)
+      assert session.claude_session_id == "s-9"
+      assert session.claude_session_isolation == :exclusive
+    end
+
+    test "a failed turn changes neither the session id nor its isolation", ctx do
+      pin_session!(ctx.card, "mac-1", "s-1", :exclusive)
+      {:ok, turn} = Talk.post_message(ctx.card, ctx.author, "one")
+      {:ok, _} = Runs.claim_next_job(ctx.runner)
+
+      {:ok, _} = Talk.finish_turn(turn, :failed, %{session_id: "s-9"})
+
+      session = Talk.get_session(ctx.card)
+      assert session.claude_session_id == "s-1"
+      assert session.claude_session_isolation == :exclusive
     end
   end
 
@@ -619,8 +752,8 @@ defmodule Hamaca.TalkTest do
         insert(:runner,
           board: ctx.board,
           name: "mac-2",
-          capacity: %{"exclusive" => 1},
-          version: Runs.min_runner_version()
+          capacity: %{"shared_clean" => 1, "exclusive" => 1},
+          version: Runs.shared_talk_min_version()
         )
 
       job_id = job.id
@@ -640,13 +773,22 @@ defmodule Hamaca.TalkTest do
     end
   end
 
-  defp pin_session!(card, runner_name, session_id) do
+  # The session's stored isolation defaults to `:shared_clean` — what a run-less card's turn is
+  # chosen as (RE366) — so a pin test exercises the pin, not an isolation switch.
+  defp pin_session!(card, runner_name, session_id, isolation \\ :shared_clean) do
     session = Talk.session_for_card(card)
 
     Repo.update_all(from(s in Schemas.TalkSession, where: s.id == ^session.id),
-      set: [pinned_runner_name: runner_name, claude_session_id: session_id]
+      set: [pinned_runner_name: runner_name, claude_session_id: session_id, claude_session_isolation: isolation]
     )
   end
+
+  defp exclusive_run!(ctx) do
+    flow = insert(:flow, board: ctx.board, isolation: :exclusive)
+    insert(:run, card: ctx.card, flow_id: flow.id, status: :running)
+  end
+
+  defp turn_events(turn), do: Repo.all(from(e in TalkEvent, where: e.talk_turn_id == ^turn.id, order_by: e.seq))
 
   defp silence!(runner, seconds) do
     at = DateTime.add(DateTime.truncate(DateTime.utc_now(), :second), -seconds, :second)

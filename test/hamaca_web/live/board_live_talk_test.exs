@@ -236,7 +236,7 @@ defmodule HamacaWeb.BoardLiveTalkTest do
   end
 
   test "sending a turn posts it, shows Stop, and streams the answer in", ctx do
-    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"shared_clean" => 1, "exclusive" => 1})
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
 
@@ -257,7 +257,7 @@ defmodule HamacaWeb.BoardLiveTalkTest do
   end
 
   test "Stop ends the turn and keeps the partial output", ctx do
-    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"shared_clean" => 1, "exclusive" => 1})
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
     view |> form("#talk-pane-composer", %{"text" => "take your time"}) |> render_submit()
@@ -273,7 +273,7 @@ defmodule HamacaWeb.BoardLiveTalkTest do
   end
 
   test "closing the drawer does not stop a turn — it finishes and its output is waiting", ctx do
-    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"shared_clean" => 1, "exclusive" => 1})
     view = open(ctx.conn, ctx.board, ctx.ref)
     view |> element("#card-drawer-tab-talk") |> render_click()
     view |> form("#talk-pane-composer", %{"text" => "take your time"}) |> render_submit()
@@ -293,7 +293,7 @@ defmodule HamacaWeb.BoardLiveTalkTest do
   end
 
   test "the scrollback survives closing and reopening the drawer", ctx do
-    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"shared_clean" => 1, "exclusive" => 1})
     {:ok, _turn} = Talk.post_message(ctx.card, ctx.user, "first")
     FakeTalkRunner.run(runner, [{:out, "an earlier answer"}])
 
@@ -305,7 +305,7 @@ defmodule HamacaWeb.BoardLiveTalkTest do
   end
 
   test "/clear hides the scrollback without deleting it", ctx do
-    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"shared_clean" => 1, "exclusive" => 1})
     {:ok, _} = Talk.post_message(ctx.card, ctx.user, "first")
     FakeTalkRunner.run(runner, [{:out, "an earlier answer"}])
 
@@ -319,7 +319,7 @@ defmodule HamacaWeb.BoardLiveTalkTest do
   end
 
   test "talk output never reaches the card timeline", ctx do
-    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"shared_clean" => 1, "exclusive" => 1})
     {:ok, _} = Talk.post_message(ctx.card, ctx.user, "first")
     FakeTalkRunner.run(runner, [{:out, "an earlier answer"}])
 
@@ -355,7 +355,7 @@ defmodule HamacaWeb.BoardLiveTalkTest do
   end
 
   test "an archived board still renders a transcript a live board already wrote", ctx do
-    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"exclusive" => 1})
+    runner = insert(:runner, board: ctx.board, name: "mac-1", capacity: %{"shared_clean" => 1, "exclusive" => 1})
     {:ok, _} = Talk.post_message(ctx.card, ctx.user, "why is this stuck?")
     FakeTalkRunner.run(runner, [{:out, "it is waiting on you"}])
     {:ok, _board} = Hamaca.Boards.archive_board(ctx.board)
