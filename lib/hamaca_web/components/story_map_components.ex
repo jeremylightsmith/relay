@@ -51,6 +51,7 @@ defmodule HamacaWeb.StoryMapComponents do
   alias HamacaWeb.CoreComponents
   alias HamacaWeb.StoryMapFilter
   alias HamacaWeb.StoryMapGrid
+  alias Phoenix.LiveView.JS
 
   # Artboard tokens (lines ~277-279): the grid lines and the two sticky header heights.
   @gl_light "1px solid var(--color-base-300)"
@@ -1016,7 +1017,7 @@ defmodule HamacaWeb.StoryMapComponents do
           name="card[title]"
           value={Phoenix.HTML.Form.normalize_value("text", @compose_form[:title].value)}
           placeholder="Add card… ↵"
-          autofocus
+          phx-mounted={JS.focus()}
           autocomplete="off"
           phx-keydown="cancel_compose_cell"
           phx-key="escape"

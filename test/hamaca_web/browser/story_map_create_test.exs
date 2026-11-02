@@ -15,11 +15,21 @@ defmodule HamacaWeb.Browser.StoryMapCreateTest do
   so this walks all five entry points with a real Enter: the empty panel's button, the trailing
   ＋, the bare `＋ Add step` header, an activity header's ＋, and ＋ Release — and checks the
   input comes back empty and still focused, which is what lets a backbone be typed hands-free.
+
+  RE501 adds the cell composer (a cell's dashed ＋). Its input used to carry a bare `autofocus`.
+  LiveView patches the composer in and does nothing with `autofocus`, and the browser honors it
+  only for the first autofocus element in a document. So the first cell you opened was
+  focused, and every later one (another cell, a reopen) needed a click before you could type.
+  `mix test` cannot see focus at all. The fix is `phx-mounted={JS.focus()}`. The second test
+  opens a cell, types and presses Enter twice, then opens a different cell and types again.
+  It types only into the `:focus`-qualified input, so the keystrokes never focus it
+  themselves.
   """
   use PhoenixTest.Playwright.Case, async: false
 
   alias Hamaca.Accounts
   alias Hamaca.Boards
+  alias Hamaca.Cards
   alias Hamaca.StoryMap
   alias PlaywrightEx.Frame
 
@@ -99,11 +109,85 @@ defmodule HamacaWeb.Browser.StoryMapCreateTest do
     assert List.last(StoryMap.list_releases(board)).name == "Someday"
   end
 
+  test "the cell composer opens focused and stays focused across Enter", %{conn: conn} do
+    user = Accounts.ensure_dev_user!()
+    {:ok, board} = Boards.create_board(user, %{name: "Story map composer focus"})
+    {:ok, onboard} = StoryMap.create_activity(board, %{name: "Onboard & access", position: 1})
+    {:ok, plan} = StoryMap.create_activity(board, %{name: "Plan the backlog", position: 2})
+    {:ok, sign_in} = StoryMap.create_step(onboard, %{name: "Sign in", position: 1})
+    {:ok, organize} = StoryMap.create_step(plan, %{name: "Organize cards", position: 1})
+    mvp = hd(StoryMap.list_releases(board))
+
+    sign_in_cell = "s-#{sign_in.id}-r-#{mvp.id}"
+    organize_cell = "s-#{organize.id}-r-#{mvp.id}"
+    sign_in_input = "#story-map-compose-#{sign_in_cell}-input"
+    organize_input = "#story-map-compose-#{organize_cell}-input"
+
+    conn
+    |> visit("/dev/login")
+    |> assert_has("body .phx-connected")
+    |> visit("/board/#{board.slug}/story-map")
+    |> assert_has("body .phx-connected")
+    |> assert_has("#story-map-grid")
+    # The bug: the composer is patched in by LiveView, so its bare `autofocus` never fired and
+    # the user had to click the input before typing. Opening it must land focus in it.
+    |> click("#story-map-add-#{sign_in_cell}")
+    |> assert_focused_and_empty(sign_in_input)
+    |> commit_focused(sign_in_input, "Focus check")
+    |> assert_has("#story-map-cell-#{sign_in_cell}", text: "Focus check")
+    # Enter keeps the same composer (same DOM node, so phx-mounted does not re-fire); LiveView's
+    # post-submit focus restore is what keeps it focused. Wait on `:focus`, never sample it.
+    |> assert_focused_and_empty(sign_in_input)
+    |> commit_focused(sign_in_input, "Second card")
+    |> assert_has("#story-map-cell-#{sign_in_cell}", text: "Focus check")
+    |> assert_has("#story-map-cell-#{sign_in_cell}", text: "Second card")
+    |> assert_focused_and_empty(sign_in_input)
+    # Another cell's ＋ with a composer open: click-away closes the first, and the second
+    # cell's input is a fresh mount that must take focus.
+    |> click("#story-map-add-#{organize_cell}")
+    |> assert_focused_and_empty(organize_input)
+    |> refute_has("#story-map-compose-#{sign_in_cell}")
+    |> commit_focused(organize_input, "Other cell")
+    |> assert_has("#story-map-cell-#{organize_cell}", text: "Other cell")
+    # Escape closes the composer and brings the cell's ＋ back.
+    |> press(organize_input, "Escape")
+    |> refute_has("#story-map-compose-#{organize_cell}")
+    |> assert_has("#story-map-add-#{organize_cell}")
+
+    cards = Cards.list_cards(board)
+
+    for title <- ["Focus check", "Second card"] do
+      card = Enum.find(cards, &(&1.title == title))
+      assert card.story_step_id == sign_in.id
+      assert card.release_id == mvp.id
+    end
+
+    assert Enum.find(cards, &(&1.title == "Other cell")).story_step_id == organize.id
+  end
+
   # Type the name and press Enter, exactly as a user does: real keystrokes for phx-change to
   # see, then the real Enter that goes through LiveView's submit path — blur and all.
   defp commit(session, name) do
     session
     |> type(@input, name)
     |> press(@input, "Enter")
+  end
+
+  # Wait for real browser focus to land on `input`, then check it is empty. Waiting (not
+  # sampling) matters: focus arrives with the patch, after the click or Enter returns.
+  defp assert_focused_and_empty(session, input) do
+    unwrap(session, fn %{frame_id: frame_id} ->
+      {:ok, _} = Frame.wait_for_selector(frame_id, selector: "#{input}:focus", timeout: 2_000)
+      {:ok, value} = Frame.input_value(frame_id, selector: input, timeout: 2_000)
+      assert value == "", ~s(expected #{input} to be empty, got "#{value}")
+    end)
+  end
+
+  # Type into the input only while it already holds focus — the `:focus`-qualified selector
+  # never matches an unfocused input, so the keystrokes cannot be what focused it.
+  defp commit_focused(session, input, name) do
+    session
+    |> type("#{input}:focus", name)
+    |> press("#{input}:focus", "Enter")
   end
 end

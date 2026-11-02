@@ -804,6 +804,21 @@ defmodule HamacaWeb.StoryMapComponentsTest do
       assert html =~ "color:var(--color-primary);font-size:14px;line-height:1"
     end
 
+    # RE501: a bare `autofocus` is honored only on initial document load, and this composer is
+    # patched in by LiveView, so the input must focus itself when it mounts.
+    test "the open composer's input focuses itself when LiveView mounts it" do
+      html =
+        cell_html(%{
+          composing: true,
+          compose_form: Phoenix.Component.to_form(%{"title" => ""}, as: :card)
+        })
+
+      input = html |> LazyHTML.from_fragment() |> LazyHTML.query("#story-map-compose-s-10-r-100-input")
+
+      assert [mounted] = LazyHTML.attribute(input, "phx-mounted")
+      assert mounted =~ "focus"
+    end
+
     test "the cell is still the drop zone Step 2 defined" do
       html = cell_html(%{})
 
