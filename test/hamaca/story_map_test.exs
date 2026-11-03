@@ -235,24 +235,56 @@ defmodule Hamaca.StoryMapTest do
     end
   end
 
-  describe "insert_before/3 — the one ordering rule" do
-    test "inserts the dragged id immediately before the target" do
-      assert StoryMap.insert_before([1, 2, 3], 3, 1) == [3, 1, 2]
-      assert StoryMap.insert_before([1, 2, 3], 1, 3) == [2, 1, 3]
-      assert StoryMap.insert_before([1, 2, 3], 1, 2) == [1, 2, 3]
+  describe "insert_at/4 — the one ordering rule" do
+    test ":before inserts the dragged id immediately before the target" do
+      assert StoryMap.insert_at([1, 2, 3], 3, 1, :before) == [3, 1, 2]
+      assert StoryMap.insert_at([1, 2, 3], 1, 3, :before) == [2, 1, 3]
     end
 
-    test "dropping something on itself is the identity" do
-      assert StoryMap.insert_before([1, 2, 3], 2, 2) == [1, 2, 3]
+    test ":after inserts the dragged id immediately after the target" do
+      assert StoryMap.insert_at([1, 2, 3], 1, 3, :after) == [2, 3, 1]
+      assert StoryMap.insert_at([1, 2, 3], 3, 1, :after) == [1, 3, 2]
+      assert StoryMap.insert_at([1, 2, 3], 1, 2, :after) == [2, 1, 3]
     end
 
-    test "a target that is not in the list appends" do
-      assert StoryMap.insert_before([1, 2, 3], 1, 99) == [2, 3, 1]
-      assert StoryMap.insert_before([], 1, 99) == [1]
+    test ":before the next id resolves to the current position" do
+      assert StoryMap.insert_at([1, 2, 3], 1, 2, :before) == [1, 2, 3]
+    end
+
+    test "dropping something on itself is the identity on either side" do
+      assert StoryMap.insert_at([1, 2, 3], 2, 2, :before) == [1, 2, 3]
+      assert StoryMap.insert_at([1, 2, 3], 2, 2, :after) == [1, 2, 3]
+    end
+
+    test "a target that is not in the list appends, on either side" do
+      assert StoryMap.insert_at([1, 2, 3], 1, 99, :before) == [2, 3, 1]
+      assert StoryMap.insert_at([1, 2, 3], 1, 99, :after) == [2, 3, 1]
+      assert StoryMap.insert_at([], 1, 99, :after) == [1]
     end
 
     test "an id that is not in the list is inserted rather than lost" do
-      assert StoryMap.insert_before([1, 2], 9, 2) == [1, 9, 2]
+      assert StoryMap.insert_at([1, 2], 9, 2, :before) == [1, 9, 2]
+      assert StoryMap.insert_at([1, 2], 9, 1, :after) == [1, 9, 2]
+    end
+  end
+
+  describe "drop_sides/0 and parse_drop_side/1" do
+    test "the closed set of sides is exactly before and after" do
+      assert StoryMap.drop_sides() == [:before, :after]
+    end
+
+    test "parses the wire strings and defaults everything else to :before" do
+      assert StoryMap.parse_drop_side("before") == :before
+      assert StoryMap.parse_drop_side("after") == :after
+      assert StoryMap.parse_drop_side(nil) == :before
+      assert StoryMap.parse_drop_side("") == :before
+      assert StoryMap.parse_drop_side("middle") == :before
+      assert StoryMap.parse_drop_side(1) == :before
+    end
+
+    test "every side round-trips through its wire string" do
+      sides = StoryMap.drop_sides()
+      assert Enum.map(sides, &StoryMap.parse_drop_side(to_string(&1))) == sides
     end
   end
 

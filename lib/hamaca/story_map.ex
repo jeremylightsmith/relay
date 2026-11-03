@@ -164,19 +164,41 @@ defmodule Hamaca.StoryMap do
   """
   def next_position(list), do: Enum.reduce(list, 0, &max(&1.position, &2)) + 1
 
+  @drop_sides [:before, :after]
+
   @doc """
-  The artboard's `reorder/3` (`docs/designs/Relay Story Map.dc.html`, line ~679), pure and
-  query-free like `next_position/1`: remove `id` from `ids` and re-insert it at `target_id`'s
-  index — i.e. immediately **before** the target — appending when the target is not in the
-  list. Dropping something on itself is the identity.
+  The closed set of sides a header drop lands on relative to its target (RE272). The single
+  source of truth: `parse_drop_side/1` and `insert_at/4` both take their values from it, and the
+  web layer never re-types the list.
+  """
+  def drop_sides, do: @drop_sides
+
+  @doc """
+  Parses a drop side off the wire. Explicit clauses, never `String.to_atom/1` — this is client
+  input. Anything that is not a known side (`nil` from a stale client that sends no side, `""`,
+  an unknown word, a non-string) is `:before`, so there is one parse and one default.
+
+      parse_drop_side("after")  #=> :after
+      parse_drop_side(nil)      #=> :before
+  """
+  def parse_drop_side("before"), do: :before
+  def parse_drop_side("after"), do: :after
+  def parse_drop_side(_other), do: :before
+
+  @doc """
+  The artboard's `reorder/3` (`docs/designs/Relay Story Map.dc.html`, line ~679) with a side,
+  pure and query-free like `next_position/1`: remove every copy of `id` from `ids` and
+  re-insert it immediately **before** or **after** `target_id`, appending when the target is not
+  in the list. Dropping something on itself is the identity — `ids` comes back verbatim.
 
   All three header drops (activity, step, release) order through this, so the insert rule has
   one home and no call site re-types it.
 
-      insert_before([1, 2, 3], 3, 1) #=> [3, 1, 2]
-      insert_before([1, 2, 3], 1, 9) #=> [2, 3, 1]
+      insert_at([1, 2, 3], 3, 1, :before) #=> [3, 1, 2]
+      insert_at([1, 2, 3], 1, 3, :after)  #=> [2, 3, 1]
+      insert_at([1, 2, 3], 1, 9, :after)  #=> [2, 3, 1]
   """
-  def insert_before(ids, id, target_id) when is_list(ids) do
+  def insert_at(ids, id, target_id, side) when is_list(ids) and side in @drop_sides do
     if id == target_id do
       ids
     else
@@ -184,10 +206,13 @@ defmodule Hamaca.StoryMap do
 
       case Enum.find_index(rest, &(&1 == target_id)) do
         nil -> rest ++ [id]
-        index -> List.insert_at(rest, index, id)
+        index -> List.insert_at(rest, index + side_offset(side), id)
       end
     end
   end
+
+  defp side_offset(:before), do: 0
+  defp side_offset(:after), do: 1
 
   @doc "Creates an activity on `board`. `board_id` comes from the board, never from `attrs`."
   def create_activity(board, attrs) do

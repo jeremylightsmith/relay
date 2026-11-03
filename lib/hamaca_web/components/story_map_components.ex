@@ -35,10 +35,12 @@ defmodule HamacaWeb.StoryMapComponents do
 
   **Drag and drop (RE262).** Every card face — cell and tray alike — is `draggable` and carries
   `.story-map-card[data-ref]`; every body cell is a `.story-map-drop[data-column][data-lane]`
-  zone and the tray is `.story-map-drop-tray`. The hovered state is CSS
-  (`.story-map-drop.drag-over` in `app.css`, the artboard's blue tint plus a 2px inset ring), not
-  an assign — a hover never costs a round trip. `assets/js/hooks/story_map_dnd.js` reads exactly
-  those four selectors and nothing else.
+  zone and the tray is `.story-map-drop-tray`. The hover is client-only, never an assign — a
+  hover never costs a round trip: RE272's one `.story-map-drop-line` (`app.css`), which
+  `assets/js/hooks/story_map_dnd.js` draws in `BoardLive`'s `#story-map-drop-layer` at the exact
+  landing spot, and the tray's own `.story-map-drop-tray.drag-over`. Cells and headers carry no
+  hover state. A step header also carries `data-activity-id`, so an activity dragged over it
+  measures that whole activity.
 
   RE257 adds `presence_stack/1`, the artboard's `showPresence` avatar stack. It is the only
   part of this module that is not a pure function of the board's data — it renders
@@ -755,6 +757,7 @@ defmodule HamacaWeb.StoryMapComponents do
         :for={{lane, index} <- Enum.with_index(@grid.lanes)}
         id={lane_dom_id(lane)}
         class={[lane.release && not @read_only && "story-map-header story-map-header-drop"]}
+        data-lane={lane.key}
         data-kind={lane.release && "release"}
         data-id={lane.release && lane.release.id}
         draggable={
@@ -955,8 +958,9 @@ defmodule HamacaWeb.StoryMapComponents do
   has a unit to test and to storybook.
 
   Drop target: `.story-map-drop` + `data-column` / `data-lane` — `assets/js/hooks/story_map_dnd.js`
-  reads exactly those three. The hovered state is CSS (`.story-map-drop.drag-over`), not an
-  assign, so a hover never costs a round trip.
+  reads exactly those three. The cell itself never changes on hover (RE272): the hook draws the
+  drop line in `#story-map-drop-layer`, outside the grid, so a hover never reflows the cell or
+  costs a round trip.
 
   `read_only` hides both the `＋` and the composer, the way `board_column/1` hides its own
   add-work button: an archived board's server-side guard already rejects `compose_cell` and
@@ -1310,6 +1314,7 @@ defmodule HamacaWeb.StoryMapComponents do
       class={[not @read_only && "story-map-header story-map-header-drop"]}
       data-kind="step"
       data-id={@column.step && @column.step.id}
+      data-activity-id={@column.step && @column.step.story_activity_id}
       draggable={to_string(not @read_only and @edit != {:step, @column.step && @column.step.id})}
       style={column_header_style(@column, @index)}
     >

@@ -68,8 +68,14 @@ defmodule HamacaWeb.Browser.StoryMapEditTest do
     # would race the async `story_map_reorder` push/patch. The real barrier has to be DOM that
     # only holds true after the reorder lands — here, the band's own inline `grid-column`
     # (`band_style/1`), which moves to column 2 only once `plan` is leftmost.
+    #
+    # RE272 — the pointer's half of the hovered header decides the side, so a drop on the
+    # target's centre would mean AFTER. Drop in its top-left corner to keep meaning BEFORE.
     session
-    |> drag("#story-map-activity-#{plan.id}", to: "#story-map-activity-#{onboard.id}")
+    |> drag("#story-map-activity-#{plan.id}",
+      to: "#story-map-activity-#{onboard.id}",
+      playwright: [target_position: %{x: 5, y: 5}]
+    )
     |> assert_has(~s(#story-map-activity-#{plan.id}[style^="grid-column:2 "]))
 
     assert Enum.map(StoryMap.list_activities(board), & &1.name) == [
@@ -81,7 +87,10 @@ defmodule HamacaWeb.Browser.StoryMapEditTest do
     # label's inline `grid-row` (`lane_label_style/1`), which only reads 3 once `later` is the
     # topmost lane.
     session
-    |> drag("#story-map-release-#{later.id}", to: "#story-map-release-#{mvp.id}")
+    |> drag("#story-map-release-#{later.id}",
+      to: "#story-map-release-#{mvp.id}",
+      playwright: [target_position: %{x: 5, y: 5}]
+    )
     |> assert_has(~s(#story-map-release-#{later.id}[style*="grid-row:3;"]))
 
     assert Enum.map(StoryMap.list_releases(board), & &1.name) == ["Later", "MVP", "Fast follow"]

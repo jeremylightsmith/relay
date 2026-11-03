@@ -1056,15 +1056,28 @@ defmodule HamacaWeb.BoardLiveStoryMapTest do
       assert has_element?(view, "#story-map-tray-count", "1")
     end
 
-    test "step onto an ACTIVITY header appends it last in that activity", %{conn: conn} = ctx do
+    test "step onto an ACTIVITY header, side after, appends it last in that activity", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "step", ctx.sign_in.id, "activity", ctx.plan.id, "after")
+
+      moved = Repo.get!(Schemas.StoryStep, ctx.sign_in.id)
+      assert moved.story_activity_id == ctx.plan.id
+      assert moved.position == 2
+      assert Repo.get!(Schemas.StoryStep, ctx.organize.id).position == 1
+    end
+
+    # RE272 — one parse, one default: a missing side is :before, which on an activity header
+    # means FIRST in that activity (RE261 appended here).
+    test "step onto an ACTIVITY header with no side puts it first in that activity", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       reorder(view, "step", ctx.sign_in.id, "activity", ctx.plan.id)
 
       moved = Repo.get!(Schemas.StoryStep, ctx.sign_in.id)
       assert moved.story_activity_id == ctx.plan.id
-      assert moved.position == 2
-      assert Repo.get!(Schemas.StoryStep, ctx.organize.id).position == 1
+      assert moved.position == 1
+      assert Repo.get!(Schemas.StoryStep, ctx.organize.id).position == 2
     end
 
     test "step onto a step in its OWN activity is a pure renumber", %{conn: conn} = ctx do
@@ -1082,21 +1095,21 @@ defmodule HamacaWeb.BoardLiveStoryMapTest do
       assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).position == 2
     end
 
-    # Unlike an activity dropped on itself (below), the artboard's moveTask/4 does NOT no-op a
-    # step self-drop: it always pushes the dragged step to the end of `targetAct`'s order. With
-    # a second step already after it, sign_in visibly moves — this pins that behavior rather
-    # than relying on it happening to fall out of the general "step onto step" clause.
-    test "dropping a step on itself moves it to the end of its own activity", %{conn: conn} = ctx do
+    # RE272 — a step dropped on itself is a no-op on either side (RE261 pushed it to the end of
+    # its own activity). With a second step after it, any write would be visible.
+    test "dropping a step on itself changes nothing, on either side", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
-      {:ok, second} = StoryMap.create_step(ctx.onboard, %{name: "Reset password", position: 2})
-      assert has_element?(view, "#story-map-step-#{second.id}")
+      {:ok, reset} = StoryMap.create_step(ctx.onboard, %{name: "Reset password", position: 2})
+      assert has_element?(view, "#story-map-step-#{reset.id}")
 
-      reorder(view, "step", ctx.sign_in.id, "step", ctx.sign_in.id)
+      for side <- ["after", "before"] do
+        reorder(view, "step", ctx.sign_in.id, "step", ctx.sign_in.id, side)
 
-      assert Repo.get!(Schemas.StoryStep, second.id).position == 1
-      assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).position == 2
-      assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).story_activity_id == ctx.onboard.id
+        assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).position == 1
+        assert Repo.get!(Schemas.StoryStep, reset.id).position == 2
+        assert Repo.get!(Schemas.StoryStep, ctx.sign_in.id).story_activity_id == ctx.onboard.id
+      end
     end
 
     test "release onto release reorders the swimlanes", %{conn: conn} = ctx do
@@ -1110,6 +1123,97 @@ defmodule HamacaWeb.BoardLiveStoryMapTest do
                "MVP",
                "Fast follow"
              ]
+    end
+
+    test "step onto a step, side after, lands after the map's last task", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "step", ctx.sign_in.id, "step", ctx.organize.id, "after")
+
+      moved = Repo.get!(Schemas.StoryStep, ctx.sign_in.id)
+      assert moved.story_activity_id == ctx.plan.id
+      assert moved.position == 2
+      assert Repo.get!(Schemas.StoryStep, ctx.organize.id).position == 1
+    end
+
+    test "activity onto activity, side after, lands after the last activity", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "activity", ctx.onboard.id, "activity", ctx.plan.id, "after")
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), & &1.name) == [
+               "Plan the backlog",
+               "Onboard & access"
+             ]
+    end
+
+    test "release onto release, side after, lands after the last release", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "release", ctx.mvp.id, "release", ctx.later.id, "after")
+
+      assert Enum.map(StoryMap.list_releases(ctx.board), & &1.name) == ["Fast follow", "Later", "MVP"]
+    end
+
+    test "activity onto a STEP header, side after, uses the step's activity and the side",
+         %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "activity", ctx.onboard.id, "step", ctx.organize.id, "after")
+
+      assert Enum.map(StoryMap.list_activities(ctx.board), & &1.name) == [
+               "Plan the backlog",
+               "Onboard & access"
+             ]
+    end
+
+    test "step onto an ACTIVITY header, side before, puts it first in that activity", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      {:ok, reset} = StoryMap.create_step(ctx.plan, %{name: "Reset password", position: 2})
+      assert has_element?(view, "#story-map-step-#{reset.id}")
+
+      reorder(view, "step", ctx.sign_in.id, "activity", ctx.plan.id, "before")
+
+      moved = Repo.get!(Schemas.StoryStep, ctx.sign_in.id)
+      assert moved.story_activity_id == ctx.plan.id
+      assert moved.position == 1
+      assert Repo.get!(Schemas.StoryStep, ctx.organize.id).position == 2
+      assert Repo.get!(Schemas.StoryStep, reset.id).position == 3
+    end
+
+    test "step onto an ACTIVITY header, side after, puts it last after several steps", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      {:ok, reset} = StoryMap.create_step(ctx.plan, %{name: "Reset password", position: 2})
+      assert has_element?(view, "#story-map-step-#{reset.id}")
+
+      reorder(view, "step", ctx.sign_in.id, "activity", ctx.plan.id, "after")
+
+      moved = Repo.get!(Schemas.StoryStep, ctx.sign_in.id)
+      assert moved.story_activity_id == ctx.plan.id
+      assert moved.position == 3
+    end
+
+    test "step onto a step-less ACTIVITY header, side after, becomes its first step", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      {:ok, shipped} = StoryMap.create_activity(ctx.board, %{name: "Shipped", position: 3})
+      assert has_element?(view, "#story-map-activity-#{shipped.id}")
+
+      reorder(view, "step", ctx.sign_in.id, "activity", shipped.id, "after")
+
+      moved = Repo.get!(Schemas.StoryStep, ctx.sign_in.id)
+      assert moved.story_activity_id == shipped.id
+      assert moved.position == 1
+    end
+
+    test "an unknown side parses to before", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      reorder(view, "release", ctx.later.id, "release", ctx.mvp.id, "sideways")
+
+      assert Enum.map(StoryMap.list_releases(ctx.board), & &1.name) == ["Later", "MVP", "Fast follow"]
     end
 
     test "a release dropped on the backbone, and a backbone header dropped on a release, do nothing",
@@ -1167,6 +1271,8 @@ defmodule HamacaWeb.BoardLiveStoryMapTest do
       column = view |> element("#story-map-step-#{ctx.sign_in.id}") |> render()
       assert column =~ ~s(data-kind="step")
       assert column =~ "story-map-header-drop"
+      # RE272 — an activity drag over a step header resolves to the step's activity.
+      assert column =~ ~s(data-activity-id="#{ctx.onboard.id}")
 
       lane = view |> element("#story-map-release-#{ctx.mvp.id}") |> render()
       assert lane =~ ~s(data-kind="release")
@@ -1596,13 +1702,23 @@ defmodule HamacaWeb.BoardLiveStoryMapTest do
   end
 
   # Exactly what assets/js/hooks/story_map_dnd.js pushes on a header drop: ids only, as strings.
+  # reorder/5 sends NO "side" key — a stale client — so the missing-side path stays covered.
   defp reorder(view, kind, id, target_kind, target_id) do
-    render_hook(view, "story_map_reorder", %{
+    render_hook(view, "story_map_reorder", reorder_params(kind, id, target_kind, target_id))
+  end
+
+  defp reorder(view, kind, id, target_kind, target_id, side) do
+    params = Map.put(reorder_params(kind, id, target_kind, target_id), "side", side)
+    render_hook(view, "story_map_reorder", params)
+  end
+
+  defp reorder_params(kind, id, target_kind, target_id) do
+    %{
       "kind" => kind,
       "id" => to_string(id),
       "target_kind" => target_kind,
       "target_id" => to_string(target_id)
-    })
+    }
   end
 
   defp card_by_title(board, title) do
@@ -1815,6 +1931,16 @@ defmodule HamacaWeb.BoardLiveStoryMapTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
 
       assert attr_of(view, "#story-map-zoom-compact", "aria-pressed") == "true"
+    end
+  end
+
+  describe "the drop line (RE272)" do
+    test "the map renders the empty drop layer the hook owns", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, ~s(#story-map-surface #story-map-drop-layer[phx-update="ignore"]))
+      assert attr_of(view, "#story-map-drop-layer", "style") =~ "pointer-events:none"
+      refute has_element?(view, "#story-map-drop-layer > *")
     end
   end
 

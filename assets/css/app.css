@@ -297,25 +297,51 @@
   pointer-events: none;
 }
 
-/* RE262 — the story map's drop states (artboard `Relay Story Map.dc.html`, lines ~526 and
-   ~562). !important because the cell's own background, the tray's own border/background and a
-   done card's own `opacity:0.8` are INLINE artboard values on the element, and an inline
-   declaration beats a stylesheet rule; the drop and drag states have to win over all three. */
-.story-map-drop.drag-over {
-  background: color-mix(in oklab, var(--color-primary) 15%, transparent) !important;
-  box-shadow: inset 0 0 0 2px var(--color-primary) !important;
-}
+/* RE262 — the story map's drop and drag states (artboard `Relay Story Map.dc.html`, line
+   ~562). !important because the tray's own border/background and a done card's own
+   `opacity:0.8` are INLINE artboard values on the element, and an inline declaration beats a
+   stylesheet rule; the drop and drag states have to win over both. */
 .story-map-drop-tray.drag-over {
   border-right-color: var(--color-primary) !important;
   background: color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100)) !important;
 }
-/* RE261 — a header's drop state is the artboard's `hdrDrop` (line ~415): a 2px BLUE RING,
-   deliberately distinct from a body cell's blue tint above, so a header drop and a cell drop
-   never look alike. Same !important justification: the header's own styles are inline artboard
-   values on the element. */
-.story-map-header-drop.drag-over {
-  box-shadow: 0 0 0 2px var(--color-primary) !important;
+/* RE272 — the story map's drop line (card mockup "Drop line — full-span structural lines,
+   pointer half decides, no cell tint"): the same family as the board's `.drop-placeholder`
+   above, but it replaces the RE262 cell tint and the RE261 header ring as the WHOLE drop
+   affordance. StoryMapDnD creates one in `#story-map-drop-layer` and sets its inline
+   left/top/width/height — `--h` for a card or release landing, `--v` for a step or activity —
+   so it sits outside the grid and never reflows a cell. No competing inline style, so no
+   !important. */
+.story-map-drop-line {
+  position: absolute;
+  z-index: 40;
+  pointer-events: none;
+  border-radius: 3px;
+  background: var(--color-primary);
+  box-shadow:
+    0 0 0 1px var(--color-base-100),
+    0 0 10px color-mix(in oklab, var(--color-primary) 55%, transparent);
 }
+.story-map-drop-line::before,
+.story-map-drop-line::after {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-base-100);
+}
+.story-map-drop-line--h { height: 3px; }
+.story-map-drop-line--h::before,
+.story-map-drop-line--h::after { top: -3px; }
+.story-map-drop-line--h::before { left: -4px; }
+.story-map-drop-line--h::after { right: -4px; }
+.story-map-drop-line--v { width: 3px; }
+.story-map-drop-line--v::before,
+.story-map-drop-line--v::after { left: -3px; }
+.story-map-drop-line--v::before { top: -4px; }
+.story-map-drop-line--v::after { bottom: -4px; }
 .story-map-card.dragging,
 .story-map-header.dragging {
   opacity: 0.5 !important;

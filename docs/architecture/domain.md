@@ -1058,8 +1058,10 @@ sharing behavior.
   card still points at the structure (RE261)** — checked in the delete's own transaction, so
   the cascade above is now only reachable for an already-empty structure. `move_step/3` is the
   single step-repositioning entry point (activity change + renumber, one transaction, one
-  broadcast); `insert_before/3` is the pure "remove and re-insert before the target" ordering
-  rule every header drop shares.
+  broadcast); `insert_at/4` is the pure "remove and re-insert on a side of the target" ordering
+  rule every header drop shares — the side is the closed set `drop_sides/0` (`[:before,
+  :after]`), parsed off the wire by `parse_drop_side/1` (anything unknown, or missing, is
+  `:before`), and a target not in the list appends (RE272).
   Structure writes broadcast `{:story_map_changed, board_id}`; assignment reuses
   `{:card_upserted, card}` via `Cards.notify_upserted/1`. `Hamaca.Boards` deliberately does
   **not** depend on this context — `StoryMap → Cards → Boards` already exists, so the reverse
@@ -1107,9 +1109,14 @@ sharing behavior.
   `lanes[].count`, so display and guard come from one number) and the board's last release
   showing no ✕ at all; and drag-reorder by header — the `StoryMapDnD` hook gains a second
   draggable kind (`.story-map-header[data-kind][data-id]`, dropping on
-  `.story-map-header-drop`) that pushes `story_map_reorder` with **ids only**, and `BoardLive`
-  computes the order with `StoryMap.insert_before/3` and writes through
-  `reorder_activities/2`, `move_step/3` or `reorder_releases/2`. Reordering releases moves the
+  `.story-map-header-drop`) that pushes `story_map_reorder` with **ids only** plus an optional `"side"`
+  (`"before"` | `"after"`, RE272 — a missing one means `:before`; the hook takes it from the
+  pointer's half of the hovered header, and draws one `.story-map-drop-line` in `BoardLive`'s
+  `#story-map-drop-layer` where the item will land — the cell tint and header ring are gone),
+  and `BoardLive` computes the
+  order with `StoryMap.insert_at/4` and writes through `reorder_activities/2`, `move_step/3` or
+  `reorder_releases/2`. A step dropped on an activity header goes first (`:before`) or last
+  (`:after`) in it; a step dropped on itself is a no-op, as an activity on itself is. Reordering releases moves the
   last-lane fallback with it, which is a display move only — no stored `release_id` changes.
   Every new event joins the `read_only?` guard list and none of the affordances render on an
   archived board.

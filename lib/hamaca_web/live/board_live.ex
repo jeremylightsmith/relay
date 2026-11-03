@@ -1188,6 +1188,19 @@ defmodule HamacaWeb.BoardLive do
             style="position:absolute;top:0;left:0;width:0;height:0;z-index:40;pointer-events:none;"
           >
           </div>
+          <%!--
+          RE272 — the drop line's overlay, the same 0x0 content-origin layer as the cursors so
+          the line StoryMapDnD positions in #story-map-grid's coordinates scrolls with the map
+          and never reflows a cell. phx-update="ignore" because the hook owns the one line
+          inside it; the server renders it empty.
+          --%>
+          <div
+            id="story-map-drop-layer"
+            phx-update="ignore"
+            aria-hidden="true"
+            style="position:absolute;top:0;left:0;width:0;height:0;z-index:40;pointer-events:none;"
+          >
+          </div>
           <%!-- RE259 — the branch is on ACTIVITIES, not `grid.bands`: a board whose every
                 activity is collapsed has no bands but is not empty, and would otherwise
                 render the day-one panel on top of its own stubs. --%>
@@ -3055,19 +3068,23 @@ defmodule HamacaWeb.BoardLive do
     end
   end
 
-  # RE261 — a header drop. The client sends IDS ONLY; the server resolves both ends from its
-  # board-scoped assigns, computes the new order with StoryMap.insert_before/3 and calls the
-  # context, so a forged payload can at worst reorder something the user can already see. Every
-  # failure is a silent no-op — the contract assign_card already uses for a stale drop. The
-  # re-render comes from the write's own {:story_map_changed, _} broadcast.
+  # RE261 — a header drop. The client sends IDS ONLY (plus, since RE272, an optional "side");
+  # the server resolves both ends from its board-scoped assigns, computes the new order with
+  # StoryMap.insert_at/4 and calls the context, so a forged payload can at worst reorder
+  # something the user can already see. "side" is read from the params rather than matched, so
+  # a stale client that sends none still lands — StoryMap.parse_drop_side/1 maps that to
+  # :before. Every failure is a silent no-op — the contract assign_card already uses for a stale
+  # drop. The re-render comes from the write's own {:story_map_changed, _} broadcast.
   def handle_event(
         "story_map_reorder",
-        %{"kind" => kind, "id" => id, "target_kind" => target_kind, "target_id" => target_id},
+        %{"kind" => kind, "id" => id, "target_kind" => target_kind, "target_id" => target_id} = params,
         socket
       ) do
+    side = StoryMap.parse_drop_side(Map.get(params, "side"))
+
     with {_kind, _record} = dragged <- resolve_story_map_target(socket, kind, id),
          {_target_kind, _target} = target <- resolve_story_map_target(socket, target_kind, target_id) do
-      {:noreply, apply_story_map_reorder(socket, dragged, target)}
+      {:noreply, apply_story_map_reorder(socket, dragged, target, side)}
     else
       _other -> {:noreply, socket}
     end
@@ -5490,71 +5507,74 @@ defmodule HamacaWeb.BoardLive do
   defp apply_story_map_delete(socket, {:error, _changeset}), do: socket
 
   # The artboard's onDropAct / onDropTask (Relay Story Map.dc.html, lines ~681-682) as one
-  # total function. Every pair the matrix does not name — a release onto the backbone, a
-  # backbone header onto a release — falls through to the no-op clause.
-  defp apply_story_map_reorder(socket, {:activity, dragged}, {:activity, target}) do
-    reorder_story_activities(socket, dragged.id, target.id)
+  # total function, each pair landing on `side` (:before | :after, RE272) of its target. Every
+  # pair the matrix does not name — a release onto the backbone, a backbone header onto a
+  # release — falls through to the no-op clause.
+  defp apply_story_map_reorder(socket, {:activity, dragged}, {:activity, target}, side) do
+    reorder_story_activities(socket, dragged.id, target.id, side)
   end
 
   # Dropping an activity on a STEP header targets that step's activity.
-  defp apply_story_map_reorder(socket, {:activity, dragged}, {:step, target}) do
-    reorder_story_activities(socket, dragged.id, target.story_activity_id)
+  defp apply_story_map_reorder(socket, {:activity, dragged}, {:step, target}, side) do
+    reorder_story_activities(socket, dragged.id, target.story_activity_id, side)
   end
 
-  # A step dropped on itself: the artboard's moveTask/4 does NOT no-op this (unlike an activity
-  # on itself, below) — `targetTask === taskId` takes the `else` branch and always pushes the
-  # dragged step to the end of its own activity's order. Handled as its own clause rather than
-  # falling into the general case below: that clause appends `dragged.id` to build a list for
-  # insert_before/3 to dedupe, but insert_before/3 short-circuits to a verbatim return when
-  # `id == target_id`, so the append would survive as a genuine duplicate id and renumber/3
-  # would assign it two positions, leaving a gap in the final numbering.
-  defp apply_story_map_reorder(socket, {:step, %{id: id} = dragged}, {:step, %{id: id}}) do
-    ids = Enum.reject(story_map_step_ids(socket, dragged.story_activity_id), &(&1 == id)) ++ [id]
+  # A step dropped on itself is a no-op on either side, like an activity on itself (RE272
+  # removed RE261's "push it to the end of its own activity" quirk). It must stay its own clause
+  # ABOVE the general case below: that clause appends `dragged.id` to build a list for
+  # insert_at/4 to dedupe, but insert_at/4 short-circuits to a verbatim return when
+  # `id == target_id`, so the append would survive as a genuine duplicate id.
+  defp apply_story_map_reorder(socket, {:step, %{id: id}}, {:step, %{id: id}}, _side), do: socket
 
-    _ = StoryMap.move_step(dragged, dragged.story_activity_id, ids)
-    socket
-  end
-
-  defp apply_story_map_reorder(socket, {:step, dragged}, {:step, target}) do
-    # The target activity's step ids WITH the dragged one appended, so insert_before/3's own
+  defp apply_story_map_reorder(socket, {:step, dragged}, {:step, target}, side) do
+    # The target activity's step ids WITH the dragged one appended, so insert_at/4's own
     # "remove every copy of `id` first" makes "already in this activity" and "arriving from
     # another" the same list. `dragged.id != target.id` here — the self-drop clause above
     # handles that case, where this append would instead create a genuine duplicate.
     ids =
-      StoryMap.insert_before(
+      StoryMap.insert_at(
         story_map_step_ids(socket, target.story_activity_id) ++ [dragged.id],
         dragged.id,
-        target.id
+        target.id,
+        side
       )
 
     _ = StoryMap.move_step(dragged, target.story_activity_id, ids)
     socket
   end
 
-  # The artboard's `moveTask(s, task, targetAct, null)`: dropped on an activity header, the step
-  # goes to the END of that activity.
-  defp apply_story_map_reorder(socket, {:step, dragged}, {:activity, target}) do
-    ids = Enum.reject(story_map_step_ids(socket, target.id), &(&1 == dragged.id)) ++ [dragged.id]
+  # Dropped on an activity header, the step goes FIRST (:before) or LAST (:after) in that
+  # activity — the artboard's `moveTask(s, task, targetAct, null)` is the :after case. Works for
+  # an activity with no steps yet.
+  defp apply_story_map_reorder(socket, {:step, dragged}, {:activity, target}, side) do
+    others = Enum.reject(story_map_step_ids(socket, target.id), &(&1 == dragged.id))
+
+    ids =
+      case side do
+        :before -> [dragged.id | others]
+        :after -> others ++ [dragged.id]
+      end
 
     _ = StoryMap.move_step(dragged, target.id, ids)
     socket
   end
 
-  defp apply_story_map_reorder(socket, {:release, dragged}, {:release, target}) do
-    ids = StoryMap.insert_before(Enum.map(socket.assigns.releases, & &1.id), dragged.id, target.id)
+  defp apply_story_map_reorder(socket, {:release, dragged}, {:release, target}, side) do
+    ids = StoryMap.insert_at(Enum.map(socket.assigns.releases, & &1.id), dragged.id, target.id, side)
 
     _ = StoryMap.reorder_releases(socket.assigns.board, ids)
     socket
   end
 
-  defp apply_story_map_reorder(socket, _dragged, _target), do: socket
+  defp apply_story_map_reorder(socket, _dragged, _target, _side), do: socket
 
-  defp reorder_story_activities(socket, dragged_id, target_activity_id) do
+  defp reorder_story_activities(socket, dragged_id, target_activity_id, side) do
     ids =
-      StoryMap.insert_before(
+      StoryMap.insert_at(
         Enum.map(socket.assigns.story_activities, & &1.id),
         dragged_id,
-        target_activity_id
+        target_activity_id,
+        side
       )
 
     _ = StoryMap.reorder_activities(socket.assigns.board, ids)
