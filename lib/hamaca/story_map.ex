@@ -584,13 +584,14 @@ defmodule Hamaca.StoryMap do
 
   # A sibling is renumbered with a bare UPDATE of the one column, deliberately NOT the changeset
   # path the moved card takes, so its `updated_at` is left alone. This diverges from
-  # `Cards.place_at/3`, on purpose: `updated_at` is this app's recency proxy behind two orderings
-  # that live in the *board* lens — the terminal Done column's render window
-  # (`Cards.list_stage_cards/2`) and `coalesce(blocked_since, updated_at)` in
-  # `Cards.needs_you_feed/1`. A story-map cell spans every stage by construction, so re-stamping a
-  # sibling would reorder the Done column and every member's needs-you feed off a drag those
-  # surfaces never show. Returns the struct it was given with the new position applied, so
-  # renumber_cell/2 still gets a full row back for the moved card's neighbours.
+  # `Cards.place_at/3`, on purpose: `updated_at` is this app's recency proxy behind orderings
+  # that live in the *board* lens — `coalesce(blocked_since, updated_at)` in
+  # `Cards.needs_you_feed/1`, and the terminal Done column's fallback for a card with no
+  # `done_at` (it orders by `coalesce(done_at, updated_at)`, RE504). A story-map cell spans every
+  # stage by construction, so re-stamping a sibling would reorder every member's needs-you feed
+  # (and any `done_at`-less Done card) off a drag those surfaces never show. Returns the struct it
+  # was given with the new position applied, so renumber_cell/2 still gets a full row back for
+  # the moved card's neighbours.
   defp set_sibling_position(%Card{} = card, position) do
     Repo.update_all(from(c in Card, where: c.id == ^card.id), set: [story_map_position: position])
     %{card | story_map_position: position}

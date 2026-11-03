@@ -413,7 +413,32 @@ sharing behavior.
   (`Cards.stranded_run/2`: an active run whose flow's `stage` is not the destination) is
   refused up front with `{:error, :would_strand_run}` — `POST /api/cards/:ref/move` maps it to
   **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
-  the raw error. `Cards.stranded_runs/2` (RE502) is its batch form — card id → stranding run,
+  the raw error. **Done week paging** (RE504): the terminal Done column orders, filters and
+  buckets on a card's **effective done time** (`coalesce(done_at, updated_at)`, one private
+  query macro in `Cards`; `Schemas.Card.done_time/1` in memory), newest first then `id` desc —
+  `list_stage_cards/2` included. The pure `Hamaca.Cards.DoneWeeks` (exported) holds the ISO-week
+  math in the viewer's zone (`Tz` is the app's `:time_zone_database`): `zone/1` validates a zone
+  name (else `"Etc/UTC"`), `week_start/2`, `cutoff/2` (local Monday 00:00 as UTC; first instant
+  after a midnight DST gap, earlier instant on ambiguity), `label/3` / `range_label/2` (the week
+  markers, "This week" / "Last week" / "Oct 12 – 18") and `group/2`. The queries:
+  `latest_done_cutoff/2` (the newest done week's start), `older_done_cutoff/4` (the start of the
+  next `n` non-empty weeks older than a cutoff — one `date_trunc('week', … AT TIME ZONE ^zone)`
+  query, empty weeks skipped), `list_done_cards/2` (everything at or after a cutoff) and
+  `done_before?/2`. `done_weeks_per_page/0` (4) is the batch size; `stage_column/2`'s terminal
+  read is capped at `done_column_window/0` (200) for neighbor nav and the native swipe bridge.
+  **The board's Done column** (`HamacaWeb.BoardLive`) reads the viewer's zone from the LiveSocket
+  connect param `"timezone"` (`Intl.DateTimeFormat().resolvedOptions().timeZone`, validated by
+  `DoneWeeks.zone/1`; the dead render and an unknown zone read UTC) into `:viewer_zone`, and keeps a
+  `:done_cutoff` instant plus `:done_more?`. Its one windowing gate (`stream_stage/4` /
+  `stage_window/4`) re-anchors a nil or now-empty cutoff on `latest_done_cutoff/2`, streams
+  `list_done_cards/2` with a **week marker** stream item (`%{id: "week-<iso monday>", week_start:,
+  title:, range:, count:, first?:}`, rendered by `CoreComponents.done_week_marker/1`) before each
+  week's cards, and sets `done_more? = done_before?/2`. `"load_more_done_weeks"` moves the cutoff
+  back by `older_done_cutoff/4`; the column then shows "Load 4 more weeks" or, once nothing older
+  remains, "That's everything" (desktop and the pager's compact rows). Realtime moves, upserts,
+  archives and reloads all re-derive the column through the gate; a terminal-stage change resets
+  the cutoff. Mid-board Done sub-lanes are not paged.
+  `Cards.stranded_runs/2` (RE502) is its batch form — card id → stranding run,
   one query for the whole list — so a bulk move pre-checks a selection without N queries.
   The bulk move itself is **`Runs.bulk_move_cards/4`**, not a `Cards` function: with
   `cancel_runs: true` it cancels each stranding run (`Runs.cancel_run/2`, credited to the
@@ -1581,14 +1606,33 @@ every card read and `{:card_upserted, …}` payload carries it. `posted_by_user_
 "came from the public board", read only through `Schemas.Card.public?/1`; a public card's
 requester is its poster.
 
+A `Card` also carries `done_at` (RE504): **when it entered its board's terminal stage**
+(`Hamaca.Boards.terminal_stage/1`, the last top-level stage by position; read from the DB by
+`Boards.terminal_stage_id/1`). Nullable `:utc_datetime`, indexed `(stage_id, done_at)`, never
+cast. The invariant: a card in the terminal stage carries the instant it arrived, a card anywhere
+else carries `nil` — a mid-board `:done` sub-lane is not terminal. One pure rule,
+`Schemas.Card.done_at_after_stage_change/4`, decides the value (entering → now, leaving or
+staying out → nil, staying in → unchanged), and both stage writers call it: `Hamaca.Cards` on a
+cross-stage `move_card/4` (the moved card only — a same-stage reorder, an edit or a status change
+never touches it) and on `create_card/3` into the terminal stage, and
+`Hamaca.Boards.rehome_archived_cards/4` on a stage delete / lane disable, where "terminal" means
+terminal after the delete. A card can still become terminal without moving (a stage reorder, or
+deleting the terminal stage, which promotes the stage before it with its cards already inside),
+so the **effective done time** is
+`done_at || updated_at` — `Schemas.Card.done_time/1` in memory. The migration that added the
+column backfilled every terminal-stage card (archived included) from its latest `:moved` activity
+into that stage, falling back to `updated_at`. It is in `Cards`' `@list_card_fields`, so every
+board read carries it.
+
 A `Card` also carries `story_map_position`: its order **within its story-map cell**, nullable
 and independent of `cards.position` (its order within its stage column). The two orderings never
 affect each other — dragging on the map rewrites one, dragging on the board the other. `nil`
 means nobody has ordered the card on the map yet, and nil sorts **last** inside a cell. Placing a
 card renumbers its whole target cell, and the **siblings** are renumbered with a bare
 `update_all` so their `updated_at` is untouched — that column is the recency proxy behind the
-Done column's render window and the needs-you feed, both board-lens orderings that would
-otherwise be silently reshuffled by a drag on the map.
+needs-you feed (`coalesce(blocked_since, updated_at)`) and the Done column's fallback for a card
+with no `done_at` (the column orders by effective done time, `coalesce(done_at, updated_at)`),
+board-lens orderings that would otherwise be silently reshuffled by a drag on the map.
 
 A `Card` may also be **blocked by** other cards on the same board (RE93). Each edge is a
 `CardDependency` row (`card_id` = the dependent, `depends_on_card_id` = the blocker), cascading

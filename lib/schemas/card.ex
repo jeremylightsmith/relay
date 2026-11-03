@@ -27,6 +27,8 @@ defmodule Schemas.Card do
   **requester** (its creator; nil for an agent-created card); nullable, never cast — set
   programmatically by `Hamaca.Cards.create_card/3` from the `{:user, id}` actor. `mockups` (RE370) is the card's HTML
   mockup list — nullable, never cast here; written via `Hamaca.Cards.set_mockups/2`.
+  `done_at` (RE504) records when the card entered its board's terminal stage; nullable, never
+  cast — written only from `done_at_after_stage_change/4` by the stage-writing paths.
 
   `story_activity_id` / `story_step_id` / `release_id` (RE265) place the card on the story
   map — all three nilable, all three cast **only** through `story_map_changeset/2`, kept
@@ -63,6 +65,9 @@ defmodule Schemas.Card do
     field :blocked_since, :utc_datetime
     field :agent_heartbeat_at, :utc_datetime
     field :archived_at, :utc_datetime
+    # RE504 — when the card entered its board's terminal stage; nil outside it. Never cast —
+    # written only through done_at_after_stage_change/4 by the domain.
+    field :done_at, :utc_datetime
     field :branch, :string
     field :plan, :string
     field :pr_url, :string
@@ -201,6 +206,32 @@ defmodule Schemas.Card do
       changeset
     end
   end
+
+  @doc """
+  The ONE `done_at` rule (RE504): the card's `done_at` after a stage change, given its `current`
+  value, whether it was in its board's terminal stage before and whether it is after, and `now`.
+
+    * entering the terminal stage → `now` (truncated to the second)
+    * leaving it, or staying outside it → `nil`
+    * staying in it → `current`, or `now` when it had none
+
+  Both stage writers call it: `Hamaca.Cards` (move + create) and `Hamaca.Boards` (rehoming
+  archived cards on a stage delete), so "what counts as done since when" is decided once.
+  """
+  @spec done_at_after_stage_change(DateTime.t() | nil, boolean(), boolean(), DateTime.t()) :: DateTime.t() | nil
+  def done_at_after_stage_change(_current, _was_terminal?, false, _now), do: nil
+  def done_at_after_stage_change(current, true, true, now), do: current || truncate(now)
+  def done_at_after_stage_change(_current, false, true, now), do: truncate(now)
+
+  defp truncate(%DateTime{} = at), do: DateTime.truncate(at, :second)
+
+  @doc """
+  The card's effective done time (RE504): `done_at`, falling back to `updated_at` for a card
+  that became terminal without moving (a stage reorder or a terminal-stage delete). The
+  in-memory twin of the Done queries' SQL expression.
+  """
+  @spec done_time(t()) :: DateTime.t()
+  def done_time(%__MODULE__{done_at: done_at, updated_at: updated_at}), do: done_at || updated_at
 
   @doc "True when the card has been archived (soft-hidden from the board)."
   def archived?(%__MODULE__{archived_at: nil}), do: false

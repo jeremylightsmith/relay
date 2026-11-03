@@ -98,7 +98,8 @@ defmodule HamacaWeb.BoardLiveSearchTest do
       stage: done,
       title: "Zebra archaeology",
       ref_number: 100,
-      updated_at: ~U[2026-07-01 00:00:00Z]
+      # weeks older than the fillers' week, so it sits behind "Load 4 more weeks"
+      done_at: ~U[2026-06-01 00:00:00Z]
     )
 
     for i <- 1..12 do
@@ -112,8 +113,8 @@ defmodule HamacaWeb.BoardLiveSearchTest do
 
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
 
-    # The terminal Done column renders only the newest `Cards.done_page_size/0` cards, so the
-    # oldest is not in the stream at all. This is exactly why search is a popover over the
+    # The terminal Done column renders only its latest non-empty week (RE504 week paging), so
+    # the older card is not in the stream at all. This is exactly why search is a popover over the
     # database and not a filter over the columns.
     refute view |> element("#board") |> render() =~ "Zebra archaeology"
 

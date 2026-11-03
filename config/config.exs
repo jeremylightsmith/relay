@@ -7,6 +7,10 @@
 # General application configuration
 import Config
 
+# A real time zone database, so DateTime.shift_zone/2 works beyond UTC — the board's Done column
+# buckets cards into weeks in the viewer's zone (RE504, `Hamaca.Cards.DoneWeeks`).
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",

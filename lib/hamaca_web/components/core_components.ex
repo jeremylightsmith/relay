@@ -1321,9 +1321,9 @@ defmodule HamacaWeb.CoreComponents do
 
   Filtering the rendered columns is the obvious first instinct and it is wrong here: the board
   renders each stage as a LiveView stream (so filtering means re-streaming every stage with
-  `reset: true` on each keystroke), and the terminal Done column is a bounded window
-  (`Cards.done_page_size/0`) whose older cards are not in the stream at all — a filter would
-  structurally fail to find most finished work, which is precisely what search is for. A
+  `reset: true` on each keystroke), and the terminal Done column is a bounded window (whole
+  weeks, `Cards.done_weeks_per_page/0` at a time, RE504) whose older cards are not in the
+  stream at all — a filter would structurally fail to find most finished work, which is precisely what search is for. A
   popover queries the database instead: it sees the whole board, and costs zero stream churn.
 
   **No artboard governs this.** Verified during RE198's brainstorm: no `docs/designs/*.dc.html`
@@ -8063,8 +8063,9 @@ defmodule HamacaWeb.CoreComponents do
   When `collapsed` and `pager` (RE377 — the phone-width pager is active), the stage renders
   instead as a compact page: header with a `collapsed` badge and a **Show cards** button
   (`"expand_stage"`), then one-line `compact_card_row/1` rows (main lane, then each sub-lane),
-  and for the terminal stage a "N more" button (`"show_more_done"`). In pager mode an expanded
-  stage's header carries **Show as list** (`"collapse_stage"`).
+  and for the terminal stage its week markers and a "Load 4 more weeks" button
+  (`"load_more_done_weeks"`, RE504). In pager mode an expanded stage's header carries
+  **Show as list** (`"collapse_stage"`).
 
   ## Examples
 
@@ -8133,17 +8134,12 @@ defmodule HamacaWeb.CoreComponents do
 
   attr :terminal, :boolean, default: false, doc: "true when this is the board's terminal (Done) stage"
 
-  attr :revealed, :integer,
+  attr :done_more, :boolean,
     default: nil,
     doc:
-      "RLY-53 — how many terminal Done cards are shown; the 'Show N more' button appears " <>
-        "when @count exceeds it. nil (non-terminal) hides the button."
-
-  attr :page_size, :integer,
-    default: 8,
-    doc:
-      "RLY-53 — the reveal batch size, capping the button's count " <>
-        "(keep in sync with BoardLive @done_page_size)"
+      "RE504 — the terminal Done column's week paging: nil (not the terminal column) shows " <>
+        "nothing; true shows the 'Load N more weeks' button; false shows the 'That's " <>
+        "everything' end note when the column has cards."
 
   attr :questions, :map, default: %{}, doc: "card_id => latest needs_input question, for previews"
 
@@ -8209,7 +8205,7 @@ defmodule HamacaWeb.CoreComponents do
           total_count={@total_count}
           count={@count}
           terminal={@terminal}
-          revealed={@revealed}
+          done_more={@done_more}
           cards={@cards}
           sublanes={@sublanes}
         />
@@ -8442,33 +8438,48 @@ defmodule HamacaWeb.CoreComponents do
                       >
                         No cards yet
                       </div>
-                      <.board_card
-                        :for={{dom_id, card} <- @cards}
-                        {card_log_attrs(@health, card.id)}
-                        id={dom_id}
-                        title={card.title}
-                        tag={card.tag}
-                        ref={Card.format_ref(@board_key, card.ref_number)}
-                        status={card.status}
-                        stage_type={@type}
-                        done={@terminal and card.status == :ready}
-                        question={Map.get(@questions, card.id)}
-                        progress={Cards.sub_task_pct(card)}
-                        owners={card.owners}
-                        active_owner={Cards.active_owner_type(card)}
-                        lane={:main}
-                        category={@category}
-                        run={Map.get(@runs, card.id)}
-                        progress_at={run_meta_at(@run_meta, card.id)}
-                        stalled?={run_meta_stalled?(@run_meta, card.id)}
-                        rate_limited={run_meta_rate_limited(@run_meta, card.id)}
-                        vote_count={Map.get(@vote_counts, card.id, 0)}
-                        requester={card_requester(card)}
-                        public={Card.public?(card)}
-                        blocked_count={length(Map.get(@blocked_by, card.id, []))}
-                        open={open_card?(@open_ref, @board_key, card)}
-                        draggable={!@read_only}
-                      />
+                      <%!--
+                      RE504 — the terminal stream interleaves week markers with cards; only a
+                      card reaches board_card/1 (a marker has no ref_number or health entry).
+                    --%>
+                      <%= for {dom_id, card} <- @cards do %>
+                        <.done_week_marker
+                          :if={week_marker?(card)}
+                          id={dom_id}
+                          title={card.title}
+                          range={card.range}
+                          count={card.count}
+                          first={card.first?}
+                          data-week-start={Date.to_iso8601(card.week_start)}
+                        />
+                        <.board_card
+                          :if={!week_marker?(card)}
+                          {card_log_attrs(@health, card.id)}
+                          id={dom_id}
+                          title={card.title}
+                          tag={card.tag}
+                          ref={Card.format_ref(@board_key, card.ref_number)}
+                          status={card.status}
+                          stage_type={@type}
+                          done={@terminal and card.status == :ready}
+                          question={Map.get(@questions, card.id)}
+                          progress={Cards.sub_task_pct(card)}
+                          owners={card.owners}
+                          active_owner={Cards.active_owner_type(card)}
+                          lane={:main}
+                          category={@category}
+                          run={Map.get(@runs, card.id)}
+                          progress_at={run_meta_at(@run_meta, card.id)}
+                          stalled?={run_meta_stalled?(@run_meta, card.id)}
+                          rate_limited={run_meta_rate_limited(@run_meta, card.id)}
+                          vote_count={Map.get(@vote_counts, card.id, 0)}
+                          requester={card_requester(card)}
+                          public={Card.public?(card)}
+                          blocked_count={length(Map.get(@blocked_by, card.id, []))}
+                          open={open_card?(@open_ref, @board_key, card)}
+                          draggable={!@read_only}
+                        />
+                      <% end %>
                     </div>
                     <%!--
                     RLY-116 — the .stage-drop wrapper owns the droppable region: it keeps the
@@ -8479,20 +8490,17 @@ defmodule HamacaWeb.CoreComponents do
                     phx-update="stream" container and may only hold stream items.
                   --%>
                     <button
-                      :if={(@terminal and @revealed) && @count > @revealed}
+                      :if={@done_more}
                       type="button"
                       id={"#{@id}-show-more-done"}
-                      phx-click="show_more_done"
+                      phx-click="load_more_done_weeks"
                       phx-value-stage-id={@stage_id}
                       class="stage-show-more"
                       style="flex:0 0 auto;padding:8px 10px;border:1px solid var(--color-base-300);border-radius:8px;background:var(--color-base-100);color:color-mix(in oklab, var(--color-base-content) 65%, transparent);font-size:11px;font-weight:600;letter-spacing:0.01em;text-align:center;cursor:pointer;"
                     >
-                      Show
-                      <span style="font-family:var(--font-mono);">
-                        {min(@page_size, @count - @revealed)}
-                      </span>
-                      more
+                      {load_more_weeks_label()}
                     </button>
+                    <.done_end_note :if={done_end?(@done_more, @count)} id={"#{@id}-done-end"} />
                   </div>
                 </div>
               </div>
@@ -8604,6 +8612,93 @@ defmodule HamacaWeb.CoreComponents do
   defp open_card?(open_ref, board_key, card), do: Card.format_ref(board_key, card.ref_number) == open_ref
 
   @doc """
+  RE504 — a week marker in the terminal Done column (card mockup "A — load 4 weeks at a time"):
+  the week's `title` (`This week`, `Last week`, or the range of an older week) in green mono
+  caps, the `range` after This week / Last week, a hairline, and the week's card `count`. It is
+  its own stream item, rendered before that week's cards, so it carries the stream `id`. The
+  first marker in the column sits flush (`first`); later ones get 6px of top margin.
+
+  `as="li"` renders it as a list item for the pager's compact rows. Pass the week's ISO start as
+  `data-week-start`. Never give it the `board-card` class: the drag hook counts only cards.
+
+  ## Examples
+
+      <.done_week_marker id="stage_cards_9-week-2026-11-02" title="This week" range="Nov 2 – 8" count={3} first />
+  """
+  @spec done_week_marker(map()) :: Phoenix.LiveView.Rendered.t()
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :range, :string, default: nil, doc: "the week's range, shown after This week / Last week only"
+  attr :count, :integer, required: true, doc: "how many of the week's cards follow the marker"
+  attr :first, :boolean, default: false, doc: "the column's first marker: no top margin"
+  attr :as, :string, values: ["div", "li"], default: "div"
+  attr :rest, :global, doc: "e.g. data-week-start (the week's ISO Monday)"
+
+  def done_week_marker(assigns) do
+    ~H"""
+    <.dynamic_tag
+      tag_name={@as}
+      id={@id}
+      class="week-marker"
+      style={"display:flex;align-items:center;gap:7px;#{week_marker_padding(@as)}margin-top:#{if(@first, do: "0", else: "6px")}"}
+      {@rest}
+    >
+      <span
+        class="week-marker-label"
+        style="font-size:10px;font-family:var(--font-mono);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;white-space:nowrap;color:color-mix(in oklab, var(--color-success) 80%, var(--color-base-content))"
+      >
+        {@title}
+      </span>
+      <span
+        :if={@range}
+        class="week-marker-range"
+        style="font-size:10px;font-family:var(--font-mono);font-weight:400;white-space:nowrap;color:color-mix(in oklab, var(--color-base-content) 45%, transparent)"
+      >
+        {@range}
+      </span>
+      <span class="week-marker-rule" style="flex:1;height:1px;background:var(--color-base-300)">
+      </span>
+      <span
+        class="week-marker-count"
+        style="font-size:10px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent)"
+      >
+        {@count}
+      </span>
+    </.dynamic_tag>
+    """
+  end
+
+  # The desktop marker hugs the column (mockup: 0 2px); in the pager's bordered list it lines up
+  # with the compact rows' px-3 gutter.
+  defp week_marker_padding("li"), do: "padding:10px 12px 4px;"
+  defp week_marker_padding(_div), do: "padding:0 2px;"
+
+  # RE504 — a terminal stream item is a week marker (BoardLive's marker map) or a card.
+  defp week_marker?(%{week_start: %Date{}}), do: true
+  defp week_marker?(_card), do: false
+
+  # RE504 — the end note shows once the terminal column has revealed every week (done_more
+  # false) and has cards at all; nil is a non-terminal column.
+  defp done_end?(false, count), do: (count || 0) > 0
+  defp done_end?(_done_more, _count), do: false
+
+  defp load_more_weeks_label, do: "Load #{Cards.done_weeks_per_page()} more weeks"
+
+  attr :id, :string, required: true
+
+  defp done_end_note(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class="done-end-note"
+      style="text-align:center;font-size:10.5px;font-family:var(--font-mono);color:color-mix(in oklab, var(--color-base-content) 45%, transparent);padding:6px 0 2px"
+    >
+      That's everything
+    </div>
+    """
+  end
+
+  @doc """
   RE377 — one card as a single compact line on a collapsed stage's phone page (card mockup
   "B — collapsed stage stays a page, rendered as a compact one-line list"): a baton/status
   dot · the mono ref (fixed width) · the title, which truncates with an ellipsis and never
@@ -8674,7 +8769,7 @@ defmodule HamacaWeb.CoreComponents do
   attr :total_count, :integer, required: true
   attr :count, :integer, default: nil
   attr :terminal, :boolean, default: false
-  attr :revealed, :integer, default: nil
+  attr :done_more, :boolean, default: nil
   attr :cards, :any, default: []
   attr :sublanes, :list, default: []
 
@@ -8721,15 +8816,27 @@ defmodule HamacaWeb.CoreComponents do
         ]}
       >
         <ul id={"#{@id}-rows"} phx-update={is_struct(@cards, Phoenix.LiveView.LiveStream) && "stream"}>
-          <.compact_card_row
-            :for={{dom_id, card} <- @cards}
-            id={dom_id}
-            ref={Card.format_ref(@board_key, card.ref_number)}
-            title={card.title}
-            status={card.status}
-            active_owner={Cards.active_owner_type(card)}
-            done={@terminal and card.status == :ready}
-          />
+          <%= for {dom_id, card} <- @cards do %>
+            <.done_week_marker
+              :if={week_marker?(card)}
+              as="li"
+              id={dom_id}
+              title={card.title}
+              range={card.range}
+              count={card.count}
+              first={card.first?}
+              data-week-start={Date.to_iso8601(card.week_start)}
+            />
+            <.compact_card_row
+              :if={!week_marker?(card)}
+              id={dom_id}
+              ref={Card.format_ref(@board_key, card.ref_number)}
+              title={card.title}
+              status={card.status}
+              active_owner={Cards.active_owner_type(card)}
+              done={@terminal and card.status == :ready}
+            />
+          <% end %>
         </ul>
         <ul
           :for={sub <- @sublanes}
@@ -8747,15 +8854,16 @@ defmodule HamacaWeb.CoreComponents do
         </ul>
       </div>
       <button
-        :if={(@terminal and @revealed) && @count > @revealed}
+        :if={@done_more}
         type="button"
         id={"#{@id}-rows-more"}
-        phx-click="show_more_done"
+        phx-click="load_more_done_weeks"
         phx-value-stage-id={@stage_id}
         class="btn btn-ghost btn-sm mx-3 my-2 flex-none font-mono text-[11px] text-base-content/65"
       >
-        {@count - @revealed} more
+        {load_more_weeks_label()}
       </button>
+      <.done_end_note :if={done_end?(@done_more, @count)} id={"#{@id}-rows-done-end"} />
     </section>
     """
   end

@@ -18,6 +18,7 @@ defmodule Storybook.CoreComponents do
   def entry("controls"), do: [icon: {:fa, "sliders", :thin}]
   def entry("copy_button"), do: [icon: {:fa, "clipboard", :thin}]
   def entry("dependency_list"), do: [icon: {:fa, "link", :thin}]
+  def entry("done_week_marker"), do: [icon: {:fa, "calendar-week", :thin}]
   def entry("error"), do: [icon: {:fa, "circle-exclamation", :thin}]
   def entry("flash"), do: [icon: {:fa, "bolt", :thin}]
   def entry("hamaca_mark"), do: [icon: {:fa, "umbrella-beach", :thin}]

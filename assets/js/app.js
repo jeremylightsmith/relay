@@ -46,7 +46,8 @@ import initImageLightbox from "./image_lightbox"
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
-  params: {_csrf_token: csrfToken},
+  // RE504 — the viewer's IANA time zone: the board buckets its Done column into weeks there.
+  params: {_csrf_token: csrfToken, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone},
   // RE268 quality review — ArrowKeyGuard (RLY-234) and TypingKeyGuard were near-verbatim
   // duplicates of the same capture-phase keydown guard; ArrowKeyGuard's key list is now just
   // TypingKeyGuard's generic `data-guard-keys` (see the `card-drawer-panel` mount in

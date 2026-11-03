@@ -177,13 +177,18 @@ defmodule HamacaWeb.StorybookRenderTest do
     assert doc |> LazyHTML.query("#stage-column-single-collapsed-pager-show-cards") |> Enum.count() == 1
     assert doc |> LazyHTML.query("#stage-column-single-collapsed-pager-rows .compact-card-row") |> Enum.count() == 2
 
-    # The terminal Done stage pages its rows with an "N more" button.
+    # RE504 — the terminal Done stage pages its rows by whole weeks.
     more = LazyHTML.query(doc, "#stage-column-single-collapsed-pager-done-more-rows-more")
     assert Enum.count(more) == 1
-    assert more |> LazyHTML.text() |> String.trim() == "2 more"
+    assert more |> LazyHTML.text() |> String.trim() == "Load 4 more weeks"
 
     # Expanded in pager mode: Show as list folds it back to rows.
     assert doc |> LazyHTML.query("#stage-column-single-pager-expanded-show-as-list") |> Enum.count() == 1
+  end
+
+  test "GET /storybook/core_components/done_week_marker renders the RE504 week marker", %{conn: conn} do
+    html = conn |> get("/storybook/core_components/done_week_marker") |> html_response(200)
+    assert html |> LazyHTML.from_document() |> LazyHTML.query(".week-marker") |> Enum.count() >= 1
   end
 
   test "GET /storybook/core_components/compact_card_row renders the RE377 one-line rows", %{conn: conn} do

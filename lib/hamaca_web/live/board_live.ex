@@ -162,6 +162,7 @@ defmodule HamacaWeb.BoardLive do
   alias Hamaca.Billing
   alias Hamaca.Boards
   alias Hamaca.Cards
+  alias Hamaca.Cards.DoneWeeks
   alias Hamaca.Events
   alias Hamaca.Flows
   alias Hamaca.Members
@@ -200,11 +201,6 @@ defmodule HamacaWeb.BoardLive do
   require Logger
 
   @category_order Stage.categories()
-
-  # RLY-53 — the terminal Done column renders at most this many cards, with a
-  # "Show N more" button revealing the next batch. Single definition in
-  # Hamaca.Cards (RLY-227) so stage_neighbors/2's Done window matches this exactly.
-  @done_page_size Cards.done_page_size()
 
   # RLY-112: nothing broadcasts when a card GOES QUIET — that is exactly what staleness
   # is. Without this clock a card never goes amber until something unrelated re-renders it.
@@ -615,7 +611,7 @@ defmodule HamacaWeb.BoardLive do
                     wip_limit={stage.wip_limit}
                     board_key={@board.key}
                     terminal={stage.id == @terminal_stage_id}
-                    revealed={if(stage.id == @terminal_stage_id, do: @done_revealed)}
+                    done_more={if(stage.id == @terminal_stage_id, do: @done_more?)}
                     questions={@needs_input_questions}
                     health={@health_by_card}
                     runs={@face_runs}
@@ -1469,6 +1465,10 @@ defmodule HamacaWeb.BoardLive do
     live? = connected?(socket)
     story_map? = socket.assigns.live_action == :story_map
 
+    # RE504 — the viewer's time zone buckets the Done column's weeks. Connect params exist only
+    # on the connected mount; the dead render (and an absent or unknown zone) reads UTC.
+    viewer_zone = if live?, do: DoneWeeks.zone(get_connect_params(socket)["timezone"]), else: DoneWeeks.zone(nil)
+
     if live? do
       Events.subscribe(board.id)
       Runs.subscribe(board.id)
@@ -1584,7 +1584,9 @@ defmodule HamacaWeb.BoardLive do
       |> assign(:pager_mode, false)
       |> assign_board_derivations(board)
       |> assign(:health_by_card, health_by_card(cards, stage_flows))
-      |> assign(:done_revealed, @done_page_size)
+      |> assign(:viewer_zone, viewer_zone)
+      |> assign(:done_cutoff, nil)
+      |> assign(:done_more?, false)
       |> assign(:force_open, MapSet.new())
       |> assign(:force_closed, MapSet.new())
       |> assign(:stage_force_closed, MapSet.new())
@@ -2301,15 +2303,21 @@ defmodule HamacaWeb.BoardLive do
     {:noreply, assign(socket, :composing_stage_id, nil)}
   end
 
-  # RLY-53 — reveal the next batch of the terminal Done column: grow
-  # done_revealed by a page and re-derive the terminal stream to the newest
-  # done_revealed cards (reset keeps only the bounded window in the DOM).
-  def handle_event("show_more_done", %{"stage-id" => stage_id}, socket) do
+  # RE504 — reveal the next done_weeks_per_page/0 non-empty weeks of the terminal Done column:
+  # move done_cutoff back to the start of the oldest of them and re-derive the terminal stream
+  # (reset keeps only the revealed weeks in the DOM). With nothing older the cutoff stays put.
+  def handle_event("load_more_done_weeks", %{"stage-id" => stage_id}, socket) do
     stage_id = String.to_integer(stage_id)
+    %{terminal_stage_id: terminal_id, done_cutoff: cutoff, viewer_zone: zone} = socket.assigns
 
-    if stage_id == socket.assigns.terminal_stage_id do
-      socket = update(socket, :done_revealed, &(&1 + @done_page_size))
-      {:noreply, stream_stage(socket, stage_id, %{}, reset: true)}
+    if stage_id == terminal_id and cutoff != nil do
+      terminal = find_stage_by_id(socket, stage_id)
+      older = Cards.older_done_cutoff(terminal, cutoff, zone, Cards.done_weeks_per_page())
+
+      {:noreply,
+       socket
+       |> assign(:done_cutoff, older || cutoff)
+       |> stream_stage(stage_id, %{}, reset: true)}
     else
       {:noreply, socket}
     end
@@ -2334,7 +2342,7 @@ defmodule HamacaWeb.BoardLive do
       {:ok, card} ->
         {:noreply,
          socket
-         |> stream_insert(stream_name(stage.id), card, at: 0)
+         |> insert_created_card(card)
          |> update(:stage_counts, &Map.update!(&1, stage.id, fn count -> count + 1 end))
          |> assign(:compose_form, empty_compose_form())
          |> push_card_focus(Cards.ref(socket.assigns.board, card))}
@@ -4669,11 +4677,20 @@ defmodule HamacaWeb.BoardLive do
 
   # RLY-48 board derivations: the terminal stage id (for the Done rendering) and the per-card
   # needs_input question previews. Cheap; recomputed alongside the stage counts.
+  #
+  # RE504 — a different terminal stage drops the Done week cutoff, so the gate re-anchors on the
+  # new terminal stage's latest week.
   defp assign_board_derivations(socket, board) do
+    terminal_id = terminal_stage_id(board.stages)
+
     socket
-    |> assign(:terminal_stage_id, terminal_stage_id(board.stages))
+    |> reset_done_cutoff_unless(socket.assigns[:terminal_stage_id] == terminal_id)
+    |> assign(:terminal_stage_id, terminal_id)
     |> assign(:needs_input_questions, Cards.needs_input_questions(board))
   end
+
+  defp reset_done_cutoff_unless(socket, true = _same_terminal?), do: socket
+  defp reset_done_cutoff_unless(socket, false), do: assign(socket, :done_cutoff, nil)
 
   defp terminal_stage_id(stages) do
     case Boards.terminal_stage(stages) do
@@ -5266,53 +5283,85 @@ defmodule HamacaWeb.BoardLive do
       socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id) |> place_card(moved)
 
     socket
-    |> adjust_done_revealed(source_stage_id, moved.stage_id, cards_by_stage)
     |> restream_source(source_stage_id, moved, cards_by_stage)
     |> restream_stage(moved.stage_id, cards_by_stage)
     |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
     |> refresh_selected_after_move(moved)
   end
 
-  # RLY-53 — keep the Done reveal count consistent as cards cross the terminal
-  # boundary. A card entering Done is revealed on top without hiding a shown one
-  # (bump by 1, capped at the new count); a card leaving clamps the window to
-  # what remains. Reorders within Done, and moves that never touch Done, leave
-  # done_revealed untouched. Runs before the restream, which reads done_revealed.
-  defp adjust_done_revealed(socket, source_stage_id, target_stage_id, cards_by_stage) do
-    terminal_id = socket.assigns.terminal_stage_id
-    done_count = length(Map.get(cards_by_stage, terminal_id, []))
-
-    cond do
-      is_nil(terminal_id) ->
-        socket
-
-      target_stage_id == terminal_id and source_stage_id != terminal_id ->
-        update(socket, :done_revealed, &min(&1 + 1, done_count))
-
-      source_stage_id == terminal_id and target_stage_id != terminal_id ->
-        update(socket, :done_revealed, &min(&1, done_count))
-
-      true ->
-        socket
-    end
-  end
-
-  # RLY-53 — the single windowing gate: the terminal Done column streams only
-  # its newest @done_revealed cards (via Cards.list_stage_cards/2); every other
-  # stage streams its full list from cards_by_stage. Route every (re)stream of a
-  # stage through here so the Done cap holds identically on mount, reveal,
-  # reload, move, and realtime restream.
+  # RLY-53 / RE504 — the single windowing gate: the terminal Done column streams only its
+  # revealed weeks (cards done at or after @done_cutoff), each preceded by a week marker item;
+  # every other stage streams its full list from cards_by_stage. Route every (re)stream of a
+  # stage through here so the Done window, its markers and @done_more? hold identically on
+  # mount, load-more, reload, move, and realtime restream. `drop?` filters cards out of the
+  # window before grouping (restream_source/4's departed card), so an emptied week loses its
+  # marker too.
   defp stream_stage(socket, stage_id, cards_by_stage, opts \\ []) do
-    stream(socket, stream_name(stage_id), stage_window(socket, stage_id, cards_by_stage), opts)
+    {socket, window} = stage_window(socket, stage_id, cards_by_stage)
+    stream(socket, stream_name(stage_id), window, opts)
   end
 
-  defp stage_window(socket, stage_id, cards_by_stage) do
+  defp stage_window(socket, stage_id, cards_by_stage, drop? \\ fn _card -> false end) do
     if stage_id == socket.assigns.terminal_stage_id do
-      terminal_stage = find_stage_by_id(socket, stage_id)
-      Cards.list_stage_cards(terminal_stage, socket.assigns.done_revealed)
+      done_window(socket, find_stage_by_id(socket, stage_id), drop?)
     else
-      Map.get(cards_by_stage, stage_id, [])
+      {socket, cards_by_stage |> Map.get(stage_id, []) |> Enum.reject(drop?)}
     end
+  end
+
+  # RE504 — ensure the cutoff, then read the revealed weeks. A missing cutoff, or one that now
+  # reveals nothing (its weeks emptied), re-anchors on the latest non-empty week, so the column
+  # never shows a button over nothing. No Done cards: no cutoff, no items, no button.
+  defp done_window(socket, %Stage{} = terminal, drop?) do
+    %{done_cutoff: cutoff, viewer_zone: zone} = socket.assigns
+    revealed = if cutoff, do: done_cards(terminal, cutoff, drop?), else: []
+
+    {cutoff, revealed} =
+      case revealed do
+        [] -> anchor_latest_week(terminal, zone, drop?)
+        revealed -> {cutoff, revealed}
+      end
+
+    socket =
+      socket
+      |> assign(:done_cutoff, cutoff)
+      |> assign(:done_more?, cutoff != nil and Cards.done_before?(terminal, cutoff))
+
+    {socket, done_week_items(revealed, zone)}
+  end
+
+  defp anchor_latest_week(terminal, zone, drop?) do
+    case Cards.latest_done_cutoff(terminal, zone) do
+      nil -> {nil, []}
+      latest -> {latest, done_cards(terminal, latest, drop?)}
+    end
+  end
+
+  defp done_cards(terminal, cutoff, drop?), do: terminal |> Cards.list_done_cards(cutoff) |> Enum.reject(drop?)
+
+  # RE504 — the terminal stream's items: each week's marker map, then that week's cards, newest
+  # week first. A marker's id ("week-<iso monday>") gives it the stream's default
+  # stage_cards_<id>-week-<date> DOM id; labels read the clock at stream time.
+  defp done_week_items(cards, zone) do
+    now = DateTime.utc_now()
+
+    cards
+    |> DoneWeeks.group(zone)
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {{week_start, week_cards}, index} ->
+      %{title: title, range: range} = DoneWeeks.label(week_start, now, zone)
+
+      marker = %{
+        id: "week-" <> Date.to_iso8601(week_start),
+        week_start: week_start,
+        title: title,
+        range: range,
+        count: length(week_cards),
+        first?: index == 0
+      }
+
+      [marker | week_cards]
+    end)
   end
 
   # RLY-53 — the terminal Done column is a bounded window, so an upsert there
@@ -5331,15 +5380,24 @@ defmodule HamacaWeb.BoardLive do
   end
 
   # RE386 — a move's source column. The terminal Done window is read from the DB
-  # (stage_window/3), which may still hold the card that just left, so it is
-  # filtered out there too; a reorder (source == target) keeps it.
+  # (stage_window/4), which may still hold the card that just left, so it is
+  # filtered out there too — before grouping, so an emptied week drops its marker
+  # (RE504); a reorder (source == target) keeps it.
   defp restream_source(socket, source_stage_id, %Card{} = moved, cards_by_stage) do
-    window =
-      socket
-      |> stage_window(source_stage_id, cards_by_stage)
-      |> Enum.reject(&(&1.id == moved.id and moved.stage_id != source_stage_id))
+    departed? = &(&1.id == moved.id and moved.stage_id != source_stage_id)
+    {socket, window} = stage_window(socket, source_stage_id, cards_by_stage, departed?)
 
     stream(socket, stream_name(source_stage_id), window, reset: true)
+  end
+
+  # A card composed into a column: on top of a non-terminal column; through the gate in the
+  # terminal Done column, so it lands under This week's marker (RE504).
+  defp insert_created_card(socket, %Card{stage_id: stage_id} = card) do
+    if stage_id == socket.assigns.terminal_stage_id do
+      stream_stage(socket, stage_id, %{}, reset: true)
+    else
+      stream_insert(socket, stream_name(stage_id), card, at: 0)
+    end
   end
 
   # RE386 — a card lives in exactly one column: drop its DOM id from every stage
@@ -5378,7 +5436,7 @@ defmodule HamacaWeb.BoardLive do
   # Every expand gesture routes here: items streamed while a container was
   # hidden were consumed at render time and dropped, so revealing a lane must
   # re-send its cards. Goes through stream_stage/4 (via restream_stage/3) so
-  # the RLY-53 Done window still holds.
+  # the Done week window (RLY-53, RE504) still holds.
   defp restream_lanes(socket, []), do: socket
 
   defp restream_lanes(socket, stage_ids) do
@@ -5409,9 +5467,19 @@ defmodule HamacaWeb.BoardLive do
     cards_by_stage = socket.assigns.board |> Cards.list_cards() |> Enum.group_by(& &1.stage_id)
 
     socket
-    |> stream_delete(stream_name(card.stage_id), card)
+    |> remove_archived_card(card, cards_by_stage)
     |> assign(:stage_counts, stage_counts(socket.assigns.board.stages, cards_by_stage))
     |> assign_archived_count()
+  end
+
+  # RE504 — archiving a Done card re-derives the terminal window (its week's marker count, or the
+  # marker itself, changes); any other column drops the card by DOM id.
+  defp remove_archived_card(socket, %Card{stage_id: stage_id} = card, cards_by_stage) do
+    if stage_id == socket.assigns.terminal_stage_id do
+      stream_stage(socket, stage_id, cards_by_stage, reset: true)
+    else
+      stream_delete(socket, stream_name(stage_id), card)
+    end
   end
 
   # Close the drawer when the just-archived card is the one open here.

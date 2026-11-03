@@ -169,8 +169,9 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
       %Variation{
         id: :collapsed_pager_done_more,
         description:
-          "RE377 — collapsed Done stage, pager: the compact rows page the terminal stage like " <>
-            "the desktop column — a 'N more' button reveals the next page of Done rows",
+          "RE377 / RE504 — collapsed Done stage, pager: the compact rows page the terminal " <>
+            "stage by whole weeks like the desktop column — a week marker heads each week's " <>
+            "rows and 'Load 4 more weeks' reveals the next older weeks",
         attributes: %{
           id: "story-stage-collapsed-pager-done",
           name: "Done",
@@ -182,8 +183,17 @@ defmodule Storybook.Components.CoreComponents.StageColumn do
           collapsed: true,
           pager: true,
           terminal: true,
-          revealed: 1,
+          done_more: true,
           cards: [
+            {"story-pager-done-week",
+             %{
+               id: "week-2026-11-02",
+               week_start: ~D[2026-11-02],
+               title: "This week",
+               range: "Nov 2 – 8",
+               count: 1,
+               first?: true
+             }},
             {"story-card-pager-done-1",
              %{
                id: 15,

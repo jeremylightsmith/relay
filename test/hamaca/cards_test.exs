@@ -1557,14 +1557,15 @@ defmodule Hamaca.CardsTest do
       assert Cards.stage_neighbors(board, c_third).next == nil
     end
 
-    test "the terminal Done column follows the recency window (desc updated_at, desc id)", %{
+    test "the terminal Done column follows the done window (desc done_at, desc id)", %{
       board: board,
       done: done
     } do
-      # Same-second inserts, so the window order is the desc-id tiebreak: c3, c2, c1.
-      _c1 = insert(:card, stage: done, title: "First done", position: 1, ref_number: 1)
-      c2 = insert(:card, stage: done, title: "Second done", position: 2, ref_number: 2)
-      _c3 = insert(:card, stage: done, title: "Third done", position: 3, ref_number: 3)
+      # Same done_at, so the window order is the desc-id tiebreak: c3, c2, c1.
+      at = ~U[2026-10-01 12:00:00Z]
+      _c1 = insert(:card, stage: done, title: "First done", position: 1, ref_number: 1, done_at: at)
+      c2 = insert(:card, stage: done, title: "Second done", position: 2, ref_number: 2, done_at: at)
+      _c3 = insert(:card, stage: done, title: "Third done", position: 3, ref_number: 3, done_at: at)
 
       assert Cards.stage_neighbors(board, c2) == %{prev: "MY3", next: "MY1"}
     end
@@ -1573,22 +1574,25 @@ defmodule Hamaca.CardsTest do
       board: board,
       done: done
     } do
-      page = Cards.done_page_size()
+      window = Cards.done_column_window()
+      cards = insert_done_cards(done, window + 1)
 
-      cards =
-        for i <- 1..(page + 1) do
-          insert(:card, stage: done, title: "Done #{i}", position: i, ref_number: i)
-        end
-
-      # Window = the newest `page` cards by desc id. Its oldest shown card is the
-      # page-th newest; the (page + 1)-th newest is below the cap, so `next` is nil.
-      by_recency = Enum.sort_by(cards, & &1.id, :desc)
-      oldest_shown = Enum.at(by_recency, page - 1)
-      one_up = Enum.at(by_recency, page - 2)
+      # Window = the newest `window` cards by desc done_at. Its oldest shown card is the
+      # window-th newest; the (window + 1)-th newest is below the cap, so `next` is nil.
+      by_recency = Enum.reverse(cards)
+      oldest_shown = Enum.at(by_recency, window - 1)
+      one_up = Enum.at(by_recency, window - 2)
 
       neighbors = Cards.stage_neighbors(board, oldest_shown)
       assert neighbors.next == nil
       assert neighbors.prev == Cards.ref(board, one_up)
+    end
+  end
+
+  describe "RLY-53 count paging is gone (RE504)" do
+    test "done_page_size/0 no longer exists: the Done column pages by done_weeks_per_page/0" do
+      Code.ensure_loaded!(Cards)
+      refute function_exported?(Cards, :done_page_size, 0)
     end
   end
 
@@ -1722,17 +1726,13 @@ defmodule Hamaca.CardsTest do
       assert board |> Cards.stage_column(backlog.id) |> Enum.map(& &1.id) == [c1.id, c2.id, c3.id]
     end
 
-    test "the terminal Done column follows the capped recency window (RLY-227's stage_neighbors/2 window)",
+    test "the terminal Done column is the newest done_column_window/0 cards by desc done_at",
          %{board: board, done: done} do
-      page = Cards.done_page_size()
+      window = Cards.done_column_window()
+      cards = insert_done_cards(done, window + 1)
 
-      cards =
-        for i <- 1..(page + 1) do
-          insert(:card, stage: done, title: "Done #{i}", position: i, ref_number: i)
-        end
-
-      by_recency = Enum.sort_by(cards, & &1.id, :desc)
-      expected_ids = by_recency |> Enum.take(page) |> Enum.map(& &1.id)
+      # The oldest card by done_at falls outside the window.
+      expected_ids = cards |> Enum.reverse() |> Enum.take(window) |> Enum.map(& &1.id)
 
       assert board |> Cards.stage_column(done.id) |> Enum.map(& &1.id) == expected_ids
     end
@@ -1915,6 +1915,26 @@ defmodule Hamaca.CardsTest do
 
   # RE344 — an owner must hold a resolved membership on the card's board; the :board factory
   # creates none, so owner fixtures are made members explicitly.
+  # `count` cards in `stage` with ascending `done_at`, returned oldest-done first. Inserted
+  # newest-done first and with `updated_at` running the other way, so neither id order nor
+  # updated_at order agrees with done_at order — only a done_at sort passes.
+  defp insert_done_cards(stage, count) do
+    base = ~U[2026-10-01 00:00:00Z]
+
+    count..1//-1
+    |> Enum.map(fn i ->
+      insert(:card,
+        stage: stage,
+        title: "Done #{i}",
+        position: i,
+        ref_number: i,
+        done_at: DateTime.add(base, i, :minute),
+        updated_at: DateTime.add(base, -i, :minute)
+      )
+    end)
+    |> Enum.reverse()
+  end
+
   defp member!(board, attrs \\ []) do
     user = insert(:user, attrs)
     insert(:membership, board: board, user: user, email: user.email)

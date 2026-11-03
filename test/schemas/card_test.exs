@@ -229,4 +229,46 @@ defmodule Schemas.CardTest do
       assert Card.mockup_entries("junk") == []
     end
   end
+
+  describe "done_at_after_stage_change/4 (RE504)" do
+    @now ~U[2026-11-04 10:00:00Z]
+
+    test "entering the terminal stage stamps now" do
+      assert Card.done_at_after_stage_change(nil, false, true, @now) == ~U[2026-11-04 10:00:00Z]
+    end
+
+    test "entering the terminal stage truncates now to the second" do
+      assert Card.done_at_after_stage_change(nil, false, true, ~U[2026-11-04 10:00:00.123456Z]) ==
+               ~U[2026-11-04 10:00:00Z]
+    end
+
+    test "leaving the terminal stage clears it" do
+      assert Card.done_at_after_stage_change(~U[2026-10-01 00:00:00Z], true, false, @now) == nil
+    end
+
+    test "staying non-terminal keeps it nil" do
+      assert Card.done_at_after_stage_change(nil, false, false, @now) == nil
+    end
+
+    test "staying in the terminal stage keeps the original stamp" do
+      assert Card.done_at_after_stage_change(~U[2026-10-01 00:00:00Z], true, true, @now) ==
+               ~U[2026-10-01 00:00:00Z]
+    end
+
+    test "staying in the terminal stage with no stamp stamps now" do
+      assert Card.done_at_after_stage_change(nil, true, true, @now) == @now
+    end
+  end
+
+  describe "done_time/1 (RE504)" do
+    test "falls back to updated_at when done_at is nil" do
+      card = %Card{done_at: nil, updated_at: ~U[2026-09-01 00:00:00Z]}
+      assert Card.done_time(card) == ~U[2026-09-01 00:00:00Z]
+    end
+
+    test "is done_at when set" do
+      card = %Card{done_at: ~U[2026-10-01 00:00:00Z], updated_at: ~U[2026-09-01 00:00:00Z]}
+      assert Card.done_time(card) == ~U[2026-10-01 00:00:00Z]
+    end
+  end
 end

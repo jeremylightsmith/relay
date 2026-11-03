@@ -733,6 +733,19 @@ defmodule Hamaca.Boards do
   end
 
   @doc """
+  The id of the board's terminal stage, read from the DB (RE504) — `terminal_stage/1` over the
+  board's top-level stages, so "last by position" stays defined once. `nil` for a board with
+  no stages. `Hamaca.Cards` stamps `cards.done_at` against it on every move and create.
+  """
+  @spec terminal_stage_id(integer()) :: integer() | nil
+  def terminal_stage_id(board_id) when is_integer(board_id) do
+    board_id |> main_stages() |> terminal_stage() |> stage_id()
+  end
+
+  defp stage_id(%Stage{id: id}), do: id
+  defp stage_id(nil), do: nil
+
+  @doc """
   The board's **intake column** — the first top-level (`parent_id == nil`) stage by `position`,
   whatever it is named. Where a card created from *outside* a column lands (RE262's story-map
   `＋`). The mirror of `terminal_stage/1`, and the one definition of that policy: "first by
@@ -1227,6 +1240,14 @@ defmodule Hamaca.Boards do
 
     base = Repo.one(from c in Card, where: c.stage_id == ^target.id, select: max(c.position)) || 0
 
+    # RE504 — this runs BEFORE the stage DELETE, so "now terminal" is the terminal stage among
+    # the main stages that survive it: deleting the terminal stage makes its rehome target the
+    # new terminal.
+    mains = main_stages(target.board_id)
+    terminal_before_id = mains |> terminal_stage() |> stage_id()
+    now_terminal? = target.id == mains |> Enum.reject(&(&1.id in from_ids)) |> terminal_stage() |> stage_id()
+    now = DateTime.utc_now()
+
     from(c in Card, where: c.stage_id in ^from_ids and not is_nil(c.archived_at), order_by: [c.position, c.id])
     |> Repo.all()
     |> Enum.with_index(base + 1)
@@ -1235,7 +1256,14 @@ defmodule Hamaca.Boards do
       |> Changeset.change(
         stage_id: target.id,
         position: position,
-        status: Stage.arrival_status(card.status, target.type)
+        status: Stage.arrival_status(card.status, target.type),
+        done_at:
+          Card.done_at_after_stage_change(
+            card.done_at,
+            card.stage_id == terminal_before_id,
+            now_terminal?,
+            now
+          )
       )
       |> Repo.update()
       |> ok_or_rollback()

@@ -21,12 +21,14 @@ defmodule Hamaca.Cards do
       Hamaca.Setup,
       Hamaca.Votes,
       Schemas
-    ]
+    ],
+    exports: [DoneWeeks]
 
   import Ecto.Query
 
   alias Hamaca.Activity
   alias Hamaca.Boards
+  alias Hamaca.Cards.DoneWeeks
   alias Hamaca.Events
   alias Hamaca.Flows
   alias Hamaca.Members
@@ -75,6 +77,8 @@ defmodule Hamaca.Cards do
     :blocked_since,
     :agent_heartbeat_at,
     :archived_at,
+    # RE504 — when the card entered the terminal stage; the Done column pages by it.
+    :done_at,
     :branch,
     :pr_url,
     :ai_result,
@@ -368,31 +372,144 @@ defmodule Hamaca.Cards do
   defp take_limit(cards, nil), do: cards
   defp take_limit(cards, max), do: Enum.take(cards, max)
 
+  # A card's **effective done time** (RE504): when it entered the terminal stage (`done_at`),
+  # falling back to `updated_at` for a card that became terminal without moving (a stage
+  # reorder or a promoted stage). The one SQL definition every Done query orders, filters and
+  # buckets on; `Schemas.Card.done_time/1` is its in-memory twin.
+  defmacrop effective_done_at(card) do
+    quote do
+      coalesce(unquote(card).done_at, unquote(card).updated_at)
+    end
+  end
+
+  # The ISO week start (Monday) of a card's effective done time, read in `zone` (a bound
+  # parameter): `utc_datetime` columns are `timestamp without time zone` holding UTC, hence the
+  # double `AT TIME ZONE`. Postgres' `date_trunc('week', …)` on a local timestamp is ISO Monday.
+  defmacrop local_done_week(card, zone) do
+    quote do
+      type(
+        fragment(
+          "date_trunc('week', (? AT TIME ZONE 'UTC') AT TIME ZONE ?)::date",
+          effective_done_at(unquote(card)),
+          ^unquote(zone)
+        ),
+        :date
+      )
+    end
+  end
+
+  defp done_scope(stage_id), do: where(Card, [c], c.stage_id == ^stage_id and is_nil(c.archived_at))
+
+  defp newest_done_first(query), do: order_by(query, [c], desc: effective_done_at(c), desc: c.id)
+
   @doc """
-  Returns the newest `limit` non-archived cards in `stage`, ordered
-  `updated_at DESC, id DESC` — the terminal Done column's render window
-  (RLY-53). `updated_at` is the recency proxy for "recently completed": a
-  card's row is touched when it moves into a stage. Owners (`:user`) and
-  position-ordered sub_tasks are preloaded exactly like `list_cards/1`, so the
-  board columns can render the result directly.
+  Returns the newest `limit` non-archived cards in `stage`, ordered by **effective done time**
+  (`done_at`, else `updated_at` — `Schemas.Card.done_time/1`) desc, then `id` desc (RLY-53,
+  RE504). It backs the terminal Done column's bounded reads: the legacy count page and
+  `stage_column/2`'s `done_column_window/0`. Owners (`:user`) and position-ordered sub_tasks are
+  preloaded exactly like `list_cards/1`, so the board columns can render the result directly.
   """
   def list_stage_cards(%Stage{id: stage_id}, limit) when is_integer(limit) and limit >= 0 do
-    Card
-    |> where([c], c.stage_id == ^stage_id and is_nil(c.archived_at))
-    |> order_by([c], desc: c.updated_at, desc: c.id)
+    stage_id
+    |> done_scope()
+    |> newest_done_first()
     |> limit(^limit)
     |> Repo.all()
     |> Repo.preload(card_preloads())
   end
 
-  @done_page_size 8
+  @doc """
+  Every non-archived card in the terminal `stage` whose effective done time is at or after
+  `cutoff`, newest first (effective done time desc, `id` desc), preloaded like
+  `list_stage_cards/2` (RE504). The Done column's week-paged read: `cutoff` is a week start from
+  `latest_done_cutoff/2` or `older_done_cutoff/4`.
+  """
+  @spec list_done_cards(Stage.t(), DateTime.t()) :: [Card.t()]
+  def list_done_cards(%Stage{id: stage_id}, %DateTime{} = cutoff) do
+    stage_id
+    |> done_scope()
+    |> where([c], effective_done_at(c) >= type(^cutoff, :utc_datetime))
+    |> newest_done_first()
+    |> Repo.all()
+    |> Repo.preload(card_preloads())
+  end
 
   @doc """
-  The terminal Done column's render window size (RLY-53): how many of the newest
-  cards the board shows before "Show more". The single definition — `BoardLive`'s
-  initial/reveal count and `stage_neighbors/2`'s Done window both read it here.
+  The start (`DoneWeeks.cutoff/2`) of the week, in `zone`, holding the newest effective done
+  time among `stage`'s non-archived cards — the Done column's first page (RE504). `nil` when
+  the stage has none.
   """
-  def done_page_size, do: @done_page_size
+  @spec latest_done_cutoff(Stage.t(), String.t()) :: DateTime.t() | nil
+  def latest_done_cutoff(%Stage{id: stage_id}, zone) do
+    zone = DoneWeeks.zone(zone)
+
+    stage_id
+    |> done_scope()
+    |> select([c], type(max(effective_done_at(c)), :utc_datetime))
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      newest -> newest |> DoneWeeks.week_start(zone) |> DoneWeeks.cutoff(zone)
+    end
+  end
+
+  @doc """
+  The cutoff that reveals the next `n` **non-empty** weeks, in `zone`, older than `cutoff`
+  (RE504): one query for the distinct local week starts of `stage`'s non-archived cards done
+  before `cutoff`, newest first, `LIMIT n`, then `DoneWeeks.cutoff/2` of the last one returned
+  (the `n`-th, or the oldest when fewer remain). Empty weeks are skipped. `nil` when nothing
+  older remains.
+  """
+  @spec older_done_cutoff(Stage.t(), DateTime.t(), String.t(), pos_integer()) :: DateTime.t() | nil
+  def older_done_cutoff(%Stage{id: stage_id}, %DateTime{} = cutoff, zone, n) when is_integer(n) and n > 0 do
+    zone = DoneWeeks.zone(zone)
+
+    weeks =
+      stage_id
+      |> done_scope()
+      |> where([c], effective_done_at(c) < type(^cutoff, :utc_datetime))
+      |> select([c], %{week: local_done_week(c, zone)})
+
+    from(w in subquery(weeks), distinct: true, order_by: [desc: w.week], limit: ^n, select: w.week)
+    |> Repo.all()
+    |> List.last()
+    |> case do
+      nil -> nil
+      oldest -> DoneWeeks.cutoff(oldest, zone)
+    end
+  end
+
+  @doc """
+  Whether any non-archived card in `stage` has an effective done time before `cutoff` — the
+  Done column's "anything older to show?" check (RE504).
+  """
+  @spec done_before?(Stage.t(), DateTime.t()) :: boolean()
+  def done_before?(%Stage{id: stage_id}, %DateTime{} = cutoff) do
+    stage_id
+    |> done_scope()
+    |> where([c], effective_done_at(c) < type(^cutoff, :utc_datetime))
+    |> Repo.exists?()
+  end
+
+  @done_weeks_per_page 4
+
+  @doc """
+  How many non-empty weeks the terminal Done column reveals per batch (RE504). The single
+  source of truth for the batch size — the board's week paging and its "Show more" label both
+  read it here; the literal is never re-typed (AGENTS.md magic-value discipline).
+  """
+  @spec done_weeks_per_page() :: pos_integer()
+  def done_weeks_per_page, do: @done_weeks_per_page
+
+  @done_column_window 200
+
+  @doc """
+  The cap on `stage_column/2`'s terminal Done read (RE504): how many of the newest cards
+  neighbor navigation (`stage_neighbors/2`) and the native swipe bridge see. The single source
+  of truth for that bound — every consumer calls this.
+  """
+  @spec done_column_window() :: pos_integer()
+  def done_column_window, do: @done_column_window
 
   @doc """
   Refs of the cards immediately before/after `card` within its own stage column,
@@ -401,8 +518,8 @@ defmodule Hamaca.Cards do
 
   Reuses the board's own ordered reads so neighbor order can never drift from the
   rendered order: a non-terminal stage follows `list_cards/1`'s position order; the
-  terminal Done column follows the `list_stage_cards/2` recency window, capped at
-  `done_page_size/0`. Requires `board.stages` preloaded.
+  terminal Done column follows `list_stage_cards/2`'s effective-done-time order, capped at
+  `done_column_window/0`. Requires `board.stages` preloaded.
   """
   def stage_neighbors(%Board{} = board, %Card{stage_id: stage_id} = card) do
     board
@@ -412,7 +529,7 @@ defmodule Hamaca.Cards do
 
   @doc """
   The ordered, non-archived cards the board renders for `stage_id`: the terminal
-  Done column's recency window (capped at `done_page_size/0`), else the
+  Done column's newest cards by effective done time (capped at `done_column_window/0`), else the
   position-ordered slice of `list_cards/1`. The single source of column order —
   `stage_neighbors/2` (desktop chevrons/arrow keys) and the embed card-tap
   bridge's tapped-column payload (RLY-234, native swipe) both read it, so the
@@ -421,7 +538,7 @@ defmodule Hamaca.Cards do
   """
   def stage_column(%Board{} = board, stage_id) do
     case Boards.terminal_stage(board.stages) do
-      %Stage{id: ^stage_id} = terminal -> list_stage_cards(terminal, done_page_size())
+      %Stage{id: ^stage_id} = terminal -> list_stage_cards(terminal, done_column_window())
       _other -> board |> list_cards() |> Enum.filter(&(&1.stage_id == stage_id))
     end
   end
@@ -2377,6 +2494,7 @@ defmodule Hamaca.Cards do
             emit_stage_changed(moved, previous_stage_id, target_stage, actor)
 
             moved
+            |> stamp_done_at(previous_stage_id)
             |> snap_status(target_stage, actor)
             |> maybe_claim(target_stage, actor)
           end
@@ -2397,6 +2515,26 @@ defmodule Hamaca.Cards do
 
       {:error, _changeset} = error ->
         error
+    end
+  end
+
+  # RE504 — a cross-stage move rewrites done_at on the moved card only (never the re-indexed
+  # siblings), by the one rule. force_change for the same reason reposition/2 uses it: a
+  # caller-held card may carry a stale done_at.
+  defp stamp_done_at(%Card{} = moved, previous_stage_id) do
+    terminal_id = Boards.terminal_stage_id(moved.board_id)
+
+    done_at =
+      Card.done_at_after_stage_change(
+        moved.done_at,
+        previous_stage_id == terminal_id,
+        moved.stage_id == terminal_id,
+        DateTime.utc_now()
+      )
+
+    case moved |> Ecto.Changeset.change() |> Ecto.Changeset.force_change(:done_at, done_at) |> Repo.update() do
+      {:ok, card} -> card
+      {:error, changeset} -> Repo.rollback(changeset)
     end
   end
 
@@ -3276,6 +3414,9 @@ defmodule Hamaca.Cards do
     # can't hold the schema default :ready. Set on the struct (status is never cast), so create
     # stays one insert with no :status_changed entry or push.
     status = Stage.arrival_status(%Card{}.status, stage.type)
+    # RE504 — a card born in the terminal stage enters it now; done_at is never cast either.
+    terminal? = stage.id == Boards.terminal_stage_id(stage.board_id)
+    done_at = Card.done_at_after_stage_change(nil, false, terminal?, DateTime.utc_now())
 
     changeset =
       Card.changeset(
@@ -3285,6 +3426,7 @@ defmodule Hamaca.Cards do
           position: 0,
           ref_number: ref_number,
           status: status,
+          done_at: done_at,
           created_by_user_id: requester_id(actor)
         },
         attrs

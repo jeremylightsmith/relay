@@ -5,6 +5,7 @@ defmodule HamacaWeb.BoardLivePagerTest do
 
   alias Hamaca.Boards
   alias Hamaca.Cards
+  alias Hamaca.Cards.DoneWeeks
 
   # RLY-94 · BOARD-01 (docs/designs/Relay Mobile.dc.html lines ~395–443): below the
   # 45rem drawer breakpoint the board is a one-stage-at-a-time scroll-snap pager with
@@ -248,30 +249,36 @@ defmodule HamacaWeb.BoardLivePagerTest do
       assert_patch(view, ~p"/board/#{board.slug}?card=#{ref}")
     end
 
-    test "a collapsed Done pages its rows with 'N more'", %{conn: conn, board: board} do
+    test "a collapsed Done pages its rows by whole weeks with week markers", %{conn: conn, board: board} do
       done = Boards.terminal_stage(board.stages)
       {:ok, _} = Boards.update_stage(done, %{collapsed_by_default: true})
       done_col = "stage-col-#{done.position}"
-      page = Cards.done_page_size()
+      monday = DoneWeeks.week_start(DateTime.utc_now(), "Etc/UTC")
 
-      for i <- 1..(page + 4) do
-        insert(:card,
-          stage: done,
-          title: "Done #{i}",
-          updated_at: DateTime.add(~U[2026-07-01 00:00:00Z], i, :second)
-        )
+      insert(:card, stage: done, title: "Fresh", done_at: DateTime.new!(monday, ~T[00:00:01], "Etc/UTC"))
+
+      # 5 older non-empty weeks, with empty weeks between them.
+      for offset <- [-1, -3, -5, -7, -9] do
+        done_at = monday |> Date.add(7 * offset + 2) |> DateTime.new!(~T[12:00:00], "Etc/UTC")
+        insert(:card, stage: done, title: "Week #{offset}", done_at: done_at)
       end
 
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
       pager_on(view)
 
-      assert length(row_titles(view, "##{done_col}-rows .compact-card-row-title")) == page
-      assert has_element?(view, "##{done_col}-rows-more", "4 more")
+      assert has_element?(view, "##{done_col}-rows > li.week-marker:first-child", "This week")
+      assert has_element?(view, "##{done_col}-rows > li.week-marker + li.compact-card-row", "Fresh")
+      assert row_titles(view, "##{done_col}-rows .compact-card-row-title") == ["Fresh"]
+      assert row_titles(view, "##{done_col}-rows-more") == ["Load 4 more weeks"]
 
       view |> element("##{done_col}-rows-more") |> render_click()
 
-      assert length(row_titles(view, "##{done_col}-rows .compact-card-row-title")) == page + 4
+      assert length(row_titles(view, "##{done_col}-rows li.week-marker")) == 5
+
+      view |> element("##{done_col}-rows-more") |> render_click()
+
       refute has_element?(view, "##{done_col}-rows-more")
+      assert row_titles(view, "##{done_col}-rows-done-end") == ["That's everything"]
     end
 
     test "desktop (pager off) still renders the strip with no rows",

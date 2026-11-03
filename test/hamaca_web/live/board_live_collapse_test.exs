@@ -5,6 +5,7 @@ defmodule HamacaWeb.BoardLiveCollapseTest do
 
   alias Hamaca.Boards
   alias Hamaca.Cards
+  alias Hamaca.Cards.DoneWeeks
 
   setup :register_and_log_in_user
 
@@ -274,17 +275,18 @@ defmodule HamacaWeb.BoardLiveCollapseTest do
       assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Incoming")
     end
 
-    test "expanding the Done stage still respects the done_revealed window",
+    test "expanding the Done stage still respects the Done week window",
          %{conn: conn, board: board, user: user} do
       done = Boards.terminal_stage(board.stages)
+      monday = DoneWeeks.week_start(DateTime.utc_now(), "Etc/UTC")
 
-      for i <- 1..12 do
-        insert(:card,
-          stage: done,
-          title: "Done #{i}",
-          updated_at: DateTime.add(~U[2026-07-01 00:00:00Z], i, :second)
-        )
+      # 3 cards this week, 1 three weeks back: the column reveals only this week.
+      for i <- 1..3 do
+        insert(:card, stage: done, title: "Done #{i}", done_at: DateTime.new!(monday, Time.new!(0, 0, i), "Etc/UTC"))
       end
+
+      old_at = monday |> Date.add(-19) |> DateTime.new!(~T[12:00:00], "Etc/UTC")
+      insert(:card, stage: done, title: "Done old", done_at: old_at)
 
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
@@ -302,9 +304,8 @@ defmodule HamacaWeb.BoardLiveCollapseTest do
         |> LazyHTML.query("#stage-col-#{done.position}-cards .board-card .card-title")
         |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
 
-      assert length(titles) == 8
-      assert "Done 12" in titles
-      refute "Done 4" in titles
+      assert Enum.sort(titles) == ["Done 1", "Done 2", "Done 3"]
+      refute "Done old" in titles
     end
   end
 end

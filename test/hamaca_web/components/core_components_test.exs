@@ -1185,7 +1185,7 @@ defmodule HamacaWeb.CoreComponentsTest do
       refute html =~ ~s(id="stage-col-3-compact-empty")
     end
 
-    test "a collapsed terminal stage with more cards than revealed shows the 'N more' button" do
+    test "a collapsed terminal stage with older weeks shows the 'Load 4 more weeks' button" do
       html =
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-3",
@@ -1195,19 +1195,74 @@ defmodule HamacaWeb.CoreComponentsTest do
           board_key: "RE",
           count: 42,
           terminal: true,
-          revealed: 9,
+          done_more: true,
           collapsed: true,
           pager: true,
           cards: @compact_cards
         )
 
       assert html =~ ~s(id="stage-col-3-rows-more")
-      assert html =~ ~s(phx-click="show_more_done")
+      assert html =~ ~s(phx-click="load_more_done_weeks")
       assert html =~ "btn btn-ghost btn-sm mx-3 my-2 flex-none font-mono text-[11px] text-base-content/65"
-      assert html =~ ~r/33\s*more/
+      assert html =~ ~r/>\s*Load 4 more weeks\s*</
+      refute html =~ "stage-col-3-rows-done-end"
     end
 
-    test "a non-terminal collapsed stage shows no 'N more' button" do
+    test "a collapsed terminal stage with nothing older shows the 'That's everything' note" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Done",
+          type: :done,
+          stage_id: 9,
+          board_key: "RE",
+          count: 5,
+          terminal: true,
+          done_more: false,
+          collapsed: true,
+          pager: true,
+          cards: @compact_cards
+        )
+
+      assert html =~ ~s(id="stage-col-3-rows-done-end")
+      assert html =~ "That's everything"
+      refute html =~ "-rows-more"
+    end
+
+    test "a collapsed pager page renders week markers as list items before the rows" do
+      marker =
+        {"stage_cards_9-week-2026-11-02",
+         %{
+           id: "week-2026-11-02",
+           week_start: ~D[2026-11-02],
+           title: "This week",
+           range: "Nov 2 – 8",
+           count: 2,
+           first?: true
+         }}
+
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Done",
+          type: :done,
+          stage_id: 9,
+          board_key: "RE",
+          count: 2,
+          terminal: true,
+          done_more: false,
+          collapsed: true,
+          pager: true,
+          cards: [marker | @compact_cards]
+        )
+
+      doc = LazyHTML.from_fragment(html)
+      assert doc |> LazyHTML.query("#stage-col-3-rows > li.week-marker:first-child") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("li#stage_cards_9-week-2026-11-02") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#stage-col-3-rows > li.compact-card-row") |> Enum.count() == 2
+    end
+
+    test "a non-terminal collapsed stage shows neither the button nor the end note" do
       html =
         render_component(&CoreComponents.stage_column/1,
           id: "stage-col-3",
@@ -1221,6 +1276,7 @@ defmodule HamacaWeb.CoreComponentsTest do
         )
 
       refute html =~ "-rows-more"
+      refute html =~ "-rows-done-end"
     end
 
     test "an empty collapsed stage in pager mode shows the empty note" do
@@ -1298,6 +1354,169 @@ defmodule HamacaWeb.CoreComponentsTest do
 
       desktop_html = render_component(&CoreComponents.stage_column/1, base)
       refute desktop_html =~ "show-as-list"
+    end
+  end
+
+  describe "stage_column/1 Done week paging (RE504)" do
+    @done_card {"stage_cards_9-1",
+                %{id: 1, title: "Shipped", tag: nil, ref_number: 1, status: :ready, sub_tasks: [], owners: []}}
+
+    test "an expanded terminal column with older weeks shows the 'Load 4 more weeks' button" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Done",
+          type: :done,
+          stage_id: 9,
+          board_key: "RE",
+          count: 42,
+          terminal: true,
+          done_more: true,
+          cards: [@done_card]
+        )
+
+      [button] = html |> LazyHTML.from_fragment() |> LazyHTML.query("#stage-col-3-show-more-done") |> Enum.to_list()
+      assert LazyHTML.attribute(button, "class") == ["stage-show-more"]
+      assert LazyHTML.attribute(button, "phx-click") == ["load_more_done_weeks"]
+      text = button |> LazyHTML.text() |> String.split() |> Enum.join(" ")
+      assert text == "Load 4 more weeks"
+      assert Regex.scan(~r/\d/, text) == [["4"]]
+      refute html =~ "stage-col-3-done-end"
+    end
+
+    test "an expanded terminal column with nothing older shows the end note after the cards" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Done",
+          type: :done,
+          stage_id: 9,
+          board_key: "RE",
+          count: 1,
+          terminal: true,
+          done_more: false,
+          cards: [@done_card]
+        )
+
+      doc = LazyHTML.from_fragment(html)
+      [note] = doc |> LazyHTML.query("#stage-col-3-drop > #stage-col-3-cards + #stage-col-3-done-end") |> Enum.to_list()
+      assert note |> LazyHTML.text() |> String.trim() == "That's everything"
+
+      assert LazyHTML.attribute(note, "style") == [
+               "text-align:center;font-size:10.5px;font-family:var(--font-mono);" <>
+                 "color:color-mix(in oklab, var(--color-base-content) 45%, transparent);padding:6px 0 2px"
+             ]
+
+      refute html =~ "stage-col-3-show-more-done"
+    end
+
+    test "an empty terminal column shows no end note" do
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Done",
+          type: :done,
+          stage_id: 9,
+          count: 0,
+          terminal: true,
+          done_more: false
+        )
+
+      refute html =~ "stage-col-3-done-end"
+      refute html =~ "stage-col-3-show-more-done"
+    end
+
+    test "a marker stream item renders as a week marker, not a board card" do
+      marker =
+        {"stage_cards_9-week-2026-11-02",
+         %{
+           id: "week-2026-11-02",
+           week_start: ~D[2026-11-02],
+           title: "This week",
+           range: "Nov 2 – 8",
+           count: 1,
+           first?: true
+         }}
+
+      html =
+        render_component(&CoreComponents.stage_column/1,
+          id: "stage-col-3",
+          name: "Done",
+          type: :done,
+          stage_id: 9,
+          board_key: "RE",
+          count: 1,
+          terminal: true,
+          done_more: false,
+          cards: [marker, @done_card]
+        )
+
+      doc = LazyHTML.from_fragment(html)
+      [node] = doc |> LazyHTML.query("#stage-col-3-cards > #stage-col-3-empty + div.week-marker") |> Enum.to_list()
+      assert LazyHTML.attribute(node, "id") == ["stage_cards_9-week-2026-11-02"]
+      assert LazyHTML.attribute(node, "data-week-start") == ["2026-11-02"]
+      assert doc |> LazyHTML.query("#stage-col-3-cards > .week-marker + .board-card") |> Enum.count() == 1
+      assert doc |> LazyHTML.query("#stage-col-3-cards .board-card") |> Enum.count() == 1
+    end
+  end
+
+  describe "done_week_marker/1 (RE504)" do
+    defp marker_doc(attrs) do
+      (&CoreComponents.done_week_marker/1)
+      |> render_component(attrs)
+      |> LazyHTML.from_fragment()
+    end
+
+    defp style_of(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.attribute("style") |> hd()
+
+    @base [id: "m1", title: "This week", range: "Nov 2 – 8", count: 3, first: true]
+
+    test "renders the label, range, hairline and count to the mockup" do
+      doc = marker_doc(@base)
+
+      [root] = doc |> LazyHTML.query("#m1") |> Enum.to_list()
+      assert LazyHTML.attribute(root, "class") == ["week-marker"]
+      root_style = root |> LazyHTML.attribute("style") |> hd()
+      assert root_style =~ "display:flex;align-items:center;gap:7px;"
+      assert root_style =~ "padding:0 2px"
+      assert root_style =~ "margin-top:0"
+
+      [label] = doc |> LazyHTML.query("#m1 .week-marker-label") |> Enum.to_list()
+      assert LazyHTML.text(label) =~ "This week"
+      label_style = style_of(doc, "#m1 .week-marker-label")
+      assert label_style =~ "font-size:10px;font-family:var(--font-mono);font-weight:600;letter-spacing:0.08em;"
+      assert label_style =~ "text-transform:uppercase;white-space:nowrap;"
+      assert label_style =~ "color:color-mix(in oklab, var(--color-success) 80%, var(--color-base-content))"
+
+      assert doc |> LazyHTML.query("#m1 .week-marker-range") |> LazyHTML.text() =~ "Nov 2 – 8"
+
+      assert style_of(doc, "#m1 .week-marker-range") ==
+               "font-size:10px;font-family:var(--font-mono);font-weight:400;white-space:nowrap;" <>
+                 "color:color-mix(in oklab, var(--color-base-content) 45%, transparent)"
+
+      assert style_of(doc, "#m1 .week-marker-rule") == "flex:1;height:1px;background:var(--color-base-300)"
+
+      assert doc |> LazyHTML.query("#m1 .week-marker-count") |> LazyHTML.text() |> String.trim() == "3"
+
+      assert style_of(doc, "#m1 .week-marker-count") ==
+               "font-size:10px;font-family:var(--font-mono);" <>
+                 "color:color-mix(in oklab, var(--color-base-content) 45%, transparent)"
+    end
+
+    test "a later marker gets 6px of top margin" do
+      doc = marker_doc(Keyword.put(@base, :first, false))
+      assert style_of(doc, "#m1") =~ "margin-top:6px"
+    end
+
+    test "an older week has no range element" do
+      doc = marker_doc(Keyword.merge(@base, title: "Oct 12 – 18", range: nil))
+      assert doc |> LazyHTML.query("#m1 .week-marker-range") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#m1 .week-marker-label") |> LazyHTML.text() =~ "Oct 12 – 18"
+    end
+
+    test "renders as a list item when as is li" do
+      doc = marker_doc(Keyword.put(@base, :as, "li"))
+      assert doc |> LazyHTML.query("li#m1.week-marker") |> Enum.count() == 1
     end
   end
 

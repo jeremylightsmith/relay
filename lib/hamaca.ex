@@ -31,6 +31,7 @@ defmodule Hamaca do
       Boards,
       Brand,
       Cards,
+      Cards.DoneWeeks,
       Config,
       Events,
       Examples,
