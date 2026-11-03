@@ -35,6 +35,11 @@ defmodule Storybook.BoardBarComponents.BoardMoreMenu do
         attributes: Map.put(@base, :setup, %{finished?: false, closed?: false, position: 3, total: 7})
       },
       %Variation{
+        id: :hidden_setup,
+        description: "RE505 · setup hidden for everyone: a grey hidden chip, no dot on ⋯",
+        attributes: Map.put(@base, :setup, %{finished?: false, closed?: true, position: 3, total: 7})
+      },
+      %Variation{
         id: :logs_open,
         attributes: Map.merge(@base, %{active_view: :story_map, logs_open: true})
       },

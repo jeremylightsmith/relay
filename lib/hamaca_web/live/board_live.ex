@@ -108,6 +108,12 @@ defmodule HamacaWeb.BoardLive do
   columns below it. `{:setup_changed, _}` re-reads only the checklist. The shown-once step-3 key
   lives only in `:setup_token`, never persisted, broadcast or put in the URL.
 
+  RE505: the panel's ⟨ (`"setup_minimize"`) hides setup for everyone — `Hamaca.Setup.hide/1`,
+  persisted and delivered to every open view by `{:setup_changed, _}` — and ⋯ Setup
+  (`"setup_open"`) brings it back with `Hamaca.Setup.reopen/1`. A hidden unfinished setup keeps
+  the ⋯ Setup item (a grey `hidden · n of 7` chip) and gives phones the columns and pager back.
+  Only connect mode keeps the per-socket `:setup_minimized`, reset on entering and leaving it.
+
   RE455: the key stays on screen until "I've saved it — next" (`"setup_key_saved"`,
   `Hamaca.Setup.key_saved/1` on the board or the connect's machine) finishes step 3 and drops
   `:setup_token`; "Lost it? Mint a new key" is `"setup_mint_key"` again, which reopens step 3 while
@@ -289,7 +295,8 @@ defmodule HamacaWeb.BoardLive do
           <span class="badge badge-sm badge-neutral">{@stalled_count}</span>
         </button>
         <%!-- RE497 — Agent log, Board settings and the setup chip (RE443: `Setup · <position>
-            of 7`, gone once setup is closed) live in ⋯ now. --%>
+            of 7`; RE505: `hidden · <position> of 7` while an unfinished setup is hidden, gone once
+            a finished one is closed) live in ⋯ now. --%>
         <BoardBarComponents.board_more_menu
           board_slug={@board.slug}
           active_view={active_view(@live_action)}
@@ -298,7 +305,7 @@ defmodule HamacaWeb.BoardLive do
           settings_path={if(not @plan_read_only?, do: ~p"/board/#{@board.slug}/settings")}
           setup={
             if(
-              @live_action not in [:card, :story_map] and setup_shown?(@setup) and
+              @live_action not in [:card, :story_map] and setup_menu_item?(@setup) and
                 not @setup_connect_mode,
               do: @setup
             )
@@ -1558,7 +1565,8 @@ defmodule HamacaWeb.BoardLive do
       |> assign(:make_editable_confirm?, false)
       # RE443 — the setup wizard: the board's checklist (nil when it has none), the shown-once
       # step-3 key (socket-only, never persisted or broadcast), whether this socket minimized
-      # the panel, the step-2 picker's selection and the user's expert toggle.
+      # the connect-mode panel (RE505: the board's own ⟨ hides it for everyone instead), the
+      # step-2 picker's selection and the user's expert toggle.
       |> assign(:setup, Setup.checklist(board))
       # RE446 — `?setup=connect` (set in handle_params/3): this member's connect-a-machine
       # checklist replaces the board's in the panel. `:setup_token` is whichever panel's key.
@@ -1781,9 +1789,16 @@ defmodule HamacaWeb.BoardLive do
   defp setup_shown?(_none_or_closed), do: false
 
   # RE443 — only an unfinished checklist swaps the columns for the read-only checklist on phones
-  # and hides the pager; a finished one must never hide the board.
-  defp setup_unfinished?(%{finished?: false}), do: true
-  defp setup_unfinished?(_none_or_finished), do: false
+  # and hides the pager; a finished one must never hide the board. RE505 — nor a hidden one
+  # (`closed?`): a phone then gets the columns and pager like a board with no setup.
+  defp setup_unfinished?(%{finished?: false, closed?: false}), do: true
+  defp setup_unfinished?(_none_finished_or_hidden), do: false
+
+  # RE497 / RE505 — the ⋯ Setup item: while the checklist is shown, and while an unfinished one is
+  # hidden (its grey `hidden · n of 7` chip reopens it). A finished-and-closed one has none.
+  defp setup_menu_item?(%{closed?: false}), do: true
+  defp setup_menu_item?(%{finished?: false}), do: true
+  defp setup_menu_item?(_none_or_finished_and_closed), do: false
 
   # RE446 — the payoff callout: a callout to show, and a board in the DOM to pin it to.
   defp setup_callout?(%{setup_connect_mode: true}), do: false
@@ -1822,8 +1837,17 @@ defmodule HamacaWeb.BoardLive do
     )
   end
 
-  defp assign_setup_connect(socket, false),
-    do: assign(socket, setup_connect_mode: false, setup_connect: nil, setup_token: nil, setup_peeks: MapSet.new())
+  # RE505 — leaving also drops a connect-mode ⟨: the tab-only minimize must not hide the board's
+  # own (shown) panel.
+  defp assign_setup_connect(socket, false) do
+    assign(socket,
+      setup_connect_mode: false,
+      setup_connect: nil,
+      setup_token: nil,
+      setup_peeks: MapSet.new(),
+      setup_minimized: false
+    )
+  end
 
   # The connect checklist re-read: its machine's once minted, else the member's latest unfinished
   # machine or a fresh preview.
@@ -1849,12 +1873,13 @@ defmodule HamacaWeb.BoardLive do
 
   defp recommended_llm, do: Enum.find(Setup.onboarding_llms(), & &1.recommended?).harness
 
-  defp close_setup(socket) do
-    case Setup.close(socket.assigns.board) do
-      {:ok, checklist} -> assign(socket, :setup, checklist)
-      {:error, _not_finished_or_none} -> assign(socket, :setup, Setup.checklist(socket.assigns.board))
-    end
-  end
+  defp close_setup(socket), do: assign_setup_result(socket, Setup.close(socket.assigns.board))
+
+  # A `Hamaca.Setup` payoff write's result: its checklist, else (none, or not finished) a re-read.
+  defp assign_setup_result(socket, {:ok, checklist}), do: assign(socket, :setup, checklist)
+
+  defp assign_setup_result(socket, {:error, _not_finished_or_none}),
+    do: assign(socket, :setup, Setup.checklist(socket.assigns.board))
 
   defp assign_setup_key(socket, {:ok, %{checklist: checklist, token: token}}) do
     assign(socket, setup: checklist, setup_token: token)
@@ -2213,9 +2238,20 @@ defmodule HamacaWeb.BoardLive do
     end
   end
 
-  def handle_event("setup_minimize", _params, socket), do: {:noreply, assign(socket, :setup_minimized, true)}
+  # RE505 — ⟨ hides the board's setup for everyone (`Hamaca.Setup.hide/1`, delivered to every view
+  # by `{:setup_changed, _}`); ⋯ Setup reopens it for everyone. Hiding isn't a board edit, so an
+  # archived board allows it, like `setup_close`. In connect mode ⟨ only minimizes this tab: the
+  # board's own setup is not this member's to hide.
+  def handle_event("setup_minimize", _params, %{assigns: %{setup_connect_mode: true}} = socket),
+    do: {:noreply, assign(socket, :setup_minimized, true)}
 
-  def handle_event("setup_open", _params, socket), do: {:noreply, assign(socket, :setup_minimized, false)}
+  def handle_event("setup_minimize", _params, socket),
+    do: {:noreply, assign_setup_result(socket, Setup.hide(socket.assigns.board))}
+
+  def handle_event("setup_open", _params, socket) do
+    socket = assign_setup_result(socket, Setup.reopen(socket.assigns.board))
+    {:noreply, assign(socket, :setup_minimized, false)}
+  end
 
   # RE446 — the payoff. Close setup and Got it close it for every viewer (`{:setup_changed, _}`);
   # Watch it work also opens the claimed card. Closing the wizard isn't a board edit, so an

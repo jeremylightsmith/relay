@@ -261,6 +261,105 @@ defmodule Hamaca.SetupRunnerTest do
     end
   end
 
+  describe "hide/1 (RE505)" do
+    defp claim_data(board), do: Repo.get_by!(BoardSetupStep, board_id: board.id, step: claim_step()).data
+
+    defp hidden_on_install! do
+      board = "bare-minimum" |> create!() |> advance_to!(Setup.step_id(:install))
+      {:ok, _} = Setup.hide(board)
+      board
+    end
+
+    # Scenario 1
+    test "hides an unfinished setup board-wide without dismissing the callout" do
+      board = "bare-minimum" |> create!() |> advance_to!(Setup.step_id(:install))
+      board_id = board.id
+      Events.subscribe(board_id)
+
+      assert {:ok, %{closed?: true, finished?: false, position: 4, hidden_at: %DateTime{}}} = Setup.hide(board)
+      assert_receive {:setup_changed, ^board_id}
+
+      data = claim_data(board)
+      assert Map.has_key?(data, "closed_at")
+      refute Map.has_key?(data, "callout_dismissed_at")
+    end
+
+    # Scenario 2
+    test "a repeat hide writes nothing and broadcasts nothing" do
+      board = hidden_on_install!()
+      closed_at = claim_data(board)["closed_at"]
+      Events.subscribe(board.id)
+
+      assert {:ok, %{closed?: true}} = Setup.hide(board)
+      assert claim_data(board)["closed_at"] == closed_at
+      refute_receive {:setup_changed, _}
+    end
+
+    # Scenario 3
+    test "reopen brings a hidden setup back on the same step" do
+      board = hidden_on_install!()
+      install = Setup.step_id(:install)
+
+      assert {:ok, %{closed?: false, hidden_at: nil, position: 4, current_id: ^install}} = Setup.reopen(board)
+    end
+
+    # Scenario 4
+    test "progress keeps ticking while hidden and nothing resets" do
+      board = hidden_on_install!()
+      install = Setup.step_id(:install)
+
+      assert {:ok, _} = Setup.advance(board, install, :done, %{})
+
+      onboard = Setup.step_id(:onboard)
+      assert %{closed?: true, current_id: ^onboard, position: 5} = Setup.checklist(board)
+
+      assert {:ok, %{closed?: false, current_id: ^onboard, position: 5}} = Setup.reopen(board)
+      assert step(board, install).status == :done
+    end
+
+    # Scenario 5
+    test "a first claim while hidden stays quiet until reopened, then shows the callout" do
+      board = "bare-minimum" |> create!() |> advance_to!(claim_step())
+      {:ok, _} = Setup.hide(board)
+      {card, job} = job_in!(board, :planning)
+
+      :ok = Setup.observe_claim(job, runner())
+
+      assert %{finished?: true, closed?: true, callout: nil} = Setup.checklist(board)
+
+      card_ref = ref(board, card)
+      assert {:ok, _} = Setup.reopen(board)
+      assert %{callout: %{card_ref: ^card_ref}} = Setup.checklist(board)
+    end
+
+    # Scenario 6
+    test "hides a finished setup without dismissing the callout" do
+      board = finished_board!()
+
+      assert {:ok, %{finished?: true, closed?: true, callout: nil}} = Setup.hide(board)
+      refute Map.has_key?(claim_data(board), "callout_dismissed_at")
+    end
+
+    # Scenario 7
+    test "refuses a board with no checklist" do
+      user = insert(:user)
+      {:ok, plain} = Boards.create_board(user, %{name: "Plain", slug: unique_slug("plain")})
+
+      assert {:error, :no_checklist} = Setup.hide(plain)
+      assert {:error, :no_checklist} = Setup.hide(plain.id)
+    end
+
+    # Scenario 8
+    test "hidden_at is nil on a never-hidden board and on a connect checklist" do
+      board = "bare-minimum" |> create!() |> advance_to!(Setup.step_id(:llm))
+
+      assert %{position: 2, hidden_at: nil, closed?: false} = Setup.checklist(board)
+
+      {:ok, _} = Setup.hide(board)
+      assert %{connect?: true, hidden_at: nil} = Setup.connect_checklist(board, insert(:user))
+    end
+  end
+
   describe "checklist payoff keys" do
     # Scenario 11
     test "preview_checklist/2 derives started/finished/elapsed and the total" do

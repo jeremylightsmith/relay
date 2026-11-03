@@ -120,8 +120,8 @@ defmodule HamacaWeb.BoardSettingsSetupTest do
     refute has_element?(view, "#setup-pane")
   end
 
-  # Scenario 2
-  test "a finished board shows the finished line, Reopen and Connect a machine", %{conn: conn, user: user} do
+  # Scenario 2; RE505 scenario 13 — a finished setup still showing reads Showing, with no Reopen.
+  test "a finished board shows the finished line, Showing and Connect a machine", %{conn: conn, user: user} do
     %{board: board} = finished!(user)
     [created | _] = Setup.steps()
     set_completed_at!(board, created.id, ~U[2026-10-12 14:02:00Z])
@@ -132,8 +132,8 @@ defmodule HamacaWeb.BoardSettingsSetupTest do
     assert has_element?(view, "#setup-pane h2", "Setup")
     assert text(view, "#setup-finished-line") == "Finished 12 Oct, 14:42 · 7 of 7 · 40 min"
 
-    assert text(view, "#setup-reopen") == "Reopen setup wizard"
-    assert attr(view, "#setup-reopen", "class") == "btn btn-sm"
+    assert text(view, "#setup-showing") == "Showing"
+    refute has_element?(view, "#setup-reopen")
 
     assert text(view, "#setup-connect") == "➕ Connect a machine"
     assert attr(view, "#setup-connect", "class") == "btn btn-sm btn-primary"
@@ -238,5 +238,102 @@ defmodule HamacaWeb.BoardSettingsSetupTest do
     {:ok, view, _html} = live(conn, setup_url(board))
     assert text(view, "#settings-nav-setup") == BoardSettingsLive.section_label(:setup)
     assert text(view, "#settings-tab-setup") == BoardSettingsLive.section_label(:setup)
+  end
+
+  describe "Setup wizard row: Showing vs. Hidden (RE505)" do
+    defp on_step3!(user) do
+      board = create!(user)
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      assert %{position: 3, total: 7} = Setup.checklist(board)
+      board
+    end
+
+    # Hidden board-wide, with step 7's `closed_at` pinned to a fixed instant.
+    defp hidden!(user) do
+      board = on_step3!(user)
+      {:ok, _} = Setup.hide(board)
+      step7 = from(s in BoardSetupStep, where: s.board_id == ^board.id and is_nil(s.machine_id))
+      step7 = Repo.one!(from(s in step7, where: s.step == ^Setup.step_id(:first_claim)))
+      step7 |> Ecto.Changeset.change(data: Map.put(step7.data, "closed_at", "2026-11-03T18:20:00Z")) |> Repo.update!()
+      board
+    end
+
+    # Scenario 9
+    test "a shown, unfinished setup reads Showing with Connect primary", %{conn: conn, user: user} do
+      board = on_step3!(user)
+
+      {:ok, view, _html} = live(conn, setup_url(board))
+
+      assert text(view, "#setup-finished-line") == "In progress · 3 of 7"
+
+      assert text(view, "#setup-wizard-note") ==
+               "Showing beside the board for everyone. Hide it with ⟨ in the panel's header."
+
+      assert text(view, "#setup-showing") == "Showing"
+      assert attr(view, "#setup-showing", "class") == "badge badge-primary badge-soft badge-sm self-start"
+      refute has_element?(view, "#setup-reopen")
+      assert attr(view, "#setup-connect", "class") == "btn btn-sm btn-primary"
+    end
+
+    # Scenario 10
+    test "a hidden, unfinished setup reads Hidden with Reopen primary", %{conn: conn, user: user} do
+      board = hidden!(user)
+
+      {:ok, view, _html} = live(conn, setup_url(board))
+
+      assert text(view, "#setup-finished-line") == "Hidden 3 Nov, 18:20 · stopped at 3 of 7"
+
+      assert text(view, "#setup-wizard-note") ==
+               "Hidden for everyone. Reopening it shows it beside the board again at the current step, with anything the runner reported since already ticked."
+
+      assert text(view, "#setup-reopen") == "Reopen setup wizard"
+      assert attr(view, "#setup-reopen", "class") == "btn btn-sm btn-primary"
+      refute has_element?(view, "#setup-showing")
+
+      assert text(view, "#setup-connect-note") ==
+               "Still works while setup is hidden; it's your own wizard, not the board's."
+
+      assert attr(view, "#setup-connect", "class") == "btn btn-sm"
+    end
+
+    # Scenario 11
+    test "Reopen on a hidden setup shows it on the board again at the current step", %{conn: conn, user: user} do
+      board = hidden!(user)
+
+      {:ok, view, _html} = live(conn, setup_url(board))
+      view |> element("#setup-reopen") |> render_click()
+
+      assert_redirect(view, "/board/#{board.slug}")
+      refute Setup.checklist(board).closed?
+
+      {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(board_view, "#setup-panel")
+      assert has_element?(board_view, ~s(#setup-step-3[data-status="active"]))
+    end
+
+    # Scenario 12
+    test "a finished, closed setup keeps today's Reopen row, and ⋯ has no Setup item", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, _} = Setup.close(board)
+
+      {:ok, view, _html} = live(conn, setup_url(board))
+
+      assert text(view, "#setup-finished-line") =~ ~r/^Finished /
+      assert has_element?(view, "#setup-reopen")
+      assert text(view, "#setup-wizard-note") == "Reopen the checklist beside the board. It shows what was seen and when."
+
+      {:ok, board_view, _html} = live(conn, ~p"/board/#{board.slug}")
+      refute has_element?(board_view, "#board-more-setup")
+    end
+
+    # Scenario 13
+    test "a finished setup not closed reads Showing, with no Reopen", %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+
+      {:ok, view, _html} = live(conn, setup_url(board))
+
+      assert has_element?(view, "#setup-showing")
+      refute has_element?(view, "#setup-reopen")
+    end
   end
 end

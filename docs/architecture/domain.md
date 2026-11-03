@@ -1296,14 +1296,17 @@ sharing behavior.
   `warning`, step 2 active) from `Boards.create_board/2` on the template path only, so a board
   created without a template — or before RE443 — has no checklist (`checklist/1` is nil).
   `checklist/1` returns `%{board_id, template, template_warning, llm, current_id, current_sub_id,
-  first_flow_stage, first_card_stage, position, done_count, finished?, total, closed?, callout, started_at,
+  first_flow_stage, first_card_stage, position, done_count, finished?, total, closed?, hidden_at, callout, started_at,
   finished_at, elapsed_minutes, steps}` (the 7 top-level entries; step 5's in `children`). The
   payoff keys (RE446) come from the rows alone, so `preview_checklist/2` carries them too: `total`
   is the top-level step count (7), `started_at` step 1's `completed_at`, `finished_at` step 7's
   once it is finished, `elapsed_minutes` the whole minutes between them (nil unless both are set),
-  `closed?` whether step 7's `data["closed_at"]` is set, and `callout` — `%{card_ref, card_id,
-  machine, llm, verb}`, `llm` the checklist LLM's label — only while step 7 is done with a claimed
-  card and its `data["callout_dismissed_at"]` is absent; `current/1` is its first unfinished entry, `current_sub_id` (RE445) the first
+  `closed?` whether step 7's `data["closed_at"]` is set (the setup is not shown on the board —
+  closed once finished, or hidden board-wide while unfinished; always false on a connect),
+  `hidden_at` that `closed_at` parsed (nil when unset and on a connect), and `callout` —
+  `%{card_ref, card_id, machine, llm, verb}`, `llm` the checklist LLM's label — only while step 7
+  is done with a claimed card, its `data["callout_dismissed_at"]` is absent and the setup is not
+  `closed?`; `current/1` is its first unfinished entry, `current_sub_id` (RE445) the first
   unfinished child of that entry (nil when it has none) — derived from finished-ness, so a board
   that reached step 5 before RE445 still reports 5.1 — and `first_flow_stage` the NAME of the
   lowest-position top-level stage holding a flow, and `first_card_stage` the NAME of the stage that
@@ -1340,9 +1343,12 @@ sharing behavior.
   claimed card's stage category at claim time: `:planning` → `planning`, `:in_progress` →
   `building`, else `working on`). Both return `:ok` whatever the setup state, and the no-checklist
   path is one cheap `exists?` query. `close/1` (`{:error, :not_finished | :no_checklist}`) stamps
-  step 7's `callout_dismissed_at` and `closed_at`; `reopen/1` clears `closed_at` only, so the
-  callout never returns. Both write step 7's `data` directly under the board lock (never through
-  `advance/4`) and broadcast `{:setup_changed, board_id}` on a change. `choose_llm/3` (step 2) sets the board default agent to the
+  step 7's `callout_dismissed_at` and `closed_at`; `hide/1` (RE505, `{:error, :no_checklist}`)
+  stamps `closed_at` alone, in any state, so an unfinished setup is hidden for everyone while its
+  steps keep ticking, and a claim that lands while hidden shows its callout after a reopen;
+  `reopen/1` clears `closed_at` only, so a callout `close/1` dismissed never returns. All three
+  write step 7's `data` directly under the board lock (never through `advance/4`), write nothing
+  on a repeat, and broadcast `{:setup_changed, board_id}` on a change. `choose_llm/3` (step 2) sets the board default agent to the
   chosen harness (keeping a default already on it, else reusing the board's first agent on it,
   else creating one on its first model) and mints the step-3 key `"Setup · <user>"` via
   `Hamaca.ApiKeys`; `remint_key/2` mints a fresh one, revoking the old only if it was never used.
@@ -1370,7 +1376,11 @@ sharing behavior.
   renders specially, so `HamacaWeb.SetupComponents` (the wizard panel, chip and phones' read-only
   checklist `HamacaWeb.BoardLive` renders, plus RE446's payoff callout and "You're set up" box)
   never re-types one. BoardLive shows the chip and panel while the checklist isn't `closed?`, but
-  swaps the columns for the read-only checklist on phones only while it is unfinished. The install
+  swaps the columns for the read-only checklist on phones (and hides the pager) only while it is
+  unfinished and not `closed?`. The panel's ⟨ (and its footer's Hide) calls `hide/1`, hiding setup
+  for every view through `{:setup_changed, _}` — on an archived board too — except in connect
+  mode, where it only minimizes that tab; ⋯ **Setup** calls `reopen/1` and stays listed while an
+  unfinished setup is hidden (a grey `hidden · n of 7` chip), but not once a finished one is closed. The install
   handshake reports through `preflight/2` and `installed/2`, each taking the authenticated
   `Schemas.ApiKey` (board preloaded) and the script's JSON: `preflight/2` checks the key's board
   owns the request's `slug` (`:wrong_board`) and that step 2 is done (`:step_2_pending`), ticks
@@ -1428,8 +1438,10 @@ sharing behavior.
   (`"7/7"` / `"6/6"`, else `"<current id> <short>"`). `project_answers/1` is 5.3's answered
   interview questions in order (`[%{id, label, answer}]`). Both feed `BoardSettingsLive`'s
   **Setup** section (`?section=setup`, only on a board with a checklist, else General): the
-  status line, Reopen setup wizard (`reopen/1`, then back to the board), the answers, the machines
-  table and Connect a machine, a link to `/board/:slug?setup=connect` — `BoardLive`'s connect mode,
+  status line, the Setup wizard row — a **Showing** badge while not `closed?`, else Reopen setup
+  wizard (`reopen/1`, then back to the board; primary while an unfinished setup is hidden, when
+  Connect a machine steps down to a plain button) — the answers, the machines table and Connect a
+  machine, a link to `/board/:slug?setup=connect` — `BoardLive`'s connect mode,
   which shows the member's `connect_checklist/2` in the panel whatever the board's `closed?`,
   never mints on mount, and routes "Mint my key" to `connect_machine/2` (then `remint_key/2` on
   that machine). Depends

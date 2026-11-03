@@ -437,6 +437,97 @@ defmodule HamacaWeb.SetupComponentsTest do
       assert chip.(preview(all_done())) == "Setup · done"
       assert chip.(preview(%{"1" => :done, "2" => :done, "3" => :done, "4" => :active})) == "Setup · 4 of 7"
     end
+  end
+
+  describe "hidden setup (RE505)" do
+    @hidden_at ~U[2026-11-03 18:20:00Z]
+    @on_step_3 %{"1" => :done, "2" => :done, "3" => :active}
+
+    defp on_step_3, do: preview(@on_step_3)
+    defp hidden_on_step_3, do: %{on_step_3() | closed?: true, hidden_at: @hidden_at}
+
+    defp chip_doc(checklist) do
+      (&SetupComponents.setup_chip/1)
+      |> render_component(id: "setup-chip", checklist: checklist)
+      |> LazyHTML.from_fragment()
+    end
+
+    defp chip_text(doc), do: doc |> LazyHTML.query("#setup-chip") |> LazyHTML.text() |> String.trim()
+    defp chip_attr(doc, name), do: first_attr(doc, "#setup-chip", name)
+
+    defp panel_doc(checklist) do
+      (&SetupComponents.setup_panel/1)
+      |> render_component(id: "setup-panel", checklist: checklist, board_name: "Streaks", user_name: "Jeremy")
+      |> LazyHTML.from_fragment()
+    end
+
+    # Scenario 1
+    test "an unfinished hidden setup's chip reads hidden · n of 7, grey, with no primary tint" do
+      doc = chip_doc(hidden_on_step_3())
+
+      assert chip_text(doc) == "hidden · 3 of 7"
+      assert chip_attr(doc, "class") =~ "badge-ghost"
+      refute (chip_attr(doc, "style") || "") =~ "--color-primary"
+    end
+
+    # Scenario 2
+    test "a shown setup's chip keeps Setup · n of 7 and the primary tint" do
+      doc = chip_doc(on_step_3())
+
+      assert chip_text(doc) == "Setup · 3 of 7"
+      refute chip_attr(doc, "class") =~ "badge-ghost"
+      assert chip_attr(doc, "style") =~ "var(--color-primary)"
+      assert all_done() |> preview() |> chip_doc() |> chip_text() == "Setup · done"
+    end
+
+    # Scenario 3
+    test "status_line/1 says when an unfinished setup was hidden and where it stopped" do
+      checklist = %{finished?: false, closed?: true, hidden_at: @hidden_at, position: 3, total: 7}
+
+      assert SetupComponents.status_line(checklist) == "Hidden 3 Nov, 18:20 · stopped at 3 of 7"
+    end
+
+    # Scenario 4
+    test "status_line/1 reads In progress while shown" do
+      checklist = %{finished?: false, closed?: false, hidden_at: nil, position: 4, total: 7}
+
+      assert SetupComponents.status_line(checklist) == "In progress · 4 of 7"
+    end
+
+    # Scenario 4
+    test "status_line/1's finished clause wins over hidden" do
+      checklist = %{
+        finished?: true,
+        closed?: true,
+        hidden_at: @hidden_at,
+        finished_at: ~U[2026-10-12 14:42:00Z],
+        elapsed_minutes: 40,
+        position: 7,
+        total: 7
+      }
+
+      assert SetupComponents.status_line(checklist) == "Finished 12 Oct, 14:42 · 7 of 7 · 40 min"
+    end
+
+    # Scenario 5
+    test "board mode's ⟨ and footer link say they hide setup for everyone" do
+      doc = panel_doc(on_step_3())
+
+      assert first_attr(doc, "#setup-minimize", "aria-label") == "Hide setup for everyone"
+      assert first_attr(doc, "#setup-minimize", "title") == "Hide setup for everyone"
+      assert doc |> LazyHTML.query("#setup-minimize-footer") |> LazyHTML.text() |> String.trim() == "Hide"
+      assert first_attr(doc, "#setup-minimize", "phx-click") == "setup_minimize"
+      assert first_attr(doc, "#setup-minimize-footer", "phx-click") == "setup_minimize"
+    end
+
+    # Scenario 6
+    test "connect mode's ⟨ and footer link still read Minimize" do
+      connect = Setup.connect_checklist(connect_board(), insert(:user, name: "Jeremy"))
+      doc = panel_doc(connect)
+
+      assert first_attr(doc, "#setup-minimize", "aria-label") == "Minimize"
+      assert doc |> LazyHTML.query("#setup-minimize-footer") |> LazyHTML.text() |> String.trim() == "Minimize"
+    end
 
     test "setup_done_box/1 says 1 minute, singular" do
       checklist = %{preview(all_done()) | elapsed_minutes: 1}

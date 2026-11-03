@@ -147,8 +147,8 @@ defmodule HamacaWeb.BoardBarComponents do
   The board bar's ⋯ menu. Phones (below `sm`) get the View section — one entry per
   `CoreComponents.board_views/1` view — since the view switch leaves the bar there. Then
   Agent log (wide only, when `show_logs`), Board settings (when `settings_path`) and Setup
-  (when `setup`, which also puts a primary dot on the ⋯ button). Breakpoints are CSS-only: the
-  menu renders once.
+  (when `setup`; a shown setup also puts a primary dot on the ⋯ button, a hidden one doesn't).
+  Breakpoints are CSS-only: the menu renders once.
   """
   attr :board_slug, :string, required: true
   attr :active_view, :atom, values: @views, required: true
@@ -158,7 +158,8 @@ defmodule HamacaWeb.BoardBarComponents do
 
   attr :setup, :map,
     default: nil,
-    doc: "the `Hamaca.Setup.checklist/1` map; nil hides the Setup item and the dot"
+    doc:
+      "the `Hamaca.Setup.checklist/1` map; nil hides the Setup item and the dot, and `closed?: true` (hidden) hides just the dot"
 
   attr :open, :boolean, default: false, doc: "storybook only — render the menu open"
 
@@ -178,7 +179,7 @@ defmodule HamacaWeb.BoardBarComponents do
       >
         <.icon name="hero-ellipsis-horizontal" class="size-5" />
         <span
-          :if={@setup}
+          :if={@setup && !@setup.closed?}
           id="board-more-dot"
           class="absolute right-1.5 top-2 size-2 rounded-full bg-primary"
           aria-hidden="true"

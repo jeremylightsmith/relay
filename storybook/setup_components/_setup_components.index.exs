@@ -6,6 +6,7 @@ defmodule Storybook.SetupComponents do
 
   def entry("setup_callout"), do: [icon: {:fa, "hand-point-up", :thin}]
   def entry("setup_checklist"), do: [icon: {:fa, "list-check", :thin}]
+  def entry("setup_chip"), do: [icon: {:fa, "tag", :thin}]
   def entry("setup_panel"), do: [icon: {:fa, "table-columns", :thin}]
   def entry("setup_machines_table"), do: [icon: {:fa, "laptop", :thin}]
   def entry("project_answers"), do: [icon: {:fa, "clipboard-list", :thin}]

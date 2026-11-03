@@ -15,6 +15,7 @@ defmodule HamacaWeb.BoardLiveSetupTest do
   alias Hamaca.Boards
   alias Hamaca.Repo
   alias Hamaca.Setup
+  alias Schemas.BoardSetupStep
   alias Schemas.Card
   alias Schemas.Stage
   alias Schemas.User
@@ -845,6 +846,129 @@ defmodule HamacaWeb.BoardLiveSetupTest do
       render_patch(view, ~p"/board/#{board.slug}")
 
       refute has_element?(view, ~s(#setup-panel [id$="-peek"]))
+    end
+  end
+
+  describe "⟨ hides setup for everyone; ⋯ Setup brings it back (RE505)" do
+    # A bare-minimum board whose step 2 picked Claude Code, so it sits on step 3 of 7.
+    defp on_step3!(user) do
+      board = create!(user, "bare-minimum")
+      {:ok, _} = Setup.choose_llm(board, user, "claude-code")
+      assert %{position: 3, total: 7} = Setup.checklist(board)
+      board
+    end
+
+    defp hidden!(user) do
+      board = on_step3!(user)
+      {:ok, _} = Setup.hide(board)
+      board
+    end
+
+    # Scenario 1
+    test "⟨ in one view hides the panel and the dot in every view, and a reload keeps it hidden",
+         %{conn: conn, user: user} do
+      board = on_step3!(user)
+      {:ok, a, _html} = live(conn, ~p"/board/#{board.slug}")
+      {:ok, b, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      a |> element("#setup-minimize") |> render_click()
+
+      assert Setup.checklist(board).closed?
+      render(b)
+
+      for view <- [a, b] do
+        refute has_element?(view, "#setup-panel")
+        refute has_element?(view, "#board-more-dot")
+      end
+
+      {:ok, fresh, _html} = live(conn, ~p"/board/#{board.slug}")
+      refute has_element?(fresh, "#setup-panel")
+      refute has_element?(fresh, "#board-more-dot")
+    end
+
+    # Scenario 2
+    test "the footer's Hide link hides it for everyone too", %{conn: conn, user: user} do
+      board = on_step3!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#setup-minimize-footer") |> render_click()
+
+      assert Setup.checklist(board).closed?
+      refute has_element?(view, "#setup-panel")
+    end
+
+    # Scenario 3
+    test "⋯ keeps a grey hidden Setup item that reopens it for everyone", %{conn: conn, user: user} do
+      board = hidden!(user)
+      {:ok, a, _html} = live(conn, ~p"/board/#{board.slug}")
+      {:ok, b, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      assert text(b, "#board-more-setup") =~ "hidden · 3 of 7"
+      assert has_element?(b, "#board-more-setup-chip.badge-ghost")
+
+      b |> element("#board-more-setup") |> render_click()
+
+      refute Setup.checklist(board).closed?
+      render(a)
+
+      for view <- [a, b] do
+        assert has_element?(view, "#setup-panel")
+        assert has_element?(view, ~s(#setup-step-3[data-status="active"]))
+      end
+
+      {:ok, fresh, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(fresh, "#setup-panel")
+    end
+
+    # Scenario 4
+    test "phones get the columns and the pager back while an unfinished setup is hidden",
+         %{conn: conn, user: user} do
+      board = hidden!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#setup-mobile")
+      refute has_element?(view, "#board-pager-nav.hidden")
+      assert attr(view, "#board-bands", "style") =~ "display:flex"
+      assert has_element?(view, "#board-row.flex-1")
+
+      {:ok, _} = Setup.reopen(board)
+      render(view)
+
+      assert has_element?(view, "#setup-mobile")
+      assert has_element?(view, "#board-pager-nav.hidden")
+    end
+
+    # Scenario 5
+    test "⟨ on a finished setup hides it and drops the Setup item without dismissing the callout",
+         %{conn: conn, user: user} do
+      %{board: board} = finished!(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#setup-minimize") |> render_click()
+
+      refute has_element?(view, "#setup-panel")
+      refute has_element?(view, "#board-more-setup")
+      assert %{closed?: true} = Setup.checklist(board)
+
+      step7 =
+        Repo.one!(
+          from(s in BoardSetupStep,
+            where: s.board_id == ^board.id and is_nil(s.machine_id) and s.step == ^Setup.step_id(:first_claim)
+          )
+        )
+
+      refute Map.has_key?(step7.data, "callout_dismissed_at")
+    end
+
+    # Scenario 6
+    test "an archived board still allows hiding", %{conn: conn, user: user} do
+      board = on_step3!(user)
+      {:ok, _} = Boards.archive_board(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      view |> element("#setup-minimize") |> render_click()
+
+      assert Setup.checklist(board).closed?
     end
   end
 

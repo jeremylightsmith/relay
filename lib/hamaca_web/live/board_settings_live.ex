@@ -1004,30 +1004,50 @@ defmodule HamacaWeb.BoardSettingsLive do
                 >
                   {SetupComponents.status_line(@setup)}
                 </p>
+                <%!-- RE505 — Showing (on the board for everyone: a badge, no Reopen), Hidden (an
+                    unfinished setup put away with ⟨: Reopen leads, Connect steps back) or a
+                    finished setup's Close setup (today's Reopen row). --%>
                 <div class="flex items-start gap-4 border-b border-base-300 py-3">
                   <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span style="font-size:13.5px;font-weight:600">Setup wizard</span>
-                    <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent)">
-                      Reopen the checklist beside the board. It shows what was seen and when.
+                    <span
+                      id="setup-wizard-note"
+                      style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent)"
+                    >
+                      {setup_wizard_note(@setup)}
                     </span>
                   </div>
-                  <button type="button" id="setup-reopen" phx-click="setup_reopen" class="btn btn-sm">
+                  <span
+                    :if={!@setup.closed?}
+                    id="setup-showing"
+                    class="badge badge-primary badge-soft badge-sm self-start"
+                  >
+                    Showing
+                  </span>
+                  <button
+                    :if={@setup.closed?}
+                    type="button"
+                    id="setup-reopen"
+                    phx-click="setup_reopen"
+                    class={["btn btn-sm", setup_hidden?(@setup) && "btn-primary"]}
+                  >
                     Reopen setup wizard
                   </button>
                 </div>
                 <div class="flex items-start gap-4 border-b border-base-300 py-3">
                   <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span style="font-size:13.5px;font-weight:600">Connect one of your machines</span>
-                    <span style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent)">
-                      Same wizard: mints a key in your name, then install, a pull-only onboard and the
-                      runner. Board-wide steps already done are skipped. Teammates connect from their
-                      own wizard once they're in Members.
+                    <span
+                      id="setup-connect-note"
+                      style="font-size:12.5px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent)"
+                    >
+                      {setup_connect_note(@setup)}
                     </span>
                   </div>
                   <.link
                     navigate={~p"/board/#{@board.slug}?setup=connect"}
                     id="setup-connect"
-                    class="btn btn-sm btn-primary"
+                    class={["btn btn-sm", !setup_hidden?(@setup) && "btn-primary"]}
                   >
                     ➕ Connect a machine
                   </.link>
@@ -1967,6 +1987,27 @@ defmodule HamacaWeb.BoardSettingsLive do
   defp section(%{"section" => "members"}), do: :members
   defp section(%{"section" => "setup"}), do: :setup
   defp section(_params), do: :general
+
+  # RE505 — an unfinished setup hidden board-wide with ⟨ (a finished one's `closed?` is Close setup).
+  defp setup_hidden?(%{finished?: false, closed?: true}), do: true
+  defp setup_hidden?(_shown_or_finished), do: false
+
+  defp setup_wizard_note(%{closed?: false}),
+    do: "Showing beside the board for everyone. Hide it with ⟨ in the panel's header."
+
+  defp setup_wizard_note(%{finished?: false}),
+    do:
+      "Hidden for everyone. Reopening it shows it beside the board again at the current step, with anything the runner reported since already ticked."
+
+  defp setup_wizard_note(_finished_and_closed),
+    do: "Reopen the checklist beside the board. It shows what was seen and when."
+
+  defp setup_connect_note(setup) do
+    if setup_hidden?(setup),
+      do: "Still works while setup is hidden; it's your own wizard, not the board's.",
+      else:
+        "Same wizard: mints a key in your name, then install, a pull-only onboard and the runner. Board-wide steps already done are skipped. Teammates connect from their own wizard once they're in Members."
+  end
 
   # RE446 — Setup exists only on a board with a setup checklist; elsewhere it is General.
   defp resolve_section(:setup, nil = _setup), do: :general

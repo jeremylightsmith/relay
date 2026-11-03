@@ -32,7 +32,10 @@ defmodule Hamaca.Setup do
   (step 6, the machine and its harness sign-in) and `Hamaca.Runs.claim_next_job/4` calls
   `observe_claim/2` after its commit (step 7, the payoff: the claimed card's facts land in step 7's
   `data`). `close/1` / `reopen/1` store the payoff state (`callout_dismissed_at`, `closed_at`) on
-  step 7, which the checklist exposes as `closed?` and `callout`.
+  step 7, which the checklist exposes as `closed?` and `callout`. `hide/1` (RE505) stamps the same
+  `closed_at` in any state, finished or not, so `closed?` also means "hidden board-wide while
+  unfinished"; the checklist's `hidden_at` is that stamp, and `callout` stays nil while `closed?`.
+  Hiding moves no step: progress keeps ticking underneath.
 
   `choose_llm/3` (step 2) sets the board's default agent and mints the step-3 board key;
   `remint_key/2` replaces it. The raw token is returned to the caller once and never stored.
@@ -139,6 +142,7 @@ defmodule Hamaca.Setup do
           finished?: boolean(),
           total: pos_integer(),
           closed?: boolean(),
+          hidden_at: DateTime.t() | nil,
           callout:
             nil | %{card_ref: String.t(), card_id: integer(), machine: String.t(), llm: String.t(), verb: String.t()},
           started_at: DateTime.t() | nil,
@@ -1422,6 +1426,25 @@ defmodule Hamaca.Setup do
     end)
   end
 
+  @doc """
+  Hides a setup board-wide (RE505), finished or not: stamps step 7's `data["closed_at"]` (kept if
+  already set) and leaves `callout_dismissed_at` alone, so the checklist reads `closed?: true` with
+  `hidden_at` set and `callout: nil` until `reopen/1`. No step moves. A repeat writes nothing.
+  Broadcasts `{:setup_changed, board_id}` on a change. Serialized on the board row.
+  """
+  @spec hide(Board.t() | integer()) :: {:ok, checklist()} | {:error, :no_checklist}
+  def hide(board) do
+    board_id = board_id(board)
+
+    Repo.transact(fn ->
+      with {:ok, rows} <- lock({board_id, nil}) do
+        row = rows[@claim_step]
+        :ok = write_payoff!(row, Map.put_new(row.data, "closed_at", DateTime.to_iso8601(now())))
+        {:ok, checklist(board_id)}
+      end
+    end)
+  end
+
   defp finished(rows), do: if(current_id(rows), do: {:error, :not_finished}, else: :ok)
 
   defp write_payoff!(%{data: data}, data), do: :ok
@@ -1967,6 +1990,7 @@ defmodule Hamaca.Setup do
     last = List.last(tally)
     started_at = Enum.find(steps, &(&1.id == @created_step)).completed_at
     finished_at = if finished_status?(last.status), do: last.completed_at
+    closed? = not connect? and not is_nil(last.data["closed_at"])
 
     %{
       board_id: context[:board_id],
@@ -1983,8 +2007,9 @@ defmodule Hamaca.Setup do
       done_count: done_count,
       finished?: is_nil(current),
       total: length(tally),
-      closed?: not connect? and not is_nil(last.data["closed_at"]),
-      callout: callout(last, llm, connect?),
+      closed?: closed?,
+      hidden_at: if(closed?, do: hidden_at(last.data["closed_at"])),
+      callout: if(not closed?, do: callout(last, llm, connect?)),
       started_at: started_at,
       finished_at: finished_at,
       elapsed_minutes: elapsed_minutes(started_at, finished_at),
@@ -2023,6 +2048,13 @@ defmodule Hamaca.Setup do
     do: "#{ref} claimed #{Calendar.strftime(at, "%-d %b")}"
 
   defp board_claim_text(_board_claim), do: "waiting for the first claim"
+
+  defp hidden_at(closed_at) do
+    case DateTime.from_iso8601(closed_at) do
+      {:ok, at, _offset} -> at
+      {:error, _reason} -> nil
+    end
+  end
 
   # The payoff callout: only once step 7 is done with a claimed card and not yet dismissed.
   defp callout(%{status: :done, data: %{"card_ref" => ref} = data}, llm, false = _connect?)

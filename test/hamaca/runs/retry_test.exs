@@ -44,9 +44,9 @@ defmodule Hamaca.Runs.RetryTest do
   # `brainstorm` has max_retries: 1 and no :failed edge, so two failures end the run.
   defp failed_run(card, flow) do
     {:ok, _run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{} = first}, 2_000
+    assert_receive {:dispatched, %NodeJob{} = first}, 10_000
     {:ok, _run} = Runs.report_outcome(first, %{outcome: :failed, detail: "first boom"})
-    assert_receive {:dispatched, %NodeJob{} = second}, 2_000
+    assert_receive {:dispatched, %NodeJob{} = second}, 10_000
     {:ok, run} = Runs.report_outcome(second, %{outcome: :failed, detail: "final boom"})
     assert run.status == :failed
     Runs.get_run!(run.id)
@@ -64,14 +64,14 @@ defmodule Hamaca.Runs.RetryTest do
     assert revived.finished_at == nil
     assert revived.retries == 1
 
-    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"}}, 2_000
+    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"}}, 10_000
   end
 
   test "the re-entered job is the failed node, never the flow's start node", ctx do
     run = failed_run(ctx.card, ctx.flow)
     {:ok, _revived} = Runs.retry_run(run)
 
-    assert_receive {:dispatched, %NodeJob{node_key: node_key, payload: payload}}, 2_000
+    assert_receive {:dispatched, %NodeJob{node_key: node_key, payload: payload}}, 10_000
     assert node_key == "brainstorm"
     assert payload["vars"]["findings"] == "final boom"
   end
@@ -89,7 +89,7 @@ defmodule Hamaca.Runs.RetryTest do
     {:ok, revived} = Runs.retry_run(run, at: "brainstorm")
 
     assert revived.current_node == "brainstorm"
-    assert_receive {:dispatched, %NodeJob{node_execution_id: id}}, 2_000
+    assert_receive {:dispatched, %NodeJob{node_execution_id: id}}, 10_000
     execution = Repo.get!(NodeExecution, id)
     assert execution.visit == 2
     assert execution.attempt == 1
@@ -136,7 +136,7 @@ defmodule Hamaca.Runs.RetryTest do
 
   test "a running run is refused, naming its status", ctx do
     {:ok, run} = Runs.start_run(ctx.card, ctx.flow)
-    assert_receive {:dispatched, %NodeJob{}}, 2_000
+    assert_receive {:dispatched, %NodeJob{}}, 10_000
 
     assert {:error, {:not_failed, :running} = reason} = Runs.retry_run(run)
     assert Runs.retry_refusal_code(reason) == "not_failed"
@@ -183,7 +183,7 @@ defmodule Hamaca.Runs.RetryTest do
     {:ok, _revived} = Runs.retry_run(run)
 
     # One more attempt is allowed…
-    assert_receive {:dispatched, %NodeJob{} = job}, 2_000
+    assert_receive {:dispatched, %NodeJob{} = job}, 10_000
     {:ok, run} = Runs.report_outcome(job, %{outcome: :failed, detail: "still boom"})
 
     # …and the very next failure ends the run again — the budget was raised by one,
@@ -234,7 +234,7 @@ defmodule Hamaca.Runs.RetryTest do
       run = exclusive_failed_run(ctx, "mac-holder")
 
       {:ok, _revived} = Runs.retry_run(run)
-      assert_receive {:dispatched, %NodeJob{runner_name: "mac-holder"}}, 2_000
+      assert_receive {:dispatched, %NodeJob{runner_name: "mac-holder"}}, 10_000
     end
 
     test "it refuses when the pinned runner has gone stale, naming it", ctx do

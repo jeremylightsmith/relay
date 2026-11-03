@@ -11,7 +11,8 @@ defmodule HamacaWeb.SetupComponents do
     * `setup_panel/1` — the docked-left wizard: header, progress, expert toggle,
       `how_relay_works/1`, the interactive checklist (its `peeks` passed through) and a footer.
     * `setup_chip/1` — the top-bar `Setup · <position> of <total>` chip, `Setup · done` once
-      the checklist is finished.
+      the checklist is finished, and a grey `hidden · <position> of <total>` while an unfinished
+      setup is hidden board-wide (RE505).
     * `setup_done_box/1` — the "You're set up" box atop a finished panel (RE446; RE456 points at
       the peeks: "Need a command again? Open any step below; it stays done."): Close setup
       (`"setup_close"`) and Connect another machine (`"setup_connect_another"`).
@@ -1094,6 +1095,7 @@ defmodule HamacaWeb.SetupComponents do
     assigns =
       assign(assigns,
         prefix: @panel_prefix,
+        minimize_label: if(assigns.checklist.connect?, do: "Minimize", else: "Hide setup for everyone"),
         progress: round(assigns.checklist.done_count * 100 / assigns.checklist.total),
         warn?: assigns.checklist.template_warning && assigns.checklist.current_id == Setup.step_id(:llm)
       )
@@ -1119,7 +1121,8 @@ defmodule HamacaWeb.SetupComponents do
             id={"#{@prefix}-minimize"}
             phx-click="setup_minimize"
             class="btn btn-ghost btn-xs btn-square"
-            aria-label="Minimize"
+            aria-label={@minimize_label}
+            title={@minimize_label}
           >
             ⟨
           </button>
@@ -1190,7 +1193,7 @@ defmodule HamacaWeb.SetupComponents do
           phx-click="setup_minimize"
           class="link link-hover"
         >
-          Minimize
+          {if(@checklist.connect?, do: "Minimize", else: "Hide")}
         </button>
       </div>
     </aside>
@@ -1241,7 +1244,9 @@ defmodule HamacaWeb.SetupComponents do
 
   @doc """
   The one-line state of a board's setup for Board settings → Setup:
-  `"Finished 12 Oct, 14:42 · 7 of 7 · 40 min"` once finished, else `"In progress · 4 of 7"`.
+  `"Finished 12 Oct, 14:42 · 7 of 7 · 40 min"` once finished (hidden or not),
+  `"Hidden 3 Nov, 18:20 · stopped at 3 of 7"` while an unfinished setup is hidden (RE505), else
+  `"In progress · 4 of 7"`.
   """
   @spec status_line(map()) :: String.t()
   def status_line(%{finished?: true, finished_at: %DateTime{} = at, total: total} = checklist) do
@@ -1253,6 +1258,9 @@ defmodule HamacaWeb.SetupComponents do
       " · "
     )
   end
+
+  def status_line(%{finished?: false, closed?: true, hidden_at: %DateTime{} = at, position: position, total: total}),
+    do: "Hidden #{Calendar.strftime(at, "%-d %b, %H:%M")} · stopped at #{position} of #{total}"
 
   def status_line(%{position: position, total: total}), do: "In progress · #{position} of #{total}"
 
@@ -1588,11 +1596,17 @@ defmodule HamacaWeb.SetupComponents do
   attr :click, :string, default: nil, doc: "the event a click sends, or nil for a plain badge"
 
   def setup_chip(assigns) do
+    hidden? = chip_hidden?(assigns.checklist)
+
     assigns =
       assign(assigns,
         label: chip_label(assigns.checklist),
+        variant: hidden? && "badge-ghost",
         style:
-          "background:color-mix(in oklab, var(--color-primary) 12%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 40%, var(--color-base-100));color:color-mix(in oklab, var(--color-primary) 65%, var(--color-base-content))"
+          if(!hidden?,
+            do:
+              "background:color-mix(in oklab, var(--color-primary) 12%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 40%, var(--color-base-100));color:color-mix(in oklab, var(--color-primary) 65%, var(--color-base-content))"
+          )
       )
 
     ~H"""
@@ -1601,7 +1615,7 @@ defmodule HamacaWeb.SetupComponents do
       type="button"
       id={@id}
       phx-click={@click}
-      class="badge badge-sm cursor-pointer font-mono whitespace-nowrap shrink-0"
+      class={["badge badge-sm cursor-pointer font-mono whitespace-nowrap shrink-0", @variant]}
       style={@style}
       aria-label="Open setup"
     >
@@ -1610,7 +1624,7 @@ defmodule HamacaWeb.SetupComponents do
     <span
       :if={!@click}
       id={@id}
-      class="badge badge-sm font-mono whitespace-nowrap shrink-0"
+      class={["badge badge-sm font-mono whitespace-nowrap shrink-0", @variant]}
       style={@style}
     >
       {@label}
@@ -1618,7 +1632,12 @@ defmodule HamacaWeb.SetupComponents do
     """
   end
 
+  # Unfinished and put away board-wide (RE505): a grey `hidden · n of 7`, not the primary tint.
+  defp chip_hidden?(%{finished?: false, closed?: true}), do: true
+  defp chip_hidden?(_checklist), do: false
+
   defp chip_label(%{finished?: true}), do: "Setup · done"
+  defp chip_label(%{closed?: true, position: position, total: total}), do: "hidden · #{position} of #{total}"
   defp chip_label(%{position: position, total: total}), do: "Setup · #{position} of #{total}"
 
   # ---------------------------------------------------------------- mobile

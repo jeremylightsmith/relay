@@ -270,4 +270,43 @@ defmodule HamacaWeb.BoardLiveConnectTest do
     assert Repo.all(from(m in SetupMachine, where: m.user_id == ^sam.id)) == []
     assert text(view, "#setup-mint-key") == "Mint my key"
   end
+
+  describe "⟨ in connect mode vs. a hidden board setup (RE505)" do
+    # Scenario 7
+    test "⟨ in connect mode minimizes only this view, and leaving shows the board's panel",
+         %{conn: conn, board: board} do
+      {:ok, view, _html} = live(conn, connect_url(board))
+      assert text(view, "#setup-panel") =~ "Connect a machine to Streaks"
+
+      view |> element("#setup-minimize") |> render_click()
+
+      refute has_element?(view, "#setup-panel")
+      refute Setup.checklist(board).closed?
+
+      render_patch(view, ~p"/board/#{board.slug}")
+
+      assert has_element?(view, "#setup-panel")
+    end
+
+    # Scenario 8
+    test "connect mode works while the board's unfinished setup is hidden, and leaving keeps it hidden",
+         %{conn: conn, sam: sam} do
+      owner = insert(:user, name: "Ana")
+
+      {:ok, board} =
+        Boards.create_board(owner, %{name: "Habits", slug: unique_slug("habits"), template: "bare-minimum"})
+
+      insert(:membership, board: board, user: sam, email: sam.email)
+      {:ok, _} = Setup.hide(board)
+      assert %{finished?: false, closed?: true} = Setup.checklist(board)
+
+      {:ok, view, _html} = live(conn, connect_url(board))
+      assert text(view, "#setup-panel") =~ "Connect a machine to Habits"
+
+      render_patch(view, ~p"/board/#{board.slug}")
+
+      refute has_element?(view, "#setup-panel")
+      assert Setup.checklist(board).closed?
+    end
+  end
 end

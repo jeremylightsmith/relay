@@ -59,6 +59,20 @@ defmodule HamacaWeb.BoardBarComponentsTest do
       assert count(doc, "#board-more-button #board-more-dot.bg-primary") == 1
     end
 
+    # RE505 — card mockup "B — existing controls", frame 2.
+    test "a hidden setup keeps the Setup item with a grey chip and drops the dot" do
+      doc = more_menu(%{setup: %{finished?: false, closed?: true, position: 3, total: 7}})
+
+      assert count(doc, "#board-more-dot") == 0
+      assert count(doc, "#board-more-setup") == 1
+      assert doc |> LazyHTML.query("#board-more-setup") |> LazyHTML.text() =~ "hidden · 3 of 7"
+      assert count(doc, "#board-more-setup-chip.badge-ghost") == 1
+    end
+
+    test "a shown unfinished setup keeps the primary dot on the ⋯ button" do
+      assert count(more_menu(%{setup: @unfinished_setup}), "#board-more-button #board-more-dot.bg-primary") == 1
+    end
+
     test "with no setup, no logs and no settings path only the view links remain" do
       doc = more_menu(%{setup: nil, show_logs: false, settings_path: nil})
 
