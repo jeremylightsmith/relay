@@ -30,6 +30,32 @@ defmodule Storybook.StoryMapComponents.StoryMapCard do
         }
       },
       %Variation{
+        id: :selectable,
+        description: "RE502 — selectable: the checkbox shows on hover, focus and touch (always, while selecting)",
+        attributes: %{
+          id: "story-map-card-selectable",
+          ref: "RLY-101",
+          title: "Add SSO for enterprise accounts",
+          badge: "BACKLOG",
+          hue: :neutral,
+          selectable: true
+        }
+      },
+      %Variation{
+        id: :selected,
+        description: "RE502 — selected: the checked box and the primary ring",
+        attributes: %{
+          id: "story-map-card-selected",
+          ref: "RLY-102",
+          title: "Add SSO for enterprise accounts",
+          badge: "BACKLOG",
+          hue: :neutral,
+          selectable: true,
+          selected: true,
+          selecting: true
+        }
+      },
+      %Variation{
         id: :working_with_percentage,
         attributes: %{
           id: "story-map-card-2",

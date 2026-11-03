@@ -413,7 +413,15 @@ sharing behavior.
   (`Cards.stranded_run/2`: an active run whose flow's `stage` is not the destination) is
   refused up front with `{:error, :would_strand_run}` — `POST /api/cards/:ref/move` maps it to
   **409 `would_strand_run`** (RLY-217); the board pre-checks and confirms instead of surfacing
-  the raw error.
+  the raw error. `Cards.stranded_runs/2` (RE502) is its batch form — card id → stranding run,
+  one query for the whole list — so a bulk move pre-checks a selection without N queries.
+  The bulk move itself is **`Runs.bulk_move_cards/4`**, not a `Cards` function: with
+  `cancel_runs: true` it cancels each stranding run (`Runs.cancel_run/2`, credited to the
+  actor) before moving, and `Cards` may not depend on `Runs`. It re-reads each card on the
+  stage's board, appends it to the bottom through `Cards.move_card/4` (so the stranding guard
+  still holds), and returns `%{moved: [...], skipped: [...]}` — a card gone, archived, on
+  another board, or refused by `move_card/4` is skipped; one already in the stage is in
+  neither list.
   A card's `mockups` (RE370) is a nullable `{:array, :map}` column of
   `%{"url", "caption"}` entries, written only through `Hamaca.Cards.set_mockups/2` (a full
   REPLACE — `PATCH /api/cards/:ref {"mockups": …}`), `append_mockups/2`
@@ -1097,7 +1105,11 @@ sharing behavior.
   "where a card created outside a column lands") and places it. `StoryMap.assign_card/2` takes
   an optional 0-based `:position` and renumbers the whole target DB cell `1..n` in one
   transaction; `unassign_card/1` nils the position with the three FKs, so a card in the tray has
-  no story-map position. `HamacaWeb.StoryMapGrid.decode_placement/2` parses the column/lane keys
+  no story-map position. `StoryMap.replace_cards/3` (RE502) is the bulk form on one axis
+  (`:release`, nil = "(No release)", or `:step`, activity derived): cards already on the value
+  are untouched and not returned, the rest are appended to their new cells in the order given
+  inside **one** transaction (a foreign id rolls back all of them), and `{:card_upserted, card}`
+  goes out per changed card only after the commit. `HamacaWeb.StoryMapGrid.decode_placement/2` parses the column/lane keys
   that same module defines, and the `StoryMapDnD` hook (`assets/js/hooks/story_map_dnd.js`)
   pushes `{ref, column, lane, index}` — no optimistic client move, so a second tab follows for
   free.
@@ -1144,10 +1156,14 @@ sharing behavior.
   placement rule knows filtering exists and every count the map already draws narrows with it.
   **Hide complete (RE276):** an eighth key, and the first defaulting to ON — the map opens
   showing only incomplete cards. It is a third AND term in `StoryMapFilter.visible/4`, a
-  `MapSet` of stage ids to exclude; `BoardLive` resolves what "complete" means at the pre-pass
-  (`Hamaca.Boards.top_level_done_stage_ids/1` — any top-level `:complete` stage, deliberately
-  NOT `Cards.done?/2`, which is the terminal stage's `:ready` cards and drives the
-  strikethrough) so the filter module stays pure. `Clear` therefore resets to the board's
+  `MapSet` of stage ids to exclude; the pre-pass itself, `HamacaWeb.StoryMapSelection.visible_cards/5`
+  (one definition, shared by `BoardLive`'s viewport and RE502's selection handlers), resolves what
+  "complete" means (`Hamaca.Boards.top_level_done_stage_ids/1` — any top-level `:complete` stage,
+  deliberately NOT `Cards.done?/2`, which is the terminal stage's `:ready` cards and drives the
+  strikethrough) so the filter module stays pure. **Selection (RE502)** is per-socket view state —
+  a `MapSet` of card ids in `BoardLive`, never persisted or broadcast — whose rules live in
+  `HamacaWeb.StoryMapSelection`; it only holds visible, placed cards and is pruned whenever the
+  cards or the shared view change. `Clear` therefore resets to the board's
   DEFAULTS via `StoryMap.filter_keys/0`, not to "everything off", and
   `StoryMap.filters_active?/1` is the one answer to "is a filter on"
   (`HamacaWeb.StoryMapFilter.active?/2` is gone).

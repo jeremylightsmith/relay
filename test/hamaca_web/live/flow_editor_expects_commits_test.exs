@@ -39,9 +39,8 @@ defmodule HamacaWeb.FlowEditorExpectsCommitsTest do
     # Deploy is the default board's only flow-free work stage, so the flow may move there.
     deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
 
-    view
-    |> element("#trigger-stage")
-    |> render_change(%{"field" => "stage", "stage_id" => to_string(deploy.id)})
+    view |> element("#trigger-stage") |> render_click()
+    view |> element("#trigger-stage-picker-#{deploy.id}") |> render_click()
 
     view |> element("#flow-editor-save") |> render_click()
 
@@ -78,9 +77,8 @@ defmodule HamacaWeb.FlowEditorExpectsCommitsTest do
 
     deploy = Enum.find(board.stages, &(&1.name == "Deploy"))
 
-    view
-    |> element("#trigger-stage")
-    |> render_change(%{"field" => "stage", "stage_id" => to_string(deploy.id)})
+    view |> element("#trigger-stage") |> render_click()
+    view |> element("#trigger-stage-picker-#{deploy.id}") |> render_click()
 
     view |> element("#flow-editor-save") |> render_click()
 

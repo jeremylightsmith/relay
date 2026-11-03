@@ -50,19 +50,19 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
     |> click("#card-drawer-stage-chip")
     # assert_has waits for the input to be in the DOM; Frame.type below does auto-wait, but the
     # focus/value reads afterwards do not.
-    |> assert_has("#card-drawer-stage-filter")
+    |> assert_has("#card-drawer-move-to-filter")
     |> unwrap(fn %{frame_id: frame_id} ->
       {:ok, _} =
-        Frame.type(frame_id, selector: "#card-drawer-stage-filter", text: "Tes", timeout: 2_000)
+        Frame.type(frame_id, selector: "#card-drawer-move-to-filter", text: "Tes", timeout: 2_000)
     end)
     # No seeded stage matches "Tes", and the filtered list is server-rendered from @stage_filter,
     # so this only appears once the LiveView has processed all three keystrokes — an ordered
     # barrier a crash on the `T` could not have got past.
-    |> assert_has("#card-drawer-stage-none")
+    |> assert_has("#card-drawer-move-to-none")
     |> assert_has("#card-drawer-stage-menu")
     |> unwrap(fn %{frame_id: frame_id} ->
       {:ok, value} =
-        Frame.input_value(frame_id, selector: "#card-drawer-stage-filter", timeout: 2_000)
+        Frame.input_value(frame_id, selector: "#card-drawer-move-to-filter", timeout: 2_000)
 
       assert value == "Tes", "the capital T never landed in the filter (got #{inspect(value)})"
 
@@ -72,7 +72,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
           timeout: 2_000
         )
 
-      assert focused == "card-drawer-stage-filter",
+      assert focused == "card-drawer-move-to-filter",
              "focus escaped the filter to #{inspect(focused)} — the drawer was torn down"
     end)
   end
@@ -151,7 +151,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
     |> open_drawer(ctx.board, ctx.card)
     |> assert_has("#card-drawer-tab-detail[data-active='true']")
     |> click("#card-drawer-stage-chip")
-    |> assert_has("#card-drawer-stage-filter")
+    |> assert_has("#card-drawer-move-to-filter")
     |> unwrap(fn %{frame_id: frame_id} ->
       {:ok, _} =
         Frame.press(frame_id, selector: "#card-drawer-stage-chip", key: "t", timeout: 2_000)
@@ -159,9 +159,9 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
       # Ordered barrier: the LiveView handles its mailbox in order, so a `talk_shortcut` pushed
       # by that keypress is handled BEFORE this filter change. No seeded stage matches "zzzz".
       {:ok, _} =
-        Frame.type(frame_id, selector: "#card-drawer-stage-filter", text: "zzzz", timeout: 2_000)
+        Frame.type(frame_id, selector: "#card-drawer-move-to-filter", text: "zzzz", timeout: 2_000)
     end)
-    |> assert_has("#card-drawer-stage-none")
+    |> assert_has("#card-drawer-move-to-none")
     |> assert_has("#card-drawer-stage-menu")
     |> assert_has("#card-drawer-tab-detail[data-active='true']")
     |> refute_has("#card-drawer-tab-talk[data-active='true']")
@@ -202,7 +202,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
     |> open_drawer(ctx.board, ctx.card)
     |> assert_has("#card-drawer-tab-detail[data-active='true']")
     |> click("#card-drawer-stage-chip")
-    |> assert_has("#card-drawer-stage-filter")
+    |> assert_has("#card-drawer-move-to-filter")
     |> unwrap(fn %{frame_id: frame_id} ->
       {:ok, focused} =
         Frame.evaluate(frame_id,
@@ -210,14 +210,14 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
           timeout: 2_000
         )
 
-      assert focused == "card-drawer-stage-filter",
+      assert focused == "card-drawer-move-to-filter",
              "the filter never took focus (activeElement was #{inspect(focused)}) — " <>
                "everything typed at the Move-to menu goes to the board instead"
 
       {:ok, _} =
-        Frame.type(frame_id, selector: "#card-drawer-stage-filter", text: "zzzz", timeout: 2_000)
+        Frame.type(frame_id, selector: "#card-drawer-move-to-filter", text: "zzzz", timeout: 2_000)
     end)
-    |> assert_has("#card-drawer-stage-none")
+    |> assert_has("#card-drawer-move-to-none")
     |> assert_has("#card-drawer-stage-menu")
     |> assert_has("#card-drawer-tab-detail[data-active='true']")
     |> refute_has("#card-drawer-tab-talk[data-active='true']")

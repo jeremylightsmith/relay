@@ -53,6 +53,7 @@ defmodule HamacaWeb.StoryMapComponents do
   alias HamacaWeb.CoreComponents
   alias HamacaWeb.StoryMapFilter
   alias HamacaWeb.StoryMapGrid
+  alias HamacaWeb.StoryMapSelection
   alias Phoenix.LiveView.JS
 
   # Artboard tokens (lines ~277-279): the grid lines and the two sticky header heights.
@@ -73,6 +74,10 @@ defmodule HamacaWeb.StoryMapComponents do
   # from this list and `parse_zoom/1` validates against it, so the control and the parser cannot
   # drift apart.
   @zoom_levels [:map, :compact, :full]
+
+  # RE502 — the ONE definition of the bulk bar's menus: `story_map_bulk_bar/1` renders its MOVE TO
+  # buttons from this list and `parse_bulk_menu/1` validates the wire value against it.
+  @bulk_menus ~w(stage release step)a
 
   # RE257 — the presence stack's artboard tokens (lines 49-56): 26px circles, five faces before
   # the +N chip, an 8px tuck between them (Tailwind `-ml-2`).
@@ -97,6 +102,27 @@ defmodule HamacaWeb.StoryMapComponents do
   def parse_zoom("compact"), do: {:ok, :compact}
   def parse_zoom("full"), do: {:ok, :full}
   def parse_zoom(_other), do: :error
+
+  @doc """
+  The bulk bar's MOVE TO menus (RE502), left to right. The single source of truth for the closed
+  set: the bar's buttons, the `attr :open_menu` value list and `parse_bulk_menu/1` derive from it.
+  """
+  def bulk_menus, do: @bulk_menus
+
+  @doc """
+  Parses a bulk menu off the wire — matched against `bulk_menus/0`, never `String.to_atom/1`.
+
+      parse_bulk_menu("stage") #=> {:ok, :stage}
+      parse_bulk_menu("owner") #=> :error
+  """
+  def parse_bulk_menu(menu) when is_binary(menu) do
+    case Enum.find(@bulk_menus, &(Atom.to_string(&1) == menu)) do
+      nil -> :error
+      parsed -> {:ok, parsed}
+    end
+  end
+
+  def parse_bulk_menu(_other), do: :error
 
   @doc """
   The card face's derived values — badge, hue, percentage, avatar and DOM id — for one card.
@@ -733,10 +759,16 @@ defmodule HamacaWeb.StoryMapComponents do
     doc: "the focused %Schemas.StoryActivity{} (HamacaWeb.StoryMapGrid.resolve_focus/2), or nil"
 
   attr :open_ref, :string, default: nil, doc: "the drawer's open card ref (BoardLive's :open_ref), or nil"
+  attr :selection, :any, default: MapSet.new(), doc: "RE502 — MapSet of selected card ids"
+  attr :selectable, :boolean, default: false, doc: "RE502 — render the card checkboxes and select-all boxes"
 
   def story_map(assigns) do
     ~H"""
-    <div id="story-map-grid" style={grid_style(@grid, @draft)}>
+    <div
+      id="story-map-grid"
+      data-selectable={to_string(@selectable)}
+      style={grid_style(@grid, @draft)}
+    >
       <div style={corner_style()}>
         <span style="font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
           RELEASE ↓
@@ -789,6 +821,18 @@ defmodule HamacaWeb.StoryMapComponents do
             kind="release"
             id={lane.release.id}
             count={lane.count}
+          />
+          <%!-- RE502 — the release row's select-all box. The synthetic `(No release)` lane only
+                gets one while it holds cards; a real release always does. --%>
+          <span :if={is_nil(lane.release)} style="flex:1;"></span>
+          <.selection_box
+            :if={@selectable and (lane.release != nil or lane.count > 0)}
+            id={StoryMapGrid.select_box_id(:lane, lane.key)}
+            state={group_state(@grid, @selection, :lane, lane.key)}
+            phx-click="toggle_selection_group"
+            phx-value-kind="lane"
+            phx-value-key={lane.key}
+            aria-label="Select every card in this release"
           />
         </div>
         <span style="font-family:var(--font-mono);font-size:9px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
@@ -928,6 +972,9 @@ defmodule HamacaWeb.StoryMapComponents do
         edit={@edit}
         edit_name={@edit_name}
         read_only={@read_only}
+        select_state={
+          @selectable && column.count > 0 && group_state(@grid, @selection, :column, column.key)
+        }
       />
       <%= for {column, ci} <- Enum.with_index(@grid.columns),
               not column.collapsed?,
@@ -946,6 +993,8 @@ defmodule HamacaWeb.StoryMapComponents do
           read_only={@read_only}
           zoom={@zoom}
           open_ref={@open_ref}
+          selection={@selection}
+          selectable={@selectable}
         />
       <% end %>
     </div>
@@ -984,6 +1033,8 @@ defmodule HamacaWeb.StoryMapComponents do
   attr :read_only, :boolean, default: false, doc: "hide mutating affordances when true"
   attr :zoom, :atom, values: @zoom_levels, default: :full
   attr :open_ref, :string, default: nil, doc: "the drawer's open card ref (BoardLive's :open_ref), or nil"
+  attr :selection, :any, default: MapSet.new(), doc: "RE502 — MapSet of selected card ids"
+  attr :selectable, :boolean, default: false, doc: "RE502 — render each card's checkbox"
 
   def story_map_cell(assigns) do
     assigns =
@@ -998,9 +1049,12 @@ defmodule HamacaWeb.StoryMapComponents do
       style={cell_style(@column, @column_index, @lane_index, @zoom)}
     >
       <.story_map_card
-        :for={face <- Enum.map(@cards, &card_face(&1, @board, @stages, @stalled_ids))}
+        :for={{card, face} <- Enum.map(@cards, &{&1, card_face(&1, @board, @stages, @stalled_ids)})}
         zoom={@zoom}
         open={open?(face, @open_ref)}
+        selectable={@selectable}
+        selected={MapSet.member?(@selection, card.id)}
+        selecting={MapSet.size(@selection) > 0}
         {face}
       />
       <.form
@@ -1075,6 +1129,14 @@ defmodule HamacaWeb.StoryMapComponents do
 
   `zoom` defaults to `:full` so every caller that predates RE260 — including the storybook
   variations — renders exactly what it rendered before.
+
+  **Selection (RE502).** `selectable` renders a 14px checkbox — in the ref row at Full, pinned
+  to the card's top-right at Compact and Map, which have no ref row. It is hidden at rest and
+  shown on hover, on keyboard focus and on touch, and always shown while `selecting` (the
+  selection is non-empty). It is a `<button>` with its own `phx-click="toggle_card_selection"`;
+  LiveView runs the CLOSEST binding, so clicking it never reaches the article's `select_card`.
+  `selected` draws the checked box and rings the card. The article's contract is unchanged:
+  it only gains `group relative` beside `story-map-card`.
   """
   attr :id, :string, required: true
   attr :ref, :string, required: true
@@ -1090,13 +1152,19 @@ defmodule HamacaWeb.StoryMapComponents do
   attr :active_owner, :atom, values: [:human, :ai, nil], default: nil
   attr :zoom, :atom, values: @zoom_levels, default: :full
   attr :open, :boolean, default: false, doc: "RE389 — the drawer is showing this card (renders data-open)"
+  attr :selectable, :boolean, default: false, doc: "RE502 — render the checkbox"
+  attr :selected, :boolean, default: false, doc: "RE502 — the card is in the selection"
+  attr :selecting, :boolean, default: false, doc: "RE502 — the selection is non-empty, so the box always shows"
 
   def story_map_card(assigns) do
     ~H"""
     <article
       id={@id}
-      class="story-map-card"
-      style={card_shell(@zoom, @hue, @done)}
+      class={[
+        "story-map-card group relative",
+        @selected && "ring-2 ring-primary ring-offset-1 ring-offset-base-200 bg-primary/5"
+      ]}
+      style={card_style(@zoom, @hue, @done, @selected)}
       role="button"
       tabindex="0"
       draggable="true"
@@ -1109,11 +1177,28 @@ defmodule HamacaWeb.StoryMapComponents do
       phx-value-ref={@ref}
     >
       <div :if={@zoom == :full} style="display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
-          {@ref}
+        <span style="display:flex;align-items:center;gap:5px;">
+          <span style="font-family:var(--font-mono);font-size:9.5px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);">
+            {@ref}
+          </span>
+          <.card_checkbox
+            :if={@selectable}
+            id={@id}
+            ref={@ref}
+            selected={@selected}
+            selecting={@selecting}
+          />
         </span>
         <.face_avatar avatar={@avatar} owners={@owners} active_owner={@active_owner} />
       </div>
+      <.card_checkbox
+        :if={@selectable and @zoom != :full}
+        id={@id}
+        ref={@ref}
+        selected={@selected}
+        selecting={@selecting}
+        class="absolute top-1 right-1"
+      />
       <span style={title_style(@zoom, @done)}>{@title}</span>
       <span :if={@zoom == :full} style={badge_style(@hue)}>{@badge}</span>
       <div
@@ -1275,14 +1360,22 @@ defmodule HamacaWeb.StoryMapComponents do
   attr :edit_name, :string, required: true
   attr :read_only, :boolean, required: true
 
+  attr :select_state, :any,
+    default: false,
+    doc: "RE502 — the select-all box's :none | :some | :all, or false/nil for no box"
+
   def story_map_column_header(assigns) do
+    assigns = assign(assigns, :all_selected, assigns.select_state == :all)
+
     ~H"""
     <div
       :if={@column.merged?}
       id={column_dom_id(@column)}
-      style={column_header_style(@column, @index)}
+      class={[@all_selected && "bg-primary/10 text-primary"]}
+      style={column_header_style(@column, @index, @all_selected)}
     >
-      {column_name(@column)}
+      <span style="flex:1;">{column_name(@column)}</span>
+      <.column_select_box column={@column} state={@select_state} />
     </div>
     <div
       :if={@column.draft?}
@@ -1316,7 +1409,7 @@ defmodule HamacaWeb.StoryMapComponents do
       data-id={@column.step && @column.step.id}
       data-activity-id={@column.step && @column.step.story_activity_id}
       draggable={to_string(not @read_only and @edit != {:step, @column.step && @column.step.id})}
-      style={column_header_style(@column, @index)}
+      style={column_header_style(@column, @index, @all_selected)}
     >
       <span :if={not @read_only} style={grip_style(:step)}>⠿</span>
       <.header_name
@@ -1334,6 +1427,7 @@ defmodule HamacaWeb.StoryMapComponents do
         id={@column.step && @column.step.id}
         count={@column.count}
       />
+      <.column_select_box column={@column} state={@select_state} />
     </div>
     <div
       :if={
@@ -1341,12 +1435,161 @@ defmodule HamacaWeb.StoryMapComponents do
           (not @column.bare? or @read_only)
       }
       id={column_dom_id(@column)}
-      style={column_header_style(@column, @index)}
+      class={[@all_selected && "bg-primary/10 text-primary"]}
+      style={column_header_style(@column, @index, @all_selected)}
     >
-      {column_name(@column)}
+      <span style="flex:1;">{column_name(@column)}</span>
+      <.column_select_box column={@column} state={@select_state} />
     </div>
     """
   end
+
+  @doc """
+  The floating bulk bar (RE502, card mockup "A — one stage picker"): the count, the ⇧-click
+  hint, the three MOVE TO buttons (rendered from `bulk_menus/0`; the open one is primary) and
+  ✕. The `:menu` slot renders in the anchor above the bar's left edge, only while a menu is
+  open. It renders its own centring wrapper, which `HamacaWeb.BoardLive` places inside the
+  `relative` `#story-map-viewport`.
+  """
+  attr :count, :integer, required: true
+  attr :open_menu, :atom, values: [nil | @bulk_menus], default: nil
+  slot :menu
+
+  def story_map_bulk_bar(assigns) do
+    assigns = assign(assigns, :menus, bulk_menus())
+
+    ~H"""
+    <div class="absolute inset-x-0 bottom-4 flex justify-center px-3 pointer-events-none z-[60]">
+      <div
+        id="story-map-bulk-bar"
+        class="pointer-events-auto relative flex flex-wrap items-center gap-1.5 bg-neutral text-neutral-content rounded-box shadow-xl px-3 py-2 text-sm"
+      >
+        <span class="badge badge-primary">{@count} selected</span>
+        <span class="text-neutral-content/60 text-xs mr-1 hidden sm:inline">
+          ⇧-click to add or remove
+        </span>
+        <span class="text-neutral-content/50 font-mono text-[10px] tracking-wider ml-1">MOVE TO</span>
+        <button
+          :for={menu <- @menus}
+          type="button"
+          id={"story-map-bulk-#{menu}"}
+          class={[
+            "btn btn-sm",
+            if(@open_menu == menu, do: "btn-primary", else: "btn-ghost text-neutral-content")
+          ]}
+          aria-expanded={to_string(@open_menu == menu)}
+          phx-click="open_bulk_menu"
+          phx-value-menu={menu}
+        >
+          {menu |> Atom.to_string() |> String.capitalize()} ▾
+        </button>
+        <button
+          type="button"
+          id="story-map-bulk-clear"
+          class="btn btn-sm btn-ghost btn-square text-neutral-content"
+          title="Clear selection (Esc)"
+          aria-label="Clear selection"
+          phx-click="clear_card_selection"
+        >
+          ✕
+        </button>
+        <div
+          :if={@open_menu}
+          id="story-map-bulk-menu"
+          class="absolute bottom-full mb-2 left-0 text-base-content"
+        >
+          {render_slot(@menu)}
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # RE502 — a step / no-step / merged header's select-all box. `state` is false (or nil) when
+  # the header gets no box: not selectable, or no visible card under it.
+  attr :column, :map, required: true
+  attr :state, :any, required: true
+
+  defp column_select_box(assigns) do
+    ~H"""
+    <.selection_box
+      :if={@state}
+      id={StoryMapGrid.select_box_id(:column, @column.key)}
+      state={@state}
+      phx-click="toggle_selection_group"
+      phx-value-kind="column"
+      phx-value-key={@column.key}
+      aria-label="Select every card in this step"
+    />
+    """
+  end
+
+  # RE502 — the card's checkbox: the shared 14px box, hidden until hover / focus / touch unless
+  # the selection is non-empty. Not draggable, so pressing it never starts a card drag.
+  attr :id, :string, required: true, doc: "the card's DOM id; the box is `<id>-select`"
+  attr :ref, :string, required: true
+  attr :selected, :boolean, required: true
+  attr :selecting, :boolean, required: true
+  attr :class, :string, default: nil
+
+  defp card_checkbox(assigns) do
+    ~H"""
+    <.selection_box
+      id={@id <> "-select"}
+      state={if(@selected, do: :all, else: :none)}
+      draggable="false"
+      phx-click="toggle_card_selection"
+      phx-value-ref={@ref}
+      aria-pressed={to_string(@selected)}
+      aria-label="Select card"
+      class={[
+        @class,
+        if(@selecting,
+          do: "opacity-100",
+          else:
+            "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+        )
+      ]}
+    />
+    """
+  end
+
+  # RE502 — the ONE 14px box every selection control draws (card mockup "A"): empty, checked
+  # (✓) or partial (–). `data-state` carries the same value for tests and the browser.
+  attr :id, :string, required: true
+  attr :state, :atom, values: [:none, :some, :all], required: true
+  attr :class, :any, default: nil
+  attr :rest, :global, include: ~w(draggable)
+
+  defp selection_box(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={@id}
+      data-state={@state}
+      class={[
+        if(@state == :none,
+          do:
+            "inline-block w-3.5 h-3.5 rounded-[4px] border border-base-content/35 bg-base-100 shrink-0",
+          else:
+            "inline-flex items-center justify-center w-3.5 h-3.5 rounded-[4px] bg-primary shrink-0"
+        ),
+        @class
+      ]}
+      {@rest}
+    >
+      <CoreComponents.icon
+        :if={@state == :all}
+        name="hero-check"
+        class="size-2.5 text-primary-content"
+      />
+      <span :if={@state == :some} class="w-2 h-0.5 bg-primary-content rounded"></span>
+    </button>
+    """
+  end
+
+  defp group_state(grid, selection, kind, key),
+    do: StoryMapSelection.group_state(selection, StoryMapSelection.group_ids(grid, kind, key))
 
   attr :face, :map, required: true
   attr :open, :boolean, default: false, doc: "RE389 — the drawer is showing this card (renders data-open)"
@@ -1585,6 +1828,16 @@ defmodule HamacaWeb.StoryMapComponents do
 
   # Artboard line ~443: the merged header is a LABEL — smaller, muted, no font-weight, no grip,
   # no rename, no drop target. It names an activity, not a step, so there is nothing to edit.
+  # RE502 — a fully selected header is tinted primary (the mockup's `bg-primary/10
+  # text-primary`). The header is sticky, so its tint must stay OPAQUE: the same 10% primary,
+  # mixed into the surface, appended so it wins over the base declarations.
+  defp column_header_style(column, index, true),
+    do:
+      column_header_style(column, index) <>
+        "background:color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100));color:var(--color-primary);"
+
+  defp column_header_style(column, index, false), do: column_header_style(column, index)
+
   defp column_header_style(%{merged?: true}, index) do
     "grid-column:#{index + 2};grid-row:2;position:sticky;top:#{@h1}px;z-index:20;" <>
       "background:var(--color-base-200);border-right:#{@gl_strong};border-bottom:#{@gl_strong};" <>
@@ -1643,6 +1896,19 @@ defmodule HamacaWeb.StoryMapComponents do
 
     "border:1px dashed color-mix(in oklab, var(--color-base-content) 15%, var(--color-base-100));border-radius:8px;padding:#{padding};" <>
       "color:color-mix(in oklab, var(--color-base-content) 40%, transparent);font-size:12px;line-height:1;"
+  end
+
+  # RE502 — a selected card's ring and tint are Tailwind classes (`ring-2 … bg-primary/5`), and
+  # `ring-*` IS a box-shadow: the shell's inline `box-shadow` and `background` would beat both,
+  # so a selected card's shell drops those two declarations and lets the classes draw.
+  defp card_style(zoom, hue, done?, false), do: card_shell(zoom, hue, done?)
+
+  defp card_style(zoom, hue, done?, true) do
+    zoom
+    |> card_shell(hue, done?)
+    |> String.split(";", trim: true)
+    |> Enum.reject(&String.starts_with?(&1, ["background:", "box-shadow:"]))
+    |> Enum.map_join(&(&1 <> ";"))
   end
 
   # The artboard's `lineStyle` (cardVM, line ~379): Map zoom is a bare title line, not a box, so

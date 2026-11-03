@@ -1778,6 +1778,71 @@ defmodule Hamaca.Runs do
     end
   end
 
+  @doc """
+  Moves `cards` into `stage` one at a time, in the order given, each appended to the bottom of
+  the stage, credited to `actor` (`:agent | {:user, user_id}`) — the story map's bulk Stage move
+  (RE502). Lives here rather than in `Hamaca.Cards` because it may cancel runs, and `Cards`
+  may not depend on `Runs`.
+
+  Each card is re-read on the stage's board first, so a card deleted, archived or moved to
+  another board since the caller loaded it is **skipped**. A card already in `stage` is in
+  neither list — there is nothing to do. Every move goes through `Hamaca.Cards.move_card/4`, so
+  its stranding guard still holds:
+
+    * `cancel_runs: true` — a card with a stranding run (`Cards.stranded_run/2`, checked at
+      apply time) has the run cancelled via `cancel_run/2` with the same `actor` first, then
+      is moved: the board's single-card confirm, per card.
+    * `cancel_runs: false` — `move_card/4`'s `{:error, :would_strand_run}` skips the card,
+      which also covers a run that started after the board's pre-check.
+
+  Any other refusal from `move_card/4` skips the card too; one bad card never raises. `moved`
+  holds the moved structs, `skipped` the input structs.
+  """
+  @spec bulk_move_cards([Card.t()], Stage.t(), :agent | {:user, integer()}, cancel_runs: boolean()) ::
+          %{moved: [Card.t()], skipped: [Card.t()]}
+  def bulk_move_cards(cards, %Stage{} = stage, actor, cancel_runs: cancel_runs?)
+      when is_list(cards) and is_boolean(cancel_runs?) do
+    board = %Board{id: stage.board_id}
+
+    %{moved: moved, skipped: skipped} =
+      Enum.reduce(cards, %{moved: [], skipped: []}, fn card, acc ->
+        case bulk_move_one(Cards.get_card(board, card.id), stage, actor, cancel_runs?) do
+          {:ok, moved} -> %{acc | moved: [moved | acc.moved]}
+          :unchanged -> acc
+          :skipped -> %{acc | skipped: [card | acc.skipped]}
+        end
+      end)
+
+    %{moved: Enum.reverse(moved), skipped: Enum.reverse(skipped)}
+  end
+
+  defp bulk_move_one(nil, _stage, _actor, _cancel_runs?), do: :skipped
+  defp bulk_move_one(%Card{archived_at: %DateTime{}}, _stage, _actor, _cancel_runs?), do: :skipped
+  defp bulk_move_one(%Card{stage_id: stage_id}, %Stage{id: stage_id}, _actor, _cancel_runs?), do: :unchanged
+
+  defp bulk_move_one(%Card{} = card, %Stage{} = stage, actor, cancel_runs?) do
+    if cancel_runs?, do: cancel_stranding_run(card, stage, actor)
+
+    case Cards.move_card(card, stage, stage_card_count(stage), actor) do
+      {:ok, moved} -> {:ok, moved}
+      {:error, _refused} -> :skipped
+    end
+  end
+
+  # A run that went terminal between the read and the cancel returns {:error, :not_active}; the
+  # move that follows is then simply safe, so the result is not inspected.
+  defp cancel_stranding_run(card, stage, actor) do
+    case Cards.stranded_run(card, stage) do
+      nil -> :ok
+      run -> cancel_run(run, actor: actor)
+    end
+  end
+
+  # The bottom of the stage, re-read per card so each append lands after the previous one.
+  defp stage_card_count(%Stage{id: stage_id}) do
+    Repo.aggregate(from(c in Card, where: c.stage_id == ^stage_id and is_nil(c.archived_at)), :count)
+  end
+
   # RE335 — the timeline suffix a leaked run is closed with, one per kind of leak. They are
   # composed by cancel_log_text/1 into "run cancelled — <reason>". Archived wins over a terminal
   # stage: archiving is the more specific human act, and it is the one the human just did.

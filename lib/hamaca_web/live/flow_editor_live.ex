@@ -7,10 +7,13 @@ defmodule HamacaWeb.FlowEditorLive do
   and edges to inspect them — Expand-to-read of a node's main field included (RE459) — with
   every mutating control disabled and the prompt sheet's Edit mode refused.
 
-  RE429: the trigger bar is one Stage select (`Hamaca.Flows.assignable_stages/2` — free main
+  RE429: the trigger bar is one Stage chooser (`Hamaca.Flows.assignable_stages/2` — free main
   work stages plus the flow's own) and two read-only derived read-outs, pulls-from and
   lands-on, worked out from board order (`Hamaca.Flows.neighbours/2`) for the working copy's
-  stage. A stage-only change saves with no version bump.
+  stage. A stage-only change saves with no version bump. RE502: the chooser is a button that
+  opens the shared `HamacaWeb.StagePickerComponents.stage_picker/1` popover (owner squares from
+  `Hamaca.Flows.stage_flows/1`); opening it and filtering it are view-only, so they stay
+  allowed on a read-only board — but the button is disabled there and the menu never opens.
   """
   use HamacaWeb, :live_view
 
@@ -22,6 +25,7 @@ defmodule HamacaWeb.FlowEditorLive do
   alias HamacaWeb.FlowEditorComponents
   alias HamacaWeb.FlowGraphComponents
   alias HamacaWeb.FlowLayout
+  alias HamacaWeb.StagePickerComponents
   alias Schemas.Board
   alias Schemas.Flow
 
@@ -47,6 +51,8 @@ defmodule HamacaWeb.FlowEditorLive do
          |> assign(:modal, nil)
          |> assign(:connecting, nil)
          |> assign(:prompt_sheet, nil)
+         |> assign(:trigger_menu_open, false)
+         |> assign(:trigger_stage_filter, "")
          |> load_flow(flow)}
     end
   end
@@ -64,6 +70,9 @@ defmodule HamacaWeb.FlowEditorLive do
     |> assign(:flow, flow)
     |> load_agents()
     |> assign(:assignable_stages, Flows.assignable_stages(socket.assigns.board, flow))
+    # The picker's owner squares: AI iff a flow is on the stage — refreshed with every save,
+    # since moving this flow's trigger moves which stage is AI.
+    |> assign(:ai_stage_ids, socket.assigns.board |> Flows.stage_flows() |> Map.keys() |> MapSet.new())
     |> assign(:working, working)
     |> assign(:dirty?, false)
     |> assign(:errors, [])
@@ -224,10 +233,34 @@ defmodule HamacaWeb.FlowEditorLive do
     {:noreply, assign(socket, :prompt_sheet, nil)}
   end
 
-  # The trigger bar's one field (RE429). Matched explicitly — never atomize user input.
+  # The trigger bar's one field (RE429). Matched explicitly — never atomize user input. A pick
+  # from the stage picker (RE502) also closes it.
   def handle_event("validate_trigger", %{"field" => "stage", "stage_id" => id}, socket) do
     id = if id == "", do: nil, else: String.to_integer(id)
-    {:noreply, apply_working(socket, &Map.put(&1, :stage_id, id))}
+
+    {:noreply,
+     socket
+     |> assign(:trigger_menu_open, false)
+     |> apply_working(&Map.put(&1, :stage_id, id))}
+  end
+
+  # The trigger stage picker's popover (RE502) — view-only, so not in the read-only guard list,
+  # but a read-only member's (disabled) button never opens it. Each open starts unfiltered.
+  def handle_event("toggle_trigger_menu", _params, %{assigns: %{read_only?: true}} = socket), do: {:noreply, socket}
+
+  def handle_event("toggle_trigger_menu", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:trigger_menu_open, !socket.assigns.trigger_menu_open)
+     |> assign(:trigger_stage_filter, "")}
+  end
+
+  def handle_event("close_trigger_menu", _params, socket) do
+    {:noreply, assign(socket, :trigger_menu_open, false)}
+  end
+
+  def handle_event("filter_trigger_stages", %{"q" => query}, socket) do
+    {:noreply, assign(socket, :trigger_stage_filter, query)}
   end
 
   # low-level working-copy node-field edit (the inspector form/chips/steppers emit this).
@@ -498,16 +531,21 @@ defmodule HamacaWeb.FlowEditorLive do
         </div>
 
         <%!-- Trigger bar --%>
-        <div style="display:flex;align-items:center;gap:14px;padding:11px 18px;border-bottom:1px solid var(--color-base-300);background:var(--color-base-100);">
+        <div
+          id="trigger-bar"
+          style="display:flex;align-items:center;gap:14px;padding:11px 18px;border-bottom:1px solid var(--color-base-300);background:var(--color-base-100);"
+        >
           <span style="font-size:10.5px;font-weight:600;letter-spacing:0.06em;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
             TRIGGER
           </span>
-          <.trigger_select
+          <.trigger_stage
             id="trigger-stage"
-            field="stage"
             label="STAGE"
             value={@working.stage_id}
             stages={@assignable_stages}
+            ai_stage_ids={@ai_stage_ids}
+            open={@trigger_menu_open}
+            filter={@trigger_stage_filter}
             disabled={@read_only?}
           />
           <.derived_stage
@@ -773,27 +811,52 @@ defmodule HamacaWeb.FlowEditorLive do
   end
 
   attr :id, :string, required: true
-  attr :field, :string, required: true
   attr :label, :string, required: true
-  attr :value, :any, default: nil
-  attr :stages, :list, required: true
+  attr :value, :any, default: nil, doc: "the working copy's stage id"
+  attr :stages, :list, required: true, doc: "the assignable stages, in board order"
+  attr :ai_stage_ids, :any, required: true, doc: "MapSet of the board's AI stage ids, for the owner squares"
+  attr :open, :boolean, default: false
+  attr :filter, :string, default: ""
   attr :disabled, :boolean, default: false
 
-  defp trigger_select(assigns) do
+  # The trigger's Stage chooser (RE502): a button showing the working copy's stage that opens
+  # the shared stage picker, whose rows send `validate_trigger` with `field=stage`.
+  defp trigger_stage(assigns) do
+    assigns = assign(assigns, :current, Enum.find(assigns.stages, &(&1.id == assigns.value)))
+
     ~H"""
-    <form id={@id} phx-change="validate_trigger" style="display:flex;flex-direction:column;gap:3px;">
-      <input type="hidden" name="field" value={@field} />
-      <label style="font-size:9.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
+    <div
+      class="relative"
+      phx-click-away={@open && "close_trigger_menu"}
+      style="display:flex;flex-direction:column;gap:3px;"
+    >
+      <span style="font-size:9.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
         {@label}
-      </label>
-      <select
-        name="stage_id"
+      </span>
+      <button
+        type="button"
+        id={@id}
+        phx-click="toggle_trigger_menu"
         disabled={@disabled}
-        style="border:1px solid var(--color-field-border);background:var(--color-field-bg);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
+        aria-haspopup="listbox"
+        aria-expanded={to_string(@open)}
+        style="display:flex;align-items:center;gap:6px;border:1px solid var(--color-field-border);background:var(--color-field-bg);border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:ui-monospace,monospace;color:color-mix(in oklab, var(--color-base-content) 80%, transparent);"
       >
-        <option :for={s <- @stages} value={s.id} selected={s.id == @value}>{s.name}</option>
-      </select>
-    </form>
+        {stage_label(@current) || "—"}
+        <.icon name="hero-chevron-down" class="size-3" />
+      </button>
+      <StagePickerComponents.stage_picker
+        :if={@open}
+        id={"#{@id}-picker"}
+        heading={@label}
+        rows={StagePickerComponents.stage_rows(@stages, @ai_stage_ids)}
+        event="validate_trigger"
+        row_attrs={%{"phx-value-field" => "stage"}}
+        filter={@filter}
+        filter_event="filter_trigger_stages"
+        class="absolute left-0 top-full z-30 mt-1 max-h-[260px]"
+      />
+    </div>
     """
   end
 

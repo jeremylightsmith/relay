@@ -33,6 +33,29 @@ defmodule HamacaWeb.StorybookRenderTest do
     refute html =~ "Create board from"
   end
 
+  test "18. GET /storybook/stage_picker_components/stage_picker renders every variation (RE502)", %{conn: conn} do
+    html = conn |> get("/storybook/stage_picker_components/stage_picker") |> html_response(200)
+
+    for id <- ~w(no_marks all_mark some_mark filtered step_headers), do: assert(html =~ "variation_id=#{id}")
+
+    assert html =~ "hero-check"
+    assert html =~ "w-2 h-[2px] rounded bg-primary"
+    assert html =~ "Design · Review"
+    assert html =~ "text-base-content/45 uppercase"
+  end
+
+  test "GET /storybook/story_map_components/story_map_bulk_bar renders the bar's states (RE502)", %{conn: conn} do
+    html = conn |> get("/storybook/story_map_components/story_map_bulk_bar") |> html_response(200)
+
+    for id <- ~w(closed menu_open), do: assert(html =~ "variation_id=#{id}")
+  end
+
+  test "GET /storybook/story_map_components/story_map_card renders the selection variations (RE502)", %{conn: conn} do
+    html = conn |> get("/storybook/story_map_components/story_map_card") |> html_response(200)
+
+    for id <- ~w(selectable selected), do: assert(html =~ "variation_id=#{id}")
+  end
+
   test "12. GET /storybook/example_board_components/node_panel shows the inline tag (RE444)", %{conn: conn} do
     html = conn |> get("/storybook/example_board_components/node_panel") |> html_response(200)
     assert html =~ "inline · no skill"

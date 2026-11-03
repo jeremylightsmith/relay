@@ -34,6 +34,7 @@ defmodule HamacaWeb.CoreComponents do
   alias HamacaWeb.CardMedia
   alias HamacaWeb.NativeCardNav
   alias HamacaWeb.RunComponents
+  alias HamacaWeb.StagePickerComponents
   alias HamacaWeb.TalkComponents
   alias HamacaWeb.TimeAgo
   alias Phoenix.HTML.FormField
@@ -4587,7 +4588,12 @@ defmodule HamacaWeb.CoreComponents do
   attr :stages, :list,
     default: [],
     doc:
-      "RE281: EVERY stage on the board in position order — each %{id, name, current?}. The current one is listed and marked, not hidden; fewer than two entries hides the chip's move affordance"
+      "RE281/RE502: EVERY stage on the board in hierarchical order, as `HamacaWeb.StagePickerComponents.stage_rows/2` picker rows. The current one is listed and marked (see `stage_marks`), not hidden; fewer than two entries hides the chip's move affordance"
+
+  attr :stage_marks, :map,
+    default: %{},
+    doc:
+      "RE502: the Move-to picker's marks, `%{stage_id => :all}` for the card's current stage — rendered with a ✓ and inert"
 
   attr :stage_menu_open, :boolean,
     default: false,
@@ -4595,7 +4601,7 @@ defmodule HamacaWeb.CoreComponents do
 
   attr :stage_filter, :string,
     default: "",
-    doc: "RE281: the stage popover's filter text; case-insensitive substring on the stage name"
+    doc: "RE281: the stage popover's filter text; case-insensitive substring on the stage's display name"
 
   attr :conversation, :any,
     required: true,
@@ -4872,7 +4878,6 @@ defmodule HamacaWeb.CoreComponents do
       |> assign(:mockup_items, CardMedia.mockup_items(Map.get(assigns.card, :mockups), assigns.attachment_types))
       |> assign(:screen_items, CardMedia.screens(Map.get(assigns.card, :ai_result), assigns.attachment_types))
       |> assign(:show_run_tab?, assigns.runs != [] or assigns.queued_flow != nil)
-      |> assign(:visible_stages, filter_stages(assigns.stages, assigns.stage_filter))
       |> assign(:rail_flow_path, rail_flow_path(assigns.run_flow, assigns.queued_flow))
       # RE500 — through card_requester/1 and Card.public?/1, which tolerate plain card maps.
       |> assign(:requester, card_requester(assigns.card))
@@ -4993,73 +4998,26 @@ defmodule HamacaWeb.CoreComponents do
                   >
                     {@stage_name}
                   </span>
+                  <%!-- RE502 — the shared stage picker. The current stage carries the ✓ (:all)
+                  mark, which renders it inert: `move_card` to the card's own stage would
+                  reorder it to the bottom. --%>
                   <div
                     :if={@stage_menu_open and !@archived}
                     id="card-drawer-stage-menu"
-                    class={"absolute left-0 #{if(@embed, do: "top-[38px]", else: "top-[26px]")} z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5 action-group"}
-                    style="box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
+                    class={"absolute left-0 #{if(@embed, do: "top-[38px]", else: "top-[26px]")} z-[24] action-group"}
                   >
-                    <span class="px-1 pt-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.6px] text-base-content/50">
-                      Move to
-                    </span>
-                    <form
-                      id="card-drawer-stage-filter-form"
-                      phx-change="filter_stages"
-                      phx-submit="filter_stages"
-                    >
-                      <input
-                        type="text"
-                        id="card-drawer-stage-filter"
-                        name="q"
-                        value={@stage_filter}
-                        autocomplete="off"
-                        phx-mounted={JS.focus()}
-                        placeholder="Filter stages…"
-                        class="w-full rounded-md border border-base-300 bg-base-200/40 px-[9px] py-1.5 text-[12px] outline-none"
-                      />
-                    </form>
-                    <div class="flex max-h-[230px] flex-col gap-px overflow-y-auto">
-                      <span
-                        :if={@visible_stages == []}
-                        id="card-drawer-stage-none"
-                        class="rounded-md px-[9px] py-1.5 text-[12.5px] font-medium text-base-content/50"
-                      >
-                        No stages match
-                      </span>
-                      <%= for stage <- @visible_stages do %>
-                        <span
-                          :if={stage.current?}
-                          id={"#{@id}-move-to-#{stage.id}"}
-                          class="flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-semibold text-base-content"
-                        >
-                          <span class="size-[6px] flex-none rounded-[2px] bg-secondary"></span>
-                          {stage.name}
-                          <span class="ml-auto flex-none font-mono text-[10px] text-secondary">
-                            current
-                          </span>
-                        </span>
-                        <button
-                          :if={!stage.current?}
-                          type="button"
-                          id={"#{@id}-move-to-#{stage.id}"}
-                          phx-click="move_card"
-                          phx-value-ref={@ref}
-                          phx-value-stage_id={stage.id}
-                          class="flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-base-content/80 hover:bg-base-300/50 pending-action"
-                        >
-                          <span class="size-[6px] flex-none rounded-[2px] bg-base-300"></span>
-                          {stage.name}
-                          <%!-- RE394 — the pressed row's face, in the trailing slot the current
-                          row's "current" tag uses; hidden until LiveView marks the row loading. --%>
-                          <span
-                            class="pending-face ml-auto flex flex-none items-center gap-1 font-mono text-[10px] text-base-content/65"
-                            aria-hidden="true"
-                          >
-                            <span class="loading loading-spinner loading-xs"></span> Moving…
-                          </span>
-                        </button>
-                      <% end %>
-                    </div>
+                    <StagePickerComponents.stage_picker
+                      id={"#{@id}-move-to"}
+                      heading="MOVE TO"
+                      rows={@stages}
+                      marks={@stage_marks}
+                      event="move_card"
+                      row_attrs={%{"phx-value-ref" => @ref}}
+                      filter={@stage_filter}
+                      filter_event="filter_stages"
+                      pending
+                      class="max-h-[260px]"
+                    />
                   </div>
                 </div>
                 <span :if={!@embed} class="drawer-card-ref font-mono text-xs text-base-content/65">
@@ -7612,17 +7570,6 @@ defmodule HamacaWeb.CoreComponents do
     case Cards.sub_task_progress(card) do
       %{total: 0} -> nil
       progress -> progress
-    end
-  end
-
-  # RE281 — presentation-only narrowing of the header's stage list. BoardLive.move_targets/2
-  # owns "which stages exist and which one is current"; this owns "which of them the filter
-  # box is showing", so neither has to re-derive the other's answer. Matching is a
-  # case-insensitive substring on the DISPLAYED name, so "rev" finds "Code · Review".
-  defp filter_stages(stages, filter) do
-    case filter |> to_string() |> String.trim() |> String.downcase() do
-      "" -> stages
-      query -> Enum.filter(stages, &String.contains?(String.downcase(&1.name), query))
     end
   end
 

@@ -45,9 +45,9 @@ defmodule HamacaWeb.BoardLiveRetryRunTest do
 
   defp failed_run(card, flow) do
     {:ok, _run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{} = first}
+    assert_receive {:dispatched, %NodeJob{} = first}, 3000
     {:ok, _run} = Runs.report_outcome(first, %{outcome: :failed, detail: "first boom"})
-    assert_receive {:dispatched, %NodeJob{} = second}
+    assert_receive {:dispatched, %NodeJob{} = second}, 3000
     {:ok, run} = Runs.report_outcome(second, %{outcome: :failed, detail: "final boom"})
     Runs.get_run!(run.id)
   end
@@ -67,7 +67,7 @@ defmodule HamacaWeb.BoardLiveRetryRunTest do
 
   test "a running run's banner does not", ctx do
     {:ok, _run} = Runs.start_run(ctx.card, ctx.flow)
-    assert_receive {:dispatched, %NodeJob{}}
+    assert_receive {:dispatched, %NodeJob{}}, 3000
     view = open(ctx.conn, ctx.board, ctx.card)
 
     refute has_element?(view, "#run-retry")
@@ -81,7 +81,7 @@ defmodule HamacaWeb.BoardLiveRetryRunTest do
 
     assert Runs.get_run!(run.id).status == :running
     assert Runs.get_run!(run.id).current_node == "brainstorm"
-    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"}}
+    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"}}, 3000
     refute has_element?(view, "#run-retry")
   end
 

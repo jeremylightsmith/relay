@@ -51,6 +51,65 @@ defmodule Hamaca.CardsStrandedMoveTest do
     end
   end
 
+  describe "stranded_runs/2" do
+    test "maps each card with a stranding run to that run, leaving run-less cards out", ctx do
+      a = insert(:card, stage: ctx.code)
+      b = insert(:card, stage: ctx.code)
+      c = insert(:card, stage: ctx.code)
+      run_a = with_run(a, ctx.flow, :running)
+      run_b = with_run(b, ctx.flow, :parked)
+
+      stranded = Cards.stranded_runs([a, b, c], ctx.done)
+
+      assert stranded |> Map.keys() |> Enum.sort() == Enum.sort([a.id, b.id])
+      assert stranded[a.id].id == run_a.id
+      assert stranded[b.id].id == run_b.id
+    end
+
+    test "is empty for a move into the run's own lane", ctx do
+      a = insert(:card, stage: ctx.code)
+      with_run(a, ctx.flow, :running)
+
+      assert Cards.stranded_runs([a], ctx.code) == %{}
+    end
+
+    test "is empty for an empty card list", ctx do
+      assert Cards.stranded_runs([], ctx.done) == %{}
+    end
+
+    test "is empty for a card whose run is terminal", ctx do
+      a = insert(:card, stage: ctx.code)
+      # `:done` is the successful terminal status (Run.terminal_statuses/0).
+      with_run(a, ctx.flow, :done)
+
+      assert Cards.stranded_runs([a], ctx.done) == %{}
+    end
+
+    test "batches the whole list into one query", ctx do
+      cards = for _ <- 1..3, do: insert(:card, stage: ctx.code)
+      Enum.each(cards, &with_run(&1, ctx.flow, :parked))
+
+      test_pid = self()
+      handler_id = "stranded-runs-#{inspect(make_ref())}"
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:hamaca, :repo, :query],
+          fn _event, _measurements, metadata, _config ->
+            if self() == test_pid, do: send(test_pid, {:query, metadata.source})
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert map_size(Cards.stranded_runs(cards, ctx.done)) == 3
+      assert_received {:query, "runs"}
+      refute_received {:query, _}
+    end
+  end
+
   describe "move_card/4 stranding guard" do
     test "refuses a stranding move and does not move the card", ctx do
       card = insert(:card, stage: ctx.code)

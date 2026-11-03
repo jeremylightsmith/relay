@@ -26,11 +26,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
-          stages: [
-            %{id: 3, name: "Plan", current?: false},
-            %{id: 4, name: "Code", current?: true},
-            %{id: 7, name: "Done", current?: false}
-          ],
+          stages: story_stages(),
+          stage_marks: %{4 => :all},
           conversation: story_conversation(),
           note_count: length(story_conversation()),
           activity: story_activity(),
@@ -54,11 +51,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           health: :live,
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
-          stages: [
-            %{id: 3, name: "Plan", current?: false},
-            %{id: 4, name: "Code", current?: true},
-            %{id: 7, name: "Done", current?: false}
-          ],
+          stages: story_stages(),
+          stage_marks: %{4 => :all},
           conversation: origin_conversation(),
           note_count: length(origin_conversation()),
           activity: story_activity(),
@@ -83,14 +77,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           # RE281 — the header's Move-to popover, open, with the current stage marked.
           stage_menu_open: true,
           stage_filter: "",
-          stages: [
-            %{id: 1, name: "Backlog", current?: false},
-            %{id: 2, name: "Spec", current?: false},
-            %{id: 3, name: "Plan", current?: false},
-            %{id: 4, name: "Code", current?: true},
-            %{id: 5, name: "Code · Review", current?: false},
-            %{id: 7, name: "Done", current?: false}
-          ],
+          stages: story_stages_with_sublane(),
+          stage_marks: %{4 => :all},
           conversation: story_conversation(),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
@@ -113,11 +101,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => 61}, as: :card),
           # RE281 — the ⋯ menu, open. Archive is the only item: no Duplicate, no Copy link.
           overflow_open: true,
-          stages: [
-            %{id: 3, name: "Plan", current?: false},
-            %{id: 4, name: "Code", current?: true},
-            %{id: 7, name: "Done", current?: false}
-          ],
+          stages: story_stages(),
+          stage_marks: %{4 => :all},
           conversation: story_conversation(),
           activity: story_activity(),
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
@@ -138,11 +123,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Deploy the search reindex job"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
-          stages: [
-            %{id: 3, name: "Plan", current?: false},
-            %{id: 4, name: "Code", current?: true},
-            %{id: 7, name: "Done", current?: false}
-          ],
+          stages: story_stages(),
+          stage_marks: %{4 => :all},
           conversation: [],
           note_count: 0,
           activity: story_activity(),
@@ -164,11 +146,8 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           close_patch: "/storybook/core_components/card_drawer",
           title_form: Phoenix.Component.to_form(%{"title" => "Generate the API client"}, as: :card),
           status_form: Phoenix.Component.to_form(%{"status" => "working", "progress" => nil}, as: :card),
-          stages: [
-            %{id: 3, name: "Plan", current?: false},
-            %{id: 4, name: "Code", current?: true},
-            %{id: 7, name: "Done", current?: false}
-          ],
+          stages: story_stages(),
+          stage_marks: %{4 => :all},
           conversation: [],
           note_count: 0,
           activity: story_activity(),
@@ -663,6 +642,26 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
           comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
         }
       }
+    ]
+  end
+
+  # RE502 — the Move-to menu's rows, in HamacaWeb.StagePickerComponents.stage_rows/2's shape.
+  defp story_stages do
+    [
+      %{id: 3, kind: :row, label: "Plan", display_name: "Plan", depth: 0, owner: :human},
+      %{id: 4, kind: :row, label: "Code", display_name: "Code", depth: 0, owner: :ai},
+      %{id: 7, kind: :row, label: "Done", display_name: "Done", depth: 0, owner: :human}
+    ]
+  end
+
+  defp story_stages_with_sublane do
+    [
+      %{id: 1, kind: :row, label: "Backlog", display_name: "Backlog", depth: 0, owner: :human},
+      %{id: 2, kind: :row, label: "Spec", display_name: "Spec", depth: 0, owner: :ai},
+      %{id: 3, kind: :row, label: "Plan", display_name: "Plan", depth: 0, owner: :human},
+      %{id: 4, kind: :row, label: "Code", display_name: "Code", depth: 0, owner: :ai},
+      %{id: 5, kind: :row, label: "Review", display_name: "Code · Review", depth: 1, owner: nil},
+      %{id: 7, kind: :row, label: "Done", display_name: "Done", depth: 0, owner: :human}
     ]
   end
 

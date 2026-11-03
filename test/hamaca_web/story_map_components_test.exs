@@ -225,7 +225,7 @@ defmodule HamacaWeb.StoryMapComponentsTest do
         )
 
       assert html =~ ~s(draggable="true")
-      assert html =~ ~s(class="story-map-card")
+      assert [_article] = html |> LazyHTML.from_fragment() |> LazyHTML.query("article.story-map-card") |> Enum.to_list()
       assert html =~ ~s(data-ref="RLY1")
     end
 
@@ -1573,6 +1573,106 @@ defmodule HamacaWeb.StoryMapComponentsTest do
       assert style_of(html, "#story-map-collapse-2") ==
                "font-size:12px;color:color-mix(in oklab, var(--color-base-content) 65%, transparent);"
     end
+  end
+
+  describe "RE502 — story_map_card/1 selection (scenario 19)" do
+    defp selectable_card(attrs) do
+      render_component(
+        &StoryMapComponents.story_map_card/1,
+        Keyword.merge([id: "story-map-card-RLY1", ref: "RLY1", title: "Add SSO", badge: "CODE"], attrs)
+      )
+    end
+
+    defp classes(html, selector) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> LazyHTML.attribute("class")
+      |> List.first("")
+      |> String.split()
+    end
+
+    test "a selected card draws the ring and the checked box" do
+      html = selectable_card(selectable: true, selected: true, selecting: true)
+
+      article = classes(html, "article.story-map-card")
+      assert "ring-2" in article
+      assert "ring-primary" in article
+      assert "bg-primary/5" in article
+
+      button = classes(html, "#story-map-card-RLY1-select")
+      assert "bg-primary" in button
+      assert present?(html, "#story-map-card-RLY1-select .hero-check")
+      assert matches?(html, ~s(#story-map-card-RLY1-select[aria-pressed="true"][phx-click="toggle_card_selection"]))
+      assert matches?(html, ~s(#story-map-card-RLY1-select[phx-value-ref="RLY1"][aria-label="Select card"]))
+    end
+
+    test "with no selection the box hides until hover" do
+      html = selectable_card(selectable: true, selecting: false)
+
+      button = classes(html, "#story-map-card-RLY1-select")
+      assert "opacity-0" in button
+      assert "group-hover:opacity-100" in button
+      assert matches?(html, ~s(#story-map-card-RLY1-select[aria-pressed="false"]))
+      refute "ring-2" in classes(html, "article.story-map-card")
+    end
+
+    test "a non-selectable card renders no box" do
+      refute matches?(selectable_card(selectable: false), "#story-map-card-RLY1-select")
+    end
+
+    for zoom <- StoryMapComponents.zoom_levels() do
+      test "the card keeps its DnD contract with a box at #{zoom} zoom" do
+        html = selectable_card(selectable: true, zoom: unquote(zoom))
+
+        assert matches?(
+                 html,
+                 ~s(article.story-map-card.group[draggable="true"][data-ref="RLY1"][phx-click="select_card"])
+               )
+
+        assert matches?(html, "#story-map-card-RLY1-select")
+      end
+    end
+  end
+
+  describe "RE502 — story_map_bulk_bar/1 (scenario 20)" do
+    test "the count badge, the open menu's primary button and the wrapping bar" do
+      html = render_component(&StoryMapComponents.story_map_bulk_bar/1, count: 5, open_menu: :release)
+
+      assert text_of(html, ".badge.badge-primary") == "5 selected"
+      assert "btn-primary" in classes(html, "#story-map-bulk-release")
+      assert "btn-ghost" in classes(html, "#story-map-bulk-stage")
+      assert "btn-ghost" in classes(html, "#story-map-bulk-step")
+      assert present?(html, ~s(#story-map-bulk-bar span.hidden.sm\\:inline))
+      assert "flex-wrap" in classes(html, "#story-map-bulk-bar")
+      assert matches?(html, ~s|#story-map-bulk-clear[phx-click="clear_card_selection"][title="Clear selection (Esc)"]|)
+      assert matches?(html, ~s(#story-map-bulk-stage[phx-click="open_bulk_menu"][phx-value-menu="stage"]))
+    end
+
+    test "every menu button is ghost when no menu is open" do
+      html = render_component(&StoryMapComponents.story_map_bulk_bar/1, count: 2, open_menu: nil)
+
+      for menu <- StoryMapComponents.bulk_menus() do
+        assert "btn-ghost" in classes(html, "#story-map-bulk-#{menu}")
+      end
+    end
+  end
+
+  describe "RE502 — bulk_menus/0 and parse_bulk_menu/1" do
+    test "parses each menu and refuses anything else" do
+      for menu <- StoryMapComponents.bulk_menus() do
+        assert StoryMapComponents.parse_bulk_menu(Atom.to_string(menu)) == {:ok, menu}
+      end
+
+      assert StoryMapComponents.bulk_menus() == [:stage, :release, :step]
+      assert StoryMapComponents.parse_bulk_menu("owner") == :error
+      assert StoryMapComponents.parse_bulk_menu(nil) == :error
+    end
+  end
+
+  # `matches?/2` for an element that carries no id (an icon, a hint span).
+  defp present?(html, selector) do
+    html |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> Enum.count() > 0
   end
 
   describe "RE237 theme tokens" do

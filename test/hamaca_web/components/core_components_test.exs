@@ -2069,10 +2069,8 @@ defmodule HamacaWeb.CoreComponentsTest do
     test "the header stage chip is a nowrap trigger with the v5 artboard's geometry and its owner tint" do
       attrs =
         drawer_attrs(%{}, %{
-          stages: [
-            %{id: 1, name: "Plan", current?: false},
-            %{id: 2, name: "Code", current?: true}
-          ]
+          stages: picker_stages(),
+          stage_marks: %{2 => :all}
         })
 
       html = render_component(&CoreComponents.card_drawer/1, attrs)
@@ -2088,15 +2086,16 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert html =~ "hero-chevron-down size-[11px]"
     end
 
+    # RE502 — the drawer's Move-to menu is the shared <.stage_picker> rows.
+    defp picker_stages do
+      [
+        %{id: 1, kind: :row, label: "Plan", display_name: "Plan", depth: 0, owner: :human},
+        %{id: 2, kind: :row, label: "Code", display_name: "Code", depth: 0, owner: :ai}
+      ]
+    end
+
     test "the Move-to rows carry a Moving… pressed face inside an action group (RE394)" do
-      attrs =
-        drawer_attrs(%{}, %{
-          stage_menu_open: true,
-          stages: [
-            %{id: 1, name: "Plan", current?: false},
-            %{id: 2, name: "Code", current?: true}
-          ]
-        })
+      attrs = drawer_attrs(%{}, %{stage_menu_open: true, stages: picker_stages(), stage_marks: %{2 => :all}})
 
       doc = LazyHTML.from_fragment(render_component(&CoreComponents.card_drawer/1, attrs))
 
@@ -2104,6 +2103,8 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert count(doc, "button#card-drawer-move-to-1") == 1
       assert "pending-action" in btn_classes(doc, "#card-drawer-move-to-1")
       assert doc |> LazyHTML.query("#card-drawer-move-to-1") |> LazyHTML.attribute("phx-click") == ["move_card"]
+      assert doc |> LazyHTML.query("#card-drawer-move-to-1") |> LazyHTML.attribute("phx-value-ref") == ["RLY-1"]
+      assert doc |> LazyHTML.query("#card-drawer-move-to-1") |> LazyHTML.attribute("phx-value-stage_id") == ["1"]
       assert text_of(doc, "#card-drawer-move-to-1 .pending-face") == "Moving…"
 
       assert doc |> LazyHTML.query("#card-drawer-move-to-1 .pending-face") |> LazyHTML.attribute("aria-hidden") == [
@@ -2114,60 +2115,38 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert count(doc, "#card-drawer-move-to-1 .pending-face .loading.loading-spinner.loading-xs") == 1
 
       assert count(doc, "#card-drawer-move-to-2 .pending-face") == 0
-      assert text_of(doc, "#card-drawer-move-to-2") =~ "current"
     end
 
-    test "the stage popover matches the v5 artboard and marks the current stage inert" do
-      attrs =
-        drawer_attrs(%{}, %{
-          stage_menu_open: true,
-          stages: [
-            %{id: 1, name: "Plan", current?: false},
-            %{id: 2, name: "Code", current?: true}
-          ]
-        })
+    # Scenario 11 — ✓ replaces the old "current" tag; the marked row is inert.
+    test "the stage popover is the shared picker and marks the current stage with an inert ✓" do
+      attrs = drawer_attrs(%{}, %{stage_menu_open: true, stages: picker_stages(), stage_marks: %{2 => :all}})
 
       html = render_component(&CoreComponents.card_drawer/1, attrs)
+      doc = LazyHTML.from_fragment(html)
 
-      # line ~48 — top:26px;left:0;z-index:24;width:214px;radius 9px;padding 6px;gap 5px.
-      assert html =~
-               "absolute left-0 top-[26px] z-[24] flex w-[214px] flex-col gap-[5px] rounded-[9px] border border-base-300 bg-base-100 p-1.5"
+      assert count(doc, "#card-drawer-stage-menu #card-drawer-move-to.rounded-box.w-64") == 1
+      assert "max-h-[260px]" in btn_classes(doc, "#card-drawer-move-to")
+      assert text_of(doc, "#card-drawer-move-to > div:first-child") == "MOVE TO"
 
-      assert html =~ "box-shadow:0 8px 28px color-mix(in oklab, var(--color-neutral) 16%, transparent);"
+      # The filter box, which takes the caret with it (RE306 round 2): without phx-mounted focus
+      # the menu opened with focus still on the chip, so typing went to the window instead.
+      assert doc |> LazyHTML.query("#card-drawer-move-to-filter-form") |> LazyHTML.attribute("phx-change") == [
+               "filter_stages"
+             ]
 
-      # line ~49 — mono 9.5px/600, .6px tracking, uppercase eyebrow.
-      assert html =~ "px-1 pt-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.6px] text-base-content/50"
+      assert doc |> LazyHTML.query("#card-drawer-move-to-filter") |> LazyHTML.attribute("placeholder") == [
+               "Filter stages…"
+             ]
 
-      # line ~50 — the filter input.
-      assert html =~ ~s(id="card-drawer-stage-filter")
-      assert html =~ ~s(placeholder="Filter stages…")
-
-      # RE306 round 2 — the menu must take the caret with it. Without this the menu opened with
-      # focus still on the chip <button>, so everything typed at "Filter stages…" went to the
-      # window instead and the `t` in it switched the drawer to Talk.
-      [filter_tag] = Regex.run(~r/<input[^>]*id="card-drawer-stage-filter"[^>]*>/, html)
+      [filter_tag] = Regex.run(~r/<input[^>]*id="card-drawer-move-to-filter"[^>]*>/, html)
       assert filter_tag =~ ~s(phx-mounted="[[&quot;focus&quot;,{}]]")
-      assert html =~ "w-full rounded-md border border-base-300 bg-base-200/40 px-[9px] py-1.5 text-[12px] outline-none"
 
-      # line ~51 — max-height:230px;overflow-y:auto;gap:1px.
-      assert html =~ "flex max-h-[230px] flex-col gap-px overflow-y-auto"
-
-      # line ~692 — non-current row: 12.5px/500, muted ink, 6px grey dot, real hover.
-      assert html =~
-               ~s(<button type="button" id="card-drawer-move-to-1")
-
-      assert html =~
-               "flex w-full items-center gap-2 rounded-md px-[9px] py-1.5 text-left text-[12.5px] font-medium text-base-content/80 hover:bg-base-300/50"
-
-      assert html =~ ~s(<span class="size-[6px] flex-none rounded-[2px] bg-base-300">)
-
-      # line ~692-694 — current row: weight 600, full ink, violet dot, mono violet `current`
-      # tag pinned right, and NOT a button so it cannot be re-selected.
-      assert html =~ ~s(<span id="card-drawer-move-to-2")
-      refute html =~ ~s(<button type="button" id="card-drawer-move-to-2")
-      assert html =~ ~s(<span class="size-[6px] flex-none rounded-[2px] bg-secondary">)
-      assert html =~ "ml-auto flex-none font-mono text-[10px] text-secondary"
-      assert html =~ "current"
+      assert count(doc, "button#card-drawer-move-to-1") == 1
+      assert count(doc, "button#card-drawer-move-to-2") == 0
+      assert count(doc, "div#card-drawer-move-to-2") == 1
+      assert count(doc, "#card-drawer-move-to-2 .hero-check") == 1
+      refute text_of(doc, "#card-drawer-move-to-2") =~ "current"
+      refute text_of(doc, "#card-drawer-stage-menu") =~ "current"
     end
 
     test "an archived card's chip is a plain span with no chevron and no popover" do
@@ -2175,10 +2154,8 @@ defmodule HamacaWeb.CoreComponentsTest do
         drawer_attrs(%{}, %{
           archived: true,
           stage_menu_open: true,
-          stages: [
-            %{id: 1, name: "Plan", current?: false},
-            %{id: 2, name: "Code", current?: true}
-          ]
+          stages: picker_stages(),
+          stage_marks: %{2 => :all}
         })
 
       html = render_component(&CoreComponents.card_drawer/1, attrs)
@@ -2194,15 +2171,13 @@ defmodule HamacaWeb.CoreComponentsTest do
         drawer_attrs(%{}, %{
           stage_menu_open: true,
           stage_filter: "zzzz",
-          stages: [
-            %{id: 1, name: "Plan", current?: false},
-            %{id: 2, name: "Code", current?: true}
-          ]
+          stages: picker_stages(),
+          stage_marks: %{2 => :all}
         })
 
       html = render_component(&CoreComponents.card_drawer/1, attrs)
 
-      assert html =~ ~s(id="card-drawer-stage-none")
+      assert html =~ ~s(id="card-drawer-move-to-none")
       assert html =~ "No stages match"
       refute html =~ ~s(id="card-drawer-move-to-1")
       refute html =~ ~s(id="card-drawer-move-to-2")

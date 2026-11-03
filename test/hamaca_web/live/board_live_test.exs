@@ -1689,25 +1689,26 @@ defmodule HamacaWeb.BoardLiveTest do
       names =
         html
         |> LazyHTML.from_fragment()
-        |> LazyHTML.query(~s{[id^="card-drawer-move-to-"]})
+        |> LazyHTML.query(~s{#card-drawer-move-to [id^="card-drawer-move-to-"]:not(form):not(input)})
         # RE394 — a movable row also carries its hidden "Moving…" pressed face after the name.
         |> Enum.map(
           &(&1
             |> LazyHTML.text()
             |> String.trim()
-            |> String.replace_suffix("current", "")
             |> String.replace_suffix("Moving…", "")
-            |> String.trim())
+            |> String.split()
+            |> Enum.join(" "))
         )
 
+      # RE502 — a substage is a nested row labelled by its lane word, under its parent.
       assert names == [
                "Backlog",
                "Next up",
                "Spec",
-               "Spec · Review",
-               "Spec · Done",
+               "─Review",
+               "─Done",
                "Plan",
-               "Plan · Done",
+               "─Done",
                "Code",
                "Review",
                "Deploy",
@@ -1715,7 +1716,7 @@ defmodule HamacaWeb.BoardLiveTest do
              ]
     end
 
-    test "labels a sub-lane target with the parent's name, not the raw composite Stage.name",
+    test "labels a sub-lane target by its lane word, nested, never the raw composite Stage.name",
          %{conn: conn, board: board} do
       code = Enum.find(board.stages, &(&1.name == "Code"))
       {:ok, review} = Boards.enable_lane(code, :review)
@@ -1725,7 +1726,8 @@ defmodule HamacaWeb.BoardLiveTest do
 
       view |> element("#card-drawer-stage-chip") |> render_click()
 
-      assert has_element?(view, "#card-drawer-move-to-#{review.id}", "Code · Review")
+      assert has_element?(view, "#card-drawer-move-to-#{review.id}", "Review")
+      assert has_element?(view, "#card-drawer-move-to-#{review.id} .w-px.bg-base-300")
       refute has_element?(view, "#card-drawer-move-to-#{review.id}", "Code:Review")
     end
 
@@ -1764,7 +1766,8 @@ defmodule HamacaWeb.BoardLiveTest do
       assert has_element?(view, "#stage-col-#{spec.position} .stage-count", "2")
     end
 
-    test "the drawer stage chip and menu update after the move", %{conn: conn, plan: plan, user: user} do
+    test "the drawer stage chip and menu update after the move",
+         %{conn: conn, plan: plan, card: card, user: user} do
       board = Boards.get_or_create_default_board(user)
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
       render_async(view)
@@ -1772,6 +1775,7 @@ defmodule HamacaWeb.BoardLiveTest do
       view |> element("#card-drawer-stage-chip") |> render_click()
       view |> element("#card-drawer-move-to-#{plan.id}") |> render_click()
 
+      assert Repo.get!(Card, card.id).stage_id == plan.id
       assert has_element?(view, "#card-drawer .drawer-stage-chip.badge-secondary", "Plan")
       refute has_element?(view, "#card-drawer-stage-menu")
     end
@@ -1786,17 +1790,32 @@ defmodule HamacaWeb.BoardLiveTest do
 
       view |> element("#card-drawer-stage-chip") |> render_click()
 
-      assert has_element?(view, "#card-drawer-stage-menu", "Move to")
-      assert has_element?(view, "#card-drawer-stage-filter[placeholder='Filter stages…']")
+      assert has_element?(view, "#card-drawer-stage-menu", "MOVE TO")
+      assert has_element?(view, "#card-drawer-move-to-filter[placeholder='Filter stages…']")
 
-      # The current stage is LISTED and marked — not hidden…
-      assert has_element?(view, "span#card-drawer-move-to-#{backlog.id}", "Backlog")
-      assert has_element?(view, "span#card-drawer-move-to-#{backlog.id}", "current")
+      # The current stage is LISTED and marked with a ✓ — not hidden, and no "current" tag…
+      assert has_element?(view, "#card-drawer-move-to-#{backlog.id}", "Backlog")
+      assert has_element?(view, "#card-drawer-move-to-#{backlog.id} .hero-check")
+      refute has_element?(view, "#card-drawer-stage-menu *", "current")
       # …and it is not a button, so it cannot be clicked to move the card where it already is.
       refute has_element?(view, "button#card-drawer-move-to-#{backlog.id}")
 
       assert has_element?(view, "button#card-drawer-move-to-#{spec.id}", "Spec")
       assert has_element?(view, "button#card-drawer-move-to-#{plan.id}", "Plan")
+    end
+
+    test "filtering for a substage shows it flattened under its full display name",
+         %{conn: conn, board: board} do
+      code = Enum.find(board.stages, &(&1.name == "Code"))
+      {:ok, review} = Boards.enable_lane(code, :review)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      view |> element("#card-drawer-stage-chip") |> render_click()
+      view |> form("#card-drawer-move-to-filter-form", %{"q" => "rev"}) |> render_change()
+
+      assert has_element?(view, "#card-drawer-move-to-#{review.id}", "Code · Review")
     end
 
     test "typing in the filter narrows the list case-insensitively, then shows a no-match row",
@@ -1806,14 +1825,14 @@ defmodule HamacaWeb.BoardLiveTest do
       render_async(view)
 
       view |> element("#card-drawer-stage-chip") |> render_click()
-      view |> form("#card-drawer-stage-filter-form", %{"q" => "PL"}) |> render_change()
+      view |> form("#card-drawer-move-to-filter-form", %{"q" => "PL"}) |> render_change()
 
       assert has_element?(view, "#card-drawer-move-to-#{plan.id}", "Plan")
       refute has_element?(view, "#card-drawer-move-to-#{spec.id}")
 
-      view |> form("#card-drawer-stage-filter-form", %{"q" => "zzzz"}) |> render_change()
+      view |> form("#card-drawer-move-to-filter-form", %{"q" => "zzzz"}) |> render_change()
 
-      assert has_element?(view, "#card-drawer-stage-none", "No stages match")
+      assert has_element?(view, "#card-drawer-move-to-none", "No stages match")
       refute has_element?(view, "#card-drawer-move-to-#{plan.id}")
     end
 
@@ -1824,14 +1843,14 @@ defmodule HamacaWeb.BoardLiveTest do
       render_async(view)
 
       view |> element("#card-drawer-stage-chip") |> render_click()
-      view |> form("#card-drawer-stage-filter-form", %{"q" => "plan"}) |> render_change()
+      view |> form("#card-drawer-move-to-filter-form", %{"q" => "plan"}) |> render_change()
       refute has_element?(view, "#card-drawer-move-to-#{spec.id}")
 
       # close, then reopen
       view |> element("#card-drawer-stage-chip") |> render_click()
       view |> element("#card-drawer-stage-chip") |> render_click()
 
-      assert has_element?(view, "#card-drawer-stage-filter[value='']")
+      assert has_element?(view, "#card-drawer-move-to-filter[value='']")
       assert has_element?(view, "#card-drawer-move-to-#{spec.id}", "Spec")
     end
 
@@ -1842,7 +1861,7 @@ defmodule HamacaWeb.BoardLiveTest do
       render_async(view)
 
       view |> element("#card-drawer-stage-chip") |> render_click()
-      view |> form("#card-drawer-stage-filter-form", %{"q" => "spec"}) |> render_change()
+      view |> form("#card-drawer-move-to-filter-form", %{"q" => "spec"}) |> render_change()
       view |> element("#card-drawer-move-to-#{spec.id}") |> render_click()
 
       assert Repo.get!(Card, card.id).stage_id == spec.id

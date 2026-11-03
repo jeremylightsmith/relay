@@ -12,4 +12,5 @@ defmodule Storybook.StoryMapComponents do
   def entry("presence_stack"), do: [icon: {:fa, "users", :thin}]
   def entry("story_map_filter_bar"), do: [icon: {:fa, "filter", :thin}]
   def entry("story_map_collapsed_stub"), do: [icon: {:fa, "compress", :thin}]
+  def entry("story_map_bulk_bar"), do: [icon: {:fa, "list-check", :thin}]
 end

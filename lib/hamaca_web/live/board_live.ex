@@ -78,8 +78,9 @@ defmodule HamacaWeb.BoardLive do
   (`assign_story_map_view/2`) and written by the same event pattern — seven handlers, counting
   RE276's `hide_complete` below: parse the wire value,
   write through `Hamaca.StoryMap`, re-render from that write's own broadcast. **Filtering is a
-  pre-pass**: `story_map_viewport/1` narrows the card list with
-  `HamacaWeb.StoryMapFilter.visible/4` and builds the grid from the result, so no placement
+  pre-pass**: `story_map_grid/1` (shared by the viewport and RE502's selection handlers) narrows
+  the card list with `HamacaWeb.StoryMapSelection.visible_cards/5` and builds the grid from the
+  result, so no placement
   rule in `StoryMapGrid` knows filtering exists, `grid.total` is the visible count and
   `length(@story_map_cards)` is the total. Collapse and focus reach the grid as one MapSet via
   `StoryMapGrid.collapsed_set/3` — focus IS a collapse of everything else, and that rule lives
@@ -88,9 +89,10 @@ defmodule HamacaWeb.BoardLive do
   Hide steps off, because `＋ Add step` must never open an input the user cannot see.
 
   RE276 adds an eighth key, `:story_map_hide_complete`, and it is the first defaulting to ON:
-  the map opens showing only incomplete cards. `story_map_viewport/1` turns it into the
-  `hidden_stage_ids` set the pre-pass excludes — `Hamaca.Boards.top_level_done_stage_ids/1`
-  when on, empty when off — so the meaning of "complete" lives at this call site and
+  the map opens showing only incomplete cards. `HamacaWeb.StoryMapSelection.visible_cards/5`
+  turns it into the `hidden_stage_ids` set the pre-pass excludes —
+  `Hamaca.Boards.top_level_done_stage_ids/1` when on, empty when off — so the meaning of
+  "complete" lives in that one definition and
   `StoryMapFilter` stays a pure set-exclusion. It is deliberately NOT `Cards.done?/2` (the
   terminal stage's `:ready` cards, which drives the card face's strikethrough); the two answer
   different questions and are not merged. The tray narrows for free, because `grid.unmapped`
@@ -131,6 +133,24 @@ defmodule HamacaWeb.BoardLive do
   board — calls `Hamaca.Billing.choose_free_board/2`. Its `{:billing_changed, _}` broadcast flips
   every open session of the owner's boards; a member never sees the switch and a forged confirm
   from one does nothing.
+
+  RE502 — the story map's multi-select. `:story_map_selection` is a `MapSet` of card ids and
+  `:story_map_bulk_menu` the bulk bar's open menu (`StoryMapComponents.bulk_menus/0`, or nil).
+  Both are per-socket view state — never persisted or broadcast — and every rule about them is
+  `HamacaWeb.StoryMapSelection`'s. The selection only holds visible, placed cards: it is pruned
+  against `story_map_grid/1`'s visible set whenever the cards (`refresh_story_map/1`) or the
+  shared view (`assign_story_map_view/2`) change. A read-only board has no selection at all.
+  Esc is layered: the bar's Esc binding renders only while the drawer is closed, and means Keep
+  while the batched confirm is open, then closes an open menu, and only then clears the
+  selection.
+
+  The bulk bar's Stage / Release / Step menus are `HamacaWeb.StagePickerComponents.stage_picker/1`
+  panels filtered by `:story_map_bulk_filter` (reset whenever the menu opens, closes or
+  changes). A Stage move is silent — no WIP warning, no AI-stage confirm — unless runs would
+  strand, in which case `:pending_bulk_move` holds the intent for the batched RLY-217 confirm
+  (`#bulk-move-modal`): cancel the runs and move all, move the others only, or keep. Every move
+  writes through the per-card domain paths, whose broadcasts refresh this socket too, and the
+  selection is kept afterwards.
   """
 
   use HamacaWeb, :live_view
@@ -160,9 +180,11 @@ defmodule HamacaWeb.BoardLive do
   alias HamacaWeb.NativeCardNav
   alias HamacaWeb.RunComponents
   alias HamacaWeb.SetupComponents
+  alias HamacaWeb.StagePickerComponents
   alias HamacaWeb.StoryMapComponents
   alias HamacaWeb.StoryMapFilter
   alias HamacaWeb.StoryMapGrid
+  alias HamacaWeb.StoryMapSelection
   alias Schemas.Attachment
   alias Schemas.Board
   alias Schemas.BoardSetupStep
@@ -704,6 +726,10 @@ defmodule HamacaWeb.BoardLive do
         hide_complete={@story_map_hide_complete}
         filter_active={@story_map_filter_active}
         open_ref={@open_ref}
+        selection={@story_map_selection}
+        bulk_menu={@story_map_bulk_menu}
+        bulk_filter={@story_map_bulk_filter}
+        stage_flows={@stage_flows}
       />
       <.card_drawer
         :if={@selected_card}
@@ -724,7 +750,8 @@ defmodule HamacaWeb.BoardLive do
         image_href={&viewer_path(assigns, Cards.ref(@board, @selected_card), :images, &1)}
         stage_name={drawer_stage_name(@selected_stage, @board.stages)}
         stage_owner={stage_owner(@selected_stage, @stage_flows)}
-        stages={move_targets(@board, @selected_card)}
+        stages={move_targets(@board, @stage_flows)}
+        stage_marks={%{@selected_card.stage_id => :all}}
         active_owner={Cards.active_owner_type(@selected_card)}
         health={health_state(@health_by_card, @selected_card.id)}
         done={Cards.done?(@selected_card, @board.stages)}
@@ -1035,6 +1062,7 @@ defmodule HamacaWeb.BoardLive do
         </div>
         <label class="modal-backdrop" phx-click="cancel_move">Close</label>
       </div>
+      <.bulk_move_modal :if={@pending_bulk_move} pending={@pending_bulk_move} />
       <FreeBoardComponents.make_editable_confirm
         :if={
           @make_editable_confirm? and @board_owner? and match?({:free_read_only, _}, @billing_notice)
@@ -1074,53 +1102,17 @@ defmodule HamacaWeb.BoardLive do
   attr :hide_complete, :boolean, required: true
   attr :filter_active, :boolean, required: true
   attr :open_ref, :string, default: nil, doc: "the drawer's open card ref (BoardLive's :open_ref), or nil"
+  attr :selection, :any, required: true, doc: "RE502 — MapSet of selected card ids"
+  attr :bulk_menu, :atom, required: true, doc: "RE502 — the bulk bar's open menu, or nil"
+  attr :bulk_filter, :string, required: true, doc: "RE502 — the open bulk menu's filter text"
+  attr :stage_flows, :map, required: true, doc: "stage id => flow; its keys are the AI stages"
 
   defp story_map_viewport(assigns) do
-    # RE259 — filtering is a PRE-PASS, not a grid concern: the grid is built from the
-    # VISIBLE cards, so its placement rules are untouched, `grid.total` is the visible
-    # count and `length(@cards)` is the total — the two numbers the count label needs.
-    # Every count the map already shows (band badges, lane `N cards`, the ✕ block) then
-    # narrows with the filter for free, exactly as the artboard does.
-    #
-    # Consequence worth stating: the ✕ delete button un-blocks when a filter hides an
-    # activity's last card. The SERVER still refuses a non-empty delete with
-    # `{:error, :not_empty}` (the existing defence in depth), so the outcome is a refused
-    # click, not lost cards. Accepted; the alternative is a second set of unfiltered
-    # counts threaded through the grid for one edge case.
-    #
-    # RE276 — "complete" is a property of the STAGE, resolved to one MapSet per render HERE,
-    # at the call site that knows what the toggle means; `StoryMapFilter` just excludes a set.
-    # Deliberately `Boards.top_level_done_stage_ids/1` and NOT `Cards.done?/2`: this hides a
-    # finished COLUMN (any top-level `:complete` stage, whatever the card's status) while
-    # `done?/2` marks the terminal stage's `:ready` cards for the card face's strikethrough.
-    # Both are right for their own job; merging them would break one of the two.
-    hidden_stage_ids =
-      if assigns.hide_complete,
-        do: MapSet.new(Boards.top_level_done_stage_ids(assigns.board.stages)),
-        else: MapSet.new()
-
-    visible =
-      StoryMapFilter.visible(
-        assigns.cards,
-        assigns.owner_filter,
-        assigns.needs_input_filter,
-        hidden_stage_ids
-      )
+    {_visible, grid} = story_map_grid(assigns)
 
     assigns =
       assigns
-      |> assign(
-        :grid,
-        StoryMapGrid.build(
-          assigns.activities,
-          assigns.steps,
-          assigns.releases,
-          visible,
-          assigns.draft,
-          assigns.hide_steps,
-          StoryMapGrid.collapsed_set(assigns.activities, assigns.collapsed, assigns.focus)
-        )
-      )
+      |> assign(:grid, grid)
       # Chips come from the UNFILTERED list plus the selection, so selecting an owner
       # never removes the other chips.
       |> assign(:chips, StoryMapFilter.chips(assigns.cards, assigns.owner_filter))
@@ -1141,7 +1133,10 @@ defmodule HamacaWeb.BoardLive do
     <div
       id="story-map-viewport"
       style="isolation:isolate;"
-      class={["flex min-h-0 flex-col", if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")]}
+      class={[
+        "relative flex min-h-0 flex-col",
+        if(@embed, do: "h-dvh", else: "h-[calc(100dvh_-_53px)]")
+      ]}
     >
       <StoryMapComponents.story_map_filter_bar
         chips={@chips}
@@ -1220,6 +1215,8 @@ defmodule HamacaWeb.BoardLive do
             zoom={@zoom}
             focus={@focus_activity}
             open_ref={@open_ref}
+            selection={@selection}
+            selectable={not @read_only}
           />
           <StoryMapComponents.story_map_empty
             :if={@activities == []}
@@ -1229,8 +1226,212 @@ defmodule HamacaWeb.BoardLive do
           />
         </div>
       </div>
+      <%!-- RE502 — the bulk bar floats over the map's bottom edge; the viewport is `relative`
+            and the bar's wrapper is z-[60], above the filter bar's 55 inside this stacking
+            context. --%>
+      <StoryMapComponents.story_map_bulk_bar
+        :if={MapSet.size(@selection) > 0}
+        count={MapSet.size(@selection)}
+        open_menu={@bulk_menu}
+      >
+        <:menu>
+          <.bulk_menu
+            menu={@bulk_menu}
+            board={@board}
+            stage_flows={@stage_flows}
+            activities={@activities}
+            steps={@steps}
+            releases={@releases}
+            selected={Enum.filter(@cards, &MapSet.member?(@selection, &1.id))}
+            filter={@bulk_filter}
+          />
+        </:menu>
+      </StoryMapComponents.story_map_bulk_bar>
+      <%!-- RE502 — layered Esc. Bound only while the drawer is closed: the drawer binds its own
+            window Esc (`close_drawer`), and one keypress must never both close the drawer and
+            clear the selection. --%>
+      <div
+        :if={MapSet.size(@selection) > 0 and is_nil(@open_ref)}
+        id="story-map-selection-escape"
+        phx-window-keydown="story_map_selection_escape"
+        phx-key="Escape"
+        hidden
+      >
+      </div>
     </div>
     """
+  end
+
+  # RE502 — the batched RLY-217 confirm: `#stranded-move-modal`'s markup for N cards, K of them
+  # with a live run. The counts and both labels are over the N cards actually moving (the ones
+  # already in the target are not), and "Move the other … only" is absent when every one runs.
+  attr :pending, :map, required: true, doc: "the :pending_bulk_move intent"
+
+  defp bulk_move_modal(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :copy,
+        StoryMapSelection.confirm_copy(
+          length(assigns.pending.stranded),
+          length(assigns.pending.card_ids),
+          assigns.pending.target_stage_name
+        )
+      )
+
+    ~H"""
+    <div id="bulk-move-modal" class="modal modal-open" role="dialog" aria-label="Confirm bulk move">
+      <div class="modal-box max-w-md">
+        <h3 class="text-lg font-semibold">{@copy.title}</h3>
+        <ul id="bulk-move-running" class="mt-3 flex flex-col gap-1 text-sm text-base-content/80">
+          <li :for={run <- @pending.stranded}>
+            <span class="font-medium">{run.ref}</span>
+            · {run.status} · <span class="font-medium">{run.node}</span>
+            · {run.flow_key} flow
+          </li>
+        </ul>
+        <p class="mt-3 text-sm text-base-content/80">{@copy.consequence}</p>
+        <div class="modal-action action-group flex-wrap">
+          <button type="button" id="bulk-move-keep" phx-click="bulk_move_keep" class="btn btn-ghost">
+            Keep all here
+          </button>
+          <.button
+            :if={@copy.others}
+            type="button"
+            id="bulk-move-others"
+            phx-click="bulk_move_confirm"
+            phx-value-mode="others"
+            pending="Moving…"
+          >
+            {@copy.others}
+          </.button>
+          <.button
+            type="button"
+            id="bulk-move-cancel-runs"
+            phx-click="bulk_move_confirm"
+            phx-value-mode="all"
+            class="btn btn-error"
+            pending="Moving…"
+          >
+            {@copy.cancel_all}
+          </.button>
+        </div>
+      </div>
+      <label class="modal-backdrop" phx-click="bulk_move_keep">Close</label>
+    </div>
+    """
+  end
+
+  # RE502 — the bulk bar's open menu: one shared picker, configured per axis. The heading counts
+  # the selection; the marks say where the selection already is.
+  attr :menu, :atom, required: true
+  attr :board, :any, required: true
+  attr :stage_flows, :map, required: true
+  attr :activities, :list, required: true
+  attr :steps, :list, required: true
+  attr :releases, :list, required: true
+  attr :selected, :list, required: true, doc: "the selected cards on the map"
+  attr :filter, :string, required: true
+
+  defp bulk_menu(assigns) do
+    count = length(assigns.selected)
+    noun = if count == 1, do: "CARD", else: "CARDS"
+
+    assigns =
+      assigns
+      |> assign(bulk_menu_config(assigns.menu, assigns))
+      |> assign(:heading_prefix, "MOVE #{count} #{noun} TO")
+
+    ~H"""
+    <StagePickerComponents.stage_picker
+      id={"bulk-#{@menu}-menu"}
+      heading={"#{@heading_prefix} #{@axis_word}"}
+      rows={@rows}
+      marks={StoryMapSelection.marks(@selected, @menu)}
+      event={"bulk_move_#{@menu}"}
+      value_name={"#{@menu}_id"}
+      filter={@filter}
+      filter_event="filter_bulk_menu"
+      filter_placeholder={@placeholder}
+      class="max-h-[60vh] max-w-[calc(100vw-1.5rem)]"
+    />
+    """
+  end
+
+  defp bulk_menu_config(:stage, assigns) do
+    %{axis_word: "STAGE", rows: move_targets(assigns.board, assigns.stage_flows), placeholder: "Filter stages…"}
+  end
+
+  defp bulk_menu_config(:release, assigns) do
+    %{axis_word: "RELEASE", rows: StagePickerComponents.release_rows(assigns.releases), placeholder: "Filter releases…"}
+  end
+
+  defp bulk_menu_config(:step, assigns) do
+    %{
+      axis_word: "STEP",
+      rows: StagePickerComponents.step_rows(assigns.activities, assigns.steps),
+      placeholder: "Filter steps…"
+    }
+  end
+
+  # The map's grid, built ONCE per caller from the viewport-shaped inputs: the viewport renders
+  # from it and the RE502 selection handlers read the same visible set and cells, so a box can
+  # only ever select what is drawn under it.
+  #
+  # RE259 — filtering is a PRE-PASS, not a grid concern: the grid is built from the VISIBLE
+  # cards, so its placement rules are untouched, `grid.total` is the visible count and
+  # `length(@cards)` is the total — the two numbers the count label needs. Every count the map
+  # already shows (band badges, lane `N cards`, the ✕ block) then narrows with the filter for
+  # free, exactly as the artboard does.
+  #
+  # Consequence worth stating: the ✕ delete button un-blocks when a filter hides an activity's
+  # last card. The SERVER still refuses a non-empty delete with `{:error, :not_empty}` (the
+  # existing defence in depth), so the outcome is a refused click, not lost cards. Accepted; the
+  # alternative is a second set of unfiltered counts threaded through the grid for one edge case.
+  #
+  # RE276 — what "complete" means is resolved in `StoryMapSelection.visible_cards/5`, the one
+  # definition of the pre-pass (see its doc for why it is not `Cards.done?/2`).
+  defp story_map_grid(inputs) do
+    visible =
+      StoryMapSelection.visible_cards(
+        inputs.cards,
+        inputs.board.stages,
+        inputs.owner_filter,
+        inputs.needs_input_filter,
+        inputs.hide_complete
+      )
+
+    grid =
+      StoryMapGrid.build(
+        inputs.activities,
+        inputs.steps,
+        inputs.releases,
+        visible,
+        inputs.draft,
+        inputs.hide_steps,
+        StoryMapGrid.collapsed_set(inputs.activities, inputs.collapsed, inputs.focus)
+      )
+
+    {visible, grid}
+  end
+
+  # The socket's assigns in the viewport's shape — the one mapping, so a handler and the
+  # rendered map can never be built from different inputs.
+  defp story_map_inputs(assigns) do
+    %{
+      board: assigns.board,
+      activities: assigns.story_activities,
+      steps: assigns.story_steps,
+      releases: assigns.releases,
+      cards: assigns.story_map_cards,
+      draft: assigns.story_map_draft,
+      hide_steps: assigns.story_map_hide_steps,
+      collapsed: assigns.story_map_collapsed,
+      focus: assigns.story_map_focus,
+      owner_filter: assigns.story_map_owner_filter,
+      needs_input_filter: assigns.story_map_needs_filter,
+      hide_complete: assigns.story_map_hide_complete
+    }
   end
 
   @impl true
@@ -1305,6 +1506,12 @@ defmodule HamacaWeb.BoardLive do
       |> assign(:story_steps, StoryMap.list_steps(board))
       |> assign(:releases, StoryMap.list_releases(board))
       |> assign(:story_map_cards, cards)
+      # RE502 — the selection and the bulk bar's open menu: per-socket view state, assigned
+      # before the shared view so its prune (assign_story_map_view/2) has a selection to read.
+      |> assign(:story_map_selection, MapSet.new())
+      |> assign(:story_map_bulk_menu, nil)
+      |> assign(:story_map_bulk_filter, "")
+      |> assign(:pending_bulk_move, nil)
       # RE257 — the map's view settings are SHARED, board-wide, not per-socket assigns: every
       # viewer of a board must be looking at the same map, which is what makes a raw-pixel
       # cursor land on the right card. Seeded from the persisted view so a late joiner opens on
@@ -1897,6 +2104,12 @@ defmodule HamacaWeb.BoardLive do
     {:noreply, assign(socket, :body_loading?, false)}
   end
 
+  # RE502 — the story-map selection's events; see the read-only clause above their handlers.
+  @selection_events ~w(
+    toggle_card_selection toggle_selection_group clear_card_selection
+    open_bulk_menu close_bulk_menu story_map_selection_escape filter_bulk_menu
+  )
+
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
         compose create_card move_card assign_card unassign_card compose_cell create_card_in_cell
@@ -1906,6 +2119,7 @@ defmodule HamacaWeb.BoardLive do
         add_owner remove_owner take_over post_comment answer_input
         answer_select answer_custom answer_commit answer_next answer_back answer_goto answer_submit
         review_approve review_reject retry_card retry_run advance_run confirm_move cancel_move
+        bulk_move_stage bulk_move_release bulk_move_step bulk_move_confirm bulk_move_keep
         archive_card restore_card toggle_sub_task restart_one
         story_map_add_activity story_map_add_step story_map_add_release story_map_draft_submit
         story_map_rename_start story_map_rename_change story_map_rename_submit
@@ -2819,6 +3033,143 @@ defmodule HamacaWeb.BoardLive do
 
   def handle_event("toggle_ai_result", _params, socket) do
     {:noreply, update(socket, :expanded_ai_result?, &(!&1))}
+  end
+
+  # RE502 — building a story-map selection. Selection is per-socket VIEW state, like the view
+  # toggles below, but it is guarded explicitly rather than left live: a read-only board (archived,
+  # or plan-read-only — `read_only?` covers both) has no selection at all, so every event is a
+  # silent no-op there, with no flash, exactly as an unknown target is.
+  def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in @selection_events do
+    {:noreply, socket}
+  end
+
+  # ⇧-click (the StoryMapDnD hook) and the card's checkbox. A ref that is not a VISIBLE, PLACED
+  # card on this map — unknown, in the tray, or hidden by a filter — is a silent no-op.
+  def handle_event("toggle_card_selection", %{"ref" => ref}, socket) do
+    %{board: board, story_map_selection: selection} = socket.assigns
+    {visible, _grid} = socket.assigns |> story_map_inputs() |> story_map_grid()
+
+    case Enum.find(visible, &(Cards.ref(board, &1) == ref)) do
+      %Card{id: id} = card when not is_nil(card.story_activity_id) ->
+        {:noreply, put_story_map_selection(socket, StoryMapSelection.toggle(selection, id))}
+
+      _unknown_unmapped_or_hidden ->
+        {:noreply, socket}
+    end
+  end
+
+  # A step header's or release row's select-all box: the cards the grid draws under it.
+  def handle_event("toggle_selection_group", %{"kind" => kind, "key" => key}, socket) when kind in ~w(column lane) do
+    {_visible, grid} = socket.assigns |> story_map_inputs() |> story_map_grid()
+    ids = StoryMapSelection.group_ids(grid, if(kind == "column", do: :column, else: :lane), key)
+    selection = StoryMapSelection.toggle_group(socket.assigns.story_map_selection, ids)
+
+    {:noreply, put_story_map_selection(socket, selection)}
+  end
+
+  def handle_event("toggle_selection_group", _params, socket), do: {:noreply, socket}
+
+  def handle_event("clear_card_selection", _params, socket) do
+    {:noreply, put_story_map_selection(socket, MapSet.new())}
+  end
+
+  # The same menu again closes it; an unknown menu, or no selection to move, is a no-op.
+  def handle_event("open_bulk_menu", %{"menu" => menu}, socket) do
+    with {:ok, parsed} <- StoryMapComponents.parse_bulk_menu(menu),
+         false <- MapSet.size(socket.assigns.story_map_selection) == 0 do
+      open = if socket.assigns.story_map_bulk_menu == parsed, do: nil, else: parsed
+      {:noreply, put_bulk_menu(socket, open)}
+    else
+      _no_op -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("close_bulk_menu", _params, socket) do
+    {:noreply, put_bulk_menu(socket, nil)}
+  end
+
+  def handle_event("filter_bulk_menu", %{"q" => q}, socket) when is_binary(q) do
+    {:noreply, assign(socket, :story_map_bulk_filter, q)}
+  end
+
+  def handle_event("filter_bulk_menu", _params, socket), do: {:noreply, socket}
+
+  # Layered Esc: an open batched confirm means Keep; then an open menu swallows it; only then
+  # does Esc clear the selection.
+  def handle_event("story_map_selection_escape", _params, %{assigns: %{pending_bulk_move: %{}}} = socket) do
+    {:noreply, assign(socket, :pending_bulk_move, nil)}
+  end
+
+  def handle_event("story_map_selection_escape", _params, %{assigns: %{story_map_bulk_menu: menu}} = socket)
+      when not is_nil(menu) do
+    {:noreply, put_bulk_menu(socket, nil)}
+  end
+
+  def handle_event("story_map_selection_escape", _params, socket) do
+    {:noreply, put_story_map_selection(socket, MapSet.new())}
+  end
+
+  # RE502 — the bulk Stage move. N is the selected, mapped cards (in map order) minus the ones
+  # already in the target. Silent when nothing would strand — no WIP warning, no AI-stage
+  # confirm, which are the single-card path's — else nothing moves and the batched confirm
+  # opens. A foreign or unknown stage is a silent no-op. The re-render comes from the moves' own
+  # broadcasts (this socket's echo runs refresh_story_map/1), never a hand restream.
+  def handle_event("bulk_move_stage", %{"stage_id" => stage_id}, socket) do
+    case resolve_stage(socket, stage_id) do
+      %Stage{} = stage ->
+        cards = socket.assigns |> selected_map_cards() |> Enum.reject(&(&1.stage_id == stage.id))
+        socket = put_bulk_menu(socket, nil)
+
+        case Cards.stranded_runs(cards, stage) do
+          stranded when map_size(stranded) == 0 -> {:noreply, bulk_move_to_stage(socket, cards, stage, 0, false)}
+          stranded -> {:noreply, assign(socket, :pending_bulk_move, pending_bulk_move(socket, cards, stage, stranded))}
+        end
+
+      nil ->
+        {:noreply, socket}
+    end
+  end
+
+  # Release and Step re-place the selection on one axis, keeping the other. An id that is not
+  # one of this map's releases / steps is a silent no-op.
+  def handle_event("bulk_move_release", %{"release_id" => raw}, socket) do
+    case resolve_bulk_release(socket.assigns.releases, raw) do
+      {:ok, release_id} -> {:noreply, bulk_replace(socket, :release, release_id)}
+      :error -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("bulk_move_step", %{"step_id" => raw}, socket) do
+    step_id = parse_int(raw)
+
+    if Enum.any?(socket.assigns.story_steps, &(&1.id == step_id)),
+      do: {:noreply, bulk_replace(socket, :step, step_id)},
+      else: {:noreply, socket}
+  end
+
+  # RLY-217, batched. The intent is cleared first, then re-checked against the map as it is
+  # NOW: an id that no longer resolves (archived, deleted, unmapped) counts as skipped, and
+  # Runs.bulk_move_cards/4 re-reads every card and skips what it cannot move. `:all` cancels the
+  # stranding runs and moves every card; `:others` moves only the ones that had no live run.
+  def handle_event("bulk_move_confirm", %{"mode" => raw}, %{assigns: %{pending_bulk_move: %{} = pending}} = socket) do
+    with {:ok, mode} <- StoryMapSelection.parse_confirm_mode(raw),
+         socket = assign(socket, :pending_bulk_move, nil),
+         %Stage{} = stage <- resolve_stage(socket, pending.target_stage_id) do
+      stranded_ids = MapSet.new(pending.stranded, & &1.card_id)
+      ids = if mode == :all, do: pending.card_ids, else: Enum.reject(pending.card_ids, &MapSet.member?(stranded_ids, &1))
+      by_id = Map.new(socket.assigns.story_map_cards, &{&1.id, &1})
+      cards = Enum.flat_map(ids, &List.wrap(Map.get(by_id, &1)))
+
+      {:noreply, bulk_move_to_stage(socket, cards, stage, length(ids) - length(cards), mode == :all)}
+    else
+      _bogus_or_stale -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("bulk_move_confirm", _params, socket), do: {:noreply, socket}
+
+  def handle_event("bulk_move_keep", _params, socket) do
+    {:noreply, assign(socket, :pending_bulk_move, nil)}
   end
 
   # RE257 — the tray's open state is SHARED board-wide, so the click writes through
@@ -4472,35 +4823,23 @@ defmodule HamacaWeb.BoardLive do
     |> assign(:stage_filter, "")
   end
 
-  # Drawer move targets: EVERY stage on this board, in position order, each flagged with
-  # whether it is the card's current one. RE281 — the header's Move-to popover LISTS the
-  # current stage, marked and inert, rather than hiding it, so the picker doubles as a
-  # "where am I" readout. Sub-lanes are ordinary move_card targets, but must show a human
-  # label ("Code · Review") rather than the composite internal Stage.name ("Code:Review")
-  # built by Boards.enable_lane/2 — the same leak lane_label/1 already guards against on
-  # the board itself.
-  defp move_targets(board, %Card{stage_id: stage_id}) do
-    stages_by_id = Map.new(board.stages, &{&1.id, &1})
-
-    Enum.map(
-      board.stages,
-      &%{id: &1.id, name: move_target_name(&1, stages_by_id), current?: &1.id == stage_id}
-    )
-  end
-
-  defp move_target_name(%Stage{parent_id: nil} = stage, _stages_by_id), do: stage.name
-
-  defp move_target_name(%Stage{parent_id: parent_id} = stage, stages_by_id) do
-    parent = Map.fetch!(stages_by_id, parent_id)
-    "#{parent.name} · #{lane_label(stage.type)}"
+  # Drawer move targets: EVERY stage on this board, in hierarchical order, as shared
+  # <.stage_picker> rows (RE502). RE281 — the header's Move-to popover LISTS the current stage,
+  # marked (the call site's `stage_marks`) and inert, rather than hiding it, so the picker
+  # doubles as a "where am I" readout. A sub-lane is a nested "Review" / "Done" row whose
+  # display name ("Code · Review") is never the composite internal Stage.name ("Code:Review").
+  defp move_targets(board, stage_flows) do
+    StagePickerComponents.stage_rows(board.stages, stage_flows |> Map.keys() |> MapSet.new())
   end
 
   # The drawer header chip and "Stage" rail label render whatever stage
-  # is selected, including a sub-lane child — sanitize it the same way
-  # move_target_name/2 already does for the move menu, so the composite
-  # internal Stage.name ("Code:Review") never reaches either spot.
-  defp drawer_stage_name(%Stage{} = stage, stages) do
-    move_target_name(stage, Map.new(stages, &{&1.id, &1}))
+  # is selected, including a sub-lane child — sanitize it the same way the
+  # move menu's rows do, so the composite internal Stage.name ("Code:Review")
+  # never reaches either spot. The parent resolves from `stages`, never the DB.
+  defp drawer_stage_name(%Stage{parent_id: nil} = stage, _stages), do: stage.name
+
+  defp drawer_stage_name(%Stage{parent_id: parent_id} = stage, stages) do
+    Boards.stage_display_name(stage, Enum.find(stages, &(&1.id == parent_id)))
   end
 
   defp resolve_stage(socket, stage_id) do
@@ -5273,9 +5612,108 @@ defmodule HamacaWeb.BoardLive do
     |> assign(:story_steps, StoryMap.list_steps(board))
     |> assign(:releases, StoryMap.list_releases(board))
     |> assign(:story_map_cards, Cards.list_cards(board))
+    |> prune_story_map_selection()
   end
 
   defp refresh_story_map(socket), do: socket
+
+  # RE502 — the selection only ever holds VISIBLE, PLACED cards: a card that another actor
+  # unmapped or archived, or that a filter now hides, drops out rather than being moved by a bulk
+  # action the human can no longer see. Run on both refresh paths — the cards
+  # (refresh_story_map/1) and the shared view (assign_story_map_view/2). Only the map has a
+  # selection, so the board lens skips it.
+  defp prune_story_map_selection(%{assigns: %{live_action: :story_map, story_map_selection: selection}} = socket) do
+    if MapSet.size(selection) == 0 do
+      socket
+    else
+      a = socket.assigns
+
+      selectable =
+        a.story_map_cards
+        |> StoryMapSelection.visible_cards(
+          a.board.stages,
+          a.story_map_owner_filter,
+          a.story_map_needs_filter,
+          a.story_map_hide_complete
+        )
+        |> StoryMapSelection.selectable_ids()
+
+      put_story_map_selection(socket, StoryMapSelection.prune(selection, selectable))
+    end
+  end
+
+  defp prune_story_map_selection(socket), do: socket
+
+  # The one writer of the selection: an emptied selection closes the bulk menu with it, so a menu
+  # can never be open over nothing.
+  defp put_story_map_selection(socket, selection) do
+    socket
+    |> assign(:story_map_selection, selection)
+    |> then(&if(MapSet.size(selection) == 0, do: put_bulk_menu(&1, nil), else: &1))
+  end
+
+  # The one writer of the open bulk menu: opening, closing or switching it resets its filter.
+  defp put_bulk_menu(socket, menu) do
+    socket
+    |> assign(:story_map_bulk_menu, menu)
+    |> assign(:story_map_bulk_filter, "")
+  end
+
+  # RE502 — the selection's cards that are still on the map, in the order the map draws them.
+  defp selected_map_cards(assigns) do
+    assigns.story_map_cards
+    |> Enum.filter(&MapSet.member?(assigns.story_map_selection, &1.id))
+    |> StoryMapSelection.order_by_map_position(assigns.story_activities, assigns.story_steps, assigns.releases)
+  end
+
+  # Moves `cards` and flashes "Moved M · S skipped" only when something was skipped — S counts
+  # the `unresolved` ids the caller could not find plus the cards the move refused. The menu
+  # stays closed and the selection is kept, running cards left behind included.
+  defp bulk_move_to_stage(socket, cards, %Stage{} = stage, unresolved, cancel_runs?) do
+    %{moved: moved, skipped: skipped} =
+      Runs.bulk_move_cards(cards, stage, current_actor(socket), cancel_runs: cancel_runs?)
+
+    case unresolved + length(skipped) do
+      0 -> socket
+      skipped_count -> put_flash(socket, :info, "Moved #{length(moved)} · #{skipped_count} skipped")
+    end
+  end
+
+  defp pending_bulk_move(socket, cards, %Stage{} = stage, stranded) do
+    %{board: board} = socket.assigns
+
+    %{
+      target_stage_id: stage.id,
+      target_stage_name: drawer_stage_name(stage, board.stages),
+      card_ids: Enum.map(cards, & &1.id),
+      stranded:
+        for card <- cards, run = Map.get(stranded, card.id) do
+          %{
+            card_id: card.id,
+            ref: Cards.ref(board, card),
+            status: run.status,
+            node: run.current_node,
+            flow_key: run.flow_key
+          }
+        end
+    }
+  end
+
+  defp resolve_bulk_release(releases, raw) do
+    if raw == StagePickerComponents.no_release_id() do
+      {:ok, nil}
+    else
+      release_id = parse_int(raw)
+      if Enum.any?(releases, &(&1.id == release_id)), do: {:ok, release_id}, else: :error
+    end
+  end
+
+  # A soft `_ =`: the ids were just checked against this map, so a failure is a race (the
+  # release or step was deleted meanwhile) — the transaction rolls back and nothing moves.
+  defp bulk_replace(socket, axis, value) do
+    _ = StoryMap.replace_cards(selected_map_cards(socket.assigns), axis, value)
+    put_bulk_menu(socket, nil)
+  end
 
   # RE257 — one place that joins everything the map's realtime surfaces need: the roster, the
   # cursor stream and the shared view.
@@ -5345,6 +5783,7 @@ defmodule HamacaWeb.BoardLive do
     # link cannot fall out of step with the filters it clears. `story_map_viewport/1` takes it
     # as an attr rather than recomputing it.
     |> assign(:story_map_filter_active, StoryMap.filters_active?(view))
+    |> prune_story_map_selection()
   end
 
   defp zoom_from_view(view) do

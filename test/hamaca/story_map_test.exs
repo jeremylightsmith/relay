@@ -760,6 +760,109 @@ defmodule Hamaca.StoryMapTest do
     end
   end
 
+  describe "replace_cards/3" do
+    setup %{board: board, stage: stage} do
+      activity = insert(:story_activity, board: board, position: 1)
+      s1 = insert(:story_step, story_activity: activity, position: 1)
+      s2 = insert(:story_step, story_activity: activity, position: 2)
+      s3 = insert(:story_step, story_activity: insert(:story_activity, board: board, position: 2))
+      r1 = insert(:release, board: board, position: 1)
+      r2 = insert(:release, board: board, position: 2)
+
+      %{activity: activity, s1: s1, s2: s2, s3: s3, r1: r1, r2: r2, stage: stage}
+    end
+
+    test ":release re-places each card in its new release, keeping its step, appended in order", ctx do
+      a = place(ctx.stage, "A", ctx.s1, ctx.r1)
+      b = place(ctx.stage, "B", ctx.s2, ctx.r1)
+      place(ctx.stage, "C", ctx.s1, ctx.r2)
+
+      assert {:ok, [a2, b2]} = StoryMap.replace_cards([a, b], :release, ctx.r2.id)
+
+      assert {a2.id, a2.story_step_id, a2.story_activity_id, a2.release_id} ==
+               {a.id, ctx.s1.id, ctx.activity.id, ctx.r2.id}
+
+      assert {b2.id, b2.story_step_id, b2.story_activity_id, b2.release_id} ==
+               {b.id, ctx.s2.id, ctx.activity.id, ctx.r2.id}
+
+      assert cell_order(ctx.s1, ctx.r2) == ["C", "A"]
+      assert Repo.get!(Card, a.id).stage_id == a.stage_id
+      assert Repo.get!(Card, b.id).stage_id == b.stage_id
+    end
+
+    test ":release with nil moves the cards to (No release), keeping their step", ctx do
+      a = place(ctx.stage, "A", ctx.s1, ctx.r1)
+
+      assert {:ok, [_]} = StoryMap.replace_cards([a], :release, nil)
+
+      reloaded = Repo.get!(Card, a.id)
+      assert reloaded.release_id == nil
+      assert reloaded.story_step_id == ctx.s1.id
+    end
+
+    test ":step re-places each card in the new step, keeping its release, with the derived activity", ctx do
+      a = place(ctx.stage, "A", ctx.s1, ctx.r1)
+      b = place(ctx.stage, "B", ctx.s1, ctx.r2)
+
+      assert {:ok, [_, _]} = StoryMap.replace_cards([a, b], :step, ctx.s3.id)
+
+      a2 = Repo.get!(Card, a.id)
+      b2 = Repo.get!(Card, b.id)
+      assert {a2.story_step_id, a2.release_id} == {ctx.s3.id, ctx.r1.id}
+      assert {b2.story_step_id, b2.release_id} == {ctx.s3.id, ctx.r2.id}
+      assert a2.story_activity_id == ctx.s3.story_activity_id
+      assert b2.story_activity_id == ctx.s3.story_activity_id
+    end
+
+    test "a card already on that value is left untouched and not returned", ctx do
+      a = place(ctx.stage, "A", ctx.s1, ctx.r1)
+      b = place(ctx.stage, "B", ctx.s2, ctx.r1)
+      stale = ~U[2020-01-01 00:00:00Z]
+      {1, _} = Repo.update_all(from(c in Card, where: c.id == ^a.id), set: [updated_at: stale])
+
+      assert {:ok, [b2]} = StoryMap.replace_cards([a, b], :step, ctx.s1.id)
+
+      assert b2.id == b.id
+      untouched = Repo.get!(Card, a.id)
+      assert untouched.story_map_position == a.story_map_position
+      assert untouched.updated_at == stale
+    end
+
+    test "a foreign id rolls everything back", ctx do
+      a = place(ctx.stage, "A", ctx.s1, ctx.r1)
+      foreign = insert(:release, board: insert(:board))
+
+      assert {:error, %Ecto.Changeset{}} = StoryMap.replace_cards([a], :release, foreign.id)
+
+      unchanged = Repo.get!(Card, a.id)
+
+      assert {unchanged.story_step_id, unchanged.release_id, unchanged.story_map_position} ==
+               {ctx.s1.id, ctx.r1.id, a.story_map_position}
+    end
+
+    test "a failure part-way leaves the earlier cards unwritten", ctx do
+      a = place(ctx.stage, "A", ctx.s1, ctx.r1)
+      other_board_card = insert(:card, stage: insert(:stage, board: insert(:board)))
+
+      assert {:error, %Ecto.Changeset{}} = StoryMap.replace_cards([a, other_board_card], :release, ctx.r2.id)
+
+      assert Repo.get!(Card, a.id).release_id == ctx.r1.id
+    end
+
+    test "broadcasts {:card_upserted, card} exactly once per changed card, with the new value", ctx do
+      a = place(ctx.stage, "A", ctx.s1, ctx.r1)
+      b = place(ctx.stage, "B", ctx.s1, ctx.r1)
+      :ok = Events.subscribe(ctx.board.id)
+      {a_id, b_id, r2_id} = {a.id, b.id, ctx.r2.id}
+
+      assert {:ok, _} = StoryMap.replace_cards([a, b], :release, ctx.r2.id)
+
+      assert_receive {:card_upserted, %Card{id: ^a_id, release_id: ^r2_id}}
+      assert_receive {:card_upserted, %Card{id: ^b_id, release_id: ^r2_id}}
+      refute_receive {:card_upserted, _another}, 100
+    end
+  end
+
   # The cell's cards in the order the grid would render them: story_map_position ascending
   # (nils last), ties broken by the board order list_cards/1 returns.
   defp cell_order(step, release) do

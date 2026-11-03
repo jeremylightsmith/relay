@@ -52,28 +52,45 @@ defmodule HamacaWeb.FlowEditorLiveTest do
     assert has_element?(view, "#top-bar-crumb-boards")
   end
 
-  test "34. the trigger bar is one Stage select with read-only derived pickup and drop-off (RE429)",
+  test "34. the trigger bar is one Stage picker with read-only derived pickup and drop-off (RE429, RE502)",
        %{conn: conn, board: board} do
-    deploy = Enum.find(Boards.list_stages(board), &(&1.name == "Deploy"))
+    stages = Boards.list_stages(board)
+    code = Enum.find(stages, &(&1.name == "Code"))
+    deploy = Enum.find(stages, &(&1.name == "Deploy"))
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
 
-    options =
-      view
-      |> render()
-      |> LazyHTML.from_fragment()
-      |> LazyHTML.query("#trigger-stage option")
-      |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
-
-    assert options == ["Code", "Deploy"]
-    assert has_element?(view, "#trigger-stage option[selected]", "Code")
+    # RE502 — the native <select> is gone: the trigger stage is a button opening the shared picker.
+    assert has_element?(view, "button#trigger-stage", "Code")
+    refute has_element?(view, "#trigger-stage option")
+    refute has_element?(view, "#trigger-bar select")
+    refute has_element?(view, "#trigger-stage-picker")
     refute has_element?(view, "#trigger-pulls-from")
     refute has_element?(view, "#trigger-works-in")
     refute has_element?(view, "#trigger-lands-on")
     assert has_element?(view, "#trigger-derived-pulls-from", "Plan:Done")
     assert has_element?(view, "#trigger-derived-lands-on", "Review")
 
-    view |> element("#trigger-stage") |> render_change(%{"field" => "stage", "stage_id" => to_string(deploy.id)})
+    view |> element("#trigger-stage") |> render_click()
+
+    row_ids =
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#trigger-stage-picker button[id^='trigger-stage-picker-']")
+      |> LazyHTML.attribute("id")
+
+    assert row_ids == ["trigger-stage-picker-#{code.id}", "trigger-stage-picker-#{deploy.id}"]
+
+    for id <- [code.id, deploy.id] do
+      refute has_element?(view, "#trigger-stage-picker-#{id} .hero-check")
+      refute has_element?(view, "#trigger-stage-picker-#{id} .h-\\[2px\\]")
+    end
+
+    view |> element("#trigger-stage-picker-#{deploy.id}") |> render_click()
     assert has_element?(view, "#flow-editor-unsaved-bar")
+    assert has_element?(view, "#trigger-derived-pulls-from", "Review")
+    assert has_element?(view, "button#trigger-stage", "Deploy")
+    refute has_element?(view, "#trigger-stage-picker")
 
     view |> element("#flow-editor-save") |> render_click()
 
@@ -83,6 +100,34 @@ defmodule HamacaWeb.FlowEditorLiveTest do
     assert has_element?(view, "#flow-editor-version-chip", "v1")
     assert has_element?(view, "#trigger-derived-pulls-from", "Review")
     assert has_element?(view, "#trigger-derived-lands-on", "Done")
+  end
+
+  test "the trigger stage picker filters its rows (RE502)", %{conn: conn, board: board} do
+    stages = Boards.list_stages(board)
+    code = Enum.find(stages, &(&1.name == "Code"))
+    deploy = Enum.find(stages, &(&1.name == "Deploy"))
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    view |> element("#trigger-stage") |> render_click()
+    view |> form("#trigger-stage-picker-filter-form", %{"q" => "dep"}) |> render_change()
+
+    assert has_element?(view, "#trigger-stage-picker-#{deploy.id}", "Deploy")
+    refute has_element?(view, "#trigger-stage-picker-#{code.id}")
+  end
+
+  test "the trigger stage picker closes on click-away and clears its filter on reopen (RE502)",
+       %{conn: conn, board: board} do
+    code = Enum.find(Boards.list_stages(board), &(&1.name == "Code"))
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/flows/code")
+
+    view |> element("#trigger-stage") |> render_click()
+    view |> form("#trigger-stage-picker-filter-form", %{"q" => "dep"}) |> render_change()
+    render_click(view, "close_trigger_menu", %{})
+    refute has_element?(view, "#trigger-stage-picker")
+
+    view |> element("#trigger-stage") |> render_click()
+    assert has_element?(view, "#trigger-stage-picker-filter[value='']")
+    assert has_element?(view, "#trigger-stage-picker-#{code.id}")
   end
 
   test "an unknown flow key redirects to the Stages settings", %{conn: conn, board: board} do
@@ -644,7 +689,7 @@ defmodule HamacaWeb.FlowEditorLiveTest do
 
     {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/flows/spec")
 
-    assert has_element?(view, "#trigger-stage option[selected]", "Specify")
+    assert has_element?(view, "button#trigger-stage", "Specify")
     assert has_element?(view, "#trigger-derived-lands-on", "Specify:Review")
     refute html =~ "Spec:Review"
   end
@@ -1417,6 +1462,14 @@ defmodule HamacaWeb.FlowEditorLiveTest do
     end
 
     defp post_run(view), do: Enum.find(working(view).nodes, &(&1.key == "post")).run
+
+    test "the trigger stage button is disabled and its picker never opens (RE502)", %{view: view} do
+      assert has_element?(view, "button#trigger-stage[disabled]")
+
+      render_click(view, "toggle_trigger_menu", %{})
+
+      refute has_element?(view, "#trigger-stage-picker")
+    end
 
     defp open_read_only_sheet(view) do
       view |> element(~s([data-node="post"])) |> render_click()

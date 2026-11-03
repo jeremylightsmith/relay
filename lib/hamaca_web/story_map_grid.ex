@@ -71,6 +71,9 @@ defmodule HamacaWeb.StoryMapGrid do
 
   defstruct bands: [], columns: [], lanes: [], cells: %{}, unmapped: [], total: 0
 
+  @typedoc "A built grid — see `build/7` for each field."
+  @type t :: %__MODULE__{}
+
   @doc """
   Builds the grid. `activities`, `steps` and `releases` are the board's structure in `position`
   order (`Hamaca.StoryMap.list_activities/1`, `list_steps/1`, `list_releases/1`); `cards` is the
@@ -199,6 +202,14 @@ defmodule HamacaWeb.StoryMapGrid do
   def cell_element_id(prefix, column_key, lane_key) do
     "story-map-#{prefix}-#{dash(column_key)}-#{dash(lane_key)}"
   end
+
+  @doc """
+  The DOM id of a select-all box (RE502): a step header's (`:column`) or a release row's
+  (`:lane`). `select_box_id(:column, "s:7")` is `"story-map-select-col-s-7"` — the same `:` → `-`
+  rule as `cell_element_id/3`.
+  """
+  def select_box_id(:column, column_key), do: "story-map-select-col-#{dash(column_key)}"
+  def select_box_id(:lane, lane_key), do: "story-map-select-lane-#{dash(lane_key)}"
 
   defp dash(key), do: String.replace(key, ":", "-")
 

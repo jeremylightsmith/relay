@@ -113,7 +113,7 @@ defmodule HamacaWeb.BoardLiveTalkTest do
     view = open(ctx.conn, ctx.board, ctx.ref)
 
     view |> element("#card-drawer-stage-chip") |> render_click()
-    assert has_element?(view, "#card-drawer-stage-filter")
+    assert has_element?(view, "#card-drawer-move-to-filter")
 
     # Capital too: LiveView case-folds `phx-key`, so a Shift+T aimed at the filter arrives here
     # as %{"key" => "T"} and must be refused for the same reason.

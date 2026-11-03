@@ -78,6 +78,20 @@ const StoryMapDnD = {
       this.startDrag(e, header, {type: "header", kind, id}, `${kind}:${id}`)
     })
 
+    // RE502 — ⇧-click toggles a GRID card into the selection instead of opening the drawer.
+    // Bubble phase on this element runs before LiveView's own window-level click listener, so
+    // stopPropagation() keeps the card's phx-click="select_card" from ever seeing it. A plain
+    // click, a tray card, and a read-only map (data-selectable="false") are left untouched.
+    this.el.addEventListener("click", e => {
+      if (!e.shiftKey) return
+      const grid = this.el.querySelector(`#${GRID_ID}[data-selectable="true"]`)
+      const card = e.target.closest(CARD_SELECTOR)
+      if (!grid || !card || !grid.contains(card)) return
+      e.preventDefault()
+      e.stopPropagation()
+      this.pushEvent("toggle_card_selection", {ref: card.dataset.ref})
+    })
+
     this.el.addEventListener("dragend", () => {
       if (this.draggedEl) this.draggedEl.classList.remove("dragging")
       this.stopAutoscroll()

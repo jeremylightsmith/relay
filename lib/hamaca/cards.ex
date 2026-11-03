@@ -2312,6 +2312,29 @@ defmodule Hamaca.Cards do
   end
 
   @doc """
+  The batch form of `stranded_run/2` (RE502): a map of card id → the active run a move of that
+  card into `target_stage` would strand. Cards with no stranding run are absent, so an empty
+  map means the whole move is safe. One query for the whole list, under the same rule as
+  `stranded_run/2` — see that doc.
+  """
+  @spec stranded_runs([Card.t()], Stage.t()) :: %{optional(integer()) => Run.t()}
+  def stranded_runs([], %Stage{}), do: %{}
+
+  def stranded_runs(cards, %Stage{id: target_stage_id}) when is_list(cards) do
+    ids = Enum.map(cards, & &1.id)
+
+    from(r in Run,
+      join: f in Flow,
+      on: f.id == r.flow_id,
+      where: r.card_id in ^ids and r.status in ^Run.active_statuses(),
+      where: f.stage_id != ^target_stage_id,
+      select: {r.card_id, r}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
   Moves `card` into `target_stage` at the 0-based `index` among the
   stage's cards (excluding the moved card itself), attributed to `actor`
   (`:agent | {:user, user_id}`, defaults to `:agent`), returning

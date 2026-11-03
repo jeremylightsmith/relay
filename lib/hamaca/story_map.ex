@@ -459,8 +459,61 @@ defmodule Hamaca.StoryMap do
         |> notify_card()
 
       {:error, field, message} ->
-        {:error, card |> Card.story_map_changeset(%{}) |> Changeset.add_error(field, message)}
+        {:error, placement_error(card, field, message)}
     end
+  end
+
+  @doc """
+  Re-places `cards` on one axis of the story map (RE502's bulk Release / Step move), keeping
+  the other axis:
+
+    * `:release` — each card keeps its step and activity and gets `release_id: value`; `nil`
+      is "(No release)".
+    * `:step` — each card keeps its release and gets `story_step_id: value`, with the activity
+      derived from the step exactly as `assign_card/2` derives it. `nil` is not a step.
+
+  A card already on `value` is left untouched — no renumber, no re-stamp — and is not in the
+  returned list. The rest are written in the order given, each appended at the end of its new
+  cell (each later card's renumber sees the earlier writes), all in **one** transaction: a
+  foreign or unknown id rolls back every card and returns `{:error, changeset}`. Only after the
+  commit is `{:card_upserted, card}` broadcast, once per changed card — broadcasting from
+  inside the transaction would let listeners refetch rows that are not committed yet.
+  """
+  @spec replace_cards([Card.t()], :release | :step, integer() | nil) ::
+          {:ok, [Card.t()]} | {:error, Changeset.t()}
+  def replace_cards(cards, :release, release_id) when is_list(cards) and (is_integer(release_id) or is_nil(release_id)) do
+    cards
+    |> Enum.reject(&(&1.release_id == release_id))
+    |> write_placements(fn card ->
+      %{story_step_id: card.story_step_id, story_activity_id: card.story_activity_id, release_id: release_id}
+    end)
+  end
+
+  def replace_cards(cards, :step, step_id) when is_list(cards) and is_integer(step_id) do
+    cards
+    |> Enum.reject(&(&1.story_step_id == step_id))
+    |> write_placements(fn card -> %{story_step_id: step_id, release_id: card.release_id} end)
+  end
+
+  defp write_placements(cards, attrs_fun) do
+    result = Repo.transaction(fn -> Enum.map(cards, &resolve_and_place!(&1, attrs_fun.(&1))) end)
+
+    with {:ok, placed} <- result do
+      Enum.each(placed, &notify_card({:ok, &1}))
+      result
+    end
+  end
+
+  # Appends `card` to its new cell inside the caller's transaction; a bad id rolls it all back.
+  defp resolve_and_place!(%Card{} = card, attrs) do
+    case resolve_placement(card, attrs) do
+      {:ok, placement} -> place!(card, placement, nil)
+      {:error, field, message} -> Repo.rollback(placement_error(card, field, message))
+    end
+  end
+
+  defp placement_error(%Card{} = card, field, message) do
+    card |> Card.story_map_changeset(%{}) |> Changeset.add_error(field, message)
   end
 
   @doc """
@@ -474,12 +527,15 @@ defmodule Hamaca.StoryMap do
 
   # The placement write and the cell renumber are one transaction, so a failure leaves neither.
   defp write_placement(%Card{} = card, placement, index) do
-    Repo.transaction(fn ->
-      case card |> Card.story_map_changeset(placement) |> Repo.update() do
-        {:ok, moved} -> renumber_cell(moved, index)
-        {:error, changeset} -> Repo.rollback(changeset)
-      end
-    end)
+    Repo.transaction(fn -> place!(card, placement, index) end)
+  end
+
+  # The write + renumber body, run inside the caller's transaction; a failure rolls it back.
+  defp place!(%Card{} = card, placement, index) do
+    case card |> Card.story_map_changeset(placement) |> Repo.update() do
+      {:ok, moved} -> renumber_cell(moved, index)
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
   end
 
   # Unmapped: a card in the tray carries no position.
