@@ -249,6 +249,21 @@ defmodule HamacaWeb.BoardLivePagerTest do
       assert_patch(view, ~p"/board/#{board.slug}?card=#{ref}")
     end
 
+    # RE506 — the server rule holds in pager mode too: a drag-drop into a collapsed stage opens it.
+    test "a drag-drop into a collapsed compact page expands it to the full page",
+         %{conn: conn, board: board, backlog: backlog, code: code} do
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+      ref = Cards.ref(board, incoming)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      pager_on(view)
+      assert has_element?(view, ".stage-compact[data-stage-id='#{code.id}'][data-collapsed='true']")
+
+      render_hook(view, "move_card", %{"ref" => ref, "stage_id" => code.id, "index" => 0, "drag" => true})
+
+      refute has_element?(view, ".stage-compact[data-stage-id='#{code.id}']")
+      assert has_element?(view, ".stage-column[data-stage-id='#{code.id}'] .board-card[data-ref='#{ref}']")
+    end
+
     test "a collapsed Done pages its rows by whole weeks with week markers", %{conn: conn, board: board} do
       done = Boards.terminal_stage(board.stages)
       {:ok, _} = Boards.update_stage(done, %{collapsed_by_default: true})

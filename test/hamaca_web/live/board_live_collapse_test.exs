@@ -6,6 +6,7 @@ defmodule HamacaWeb.BoardLiveCollapseTest do
   alias Hamaca.Boards
   alias Hamaca.Cards
   alias Hamaca.Cards.DoneWeeks
+  alias Hamaca.Repo
 
   setup :register_and_log_in_user
 
@@ -137,7 +138,7 @@ defmodule HamacaWeb.BoardLiveCollapseTest do
       refute has_element?(fresh, "#stage-strip-#{code.id}")
     end
 
-    test "dropping a card onto the strip moves it in without expanding the stage",
+    test "a move without the drag flag (drawer) does not expand the stage",
          %{conn: conn, board: board, code: code, user: user} do
       backlog = Enum.find(board.stages, &(&1.name == "Backlog"))
       {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
@@ -148,7 +149,7 @@ defmodule HamacaWeb.BoardLiveCollapseTest do
       {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
       assert has_element?(view, "#stage-strip-#{code.id} .stage-count", "1")
 
-      render_hook(view, "move_card", %{"ref" => "MY2", "stage_id" => code.id, "index" => 0})
+      render_hook(view, "move_card", %{"ref" => "MY2", "stage_id" => code.id})
 
       assert has_element?(view, "#stage-strip-#{code.id} .stage-count", "2")
       refute has_element?(view, "#stage-col-5")
@@ -307,5 +308,226 @@ defmodule HamacaWeb.BoardLiveCollapseTest do
       assert Enum.sort(titles) == ["Done 1", "Done 2", "Done 3"]
       refute "Done old" in titles
     end
+  end
+
+  describe "a drag-drop reveals its collapsed target (RE506)" do
+    setup %{board: board} do
+      %{backlog: Enum.find(board.stages, &(&1.name == "Backlog"))}
+    end
+
+    test "a drag onto a collapsed-by-default stage expands it with the card at its drop slot",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
+      {:ok, _} = Cards.create_card(code, %{title: "Already here"})
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(view, "#stage-strip-#{code.id}")
+
+      drag_drop(view, board, incoming, code.id)
+
+      refute has_element?(view, "#stage-strip-#{code.id}")
+      assert has_element?(view, "#stage-col-5")
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Incoming")
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Already here")
+      assert card_titles(view, "#stage-col-5-cards") == ["Incoming", "Already here"]
+    end
+
+    test "a drag onto a stage the user collapsed by name expands it",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      {:ok, _} = Cards.create_card(code, %{title: "Keeper"})
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#stage-col-5-name") |> render_click()
+      assert has_element?(view, "#stage-strip-#{code.id}")
+
+      drag_drop(view, board, incoming, code.id)
+
+      refute has_element?(view, "#stage-strip-#{code.id}")
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Incoming")
+    end
+
+    test "a drag onto a user-collapsed main lane expands that lane",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      {:ok, done} = Boards.enable_lane(code, :done)
+      {:ok, anchor} = Cards.create_card(code, %{title: "Anchor"})
+      {:ok, _} = Cards.move_card(anchor, done, 0)
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#stage-col-5-main-lane-header") |> render_click()
+      assert has_element?(view, "#stage-col-5-main-strip")
+
+      drag_drop(view, board, incoming, code.id)
+
+      refute has_element?(view, "#stage-col-5-main-strip")
+      assert has_element?(view, "#stage-col-5-main-lane-header")
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Incoming")
+    end
+
+    test "a drag onto a user-collapsed sub-lane expands that sub-lane",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      {:ok, done} = Boards.enable_lane(code, :done)
+      {:ok, shipped} = Cards.create_card(code, %{title: "Shipped"})
+      {:ok, _} = Cards.move_card(shipped, done, 0)
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      view |> element("#sublane-#{done.id}-header") |> render_click()
+      assert has_element?(view, "#sublane-#{done.id}-strip")
+
+      drag_drop(view, board, incoming, done.id)
+
+      refute has_element?(view, "#sublane-#{done.id}-strip")
+      assert has_element?(view, "#sublane-#{done.id}-cards .board-card .card-title", "Shipped")
+      assert has_element?(view, "#sublane-#{done.id}-cards .board-card .card-title", "Incoming")
+    end
+
+    test "a drag onto a collapsed stage also opens its earlier user-collapsed main lane",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      # the In progress header only renders when the stage has a sub-lane
+      {:ok, _done} = Boards.enable_lane(code, :done)
+      {:ok, code} = Boards.update_stage(code, %{collapsed_by_default: true})
+      {:ok, _} = Cards.create_card(code, %{title: "Held"})
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      # expand the strip, then collapse its main lane — force_open is shared by the stage and
+      # its main lane, so that click also folds the collapsed-by-default stage back to its strip;
+      # expand it once more to see the user-collapsed main lane, then re-collapse by name.
+      view |> element("#stage-strip-#{code.id}") |> render_click()
+      view |> element("#stage-col-5-main-lane-header") |> render_click()
+      view |> element("#stage-strip-#{code.id}") |> render_click()
+      assert has_element?(view, "#stage-col-5-main-strip")
+      view |> element("#stage-col-5-name") |> render_click()
+      assert has_element?(view, "#stage-strip-#{code.id}")
+
+      drag_drop(view, board, incoming, code.id)
+
+      refute has_element?(view, "#stage-strip-#{code.id}")
+      refute has_element?(view, "#stage-col-5-main-strip")
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Incoming")
+    end
+
+    test "a drag naming an unknown ref expands nothing",
+         %{conn: conn, code: code, user: user} do
+      {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{"ref" => "MY999", "stage_id" => code.id, "index" => 0, "drag" => true})
+
+      assert has_element?(view, "#stage-strip-#{code.id}")
+      refute has_element?(view, "#stage-col-5")
+    end
+
+    test "a drag naming a stage not on this board expands nothing",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      drag_drop(view, board, incoming, "999999")
+
+      assert has_element?(view, "#stage-strip-#{code.id}")
+    end
+
+    test "a non-boolean drag flag is not a drag: the card moves but the stage stays collapsed",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
+      {:ok, _} = Cards.create_card(code, %{title: "Already here"})
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      render_hook(view, "move_card", %{
+        "ref" => Cards.ref(board, incoming),
+        "stage_id" => code.id,
+        "index" => 0,
+        "drag" => "true"
+      })
+
+      assert has_element?(view, "#stage-strip-#{code.id} .stage-count", "2")
+    end
+
+    test "the drop's expansion is session-only: other viewers, a reload and the stage row are untouched",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
+      {:ok, _} = Cards.create_card(code, %{title: "Already here"})
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view_a, _html} = live(conn, ~p"/board/#{board.slug}")
+      {:ok, view_b, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      drag_drop(view_a, board, incoming, code.id)
+
+      assert has_element?(view_a, "#stage-col-5")
+      refute has_element?(view_a, "#stage-strip-#{code.id}")
+      assert has_element?(view_b, "#stage-strip-#{code.id} .stage-count", "2")
+
+      {:ok, fresh, _html} = live(conn, ~p"/board/#{board.slug}")
+      assert has_element?(fresh, "#stage-strip-#{code.id}")
+
+      assert Repo.get!(Schemas.Stage, code.id).collapsed_by_default
+    end
+
+    test "a stage expanded by a drop re-collapses on a stage-name click",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      {:ok, _} = Boards.update_stage(code, %{collapsed_by_default: true})
+      {:ok, _} = Cards.create_card(code, %{title: "Already here"})
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+      drag_drop(view, board, incoming, code.id)
+      assert has_element?(view, "#stage-col-5")
+
+      view |> element("#stage-col-5-name") |> render_click()
+
+      assert has_element?(view, "#stage-strip-#{code.id}")
+    end
+
+    test "a drag onto an already-expanded stage leaves it expanded",
+         %{conn: conn, backlog: backlog, code: code, user: user} do
+      {:ok, _} = Cards.create_card(code, %{title: "Busy"})
+      {:ok, incoming} = Cards.create_card(backlog, %{title: "Incoming"})
+
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+      drag_drop(view, board, incoming, code.id)
+
+      assert has_element?(view, "#stage-col-5")
+      assert has_element?(view, "#stage-col-5-cards .board-card .card-title", "Incoming")
+      refute has_element?(view, "#stage-strip-#{code.id}")
+    end
+  end
+
+  defp drag_drop(view, board, card, stage_id) do
+    render_hook(view, "move_card", %{
+      "ref" => Cards.ref(board, card),
+      "stage_id" => stage_id,
+      "index" => 0,
+      "drag" => true
+    })
+  end
+
+  defp card_titles(view, container) do
+    view
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("#{container} .board-card .card-title")
+    |> Enum.map(&(&1 |> LazyHTML.text() |> String.trim()))
   end
 end

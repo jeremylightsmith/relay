@@ -4,6 +4,7 @@ defmodule HamacaWeb.BoardLiveStrandedMoveTest do
   import Hamaca.Factory
   import Phoenix.LiveViewTest
 
+  alias Hamaca.Boards
   alias Hamaca.Cards
   alias Hamaca.Repo
   alias Hamaca.Runs.FakeDispatcher
@@ -100,5 +101,65 @@ defmodule HamacaWeb.BoardLiveStrandedMoveTest do
 
     refute has_element?(view, "#stranded-move-modal")
     assert Repo.get!(Schemas.Card, plain.id).stage_id == ctx.done.id
+  end
+
+  # RE506 — a drag-drop into a collapsed target expands it only once the move actually happens:
+  # never while the stranding prompt is open, never on Keep it here, and never for a drawer move.
+  describe "a stranded drag-drop into a collapsed target (RE506)" do
+    setup %{done: done} do
+      {:ok, done} = Boards.update_stage(done, %{collapsed_by_default: true})
+      %{done: done}
+    end
+
+    test "the prompt opens without expanding the target", ctx do
+      {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+      drag_drop(view, ctx.board, ctx.card, ctx.done)
+
+      assert has_element?(view, "#stranded-move-modal")
+      assert has_element?(view, "#stage-strip-#{ctx.done.id}")
+    end
+
+    test "Keep it here leaves the target collapsed and the card in place", ctx do
+      {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+      drag_drop(view, ctx.board, ctx.card, ctx.done)
+
+      view |> element("#stranded-move-cancel") |> render_click()
+
+      refute has_element?(view, "#stranded-move-modal")
+      assert has_element?(view, "#stage-strip-#{ctx.done.id}")
+      assert Repo.get!(Schemas.Card, ctx.card.id).stage_id == ctx.code.id
+    end
+
+    test "confirming expands the target and shows the moved card", ctx do
+      ref = Cards.ref(ctx.board, ctx.card)
+      {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+      drag_drop(view, ctx.board, ctx.card, ctx.done)
+
+      view |> element("#stranded-move-confirm") |> render_click()
+
+      refute has_element?(view, "#stranded-move-modal")
+      refute has_element?(view, "#stage-strip-#{ctx.done.id}")
+      assert has_element?(view, ".stage-column[data-stage-id='#{ctx.done.id}'] .board-card[data-ref='#{ref}']")
+      assert Repo.get!(Schemas.Run, ctx.run.id).status == :cancelled
+    end
+
+    test "confirming a move without the drag flag leaves the target collapsed", ctx do
+      {:ok, view, _html} = live(ctx.conn, ~p"/board/#{ctx.board.slug}")
+      drop(view, ctx.board, ctx.card, ctx.done)
+
+      view |> element("#stranded-move-confirm") |> render_click()
+
+      assert Repo.get!(Schemas.Card, ctx.card.id).stage_id == ctx.done.id
+      assert has_element?(view, "#stage-strip-#{ctx.done.id}")
+    end
+  end
+
+  defp drag_drop(view, board, card, stage) do
+    render_hook(view, "move_card", %{
+      "ref" => Cards.ref(board, card),
+      "stage_id" => to_string(stage.id),
+      "index" => 0,
+      "drag" => true
+    })
   end
 end

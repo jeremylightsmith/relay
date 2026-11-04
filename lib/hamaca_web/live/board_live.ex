@@ -2567,13 +2567,16 @@ defmodule HamacaWeb.BoardLive do
   # "Move to…" menu). `index` is the 0-based drop index among the target
   # stage's other cards; when omitted (drawer) the card appends to the
   # bottom. Anything that doesn't resolve on THIS board is a silent no-op.
+  # RE506 — only the DnD hook sends `"drag" => true` (a JSON boolean); a drag that lands
+  # opens its collapsed target lane for this session. The drawer never sends it.
   def handle_event("move_card", %{"ref" => ref, "stage_id" => stage_id} = params, socket) do
     socket = close_header_popovers(socket)
+    drag? = params["drag"] == true
 
     with %Card{} = card <- Cards.get_card_by_ref(socket.assigns.board, ref),
          %Stage{} = stage <- resolve_stage(socket, stage_id),
          index when is_integer(index) <- resolve_index(params, socket, stage) do
-      move_or_prompt(socket, ref, card, stage, index)
+      move_or_prompt(socket, ref, card, stage, index, drag?)
     else
       _ -> {:noreply, socket}
     end
@@ -2674,9 +2677,10 @@ defmodule HamacaWeb.BoardLive do
          %Stage{} = stage <- resolve_stage(socket, pm.target_stage_id),
          %Run{} = run <- Runs.get_run(pm.run_id) do
       _ = Runs.cancel_run(run, actor: current_actor(socket))
+      reveal = if pm.drag?, do: drop_reveal(socket, stage)
 
       case Cards.move_card(card, stage, pm.index, current_actor(socket)) do
-        {:ok, moved} -> {:noreply, apply_move(socket, card.stage_id, moved)}
+        {:ok, moved} -> {:noreply, socket |> apply_move(card.stage_id, moved) |> reveal_drop_target(stage, reveal)}
         _error -> {:noreply, socket}
       end
     else
@@ -2709,11 +2713,7 @@ defmodule HamacaWeb.BoardLive do
         {:noreply, socket}
 
       %Stage{id: id} ->
-        {:noreply,
-         socket
-         |> update(:stage_force_closed, &MapSet.delete(&1, id))
-         |> update(:force_open, &MapSet.put(&1, id))
-         |> restream_lanes([id | sublane_ids(socket, id)])}
+        {:noreply, open_stage(socket, id)}
     end
   end
 
@@ -2757,19 +2757,15 @@ defmodule HamacaWeb.BoardLive do
   # one clears the other, so a lane is never forced both ways at once.
   def handle_event("toggle_collapse", %{"stage-id" => stage_id}, socket) do
     case resolve_stage(socket, stage_id) do
-      %Stage{id: id, parent_id: parent_id, type: type} ->
-        lane = if is_nil(parent_id), do: :main, else: type
+      %Stage{id: id} = stage ->
+        lane = stage_lane(stage)
 
         collapsed? =
           lane_collapsed?(id, lane, socket.assigns.stage_counts, socket.assigns.force_open, socket.assigns.force_closed)
 
         socket =
           if collapsed? do
-            # RLY-145: refetch the lane being revealed — see expand_stage.
-            socket
-            |> update(:force_closed, &MapSet.delete(&1, id))
-            |> update(:force_open, &MapSet.put(&1, id))
-            |> restream_lanes([id])
+            open_lane(socket, id)
           else
             socket
             |> update(:force_open, &MapSet.delete(&1, id))
@@ -5273,18 +5269,24 @@ defmodule HamacaWeb.BoardLive do
   # refresh the lane counts, and keep the drawer in sync when the moved
   # card is the selected one.
   # RLY-217 — the stranding pre-check: a live run out of its work lane prompts instead of
-  # moving (prompt_stranded_move/6); otherwise the move proceeds as before.
-  defp move_or_prompt(socket, ref, %Card{} = card, %Stage{} = stage, index) do
+  # moving (prompt_stranded_move/7); otherwise the move proceeds as before.
+  defp move_or_prompt(socket, ref, %Card{} = card, %Stage{} = stage, index, drag?) do
     case Cards.stranded_run(card, stage) do
-      nil -> apply_ordinary_move(socket, card, stage, index)
-      %Run{} = run -> {:noreply, prompt_stranded_move(socket, ref, card, stage, index, run)}
+      nil -> apply_ordinary_move(socket, card, stage, index, drag?)
+      %Run{} = run -> {:noreply, prompt_stranded_move(socket, ref, card, stage, index, run, drag?)}
     end
   end
 
-  defp apply_ordinary_move(socket, %Card{} = card, %Stage{} = stage, index) do
+  defp apply_ordinary_move(socket, %Card{} = card, %Stage{} = stage, index, drag?) do
+    reveal = if drag?, do: drop_reveal(socket, stage)
+
     case Cards.move_card(card, stage, index, current_actor(socket)) do
       {:ok, moved} ->
-        {:noreply, socket |> apply_move(card.stage_id, moved) |> maybe_warn_over_wip(stage, card.stage_id)}
+        {:noreply,
+         socket
+         |> apply_move(card.stage_id, moved)
+         |> reveal_drop_target(stage, reveal)
+         |> maybe_warn_over_wip(stage, card.stage_id)}
 
       _error ->
         {:noreply, socket}
@@ -5294,7 +5296,8 @@ defmodule HamacaWeb.BoardLive do
   # RLY-217 — a drop/menu-move that would strand a live run: do NOT move. Stash the intent so
   # the modal (rendered from @pending_move) can name the exact consequence, and restream the
   # source + destination lanes so the optimistically-dragged card visibly returns to origin.
-  defp prompt_stranded_move(socket, ref, %Card{} = card, %Stage{} = stage, index, %Run{} = run) do
+  # RE506: `drag?` rides along so confirm_move opens a collapsed target exactly as a direct drop.
+  defp prompt_stranded_move(socket, ref, %Card{} = card, %Stage{} = stage, index, %Run{} = run, drag?) do
     pending = %{
       ref: ref,
       source_stage_id: card.stage_id,
@@ -5304,7 +5307,8 @@ defmodule HamacaWeb.BoardLive do
       run_id: run.id,
       status: run.status,
       node: run.current_node,
-      flow_key: run.flow_key
+      flow_key: run.flow_key,
+      drag?: drag?
     }
 
     socket
@@ -5482,6 +5486,59 @@ defmodule HamacaWeb.BoardLive do
 
   defp sublane_ids(socket, stage_id) do
     socket.assigns.sublanes_by_parent |> Map.get(stage_id, []) |> Enum.map(& &1.id)
+  end
+
+  # The one definition of "open" for this session (MMF 12c / RLY-1 / RLY-111) — the strip click,
+  # the lane-header toggle and a drag-drop (RE506) all route here. A stage opens by leaving
+  # stage_force_closed and entering force_open; a lane by leaving force_closed and entering
+  # force_open. RLY-145: everything revealed is restreamed (stream items are consumed at render,
+  # so lanes streamed while collapsed would otherwise come up empty).
+  defp open_stage(socket, stage_id) do
+    socket
+    |> update(:stage_force_closed, &MapSet.delete(&1, stage_id))
+    |> update(:force_open, &MapSet.put(&1, stage_id))
+    |> restream_lanes([stage_id | sublane_ids(socket, stage_id)])
+  end
+
+  defp open_lane(socket, lane_id) do
+    socket
+    |> update(:force_closed, &MapSet.delete(&1, lane_id))
+    |> update(:force_open, &MapSet.put(&1, lane_id))
+    |> restream_lanes([lane_id])
+  end
+
+  # A top-level stage's own cards are its :main lane; a sub-lane is the lane of its type.
+  defp stage_lane(%Stage{parent_id: nil}), do: :main
+  defp stage_lane(%Stage{type: type}), do: type
+
+  # RE506 — decided on the PRE-move socket: after the move an empty auto-collapsed sub-lane is
+  # no longer empty, and apply_move/3 replaces :stage_counts. `:stage` = the drop hit a stage
+  # strip; `:lane` = a main-lane or sub-lane strip; nil = nothing to open. Callers only ask for
+  # a drag — a drawer move (or a non-boolean flag) reveals nothing.
+  defp drop_reveal(socket, %Stage{id: id} = stage) do
+    %{stage_counts: counts, sublanes_by_parent: subs, force_open: open, force_closed: closed} = socket.assigns
+
+    cond do
+      is_nil(stage.parent_id) and stage_collapsed?(stage, counts, subs, open, socket.assigns.stage_force_closed) ->
+        :stage
+
+      lane_collapsed?(id, stage_lane(stage), counts, open, closed) ->
+        :lane
+
+      true ->
+        nil
+    end
+  end
+
+  # Applied AFTER apply_move/3, so the opened lanes restream the post-move order. A stage strip
+  # also opens a main lane the user collapsed earlier — force_closed is lane-only, so otherwise
+  # the newly opened stage would still show its In progress lane as a strip.
+  defp reveal_drop_target(socket, _stage, nil), do: socket
+  defp reveal_drop_target(socket, %Stage{id: id}, :lane), do: open_lane(socket, id)
+
+  defp reveal_drop_target(socket, %Stage{id: id}, :stage) do
+    socket = open_stage(socket, id)
+    if MapSet.member?(socket.assigns.force_closed, id), do: open_lane(socket, id), else: socket
   end
 
   # RE377 — every lane (main + sub-lanes) of every stage that currently renders collapsed.

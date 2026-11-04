@@ -4,6 +4,9 @@
 // the zone wraps the .stage-cards stream list; cards may be grandchildren).
 // The hook never mutates the card lists — it only pushes "move_card" with
 // what was dropped where; the server owns all state and re-streams.
+// RE506: the payload carries `drag: true` so the server knows the move came
+// from a drop and reveals a collapsed target lane. The drawer's Move to…
+// menu sends `move_card` without it, so its moves never expand anything.
 const CARD_SELECTOR = ".board-card"
 const ZONE_SELECTOR = ".stage-drop"
 
@@ -58,6 +61,7 @@ const BoardDnD = {
         ref: this.draggedRef,
         stage_id: zone.dataset.stageId,
         index: this.dropIndex(zone, e.clientY),
+        drag: true,
       })
       this.clearDropTargets()
     })
