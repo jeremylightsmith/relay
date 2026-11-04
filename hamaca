@@ -61,8 +61,8 @@ USAGE = None   # the running `hamaca start`'s HarnessUsageBook (RE436); None out
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 100
-RUNNER_FINGERPRINT = "16e54e8528dbfed30e38a7c6262621ceea34fca30626ff1296ff035ee13abed9"
+RUNNER_VERSION = 101
+RUNNER_FINGERPRINT = "e6d629c5f4c15d5aa4495c47233876fe38d91ffa5b742b90e0d280e3a93b7e53"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -6226,13 +6226,17 @@ def _runner_sha256_file(path):
 def carry_board_url(source, path):
     """`source` with the BOARD_URL of the ./hamaca already at `path` when that one is non-empty,
     else `source` as served (RE443): a project's baked board survives every rewrite of the file,
-    by `hamaca update` and by auto-update alike."""
+    by `hamaca update` and by auto-update alike. An unbaked ./hamaca stays unbaked while
+    HAMACA_URL / RELAY_URL names the board — Hamaca's own checkout commits it that way, and baking
+    the served URL in left the file dirty after every update."""
     try:
         with open(path, encoding="utf-8") as f:
             local = board_url_of(f.read())
     except (OSError, UnicodeDecodeError):
-        local = ""
-    return bake_board_url(source, local) if local else source
+        return source
+    if local:
+        return bake_board_url(source, local)
+    return bake_board_url(source, "") if getenv("URL") else source
 
 
 RUNNER_VERSION_RE = re.compile(r"(?m)^RUNNER_VERSION\s*=\s*(\d+)")

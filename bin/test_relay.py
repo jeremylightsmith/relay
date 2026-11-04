@@ -7111,6 +7111,28 @@ class AutoUpdateInstallTest(unittest.TestCase):
         self.assertIn('\nBOARD_URL = "https://mine.test"\n', written)
         self.assertIn('print("hi")', written)
 
+    # A checkout that names its board in the environment (Hamaca's own repo) keeps the committed
+    # file's empty BOARD_URL: baking the served URL in would leave ./hamaca dirty after every update.
+    def test_an_unbaked_runner_stays_unbaked_when_the_env_names_the_board(self):
+        _write(self.path, '#!/usr/bin/env python3\nRUNNER_VERSION = 1\nBOARD_URL = ""\n')
+        source = '#!/usr/bin/env python3\nRUNNER_VERSION = 99\nBOARD_URL = "https://served.test"\n'
+
+        with unittest.mock.patch.dict(os.environ, {"HAMACA_URL": "https://env.test"}):
+            self.assertTrue(relay.install_runner(source, 99, self.path))
+
+        with open(self.path, encoding="utf-8") as f:
+            self.assertIn('\nBOARD_URL = ""\n', f.read())
+
+    def test_an_unbaked_runner_takes_the_served_url_when_the_env_names_no_board(self):
+        _write(self.path, '#!/usr/bin/env python3\nRUNNER_VERSION = 1\nBOARD_URL = ""\n')
+        source = '#!/usr/bin/env python3\nRUNNER_VERSION = 99\nBOARD_URL = "https://served.test"\n'
+
+        with unittest.mock.patch.dict(os.environ, {"HAMACA_URL": "", "RELAY_URL": ""}):
+            self.assertTrue(relay.install_runner(source, 99, self.path))
+
+        with open(self.path, encoding="utf-8") as f:
+            self.assertIn('\nBOARD_URL = "https://served.test"\n', f.read())
+
 
 class AutoUpdateHandshakeTest(unittest.TestCase):
     """RE185 anti-thrash: the ONLY thing standing between a bad restart and an infinite
