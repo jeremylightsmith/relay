@@ -775,8 +775,8 @@ defmodule Hamaca.Cards do
   @doc """
   A card's tasks — its `sub_tasks` rows — in `position` order (RE355).
 
-  Tasks are addressable one row at a time through `get_task/2`, `add_tasks/2`, `update_task/3`
-  and `delete_task/2`. None of them rewrites another row's id, title, body or `done`, so a
+  Tasks are addressable one row at a time through `get_task/2`, `add_tasks/2`, `update_task/3`,
+  `move_task/3` and `delete_task/2`. None of them rewrites another row's id, title, body or `done`, so a
   surviving row keeps every `node_executions.sub_task_id` bound to it — unlike
   `set_sub_tasks/2`, the full replace (`./hamaca sub-tasks`), which deletes and re-inserts the whole set.
   """
@@ -869,6 +869,57 @@ defmodule Hamaca.Cards do
 
     notify_task_write(result, card)
   end
+
+  @doc """
+  Moves one of `card`'s tasks to `to_position` — a position-only reorder (RE507). The target is
+  clamped to `0..count-1` (the count read under the lock, not from the caller's possibly-stale
+  `card.sub_tasks`), and the rows between the old and new slot shift by ±1 in the same
+  transaction, under the same `FOR UPDATE` card lock as `delete_task/2`, so positions stay
+  `0..n-1`. No row's id, title, body or `done` is written, so every `node_executions.sub_task_id`
+  binding survives. Not exposed on the agent `/api` or `./hamaca` — it backs the drawer's human
+  editing surface.
+
+  Broadcasts `{:card_upserted, card}` (a same-position move included). Returns `{:ok, task}`,
+  the moved row with its new `position`, or `{:error, :not_found}` when `id` is not one of
+  `card`'s tasks — nothing written, nothing broadcast.
+  """
+  @spec move_task(Card.t(), integer(), integer()) :: {:ok, SubTask.t()} | {:error, :not_found}
+  def move_task(%Card{} = card, id, to_position) when is_integer(id) and is_integer(to_position) do
+    result =
+      Repo.transaction(fn ->
+        lock_card!(card)
+
+        case get_task(card, id) do
+          {:ok, task} ->
+            new_position = to_position |> min(task_count(card) - 1) |> max(0)
+            shift_tasks_between(card, task.position, new_position)
+            task |> Ecto.Changeset.change(position: new_position) |> Repo.update!()
+
+          {:error, reason} ->
+            Repo.rollback(reason)
+        end
+      end)
+
+    notify_task_write(result, card)
+  end
+
+  # move_task/3's gap shuffle: moving down pulls the rows in (old, new] up one slot; moving up
+  # pushes the rows in [new, old) down one slot. A same-position move touches nothing.
+  defp shift_tasks_between(%Card{id: card_id}, old, new) when old < new do
+    Repo.update_all(
+      from(st in SubTask, where: st.card_id == ^card_id and st.position > ^old and st.position <= ^new),
+      inc: [position: -1]
+    )
+  end
+
+  defp shift_tasks_between(%Card{id: card_id}, old, new) when new < old do
+    Repo.update_all(
+      from(st in SubTask, where: st.card_id == ^card_id and st.position >= ^new and st.position < ^old),
+      inc: [position: 1]
+    )
+  end
+
+  defp shift_tasks_between(%Card{}, same, same), do: {0, nil}
 
   @doc """
   Replaces `card`'s blocker set with the cards named by `refs` (board-scoped), mirroring
@@ -3331,8 +3382,8 @@ defmodule Hamaca.Cards do
   # (set_sub_task_done/3) and `position` is programmatic, so neither rides in on a task write.
   defp task_attrs(attrs), do: Map.take(attrs, [:title, :body, "title", "body"])
 
-  # Serializes position math on one card — add_tasks/2's max + 1 and delete_task/2's gap close —
-  # so two writers can't interleave. The lock is released when the transaction ends.
+  # Serializes position math on one card — add_tasks/2's max + 1, move_task/3's shift and
+  # delete_task/2's gap close — so two writers can't interleave. The lock is released when the transaction ends.
   defp lock_card!(%Card{id: id}) do
     Repo.one!(from c in Card, where: c.id == ^id, lock: "FOR UPDATE", select: c.id)
   end

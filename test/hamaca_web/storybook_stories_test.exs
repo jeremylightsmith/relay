@@ -50,6 +50,14 @@ defmodule HamacaWeb.StorybookStoriesTest do
     assert read("_core_components.index.exs") =~ ~s|def entry("plan_tasks")|
   end
 
+  test "plan_tasks story covers the RE507 editing states" do
+    src = read("plan_tasks.story.exs")
+
+    for id <- ~w(:at_rest :menu_open :delete_confirm :editing :adding :locked :empty) do
+      assert src =~ "id: #{id}", "plan_tasks story is missing variation #{id}"
+    end
+  end
+
   test "note_image_row story covers two images and a single wide image and is indexed (RE427)" do
     src = read("note_image_row.story.exs")
 

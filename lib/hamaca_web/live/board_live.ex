@@ -778,6 +778,13 @@ defmodule HamacaWeb.BoardLive do
         open_task_id={@open_task_id}
         task_full?={@task_full?}
         in_flight_task_id={@in_flight_task_id}
+        locked={@tasks_locked?}
+        editing_task_id={@editing_task_id}
+        task_form={@task_form}
+        task_menu_id={@task_menu_id}
+        confirm_delete_task_id={@confirm_delete_task_id}
+        adding_task={@adding_task?}
+        add_form={@add_task_form}
         expanded_ai_result={@expanded_ai_result?}
         spec_form={@spec_form}
         plan_form={@plan_form}
@@ -1608,6 +1615,10 @@ defmodule HamacaWeb.BoardLive do
       |> assign(:open_task_id, nil)
       |> assign(:task_full?, false)
       |> assign(:in_flight_task_id, nil)
+      # RE507 — human task editing: whether a :running run locks the list, plus the one row being
+      # edited / confirmed / menu'd and the add row (see reset_task_edit/1).
+      |> assign(:tasks_locked?, false)
+      |> reset_task_edit()
       |> assign(:overflow_open, false)
       |> assign(:stage_menu_open, false)
       |> assign(:stage_filter, "")
@@ -2131,6 +2142,13 @@ defmodule HamacaWeb.BoardLive do
     {:noreply, assign(socket, :body_loading?, false)}
   end
 
+  # RE507 — the task-editing events that write or open an editing surface; each re-checks the run
+  # lock and archived state (see their handle_event clause).
+  @guarded_task_events ~w(
+    open_task_menu edit_task save_task move_task confirm_delete_task delete_task
+    start_add_task save_new_task
+  )
+
   # RE502 — the story-map selection's events; see the read-only clause above their handlers.
   @selection_events ~w(
     toggle_card_selection toggle_selection_group clear_card_selection
@@ -2148,6 +2166,8 @@ defmodule HamacaWeb.BoardLive do
         review_approve review_reject retry_card retry_run advance_run confirm_move cancel_move
         bulk_move_stage bulk_move_release bulk_move_step bulk_move_confirm bulk_move_keep
         archive_card restore_card toggle_sub_task restart_one
+        edit_task save_task move_task confirm_delete_task delete_task start_add_task save_new_task
+        open_task_menu
         story_map_add_activity story_map_add_step story_map_add_release story_map_draft_submit
         story_map_rename_start story_map_rename_change story_map_rename_submit
         story_map_rename_cancel story_map_delete story_map_reorder
@@ -2414,6 +2434,16 @@ defmodule HamacaWeb.BoardLive do
 
   def handle_event("close_drawer", _params, %{assigns: %{overflow_open: true}} = socket) do
     {:noreply, close_header_popovers(socket)}
+  end
+
+  # RE507 — a task's ⋯ menu and its inline delete confirm are layers too. (The task editor and
+  # the add row stop Esc themselves in CommitField.)
+  def handle_event("close_drawer", _params, %{assigns: %{task_menu_id: id}} = socket) when not is_nil(id) do
+    {:noreply, assign(socket, :task_menu_id, nil)}
+  end
+
+  def handle_event("close_drawer", _params, %{assigns: %{confirm_delete_task_id: id}} = socket) when not is_nil(id) do
+    {:noreply, assign(socket, :confirm_delete_task_id, nil)}
   end
 
   # Card mode (/cards/:ref) has no board behind the drawer to close back to — the native
@@ -3511,6 +3541,36 @@ defmodule HamacaWeb.BoardLive do
   def handle_event("toggle_task_open", _params, socket), do: {:noreply, socket}
 
   def handle_event("toggle_task_full", _params, socket), do: {:noreply, update(socket, :task_full?, &(!&1))}
+
+  # RE507 — human task editing. Every write AND every opener re-checks the lock fresh
+  # (`Runs.tasks_locked?/1`, never the `tasks_locked?` assign, which can trail a run starting by a
+  # debounce) and the card's archived state, so a stale page cannot write mid-run.
+  def handle_event(event, params, %{assigns: %{selected_card: %Card{} = card}} = socket)
+      when event in @guarded_task_events do
+    case task_edit_refusal(card) do
+      nil ->
+        {:noreply, task_event(event, params, card, socket)}
+
+      {message, locked?} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, message)
+         |> assign(:tasks_locked?, locked?)
+         |> reset_task_edit()}
+    end
+  end
+
+  def handle_event(event, _params, socket) when event in @guarded_task_events, do: {:noreply, socket}
+
+  def handle_event("close_task_menu", _params, socket), do: {:noreply, assign(socket, :task_menu_id, nil)}
+
+  def handle_event("cancel_task_edit", _params, socket),
+    do: {:noreply, assign(socket, editing_task_id: nil, task_form: nil)}
+
+  def handle_event("cancel_delete_task", _params, socket), do: {:noreply, assign(socket, :confirm_delete_task_id, nil)}
+
+  def handle_event("cancel_add_task", _params, socket),
+    do: {:noreply, assign(socket, adding_task?: false, add_task_form: nil)}
 
   def handle_event("toggle_reassign", _params, socket) do
     {:noreply, update(socket, :reassign_open, &(not &1))}
@@ -4961,6 +5021,7 @@ defmodule HamacaWeb.BoardLive do
 
     socket
     |> assign(:selected_card, card)
+    |> prune_task_edit(card)
     |> assign(:attachment_types, Attachments.content_types(card))
     |> assign(:body_loading?, false)
     |> assign_question(card, activity)
@@ -4985,15 +5046,185 @@ defmodule HamacaWeb.BoardLive do
   # and otherwise leaves the reader's own open/closed choice alone. Either move re-clamps.
   defp assign_in_flight_task(socket, %Card{} = card, :open) do
     id = Runs.in_flight_sub_task_id(card)
-    assign(socket, in_flight_task_id: id, open_task_id: id, task_full?: false)
+
+    socket
+    |> assign(in_flight_task_id: id, open_task_id: id, task_full?: false)
+    |> assign_tasks_lock(card)
   end
 
   defp assign_in_flight_task(socket, %Card{} = card, :refresh) do
     current = socket.assigns.in_flight_task_id
 
-    case Runs.in_flight_sub_task_id(card) do
-      ^current -> socket
-      id -> assign(socket, in_flight_task_id: id, open_task_id: id, task_full?: false)
+    socket =
+      case Runs.in_flight_sub_task_id(card) do
+        ^current -> socket
+        id -> assign(socket, in_flight_task_id: id, open_task_id: id, task_full?: false)
+      end
+
+    assign_tasks_lock(socket, card)
+  end
+
+  # RE507 — a run starting (the lock turning true) closes whatever task editing is open; the
+  # violet note replaces it. A parked or finished run gives the list back.
+  defp assign_tasks_lock(socket, %Card{} = card) do
+    if Runs.tasks_locked?(card) do
+      socket |> assign(:tasks_locked?, true) |> reset_task_edit()
+    else
+      assign(socket, :tasks_locked?, false)
+    end
+  end
+
+  # RE507 — every piece of task-editing state, closed: mount, drawer open, a lock, and each opener
+  # (only one task surface is ever open at a time).
+  defp reset_task_edit(socket) do
+    assign(socket,
+      editing_task_id: nil,
+      task_form: nil,
+      task_menu_id: nil,
+      confirm_delete_task_id: nil,
+      adding_task?: false,
+      add_task_form: nil
+    )
+  end
+
+  # RE507 — a task named by the edit state that is no longer on the card (deleted elsewhere, or a
+  # Plan full replace) drops out of it silently. Tolerates state already reset by a prior refresh.
+  defp prune_task_edit(socket, %Card{sub_tasks: tasks}) when is_list(tasks) do
+    ids = MapSet.new(tasks, & &1.id)
+
+    socket
+    |> drop_stale_task(:editing_task_id, ids, task_form: nil)
+    |> drop_stale_task(:confirm_delete_task_id, ids)
+    |> drop_stale_task(:task_menu_id, ids)
+  end
+
+  defp prune_task_edit(socket, _card), do: socket
+
+  defp drop_stale_task(socket, key, ids, also \\ []) do
+    id = Map.fetch!(socket.assigns, key)
+    if is_nil(id) or MapSet.member?(ids, id), do: socket, else: assign(socket, [{key, nil} | also])
+  end
+
+  @locked_tasks_flash "Tasks are read-only while the agent works them."
+  @archived_tasks_flash "Archived cards are read-only."
+
+  # nil when a human may edit `card`'s tasks now; otherwise {flash, whether the run lock is why}.
+  defp task_edit_refusal(%Card{archived_at: %DateTime{}}), do: {@archived_tasks_flash, false}
+
+  defp task_edit_refusal(%Card{} = card) do
+    if Runs.tasks_locked?(card), do: {@locked_tasks_flash, true}
+  end
+
+  defp task_event("open_task_menu", %{"id" => id}, _card, socket) do
+    case parse_int(id) do
+      nil ->
+        socket
+
+      task_id ->
+        menu = if socket.assigns.task_menu_id == task_id, do: nil, else: task_id
+        socket |> reset_task_edit() |> assign(:task_menu_id, menu)
+    end
+  end
+
+  defp task_event("edit_task", %{"id" => id}, card, socket) do
+    with task_id when is_integer(task_id) <- parse_int(id),
+         {:ok, task} <- Cards.get_task(card, task_id) do
+      socket
+      |> reset_task_edit()
+      |> assign(
+        editing_task_id: task.id,
+        task_form: to_form(%{"title" => task.title, "body" => task.body || ""}, as: :task),
+        open_task_id: task.id,
+        task_full?: false
+      )
+    else
+      _ -> socket
+    end
+  end
+
+  defp task_event("save_task", %{"id" => id, "task" => %{} = attrs}, card, socket) do
+    case parse_int(id) do
+      task_id when is_integer(task_id) ->
+        case Cards.update_task(card, task_id, Map.take(attrs, ["title", "body"])) do
+          {:ok, _task} ->
+            socket |> assign(editing_task_id: nil, task_form: nil) |> reload_selected_card(card)
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            assign(socket, :task_form, to_form(Map.put(changeset, :action, :update), as: :task))
+
+          {:error, :not_found} ->
+            assign(socket, editing_task_id: nil, task_form: nil)
+        end
+
+      _ ->
+        socket
+    end
+  end
+
+  defp task_event("move_task", %{"id" => id, "to_position" => to_position}, card, socket) do
+    socket = assign(socket, :task_menu_id, nil)
+
+    with task_id when is_integer(task_id) <- parse_int(id),
+         position when is_integer(position) <- parse_int(to_position),
+         {:ok, _task} <- Cards.move_task(card, task_id, position) do
+      reload_selected_card(socket, card)
+    else
+      _ -> socket
+    end
+  end
+
+  defp task_event("confirm_delete_task", %{"id" => id}, _card, socket) do
+    case parse_int(id) do
+      nil -> socket
+      task_id -> socket |> reset_task_edit() |> assign(:confirm_delete_task_id, task_id)
+    end
+  end
+
+  defp task_event("delete_task", %{"id" => id}, card, socket) do
+    socket = assign(socket, :confirm_delete_task_id, nil)
+
+    with task_id when is_integer(task_id) <- parse_int(id),
+         {:ok, _task} <- Cards.delete_task(card, task_id) do
+      reload_selected_card(socket, card)
+    else
+      _ -> socket
+    end
+  end
+
+  defp task_event("start_add_task", _params, _card, socket) do
+    socket
+    |> reset_task_edit()
+    |> assign(adding_task?: true, add_task_form: empty_add_task_form())
+  end
+
+  # Enter on a blank title stops adding (no write, no error); a title saves and keeps adding with a
+  # fresh empty row (its input id is keyed on the task count, so it re-mounts focused).
+  defp task_event("save_new_task", %{"task" => %{"title" => title}}, card, socket) when is_binary(title) do
+    case String.trim(title) do
+      "" ->
+        assign(socket, adding_task?: false, add_task_form: nil)
+
+      trimmed ->
+        case Cards.add_tasks(card, [%{"title" => trimmed}]) do
+          {:ok, _tasks} ->
+            socket |> assign(:add_task_form, empty_add_task_form()) |> reload_selected_card(card)
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            assign(socket, :add_task_form, to_form(Map.put(changeset, :action, :insert), as: :task))
+        end
+    end
+  end
+
+  defp task_event(_event, _params, _card, socket), do: socket
+
+  defp empty_add_task_form, do: to_form(%{"title" => ""}, as: :task)
+
+  # RE507 — after a task write, the drawer and the board card refresh at once from a fresh card
+  # (the same path as toggle_sub_task); the {:card_upserted, _} broadcast that follows re-runs it.
+  defp reload_selected_card(socket, %Card{id: id}) do
+    case Cards.get_card(socket.assigns.board, id) do
+      %Card{} = fresh -> refresh_card(socket, fresh)
+      nil -> socket
     end
   end
 
@@ -6271,7 +6502,9 @@ defmodule HamacaWeb.BoardLive do
     :editing_public_desc,
     :editing_acceptance_criteria,
     :editing_spec,
-    :editing_plan
+    :editing_plan,
+    :editing_task_id,
+    :adding_task?
   ]
 
   # RE362 — a drafted markdown editor is open, so the drawer's scrim must not close the drawer.
@@ -6472,6 +6705,7 @@ defmodule HamacaWeb.BoardLive do
           |> assign(:editing_plan, false)
           |> assign(:expanded_spec?, false)
           |> assign(:expanded_plan?, false)
+          |> reset_task_edit()
           |> assign_in_flight_task(card, :open)
           |> assign(:expanded_ai_result?, false)
           |> assign(:spec_form, nil)
@@ -6533,6 +6767,13 @@ defmodule HamacaWeb.BoardLive do
           open_task_id: nil,
           task_full?: false,
           in_flight_task_id: nil,
+          tasks_locked?: false,
+          editing_task_id: nil,
+          task_form: nil,
+          task_menu_id: nil,
+          confirm_delete_task_id: nil,
+          adding_task?: false,
+          add_task_form: nil,
           expanded_ai_result?: false,
           spec_form: nil,
           plan_form: nil,

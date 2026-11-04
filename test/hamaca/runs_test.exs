@@ -179,6 +179,33 @@ defmodule Hamaca.RunsTest do
     flow
   end
 
+  describe "tasks_locked?/1 (RE507)" do
+    test "true while the card has a :running run" do
+      card = insert(:card)
+      insert(:run, card: card, status: :running)
+
+      assert Runs.tasks_locked?(card) == true
+    end
+
+    test "false when the only run is :parked" do
+      card = insert(:card)
+      insert(:run, card: card, status: :parked, parked_reason: :needs_input)
+
+      assert Runs.tasks_locked?(card) == false
+    end
+
+    test "false when the only run is terminal" do
+      card = insert(:card)
+      insert(:run, card: card, status: :done, finished_at: DateTime.utc_now(:second))
+
+      assert Runs.tasks_locked?(card) == false
+    end
+
+    test "false with no run" do
+      assert Runs.tasks_locked?(insert(:card)) == false
+    end
+  end
+
   describe "start_run/3" do
     test "the run-start move is delivered after commit, so every subscriber reads the committed stage (RE386)",
          %{board: board} do

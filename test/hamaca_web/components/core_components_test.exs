@@ -2102,12 +2102,13 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert html =~ "width:50%"
     end
 
-    test "no plan and no tasks shows the dashed empty-state copy and no task list" do
+    test "no plan and no tasks shows the dashed empty-state copy and only the + Add task row" do
       html = render_component(&CoreComponents.card_drawer/1, drawer_attrs(%{sub_tasks: [], plan: nil}, %{}))
 
       assert html =~ "No plan yet — the Plan stage writes a short header and its tasks together."
       assert html =~ "commit-field-placeholder"
-      refute html =~ ~s(id="card-plan-tasks")
+      assert html =~ ~s(id="card-plan-add-task")
+      refute html =~ ~s(id="sub-task-)
       refute html =~ ~s(id="card-plan-count")
     end
 
@@ -3006,12 +3007,263 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert doc |> q("#sub-task-4") |> LazyHTML.attribute("data-open") == ["false"]
     end
 
-    test "plan text with no tasks shows just the header — no count, no list" do
+    test "plan text with no tasks shows just the header — no count, no task rows" do
       doc = render_plan(%{tasks: [], progress: %{done: 0, total: 0}})
 
       assert doc |> q("#card-plan-view") |> LazyHTML.text() =~ "Header text"
       assert count(doc, "#card-plan-count") == 0
-      assert count(doc, "#card-plan-tasks") == 0
+      assert count(doc, "#card-plan-tasks [id^='sub-task-']") == 0
+    end
+
+    # RE507 — card mockup "Edit inline, in the row — ⋯ always visible".
+
+    defp plan_attr(doc, selector, name), do: doc |> q(selector) |> LazyHTML.attribute(name)
+    defp plan_text(doc, selector), do: doc |> q(selector) |> LazyHTML.text() |> String.trim()
+
+    test "editable rows carry a ⋯ button and a drag grip; the list is a TaskListDnD hook with + Add task" do
+      doc = render_plan()
+
+      assert count(doc, "[id$='-menu-btn']") == 4
+
+      for id <- 1..4 do
+        assert classes(doc, "#sub-task-#{id}-menu-btn") =~ "text-base-content/45"
+        assert plan_text(doc, "#sub-task-#{id}-grip") == "⠿"
+        assert plan_attr(doc, "#sub-task-#{id}-grip", "draggable") == ["true"]
+      end
+
+      assert plan_attr(doc, "ul#card-plan-tasks", "data-editable") == ["true"]
+      assert plan_attr(doc, "ul#card-plan-tasks", "phx-hook") == ["TaskListDnD"]
+      assert plan_text(doc, "#card-plan-add-task") =~ "Add task"
+    end
+
+    test "the ⋯ button and grip match the mockup's classes and attributes" do
+      doc = render_plan()
+
+      assert classes(doc, "#sub-task-2-menu-btn") =~
+               "flex size-6 shrink-0 items-center justify-center rounded text-base-content/45 hover:bg-base-300 hover:text-base-content"
+
+      assert plan_attr(doc, "#sub-task-2-menu-btn", "phx-click") == ["open_task_menu"]
+      assert plan_attr(doc, "#sub-task-2-menu-btn", "phx-value-id") == ["2"]
+      assert plan_attr(doc, "#sub-task-2-menu-btn", "title") == ["Task actions"]
+      assert plan_attr(doc, "#sub-task-2-menu-btn", "aria-haspopup") == ["menu"]
+      assert plan_attr(doc, "#sub-task-2-menu-btn", "aria-expanded") == ["false"]
+      assert plan_text(doc, "#sub-task-2-menu-btn") == "⋯"
+
+      grip = classes(doc, "#sub-task-2-grip")
+      assert grip =~ "w-3 shrink-0 cursor-grab select-none text-center text-[13px] leading-none text-base-content/35"
+      assert grip =~ "opacity-0"
+      assert grip =~ "group-hover:opacity-100"
+      assert plan_attr(doc, "#sub-task-2-grip", "title") == ["Drag to reorder"]
+
+      assert classes(doc, "li#sub-task-2") =~ "group"
+      assert plan_attr(doc, "li#sub-task-2", "data-task-id") == ["2"]
+      # the ⋯ is a sibling of the toggle, never nested in a button
+      assert count(doc, "#sub-task-2-toggle #sub-task-2-menu-btn") == 0
+      assert count(doc, "button button") == 0
+      assert count(doc, "#card-plan-locked") == 0
+    end
+
+    test "an open ⋯ menu lists Edit, Move to top, Move to bottom and Delete task…, and presses its button" do
+      doc = render_plan(%{task_menu_id: 2})
+
+      assert plan_text(doc, "#sub-task-2-menu #sub-task-2-menu-edit") =~ "Edit"
+      assert plan_text(doc, "#sub-task-2-menu #sub-task-2-menu-top") =~ "Move to top"
+      assert plan_text(doc, "#sub-task-2-menu #sub-task-2-menu-bottom") =~ "Move to bottom"
+      assert plan_text(doc, "#sub-task-2-menu #sub-task-2-menu-delete") =~ "Delete task…"
+      assert classes(doc, "#sub-task-2-menu-delete") =~ "text-error"
+      assert classes(doc, "#sub-task-2-menu-btn") =~ "bg-base-300 text-base-content"
+      refute classes(doc, "#sub-task-2-menu-btn") =~ "text-base-content/45"
+      assert plan_attr(doc, "#sub-task-2-menu-btn", "aria-expanded") == ["true"]
+      assert classes(doc, "li#sub-task-2") =~ "ring-1 ring-base-content/10"
+      assert count(doc, "[id$='-menu']") == 1
+      refute classes(doc, "li#sub-task-3") =~ "ring-1"
+
+      assert classes(doc, "#sub-task-2-menu") =~
+               "absolute right-0 top-full z-10 mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-1 shadow-lg"
+
+      assert count(doc, "#sub-task-2-menu > ul.menu.menu-sm.w-full.p-0") == 1
+      assert classes(doc, "#sub-task-2-menu li:last-child") =~ "mt-1 border-t border-base-300 pt-1"
+      assert plan_attr(doc, "#sub-task-2-menu-edit", "phx-click") == ["edit_task"]
+      assert plan_attr(doc, "#sub-task-2-menu-edit", "phx-value-id") == ["2"]
+      assert plan_attr(doc, "#sub-task-2-menu-delete", "phx-click") == ["confirm_delete_task"]
+      assert plan_attr(doc, "#sub-task-2-menu-delete", "phx-value-id") == ["2"]
+      assert plan_attr(doc, "[phx-click-away]", "phx-click-away") == ["close_task_menu"]
+      assert count(doc, "button button") == 0
+    end
+
+    test "Move to top / Move to bottom push move_task with the end positions" do
+      doc = render_plan(%{task_menu_id: 2})
+
+      assert plan_attr(doc, "#sub-task-2-menu-top", "phx-click") == ["move_task"]
+      assert plan_attr(doc, "#sub-task-2-menu-top", "phx-value-id") == ["2"]
+      assert plan_attr(doc, "#sub-task-2-menu-top", "phx-value-to_position") == ["0"]
+      assert plan_attr(doc, "#sub-task-2-menu-bottom", "phx-click") == ["move_task"]
+      assert plan_attr(doc, "#sub-task-2-menu-bottom", "phx-value-id") == ["2"]
+      assert plan_attr(doc, "#sub-task-2-menu-bottom", "phx-value-to_position") == ["3"]
+    end
+
+    test "the delete confirm names the task and its body's line count" do
+      doc = render_plan(%{confirm_delete_task_id: 2})
+
+      assert plan_text(doc, "#sub-task-2-confirm") =~ "Delete “Long one” and its 20-line body?"
+      assert plan_text(doc, "#sub-task-2-confirm b") == "“Long one”"
+      assert classes(doc, "li#sub-task-2") =~ "rounded-lg border border-error/40 bg-error/5"
+      assert classes(doc, "#sub-task-2-confirm") =~ "flex flex-wrap items-center gap-2 px-2 py-1.5"
+      assert classes(doc, "#sub-task-2-delete-confirm") =~ "btn btn-xs btn-error"
+      assert plan_attr(doc, "#sub-task-2-delete-confirm", "phx-click") == ["delete_task"]
+      assert plan_attr(doc, "#sub-task-2-delete-confirm", "phx-value-id") == ["2"]
+      assert classes(doc, "#sub-task-2-delete-cancel") =~ "btn btn-xs"
+      assert plan_attr(doc, "#sub-task-2-delete-cancel", "phx-click") == ["cancel_delete_task"]
+      # the confirm replaces the row's head
+      assert count(doc, "#sub-task-2-head") == 0
+      assert count(doc, "#sub-task-3-head") == 1
+    end
+
+    test "a body-less task's delete confirm mentions no body" do
+      doc = render_plan(%{confirm_delete_task_id: 4})
+
+      assert plan_text(doc, "#sub-task-4-confirm > span.flex-1") == "Delete “Body-less”?"
+      refute plan_text(doc, "#sub-task-4-confirm") =~ "body"
+    end
+
+    test "the editor row is a title input over a markdown textarea wired to CommitField" do
+      form = Phoenix.Component.to_form(%{"title" => "Code one", "body" => "x"}, as: :task)
+      doc = render_plan(%{editing_task_id: 3, task_form: form})
+
+      assert plan_attr(doc, "form#sub-task-3-edit-form", "phx-submit") == ["save_task"]
+      assert plan_attr(doc, "#sub-task-3-edit-form input[type='hidden'][name='id']", "value") == ["3"]
+      assert plan_attr(doc, "#sub-task-3-title-input", "value") == ["Code one"]
+      assert plan_attr(doc, "#sub-task-3-title-input", "name") == ["task[title]"]
+      assert plan_attr(doc, "#sub-task-3-title-input", "data-commit") == ["enter"]
+      assert plan_attr(doc, "#sub-task-3-title-input", "data-autofocus") == ["true"]
+      assert plan_attr(doc, "#sub-task-3-title-input", "phx-hook") == ["CommitField"]
+      assert plan_attr(doc, "#sub-task-3-title-input", "data-cancel-id") == ["sub-task-3-cancel"]
+      assert classes(doc, "#sub-task-3-title-input") =~ "input input-sm h-7 min-w-0 flex-1 text-sm"
+      assert count(doc, "textarea#sub-task-3-body-input") == 1
+      assert plan_attr(doc, "#sub-task-3-body-input", "name") == ["task[body]"]
+      assert plan_attr(doc, "#sub-task-3-body-input", "data-commit") == ["cmd-enter"]
+      assert plan_attr(doc, "#sub-task-3-body-input[data-autofocus]", "id") == []
+      assert plan_attr(doc, "#sub-task-3-body-input", "rows") == ["9"]
+
+      assert classes(doc, "#sub-task-3-body-input") =~
+               "textarea commit-field-mono w-full font-mono text-xs leading-relaxed"
+
+      assert classes(doc, "#sub-task-3-save") =~ "btn btn-sm btn-primary"
+      assert plan_attr(doc, "#sub-task-3-cancel", "phx-click") == ["cancel_task_edit"]
+      assert classes(doc, "#sub-task-3-cancel") =~ "btn btn-sm"
+      hint = plan_text(doc, "#sub-task-3-edit-form span.text-xs")
+      assert hint =~ "Markdown supported"
+      assert hint =~ "Esc cancels"
+      assert classes(doc, "li#sub-task-3") =~ "rounded-lg border border-primary/50 bg-base-100 ring-2 ring-primary/15"
+      # one row edited at a time; the rest stay ordinary rows
+      assert count(doc, "[id$='-edit-form']") == 1
+      assert count(doc, "#sub-task-2-head") == 1
+    end
+
+    test "adding opens a title-only row keyed on the task count, replacing + Add task" do
+      form = Phoenix.Component.to_form(%{"title" => ""}, as: :task)
+      doc = render_plan(%{adding_task: true, add_form: form})
+
+      assert plan_attr(doc, "form#card-plan-add-form", "phx-submit") == ["save_new_task"]
+      assert count(doc, "#card-plan-add-input-4") == 1
+      assert plan_attr(doc, "#card-plan-add-input-4", "name") == ["task[title]"]
+      assert plan_attr(doc, "#card-plan-add-input-4", "data-commit") == ["enter"]
+      assert plan_attr(doc, "#card-plan-add-input-4", "data-cancel-id") == ["card-plan-add-cancel"]
+      assert plan_attr(doc, "#card-plan-add-input-4", "data-autofocus") == ["true"]
+      assert plan_attr(doc, "#card-plan-add-input-4", "phx-hook") == ["CommitField"]
+      assert plan_attr(doc, "#card-plan-add-input-4", "placeholder") == ["Task title"]
+      assert plan_attr(doc, "button#card-plan-add-cancel", "phx-click") == ["cancel_add_task"]
+      assert classes(doc, "button#card-plan-add-cancel") =~ "hidden"
+
+      [hint] =
+        doc
+        |> q("#card-plan-add-form span")
+        |> Enum.filter(&(LazyHTML.text(&1) == "↵ adds · Esc stops"))
+
+      hint_class = hint |> LazyHTML.attribute("class") |> List.first()
+      assert hint_class =~ "hidden"
+      assert hint_class =~ "sm:inline"
+      assert count(doc, "#card-plan-add-task") == 0
+    end
+
+    test "the resting add row matches the mockup" do
+      doc = render_plan()
+
+      assert plan_attr(doc, "#card-plan-add-task", "phx-click") == ["start_add_task"]
+
+      assert classes(doc, "#card-plan-add-task") =~
+               "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-base-content/55 hover:bg-base-200 hover:text-base-content"
+
+      assert count(doc, "ul#card-plan-tasks > li:last-child #card-plan-add-task") == 1
+    end
+
+    test "a locked list shows the violet read-only note and drops every edit control" do
+      doc = render_plan(%{locked: true})
+
+      assert classes(doc, "#card-plan-locked") =~
+               "flex items-start gap-2 rounded-lg border border-secondary/30 bg-secondary/5 px-3 py-2 text-xs leading-relaxed text-base-content/75"
+
+      assert plan_text(doc, "#card-plan-locked") =~ "Read-only while the agent works these tasks."
+      assert plan_text(doc, "#card-plan-locked") =~ "Editing comes back when the run stops or parks."
+      assert count(doc, "#card-plan-locked .hero-lock-closed") == 1
+      assert count(doc, "[id$='-menu-btn']") == 0
+      assert count(doc, "[id$='-grip']") == 0
+      assert count(doc, "#card-plan-add-task") == 0
+      assert plan_attr(doc, "ul#card-plan-tasks", "data-editable") == ["false"]
+      assert plan_attr(doc, "#sub-task-1-check", "phx-click") == ["toggle_sub_task"]
+      assert plan_attr(doc, "#sub-task-2-toggle", "phx-click") == ["toggle_task_open"]
+      # no reserved grip slot either: the row starts with the checkbox
+      assert count(doc, "#sub-task-2-head > span.w-3") == 0
+    end
+
+    test "a locked list renders no menu, editor or confirm even when their ids are set" do
+      form = Phoenix.Component.to_form(%{"title" => "Code one", "body" => "x"}, as: :task)
+
+      doc =
+        render_plan(%{
+          locked: true,
+          task_menu_id: 2,
+          editing_task_id: 3,
+          task_form: form,
+          confirm_delete_task_id: 1
+        })
+
+      assert count(doc, "#sub-task-2-menu") == 0
+      assert count(doc, "#sub-task-3-edit-form") == 0
+      assert count(doc, "#sub-task-1-confirm") == 0
+    end
+
+    test "an archived card has no edit controls and no locked note" do
+      doc = render_plan(%{archived: true})
+
+      assert count(doc, "[id$='-menu-btn']") == 0
+      assert count(doc, "[id$='-grip']") == 0
+      assert count(doc, "#card-plan-add-task") == 0
+      assert count(doc, "#card-plan-locked") == 0
+    end
+
+    test "an empty editable card keeps the No plan yet box and lists only + Add task" do
+      doc = render_plan(%{plan: nil, tasks: [], progress: %{done: 0, total: 0}})
+
+      assert plan_text(doc, "#card-plan") =~ "No plan yet"
+      assert count(doc, "ul#card-plan-tasks > li") == 1
+      assert count(doc, "ul#card-plan-tasks > li #card-plan-add-task") == 1
+    end
+
+    test "the meta hides below sm and the title is the double-click target" do
+      doc = render_plan()
+
+      meta = classes(doc, "#sub-task-2-meta")
+      assert meta =~ "hidden"
+      assert meta =~ "sm:inline"
+      assert plan_attr(doc, "#sub-task-2-title", "data-task-title") != [nil]
+      assert plan_text(doc, "#sub-task-2-title") =~ "Long one"
+    end
+
+    test "a locked card with a plan but no tasks has no add row" do
+      doc = render_plan(%{plan: "x", tasks: [], progress: %{done: 0, total: 0}, locked: true})
+
+      assert count(doc, "#card-plan-add-task") == 0
     end
   end
 

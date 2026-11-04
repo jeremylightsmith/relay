@@ -25,6 +25,7 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/hamaca"
 import topbar from "../vendor/topbar"
 import BoardDnD from "./hooks/board_dnd"
+import TaskListDnD from "./hooks/task_list_dnd"
 import PreserveScroll from "./hooks/preserve_scroll"
 import StoryMapDnD from "./hooks/story_map_dnd"
 import StoryMapCursors from "./hooks/story_map_cursors"
@@ -57,6 +58,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
   hooks: {
     ...colocatedHooks,
     BoardDnD,
+    TaskListDnD,
     PreserveScroll,
     StoryMapDnD,
     StoryMapCursors,

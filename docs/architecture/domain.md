@@ -392,11 +392,18 @@ sharing behavior.
   `failed` (RLY-179) is set only by `Hamaca.Cards.mark_failed/3` when a
   run ends terminally — a separate path from `needs_input`'s genuine question.
   **Tasks** (RE355) are addressable `sub_tasks` rows with a nullable markdown `body`:
-  `list_tasks/1`, `get_task/2`, `add_tasks/2`, `update_task/3` and `delete_task/2` write one row
-  at a time. `add_tasks/2` appends the batch atomically after the current last task, in argument
-  order; `delete_task/2` decrements every later row's `position` so positions stay `0..n-1`; both
-  take a `FOR UPDATE` lock on the card row first. No call rewrites another row's id, title, body
-  or `done` (`done` stays `set_sub_task_done/3`'s). `set_sub_tasks/2` remains the legacy
+  `list_tasks/1`, `get_task/2`, `add_tasks/2`, `update_task/3`, `move_task/3` and
+  `delete_task/2` write one row at a time. `add_tasks/2` appends the batch atomically after the
+  current last task, in argument order; `delete_task/2` decrements every later row's `position`
+  so positions stay `0..n-1`; `move_task/3` (RE507) is a position-only reorder that clamps the
+  target to `0..count-1` (counted under the lock) and shifts the rows between the old and new
+  slot by ±1 in the same transaction. All three take a `FOR UPDATE` lock on the card row first
+  and broadcast `{:card_upserted, card}`. No call rewrites another row's id, title, body or
+  `done` (`done` stays `set_sub_task_done/3`'s). `move_task/3` backs the card drawer's human
+  task editing (add / edit / reorder / delete in the Plan section) and is deliberately **not**
+  on the agent `/api` or `./hamaca`. That surface is read-only while
+  `Hamaca.Runs.tasks_locked?/1` holds — true iff the card's active run is `:running` (a parked
+  run hands the baton back, so it stays editable). `set_sub_tasks/2` remains the legacy
   full-replace path (`PATCH /api/cards/:ref` with `sub_tasks`): it deletes and re-inserts every
   row, nilifying each `node_executions.sub_task_id` bound to them — never use it for a per-task
   edit. Card state × stage validity is governed by

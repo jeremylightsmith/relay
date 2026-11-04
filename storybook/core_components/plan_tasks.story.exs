@@ -2,6 +2,8 @@ defmodule Storybook.Components.CoreComponents.PlanTasks do
   @moduledoc false
   use PhoenixStorybook.Story, :component
 
+  import Phoenix.Component, only: [to_form: 2]
+
   def function, do: &HamacaWeb.CoreComponents.plan_tasks/1
   def render_source, do: :function
 
@@ -60,8 +62,39 @@ defmodule Storybook.Components.CoreComponents.PlanTasks do
             progress: %{done: 0, total: 1}
           })
       },
+      # RE507 — card mockup "Edit inline, in the row — ⋯ always visible".
+      %Variation{id: :at_rest, attributes: base("story-plan-at-rest", %{})},
+      %Variation{id: :menu_open, attributes: base("story-plan-menu-open", %{task_menu_id: 3})},
+      %Variation{
+        id: :delete_confirm,
+        attributes: base("story-plan-delete-confirm", %{confirm_delete_task_id: 2})
+      },
+      %Variation{
+        id: :editing,
+        attributes:
+          base("story-plan-editing", %{
+            editing_task_id: 3,
+            task_form:
+              to_form(
+                %{
+                  "title" => "Auto-open the in-flight task",
+                  "body" => "Follow the **baton**: the task the agent is on opens by itself."
+                },
+                as: :task
+              )
+          })
+      },
+      %Variation{
+        id: :adding,
+        attributes: base("story-plan-adding", %{adding_task: true, add_form: to_form(%{"title" => ""}, as: :task)})
+      },
+      %Variation{
+        id: :locked,
+        attributes: base("story-plan-locked", %{locked: true, in_flight_task_id: 3, open_task_id: 3})
+      },
       %Variation{
         id: :empty,
+        description: "No plan and no tasks — + Add task still works the list as a plain checklist",
         attributes: %{id: "story-plan-empty", plan: nil, tasks: [], progress: %{done: 0, total: 0}}
       }
     ]

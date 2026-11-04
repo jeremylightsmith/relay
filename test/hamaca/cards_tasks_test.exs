@@ -18,6 +18,9 @@ defmodule Hamaca.CardsTasksTest do
 
   defp rows(card), do: Repo.all(from st in SubTask, where: st.card_id == ^card.id, order_by: st.position)
 
+  defp ids(card), do: Enum.map(rows(card), & &1.id)
+  defp positions(card), do: Enum.map(rows(card), & &1.position)
+
   defp add!(card, titles) do
     {:ok, tasks} = Cards.add_tasks(card, Enum.map(titles, &%{"title" => &1, "body" => "body of " <> &1}))
     tasks
@@ -182,6 +185,113 @@ defmodule Hamaca.CardsTasksTest do
       {:ok, _} = Cards.delete_task(card, a.id)
 
       assert_receive {:card_upserted, %Card{id: ^card_id, sub_tasks: []}}
+    end
+  end
+
+  describe "move_task/3" do
+    test "moving down shifts the rows between up by one", %{card: card} do
+      [a, b, c, d] = add!(card, ["A", "B", "C", "D"])
+      b_id = b.id
+
+      assert {:ok, %SubTask{id: ^b_id, position: 3}} = Cards.move_task(card, b.id, 3)
+      assert ids(card) == [a.id, c.id, d.id, b.id]
+      assert positions(card) == [0, 1, 2, 3]
+    end
+
+    test "moving up shifts the rows between down by one", %{card: card} do
+      [a, b, c, d] = add!(card, ["A", "B", "C", "D"])
+
+      assert {:ok, %SubTask{position: 1}} = Cards.move_task(card, d.id, 1)
+      assert ids(card) == [a.id, d.id, b.id, c.id]
+      assert positions(card) == [0, 1, 2, 3]
+    end
+
+    test "moves to the top and to the bottom", %{card: card} do
+      [a, b, c] = add!(card, ["A", "B", "C"])
+
+      assert {:ok, %SubTask{position: 0}} = Cards.move_task(card, c.id, 0)
+      assert ids(card) == [c.id, a.id, b.id]
+
+      assert {:ok, %SubTask{position: 2}} = Cards.move_task(card, c.id, 2)
+      assert ids(card) == [a.id, b.id, c.id]
+      assert positions(card) == [0, 1, 2]
+    end
+
+    test "clamps the target position to 0..count-1", %{card: card} do
+      [a, b, c] = add!(card, ["A", "B", "C"])
+
+      assert {:ok, %SubTask{position: 2}} = Cards.move_task(card, a.id, 99)
+      assert ids(card) == [b.id, c.id, a.id]
+      assert positions(card) == [0, 1, 2]
+
+      assert {:ok, %SubTask{position: 0}} = Cards.move_task(card, a.id, -5)
+      assert ids(card) == [a.id, b.id, c.id]
+      assert positions(card) == [0, 1, 2]
+    end
+
+    test "a same-position move is {:ok, task} and changes nothing", %{card: card} do
+      [a, b, c] = add!(card, ["A", "B", "C"])
+
+      assert {:ok, %SubTask{position: 1}} = Cards.move_task(card, b.id, 1)
+      assert ids(card) == [a.id, b.id, c.id]
+      assert positions(card) == [0, 1, 2]
+    end
+
+    test "rewrites only positions — id, title, body and done survive", %{card: card} do
+      {:ok, [a, b]} = Cards.add_tasks(card, [%{"title" => "A", "body" => "alpha"}, %{"title" => "B"}])
+      {:ok, _} = Cards.set_sub_task_done(card, a.id, true)
+      before = Map.new(rows(card), &{&1.id, {&1.title, &1.body, &1.done}})
+
+      {:ok, _} = Cards.move_task(card, a.id, 1)
+
+      assert [
+               %SubTask{title: "B", position: 0} = b2,
+               %SubTask{title: "A", body: "alpha", done: true, position: 1} = a2
+             ] = rows(card)
+
+      assert {b2.id, a2.id} == {b.id, a.id}
+      assert Map.new(rows(card), &{&1.id, {&1.title, &1.body, &1.done}}) == before
+    end
+
+    test "a bound execution keeps its sub_task_id", %{card: card} do
+      [_a, b, _c] = add!(card, ["A", "B", "C"])
+      execution = insert(:node_execution, run: insert(:run, card: card), sub_task_id: b.id)
+
+      {:ok, _} = Cards.move_task(card, b.id, 0)
+
+      assert Repo.get!(NodeExecution, execution.id).sub_task_id == b.id
+    end
+
+    test "a foreign or unknown id is :not_found and moves nothing", %{stage: stage, card: card} do
+      [a, b, c] = add!(card, ["A", "B", "C"])
+      [x] = add!(insert(:card, stage: stage), ["X"])
+
+      assert {:error, :not_found} = Cards.move_task(card, x.id, 0)
+      assert ids(card) == [a.id, b.id, c.id]
+      assert positions(card) == [0, 1, 2]
+      assert Repo.get!(SubTask, x.id).position == 0
+
+      assert {:error, :not_found} = Cards.move_task(card, -1, 0)
+      assert ids(card) == [a.id, b.id, c.id]
+    end
+
+    test "broadcasts {:card_upserted, card} on success", %{board: board, card: card} do
+      [a, _b] = add!(card, ["A", "B"])
+      :ok = Events.subscribe(board.id)
+      card_id = card.id
+
+      {:ok, _} = Cards.move_task(card, a.id, 1)
+
+      assert_receive {:card_upserted, %Card{id: ^card_id}}
+    end
+
+    test "broadcasts nothing on :not_found", %{board: board, card: card} do
+      add!(card, ["A"])
+      :ok = Events.subscribe(board.id)
+
+      assert {:error, :not_found} = Cards.move_task(card, -1, 0)
+
+      refute_receive {:card_upserted, _}
     end
   end
 

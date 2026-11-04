@@ -132,6 +132,16 @@ defmodule Hamaca.Runs do
   end
 
   @doc """
+  RE507 — may a human NOT edit `card`'s tasks right now? True iff the card's active run
+  (`active_run/1`) is `:running`: an agent is working the task list. A parked run has handed the
+  baton back to the human, so it does not lock; neither does a terminal run or no run.
+  """
+  @spec tasks_locked?(Card.t()) :: boolean()
+  def tasks_locked?(%Card{} = card) do
+    match?(%Run{status: :running}, active_run(card))
+  end
+
+  @doc """
   RE366 — where a talk turn on `card` runs, decided per turn at post time: `:exclusive` (the
   card's own worktree, an exclusive slot) when the card has live per-card work, else
   `:shared_clean` (read-only in the runner's shared clean checkout, a shared slot).

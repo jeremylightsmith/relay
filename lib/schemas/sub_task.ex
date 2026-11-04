@@ -12,6 +12,8 @@ defmodule Schemas.SubTask do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   schema "sub_tasks" do
     field :title, :string
     field :body, :string

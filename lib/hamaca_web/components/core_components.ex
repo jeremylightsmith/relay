@@ -4228,6 +4228,21 @@ defmodule HamacaWeb.CoreComponents do
   violet with an `AGENT IS HERE` chip. The `CodeBlockCopy` hook decorates each code block with a
   language / line-count / copy strip.
 
+  RE507 — the tasks are editable in the row (card mockup "Edit inline, in the row — ⋯ always
+  visible") unless the list is `locked` (`Hamaca.Runs.tasks_locked?/1`, which adds the violet
+  read-only note) or the card is `archived`. An editable row reserves a drag grip (`⠿`, shown on
+  hover; the `TaskListDnD` hook on the list drags it and turns a title double-click into
+  `edit_task`) and an always-visible ⋯ button (`open_task_menu`, phx-value id, toggles; its
+  wrapper's click-away sends `close_task_menu`). The menu (`task_menu_id`) offers Edit
+  (`edit_task`), Move to top / Move to bottom (`move_task`, phx-value id + `to_position`) and
+  Delete task… (`confirm_delete_task`). `confirm_delete_task_id` turns that row into the inline
+  confirm (`delete_task` / `cancel_delete_task`); `editing_task_id` + `task_form` turn it into
+  the editor (`save_task` with `%{"id" => id, "task" => %{"title", "body"}}`, `cancel_task_edit`).
+  The last row is `+ Add task` (`start_add_task`); `adding_task` + `add_form` swap it for a
+  title-only row (`save_new_task` with `%{"task" => %{"title"}}`, Esc → `cancel_add_task`) whose
+  input id is keyed on the task count, so every Enter-save mounts a fresh focused input. Esc on
+  the menu and the confirm is the drawer's (`close_drawer`), not this component's.
+
   ## Examples
 
       <.plan_tasks
@@ -4252,7 +4267,20 @@ defmodule HamacaWeb.CoreComponents do
   attr :plan_form, :any, default: nil, doc: "a Phoenix.HTML.Form for card[plan]"
   attr :plan_draft_restored, :boolean, default: false, doc: "RE362 — the Plan editor was reopened from a draft"
 
+  attr :locked, :boolean,
+    default: false,
+    doc: "RE507 — `Hamaca.Runs.tasks_locked?/1`: show the read-only note and hide every edit control"
+
+  attr :editing_task_id, :any, default: nil, doc: "RE507 — the task whose row is the in-place editor, or nil"
+  attr :task_form, :any, default: nil, doc: "RE507 — a Phoenix.HTML.Form named `task` (title, body) for the editor"
+  attr :task_menu_id, :any, default: nil, doc: "RE507 — the task whose ⋯ menu is open, or nil"
+  attr :confirm_delete_task_id, :any, default: nil, doc: "RE507 — the task whose row is the delete confirm, or nil"
+  attr :adding_task, :boolean, default: false, doc: "RE507 — whether the add row is open"
+  attr :add_form, :any, default: nil, doc: "RE507 — a Phoenix.HTML.Form named `task` (title) for the add row"
+
   def plan_tasks(assigns) do
+    assigns = assign(assigns, :editable?, not assigns.locked and not assigns.archived)
+
     ~H"""
     <section id={@id} class="space-y-2">
       <.boxed_field
@@ -4294,16 +4322,118 @@ defmodule HamacaWeb.CoreComponents do
       >
         {Hamaca.Markdown.to_html(@plan)}
       </div>
-      <ul :if={@tasks != []} id={"#{@id}-tasks"} class="flex flex-col gap-1.5">
+      <div
+        :if={@locked and not @archived}
+        id={"#{@id}-locked"}
+        class="flex items-start gap-2 rounded-lg border border-secondary/30 bg-secondary/5 px-3 py-2 text-xs leading-relaxed text-base-content/75"
+      >
+        <.icon name="hero-lock-closed" class="mt-px size-3.5 shrink-0 text-secondary" />
+        <span>
+          <b class="text-secondary">Read-only while the agent works these tasks.</b>
+          The Code flow runs them top to bottom, so changes now could land mid-task. Editing comes back when the run stops or parks.
+        </span>
+      </div>
+      <ul
+        :if={@tasks != [] or @editable?}
+        id={"#{@id}-tasks"}
+        phx-hook="TaskListDnD"
+        data-editable={to_string(@editable?)}
+        class="flex flex-col gap-1.5"
+      >
         <.task_row
           :for={task <- @tasks}
           task={task}
           open={task.id == @open_task_id}
           full={@task_full?}
           in_flight={task.id == @in_flight_task_id}
+          editable={@editable?}
+          state={
+            task_row_state(@editable?, task.id, @editing_task_id, @task_form, @confirm_delete_task_id)
+          }
+          task_form={@task_form}
+          menu_open={@editable? and task.id == @task_menu_id}
+          last_position={length(@tasks) - 1}
+        />
+        <.task_add_row
+          :if={@editable?}
+          id={@id}
+          adding={@adding_task and @add_form != nil}
+          form={@add_form}
+          count={length(@tasks)}
         />
       </ul>
     </section>
+    """
+  end
+
+  # RE507 — which variant a row renders as. Only an editable list ever shows the editor or the
+  # delete confirm, whatever ids the LiveView holds.
+  defp task_row_state(false, _id, _editing_id, _form, _confirm_id), do: :rest
+  defp task_row_state(true, id, id, form, _confirm_id) when form != nil, do: :editing
+  defp task_row_state(true, id, _editing_id, _form, id), do: :confirm
+  defp task_row_state(true, _id, _editing_id, _form, _confirm_id), do: :rest
+
+  attr :id, :string, required: true
+  attr :adding, :boolean, required: true
+  attr :form, :any, default: nil
+  attr :count, :integer, required: true
+
+  # RE507 — the list's last row: `+ Add task` at rest, a title-only row while adding. The input id
+  # is keyed on the task count so each Enter-save mounts a fresh, empty, autofocused input
+  # (LiveView never patches a focused input's value).
+  defp task_add_row(%{adding: false} = assigns) do
+    ~H"""
+    <li>
+      <button
+        type="button"
+        id={"#{@id}-add-task"}
+        phx-click="start_add_task"
+        class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-base-content/55 hover:bg-base-200 hover:text-base-content"
+      >
+        <span class="w-3 shrink-0"></span>
+        <span class="flex size-4 shrink-0 items-center justify-center text-base">+</span>
+        <span>Add task</span>
+      </button>
+    </li>
+    """
+  end
+
+  defp task_add_row(assigns) do
+    ~H"""
+    <li class="rounded-lg border border-primary bg-base-100 ring-2 ring-primary/20">
+      <.form
+        for={@form}
+        id={"#{@id}-add-form"}
+        phx-submit="save_new_task"
+        class="flex items-center gap-2 px-2 py-1.5"
+      >
+        <span class="w-3 shrink-0"></span>
+        <span class="flex size-4 shrink-0 items-center justify-center rounded border border-base-300 bg-base-100">
+        </span>
+        <div class="min-w-0 flex-1 [&_.fieldset]:mb-0 [&_.fieldset]:p-0">
+          <.input
+            field={@form[:title]}
+            type="text"
+            id={"#{@id}-add-input-#{@count}"}
+            placeholder="Task title"
+            autocomplete="off"
+            class="min-w-0 flex-1 text-sm w-full border-0 bg-transparent p-0 text-base-content outline-none"
+            phx-hook="CommitField"
+            data-field-role="edit"
+            data-commit="enter"
+            data-autofocus="true"
+            data-cancel-id={"#{@id}-add-cancel"}
+          />
+        </div>
+        <span
+          class="hidden shrink-0 font-mono text-[10px] text-base-content/45 sm:inline"
+          phx-no-format
+        >↵ adds · Esc stops</span>
+        <button type="button" id={"#{@id}-add-cancel"} phx-click="cancel_add_task" class="hidden">
+          Cancel
+        </button>
+      </.form>
+    </li>
     """
   end
 
@@ -4332,6 +4462,122 @@ defmodule HamacaWeb.CoreComponents do
   attr :open, :boolean, default: false
   attr :full, :boolean, default: false
   attr :in_flight, :boolean, default: false
+  attr :editable, :boolean, default: false, doc: "RE507 — render the grip slot and the ⋯ menu button"
+  attr :state, :atom, default: :rest, values: [:rest, :editing, :confirm]
+  attr :task_form, :any, default: nil
+  attr :menu_open, :boolean, default: false
+  attr :last_position, :integer, default: 0, doc: "RE507 — Move to bottom's target position"
+
+  # RE507 — the in-place editor: a title input over the markdown body, the same CommitField
+  # wiring and Save/Cancel/⌘↵ as the Spec and Plan fields (`boxed_field/1`).
+  defp task_row(%{state: :editing} = assigns) do
+    ~H"""
+    <li
+      id={"sub-task-#{@task.id}"}
+      data-task-id={@task.id}
+      data-in-flight={to_string(@in_flight)}
+      data-open="false"
+      class={["group rounded-lg border", task_row_tone(:editing)]}
+    >
+      <.form for={@task_form} id={"sub-task-#{@task.id}-edit-form"} phx-submit="save_task">
+        <.input type="hidden" id={"sub-task-#{@task.id}-id"} name="id" value={@task.id} />
+        <div class="flex items-center gap-2 border-b border-base-300 px-2 py-1.5">
+          <span class="w-3 shrink-0"></span>
+          <.task_check_box done={@task.done} />
+          <div class="min-w-0 flex-1 [&_.fieldset]:mb-0 [&_.fieldset]:p-0">
+            <.input
+              field={@task_form[:title]}
+              type="text"
+              id={"sub-task-#{@task.id}-title-input"}
+              autocomplete="off"
+              class="input input-sm h-7 min-w-0 flex-1 text-sm w-full"
+              phx-hook="CommitField"
+              data-field-role="edit"
+              data-commit="enter"
+              data-autofocus="true"
+              data-cancel-id={"sub-task-#{@task.id}-cancel"}
+            />
+          </div>
+        </div>
+        <div class="space-y-2 p-2 pl-8 [&_.fieldset]:mb-0 [&_.fieldset]:p-0">
+          <.input
+            field={@task_form[:body]}
+            type="textarea"
+            id={"sub-task-#{@task.id}-body-input"}
+            rows="9"
+            class="textarea commit-field-mono w-full font-mono text-xs leading-relaxed"
+            phx-hook="CommitField"
+            data-field-role="edit"
+            data-commit="cmd-enter"
+            data-cancel-id={"sub-task-#{@task.id}-cancel"}
+          />
+          <div class="flex flex-wrap items-center gap-2">
+            <.button
+              type="submit"
+              id={"sub-task-#{@task.id}-save"}
+              class="btn btn-sm btn-primary"
+              pending="Saving…"
+            >
+              Save
+            </.button>
+            <button
+              type="button"
+              id={"sub-task-#{@task.id}-cancel"}
+              phx-click="cancel_task_edit"
+              class="btn btn-sm"
+            >
+              Cancel
+            </button>
+            <span class="text-xs text-base-content/50">
+              Markdown supported · <span class="font-mono">⌘↵</span> saves · Esc cancels
+            </span>
+          </div>
+        </div>
+      </.form>
+    </li>
+    """
+  end
+
+  # RE507 — Delete task… turns the row into an inline confirm naming what would be lost.
+  defp task_row(%{state: :confirm} = assigns) do
+    assigns = assign(assigns, :meta, Cards.task_body_meta(Map.get(assigns.task, :body)))
+
+    ~H"""
+    <li
+      id={"sub-task-#{@task.id}"}
+      data-task-id={@task.id}
+      data-in-flight={to_string(@in_flight)}
+      data-open="false"
+      class={["group rounded-lg border", task_row_tone(:confirm)]}
+    >
+      <div id={"sub-task-#{@task.id}-confirm"} class="flex flex-wrap items-center gap-2 px-2 py-1.5">
+        <span class="w-3 shrink-0"></span>
+        <%!-- phx-no-format keeps the sentence flush — no stray whitespace around the quotes --%>
+        <span
+          class="min-w-0 flex-1 text-sm text-base-content"
+          phx-no-format
+        >Delete <b>“{@task.title}”</b>{delete_body_clause(@meta)}?</span>
+        <button
+          type="button"
+          id={"sub-task-#{@task.id}-delete-confirm"}
+          phx-click="delete_task"
+          phx-value-id={@task.id}
+          class="btn btn-xs btn-error"
+        >
+          Delete
+        </button>
+        <button
+          type="button"
+          id={"sub-task-#{@task.id}-delete-cancel"}
+          phx-click="cancel_delete_task"
+          class="btn btn-xs"
+        >
+          Cancel
+        </button>
+      </div>
+    </li>
+    """
+  end
 
   defp task_row(assigns) do
     meta = Cards.task_body_meta(Map.get(assigns.task, :body))
@@ -4345,14 +4591,30 @@ defmodule HamacaWeb.CoreComponents do
     ~H"""
     <li
       id={"sub-task-#{@task.id}"}
+      data-task-id={@task.id}
       data-in-flight={to_string(@in_flight)}
       data-open={to_string(@open?)}
-      class={["rounded-lg border", task_row_tone(@in_flight)]}
+      class={[
+        "group rounded-lg border",
+        task_row_tone(if(@in_flight, do: :in_flight, else: :rest)),
+        @menu_open && "ring-1 ring-base-content/10"
+      ]}
     >
       <div
         id={"sub-task-#{@task.id}-head"}
-        class={["flex items-center gap-2 rounded-lg px-2 py-1.5", task_head_tone(@open?)]}
+        class={[
+          "flex items-center gap-2 rounded-lg px-2 py-1.5",
+          task_head_tone(@open?) || (@editable && "relative")
+        ]}
       >
+        <span
+          :if={@editable}
+          id={"sub-task-#{@task.id}-grip"}
+          draggable="true"
+          title="Drag to reorder"
+          class="w-3 shrink-0 cursor-grab select-none text-center text-[13px] leading-none text-base-content/35 opacity-0 group-hover:opacity-100"
+          phx-no-format
+        >⠿</span>
         <button
           type="button"
           id={"sub-task-#{@task.id}-check"}
@@ -4378,10 +4640,14 @@ defmodule HamacaWeb.CoreComponents do
           aria-expanded={@meta && to_string(@open?)}
           class="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
-          <span class={[
-            "min-w-0 flex-1 truncate text-sm leading-snug",
-            if(@task.done, do: "text-base-content/55 line-through", else: "text-base-content")
-          ]}>
+          <span
+            id={"sub-task-#{@task.id}-title"}
+            data-task-title
+            class={[
+              "min-w-0 flex-1 truncate text-sm leading-snug",
+              if(@task.done, do: "text-base-content/55 line-through", else: "text-base-content")
+            ]}
+          >
             {@task.title}
           </span>
           <%!-- phx-no-format keeps the chip and meta text flush — no stray whitespace in their text --%>
@@ -4394,7 +4660,7 @@ defmodule HamacaWeb.CoreComponents do
           <span
             :if={@meta}
             id={"sub-task-#{@task.id}-meta"}
-            class="shrink-0 whitespace-nowrap font-mono text-[10px] text-base-content/50"
+            class="hidden shrink-0 whitespace-nowrap font-mono text-[10px] text-base-content/50 sm:inline"
             phx-no-format
           >{task_meta_label(@meta)}</span>
           <.icon
@@ -4403,6 +4669,88 @@ defmodule HamacaWeb.CoreComponents do
             class="size-3 shrink-0 text-base-content/50"
           />
         </.dynamic_tag>
+        <%!-- RE507 — the ⋯ is a sibling of the toggle (never a button in a button). Its wrapper, not
+             the menu, carries phx-click-away: clicking the pressed ⋯ then closes the menu with a
+             single open_task_menu toggle instead of a close immediately followed by a re-open. --%>
+        <div
+          :if={@editable}
+          class="relative shrink-0"
+          phx-click-away={@menu_open && "close_task_menu"}
+        >
+          <button
+            type="button"
+            id={"sub-task-#{@task.id}-menu-btn"}
+            phx-click="open_task_menu"
+            phx-value-id={@task.id}
+            title="Task actions"
+            aria-haspopup="menu"
+            aria-expanded={to_string(@menu_open)}
+            class={[
+              "flex size-6 shrink-0 items-center justify-center rounded",
+              if(@menu_open,
+                do: "bg-base-300 text-base-content",
+                else: "text-base-content/45 hover:bg-base-300 hover:text-base-content"
+              )
+            ]}
+            phx-no-format
+          >⋯</button>
+          <div
+            :if={@menu_open}
+            id={"sub-task-#{@task.id}-menu"}
+            role="menu"
+            class="absolute right-0 top-full z-10 mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-1 shadow-lg"
+          >
+            <ul class="menu menu-sm w-full p-0">
+              <li>
+                <button
+                  type="button"
+                  role="menuitem"
+                  id={"sub-task-#{@task.id}-menu-edit"}
+                  phx-click="edit_task"
+                  phx-value-id={@task.id}
+                >
+                  Edit
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  role="menuitem"
+                  id={"sub-task-#{@task.id}-menu-top"}
+                  phx-click="move_task"
+                  phx-value-id={@task.id}
+                  phx-value-to_position="0"
+                >
+                  Move to top
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  role="menuitem"
+                  id={"sub-task-#{@task.id}-menu-bottom"}
+                  phx-click="move_task"
+                  phx-value-id={@task.id}
+                  phx-value-to_position={@last_position}
+                >
+                  Move to bottom
+                </button>
+              </li>
+              <li class="mt-1 border-t border-base-300 pt-1">
+                <button
+                  type="button"
+                  role="menuitem"
+                  id={"sub-task-#{@task.id}-menu-delete"}
+                  phx-click="confirm_delete_task"
+                  phx-value-id={@task.id}
+                  class="text-error"
+                >
+                  Delete task…
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
       </div>
       <div
         :if={@open?}
@@ -4427,8 +4775,30 @@ defmodule HamacaWeb.CoreComponents do
     """
   end
 
-  defp task_row_tone(true), do: "border-secondary/40 bg-secondary/5"
-  defp task_row_tone(false), do: "border-base-300 bg-base-200"
+  attr :done, :boolean, required: true
+
+  # RE507 — the editor row's checkbox: the task's done state, shown but not a toggle mid-edit.
+  defp task_check_box(assigns) do
+    ~H"""
+    <span class={[
+      "flex size-4 shrink-0 items-center justify-center rounded border",
+      if(@done,
+        do: "border-success bg-success text-success-content",
+        else: "border-base-300 bg-base-100"
+      )
+    ]}>
+      <.icon :if={@done} name="hero-check" class="size-3" />
+    </span>
+    """
+  end
+
+  defp delete_body_clause(nil), do: nil
+  defp delete_body_clause(%{lines: lines}), do: " and its #{lines}-line body"
+
+  defp task_row_tone(:in_flight), do: "border-secondary/40 bg-secondary/5"
+  defp task_row_tone(:confirm), do: "border-error/40 bg-error/5"
+  defp task_row_tone(:editing), do: "border-primary/50 bg-base-100 ring-2 ring-primary/15"
+  defp task_row_tone(:rest), do: "border-base-300 bg-base-200"
 
   defp task_head_tone(true), do: "sticky top-0 drawer:-top-5 z-[2] border-b border-base-300 bg-base-100"
   defp task_head_tone(false), do: nil
@@ -4469,7 +4839,7 @@ defmodule HamacaWeb.CoreComponents do
   (form params `card[title]`) on title submit, `"edit_description"` when
   the description view is clicked, `"cancel_description"` on Cancel,
   `"save_card_description"` (form params `card[description]`) on save,
-  `"toggle_spec"` / `"toggle_plan"` (flip the Spec/Plan expanded state), `"toggle_sub_task"` (phx-value id) / `"toggle_task_open"` (phx-value id) / `"toggle_task_full"` from the Plan section's task rows (RE356, see `plan_tasks/1`),
+  `"toggle_spec"` / `"toggle_plan"` (flip the Spec/Plan expanded state), `"toggle_sub_task"` (phx-value id) / `"toggle_task_open"` (phx-value id) / `"toggle_task_full"` from the Plan section's task rows (RE356, see `plan_tasks/1`), the Plan section's task-editing events (RE507: `"open_task_menu"` / `"close_task_menu"`, `"edit_task"` / `"save_task"` / `"cancel_task_edit"`, `"move_task"`, `"confirm_delete_task"` / `"delete_task"` / `"cancel_delete_task"`, `"start_add_task"` / `"save_new_task"` / `"cancel_add_task"`, see `plan_tasks/1`),
   `"toggle_ai_result"` (flip the AI Result box between its summary and the Changes list),
   `"move_card"` (phx-value ref + stage_id, no index — the server appends
   to the target stage's bottom) when a "Move to…" target is picked,
@@ -4548,6 +4918,17 @@ defmodule HamacaWeb.CoreComponents do
   attr :in_flight_task_id, :any,
     default: nil,
     doc: "RE356 the task the agent is on (`Hamaca.Runs.in_flight_sub_task_id/1`), or nil"
+
+  attr :locked, :boolean,
+    default: false,
+    doc: "RE507 `Hamaca.Runs.tasks_locked?/1` — the Plan section's task list is read-only (see `plan_tasks/1`)"
+
+  attr :editing_task_id, :any, default: nil, doc: "RE507 the task being edited in place, or nil"
+  attr :task_form, :any, default: nil, doc: "RE507 a Phoenix.HTML.Form named `task` (title, body)"
+  attr :task_menu_id, :any, default: nil, doc: "RE507 the task whose ⋯ menu is open, or nil"
+  attr :confirm_delete_task_id, :any, default: nil, doc: "RE507 the task showing the delete confirm, or nil"
+  attr :adding_task, :boolean, default: false, doc: "RE507 whether the Plan section's add row is open"
+  attr :add_form, :any, default: nil, doc: "RE507 a Phoenix.HTML.Form named `task` (title) for the add row"
 
   attr :expanded_ai_result, :boolean,
     default: false,
@@ -5599,6 +5980,13 @@ defmodule HamacaWeb.CoreComponents do
                   task_full?={@task_full?}
                   in_flight_task_id={@in_flight_task_id}
                   archived={@archived}
+                  locked={@locked}
+                  editing_task_id={@editing_task_id}
+                  task_form={@task_form}
+                  task_menu_id={@task_menu_id}
+                  confirm_delete_task_id={@confirm_delete_task_id}
+                  adding_task={@adding_task}
+                  add_form={@add_form}
                   editing_plan={@editing_plan}
                   expanded_plan={@expanded_plan}
                   plan_form={@plan_form}
