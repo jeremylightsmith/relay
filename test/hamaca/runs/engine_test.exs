@@ -614,6 +614,22 @@ defmodule Hamaca.Runs.EngineTest do
       assert Engine.decide(flow, [current], current, bonus: 1) == {:retry, "work"}
     end
 
+    # A fan_in runs on the server and never has a job, so it cannot be retried in place —
+    # re-running it is re-running its failed branches, which only a human retry does.
+    test "a failed fan_in never retries, whatever the bonus" do
+      flow =
+        flow([[key: "fo", type: :fan_out], [key: "a", type: :shell, run: "true"], [key: "fi", type: :fan_in]], [
+          [from: "start", to: "fo"],
+          [from: "fo", to: "a"],
+          [from: "a", to: "fi", on: :succeeded],
+          [from: "fi", to: "done", on: :succeeded]
+        ])
+
+      current = failed(node_key: "fi")
+
+      assert {:fail, _reason} = Engine.decide(flow, [current], current, bonus: 1)
+    end
+
     test "bonus raises the breaker threshold by exactly the bonus" do
       flow = two_node_flow(work: [max_retries: 0])
       first = failed(node_key: "work", detail: "same")

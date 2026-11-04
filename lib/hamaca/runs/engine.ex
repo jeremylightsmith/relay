@@ -110,7 +110,11 @@ defmodule Hamaca.Runs.Engine do
       current.outcome == :failed and breaker_tripped?(history, current, breaker_threshold) ->
         {:fail, "circuit_breaker: the same failure repeated #{breaker_threshold} times"}
 
-      current.outcome == :failed and retry_budget_left?(flow, scoped, current, bonus) ->
+      # A fan_in has no job to retry: re-running a join means re-running its failed branches,
+      # which only a human retry does (`Hamaca.Runs.retry_run/2`). Without this, a retried run's
+      # bonus handed the fan_in a budget and queued a job no runner can run.
+      current.outcome == :failed and not Flow.fan_in?(flow, current.node_key) and
+          retry_budget_left?(flow, scoped, current, bonus) ->
         {:retry, current.node_key}
 
       true ->

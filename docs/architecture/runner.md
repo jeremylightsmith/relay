@@ -997,9 +997,11 @@ an immediate outcome and **no job**.
   `findings` — a parked row resuming its own `:needs_input` session, never the run-level one —
   then the region is scheduled. Jobs are revoked per row, never run-wide. The RE410 outcome-less
   cap counts per branch and parks just that branch (and the run). `Runs.boot_mode/1` always
-  re-enters a run with an open region. With no region open, re-entering at a `fan_out`, a branch
-  node or a `fan_in` opens a fresh region at the `fan_out`; `Runs.retry_run/2` maps such a target
-  to the `fan_out` itself.
+  re-enters a run with an open region. With no region open, re-entering at the `fan_out` opens a
+  fresh region; re-entering at a branch node or the `fan_in` (`Runs.retry_run/2` of a run that died
+  in the region) opens a new entry that keeps every branch the last entry succeeded and re-runs the
+  rest from the node each stopped on. A `fan_in` is never retried in place — it has no job, so no
+  runner is ever handed one.
 
 Branches share the run's checkout: concurrent edits, commits and builds are the flow author's
 responsibility — Hamaca neither guards nor forbids them.

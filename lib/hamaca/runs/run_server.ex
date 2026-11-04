@@ -98,8 +98,10 @@ defmodule Hamaca.Runs.RunServer do
       a `:running` row that kept its job is left alone, one that lost it and every `:parked` row
       get a fresh attempt of the same visit (a parked one resuming its own `:needs_input`
       session), jobs are revoked per row, then the region is scheduled. The RE410 outcome-less cap
-      counts per branch and parks that branch. With no region open, re-entering at a `fan_out`, a
-      branch node or a `fan_in` opens a fresh region at the `fan_out`.
+      counts per branch and parks that branch. With no region open, re-entering at the `fan_out`
+      opens a fresh region; re-entering at a branch node or the `fan_in` (a retry of a run that
+      died in the region) keeps every branch the last entry succeeded and re-runs the rest from
+      the node each stopped on.
 
   A `{:requeue, node}` (RE267) is a usage-limit wait: the node's agent was refused by a Claude
   usage limit whose reset the runner knows. It continues like a retry — attempt +1, same visit and
@@ -221,7 +223,7 @@ defmodule Hamaca.Runs.RunServer do
 
   # RE437: an open region re-enters branch by branch, whatever the mode — the mode's node and its
   # resume_session describe a whole-run position the region has replaced. With no open region, a
-  # current node that is a control node or inside a region re-opens that region afresh.
+  # current node that is a control node or inside a region re-opens that region (`reopen_region!/3`).
   defp reentry_effects!(run, flow, enter_fun, opts) do
     case Runs.open_region(run) do
       [_ | _] = rows ->
@@ -254,16 +256,58 @@ defmodule Hamaca.Runs.RunServer do
   defp region_node?(flow, node), do: Flow.fan_out?(flow, node) or not is_nil(Flow.enclosing_region(flow, node))
 
   # A control node or a node inside a region, with no region open (a retry, an advance, a resume
-  # parked on the fan_out): open a fresh region — a new fan_out visit with fresh rows, exactly as
-  # a transition into the fan_out does. No branch is live, so the whole-run revoke is safe here.
+  # parked on the fan_out): open a new fan_out visit with new rows. No branch is live, so the
+  # whole-run revoke is safe here.
+  #
+  # Re-entered AT the fan_out, every branch runs afresh, exactly as a transition into it does.
+  # Re-entered at a branch node or the fan_in (a retry of a run that died inside the region), the
+  # region picks up where its last entry stopped: a branch that succeeded there keeps its result,
+  # and every other branch re-runs from the node it stopped on (`carried_rows/4`).
   defp reopen_region!(run, flow, binding) do
     fan_out =
       if Flow.fan_out?(flow, run.current_node),
         do: run.current_node,
         else: Flow.enclosing_region(flow, run.current_node).fan_out
 
+    sub_task_id = reentry_binding(run, fan_out, binding)
+
+    carried =
+      if Flow.fan_out?(flow, run.current_node), do: %{}, else: carried_rows(run, flow, fan_out, sub_task_id)
+
     Runs.revoke_active_jobs(run)
-    open_region!(new_effects(), run, flow, fan_out, reentry_binding(run, fan_out, binding))
+    open_region!(new_effects(), run, flow, fan_out, sub_task_id, carried)
+  end
+
+  # What the region's previous entry left for a re-opened one, by branch key: `{:succeeded, detail}`
+  # to keep, or `{:resume, node}` to re-run from. Only an entry on the SAME sub_task carries — a
+  # foreach lap's region is a different task's work. A branch whose last node the live flow no
+  # longer places in that branch restarts at its first node.
+  defp carried_rows(run, flow, fan_out, sub_task_id) do
+    previous =
+      Repo.one(
+        from e in NodeExecution,
+          where: e.run_id == ^run.id and e.node_key == ^fan_out,
+          order_by: [desc: e.id],
+          limit: 1
+      )
+
+    if previous && previous.sub_task_id == sub_task_id do
+      nodes = Map.new(Flow.region(flow, fan_out).branches, &{&1.key, &1.nodes})
+      Map.new(entry_rows(previous), &{&1.branch, carried_row(&1, Map.get(nodes, &1.branch, []))})
+    else
+      %{}
+    end
+  end
+
+  defp carried_row(%RunBranch{outcome: :succeeded, detail: detail}, _nodes), do: {:succeeded, detail}
+
+  defp carried_row(%RunBranch{id: id, branch: branch}, nodes) do
+    last =
+      Repo.one(
+        from e in NodeExecution, where: e.run_branch_id == ^id, order_by: [desc: e.id], limit: 1, select: e.node_key
+      )
+
+    {:resume, if(last in nodes, do: last, else: branch)}
   end
 
   # The region-aware re-entry (RE437): each row in position order — a `:running` branch keeping
@@ -751,7 +795,10 @@ defmodule Hamaca.Runs.RunServer do
     {Enum.map(effects.finished, &elem(&1, 0)), effects.started}
   end
 
-  defp open_region!(effects, run, flow, fan_out, sub_task_id) do
+  # `carried` (`carried_rows/4`) seeds a re-opened region: a kept branch is inserted already
+  # `:ended` with its result, a resumed one `:queued` with the node it resumes at as its
+  # `current_node`. A branch it doesn't name starts at its first node.
+  defp open_region!(effects, run, flow, fan_out, sub_task_id, carried \\ %{}) do
     run = run |> Ecto.Changeset.change(current_node: fan_out) |> Repo.update!()
     fo = insert_control_execution!(run, fan_out, sub_task_id, :succeeded, nil)
 
@@ -763,6 +810,7 @@ defmodule Hamaca.Runs.RunServer do
         position: branch.position,
         state: :queued
       }
+      |> seed_row(Map.get(carried, branch.key))
       |> RunBranch.changeset()
       |> Repo.insert!()
     end
@@ -843,12 +891,25 @@ defmodule Hamaca.Runs.RunServer do
     Repo.all(from b in RunBranch, where: b.fan_out_execution_id == ^fo.id, order_by: [asc: b.position])
   end
 
+  defp seed_row(row, {:succeeded, detail}), do: %{row | state: :ended, outcome: :succeeded, detail: detail}
+  defp seed_row(row, {:resume, node}), do: %{row | current_node: node}
+  defp seed_row(row, nil), do: row
+
+  # A queued row starts at its branch's first node, or — seeded by a retry — at the node it
+  # resumes, handed the failure it stopped on as findings.
   defp start_branch!(effects, run, flow, fo, row) do
-    row = row |> Ecto.Changeset.change(state: :running, current_node: row.branch) |> Repo.update!()
-    execution = Runs.insert_execution!(run, row.branch, next_visit(run, row.branch), 1, fo.sub_task_id, row.id)
-    job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, row.branch, region_entry_opts(run, fo)))
+    opts = start_opts(run, fo, row.current_node)
+    node = row.current_node || row.branch
+    row = row |> Ecto.Changeset.change(state: :running, current_node: node) |> Repo.update!()
+    execution = Runs.insert_execution!(run, node, next_visit(run, node), 1, fo.sub_task_id, row.id)
+    job = Runs.insert_job!(run, execution, Runs.build_payload(run, flow, node, opts))
     add_started(effects, execution, job)
   end
+
+  defp start_opts(run, fo, nil), do: region_entry_opts(run, fo)
+
+  defp start_opts(run, fo, resume_node),
+    do: Keyword.put(region_entry_opts(run, fo), :findings, last_node_failure_detail(run, resume_node))
 
   # Every branch of one region entry starts with the same vars, re-derived from history: what
   # came before the fan_out is the last outcome-bearing NON-branch execution preceding it.
@@ -1303,6 +1364,9 @@ defmodule Hamaca.Runs.RunServer do
   # The same rule scoped to one branch's executions (RE437): what a re-entered branch is handed.
   defp last_branch_failure_detail(run, run_branch_id),
     do: run |> last_outcome_query() |> within_branch(run_branch_id) |> failure_detail()
+
+  defp last_node_failure_detail(run, node_key),
+    do: run |> last_outcome_query() |> where([e], e.node_key == ^node_key) |> failure_detail()
 
   defp last_outcome_query(run) do
     skipped = [:blocked | NodeExecution.server_only_outcomes()]

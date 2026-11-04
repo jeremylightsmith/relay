@@ -147,6 +147,10 @@ defmodule Schemas.Flow do
   @spec fan_out?(%{nodes: [map()]}, String.t()) :: boolean()
   def fan_out?(flow, key), do: Enum.any?(flow.nodes, &(&1.key == key and &1.type == :fan_out))
 
+  @doc "Whether `key` names a `fan_in` node of `flow` (RE437)."
+  @spec fan_in?(%{nodes: [map()]}, String.t()) :: boolean()
+  def fan_in?(flow, key), do: Enum.any?(flow.nodes, &(&1.key == key and &1.type == :fan_in))
+
   @doc "The region opened by the `fan_out` keyed `key`, or nil (RE437)."
   @spec region(map(), String.t()) :: region() | nil
   def region(flow, key), do: Enum.find(regions(flow), &(&1.fan_out == key))

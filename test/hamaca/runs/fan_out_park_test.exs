@@ -506,25 +506,83 @@ defmodule Hamaca.Runs.FanOutParkTest do
       assert length(Runs.list_run_branches(run)) == length(old_rows) + 3
     end
 
-    test "at the fan_in re-opens the whole region (scenario 16)" do
-      nodes = Enum.reject(three_nodes(), &(&1.key == "report"))
-      edges = park_edges() |> drop_edges("fi", "report") |> drop_edges("report", "done")
-      %{run: run} = start_three(nodes: nodes, edges: edges)
-      [old_fo] = executions(run, "fo")
-
+    test "at the fan_in re-runs only the failed branch and keeps the succeeded results (scenario 16)" do
+      %{run: run} = start_failing_join()
       :ok = report(run, "a", :succeeded, "A ok")
       :ok = report(run, "b1", :succeeded, "B ok")
       :ok = report(run, "c", :failed, "C broke")
-
       assert reload(run).status == :failed
-      assert List.last(Runs.list_executions(run)).node_key == "fi"
 
       flush_dispatches()
       assert {:ok, _run} = Runs.retry_run(reload(run))
       await_server(run)
 
-      assert_fresh_region(run, old_fo)
+      [_old_fo, new_fo] = executions(run, "fo")
+
+      fresh =
+        run
+        |> Runs.list_run_branches()
+        |> Enum.filter(&(&1.fan_out_execution_id == new_fo.id))
+        |> Map.new(&{&1.branch, &1})
+
+      assert %{state: :ended, outcome: :succeeded, detail: "A ok"} = fresh["a"]
+      assert %{state: :ended, outcome: :succeeded, detail: "B ok"} = fresh["b1"]
+      assert %{state: :running, current_node: "c"} = fresh["c"]
+
+      assert_receive {:dispatched, %NodeJob{node_key: "c"} = job}
+      assert job.payload["vars"]["findings"] == "C broke"
+      refute_received {:dispatched, %NodeJob{}}
+
+      :ok = report(run, "c", :succeeded, "C ok")
+
+      assert [_failed, joined] = executions(run, "fi")
+      assert joined.outcome == :succeeded
+      assert joined.detail == "## a: succeeded\nA ok\n\n## b1: succeeded\nB ok\n\n## c: succeeded\nC ok"
+      assert reload(run).status == :done
     end
+
+    test "resumes a failed branch at the node it failed on, not the branch's first node" do
+      %{run: run} = start_failing_join()
+      :ok = report(run, "a", :succeeded, "A ok")
+      :ok = report(run, "c", :succeeded, "C ok")
+      :ok = report(run, "b1", :failed, "B1 findings")
+      :ok = report(run, "b2", :failed, "B2 broke")
+      assert reload(run).status == :failed
+
+      flush_dispatches()
+      assert {:ok, _run} = Runs.retry_run(reload(run))
+      await_server(run)
+
+      assert_receive {:dispatched, %NodeJob{node_key: "b2"} = job}
+      assert job.payload["vars"]["findings"] == "B2 broke"
+      refute_received {:dispatched, %NodeJob{}}
+    end
+
+    # The crash this replaces: a retried run's bonus gave the fan_in a retry budget, and the
+    # engine queued a job for a control node no runner can run ('NoneType' … 'replace').
+    test "a join that fails again after a retry fails the run instead of queueing the fan_in" do
+      %{run: run} = start_failing_join()
+      :ok = report(run, "a", :succeeded, "A ok")
+      :ok = report(run, "b1", :succeeded, "B ok")
+      :ok = report(run, "c", :failed, "C broke")
+
+      assert {:ok, _run} = Runs.retry_run(reload(run))
+      await_server(run)
+      # The retry's bonus buys `c` one more attempt inside its branch before the join fails again.
+      :ok = report(run, "c", :failed, "C broke again")
+      :ok = report(run, "c", :failed, "C broke a third time")
+
+      assert reload(run).status == :failed
+      assert Enum.all?(executions(run, "fi"), &(&1.outcome == :failed))
+      refute Repo.exists?(from j in NodeJob, where: j.run_id == ^run.id and j.node_key == "fi")
+    end
+  end
+
+  # `three` with no failed edge out of `fi`, so a failed join fails the run.
+  defp start_failing_join do
+    nodes = Enum.reject(three_nodes(), &(&1.key == "report"))
+    edges = park_edges() |> drop_edges("fi", "report") |> drop_edges("report", "done")
+    start_three(nodes: nodes, edges: edges)
   end
 
   # ── scenario 17: a whole-run park outside any region ────────────────────────────────────

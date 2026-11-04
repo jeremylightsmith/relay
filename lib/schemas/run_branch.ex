@@ -6,7 +6,8 @@ defmodule Schemas.RunBranch do
   re-entered by a foreach lap or a `fan_in` loop-back gets a fresh set of rows.
 
   `state` walks `queued → running → ended` (`states/0`); `:parked` is a branch waiting on a human
-  while its siblings keep running. `current_node` is the branch node in flight (nil once ended);
+  while its siblings keep running. `current_node` is the branch node in flight (nil once ended) — or, on a `:queued` row a retry
+  seeded, the node the branch resumes at;
   the run's own `current_node` stays the `fan_out` key while the region is open. `outcome` and
   `detail` are what the `fan_in` joins (`Hamaca.Runs.Engine.join/1`): set when the branch ends,
   and left nil when a cancel or close ends it. All fields programmatic, never cast.

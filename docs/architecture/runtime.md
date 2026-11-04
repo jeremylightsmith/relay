@@ -275,8 +275,11 @@ sequenceDiagram
 - **Re-entry and restart.** Every re-entry with a region open (`Runs.open_region/1`) — resume,
   `--at`, a restart after a deploy (`Runs.boot_mode/1` always re-enters such a run) — goes branch
   by branch: a running row with a live job is left alone; one without, and every parked row, gets
-  a fresh attempt of the same visit. Re-entering at a branch node or a `fan_in` with no region open
-  opens a fresh region at its `fan_out` (`Runs.retry_run/2` maps the target the same way).
+  a fresh attempt of the same visit. With no region open, re-entering at the `fan_out` opens a
+  fresh region; re-entering at a branch node or the `fan_in` (`Runs.retry_run/2` of a run that died
+  in the region) opens a new entry that keeps every branch the last entry succeeded and re-runs the
+  rest from the node each stopped on, with that node's failure as `findings`. A `fan_in` itself is
+  never retried in place (`Engine.decide/4`): it has no job.
 - **Cancel and close.** `cancel_run/2` and `close_run!/3` end every open row
   (`Runs.end_open_branches!/1`), so a terminal run never leaves a branch `queued` or `running`.
 

@@ -4365,7 +4365,7 @@ defmodule Hamaca.Runs do
          {:ok, flow, origin} <- retry_flow(run),
          {:ok, node, mode} <- resolve_retry_target(run, flow, origin, Keyword.get(opts, :at)),
          {:ok, run} <- settle_retry_pin(run, flow, origin) do
-      revive_run(run, flow, region_entry(flow, node), mode, Keyword.get(opts, :actor, :agent))
+      revive_run(run, flow, node, mode, Keyword.get(opts, :actor, :agent))
     end
   end
 
@@ -4651,16 +4651,6 @@ defmodule Hamaca.Runs do
       {:ok, node, mode}
     else
       {:error, {:unknown_node, node}}
-    end
-  end
-
-  # RE437: a retry target inside a fan-out region (a branch node, or its fan_in) re-enters at the
-  # region's fan_out — `close_run!/3` already ended the stale rows, so the revived run opens a
-  # fresh region rather than resuming half of one.
-  defp region_entry(flow, node) do
-    case Flow.enclosing_region(flow, node) do
-      nil -> node
-      region -> region.fan_out
     end
   end
 
