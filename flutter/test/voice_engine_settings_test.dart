@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relay_mobile/features/voice/apple_speech_transcriber.dart';
+import 'package:relay_mobile/features/voice/screen_awake.dart';
 import 'package:relay_mobile/features/voice/voice_engine_settings.dart';
 import 'package:relay_mobile/features/voice/voice_engines.dart';
 import 'package:relay_mobile/features/voice/voice_transcriber.dart';
@@ -72,11 +73,13 @@ void main() {
     expect(await IosVoiceEngineSettings().isTestFlight(), isFalse);
   });
 
-  test('VoiceEngines.platform bundles the real engines and settings', () {
+  test('VoiceEngines.platform bundles the real engines, settings and screen '
+      'awake (scenario 5)', () {
     final engines = VoiceEngines.platform();
 
     expect(engines.whisper, isA<WhisperKitTranscriber>());
     expect(engines.apple, isA<AppleSpeechTranscriber>());
     expect(engines.settings, isA<IosVoiceEngineSettings>());
+    expect(engines.screenAwake, isA<IosScreenAwake>());
   });
 }

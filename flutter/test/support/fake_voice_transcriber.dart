@@ -4,11 +4,15 @@ import 'package:relay_mobile/features/voice/voice_engines.dart';
 import 'package:relay_mobile/features/voice/voice_transcriber.dart';
 
 /// A fake for every voice seam — the Whisper batch engine, the Apple live
-/// engine and the engine settings — so [engines] can stand in for
+/// engine, the engine settings and the screen-awake toggle — so [engines] can stand in for
 /// `VoiceEngines.platform()`. No MethodChannel, no OS. The repo has no mocking
 /// package; seams are structural (see FakePushPlatform).
 class FakeVoiceTranscriber
-    implements VoiceTranscriber, LiveVoiceTranscriber, VoiceEngineSettings {
+    implements
+        VoiceTranscriber,
+        LiveVoiceTranscriber,
+        VoiceEngineSettings,
+        ScreenAwake {
   FakeVoiceTranscriber({
     this.status = MicPermission.granted,
     this.statusAfterRequest = MicPermission.granted,
@@ -22,9 +26,13 @@ class FakeVoiceTranscriber
     this.liveStartError,
   });
 
-  /// Whisper, Apple and settings, all backed by this one fake.
-  VoiceEngines get engines =>
-      VoiceEngines(whisper: this, apple: this, settings: this);
+  /// Whisper, Apple, settings and screen-awake, all backed by this one fake.
+  VoiceEngines get engines => VoiceEngines(
+    whisper: this,
+    apple: this,
+    settings: this,
+    screenAwake: this,
+  );
 
   MicPermission status;
   MicPermission statusAfterRequest;
@@ -223,4 +231,12 @@ class FakeVoiceTranscriber
 
   @override
   Future<bool> isTestFlight() async => testFlight;
+
+  // --- ScreenAwake ---
+
+  /// Every setKeepAwake call, in order.
+  final List<bool> keepAwakeCalls = [];
+
+  @override
+  Future<void> setKeepAwake(bool on) async => keepAwakeCalls.add(on);
 }

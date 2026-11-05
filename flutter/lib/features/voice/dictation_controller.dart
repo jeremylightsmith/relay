@@ -79,6 +79,11 @@ class DictationController extends ChangeNotifier {
   StreamSubscription<double>? _download;
   bool _disposed = false;
 
+  /// True while this controller holds the screen awake: taken on the
+  /// [isActive] false→true edge, released on the way back down or on
+  /// dispose, so a controller only ever releases a hold it took (RE512).
+  bool _holdingAwake = false;
+
   /// True while an Apple stop is finalizing or a Whisper recording is being
   /// cancelled for an engine switch, so a stop in that window is a no-op.
   bool _finalizing = false;
@@ -503,8 +508,19 @@ class DictationController extends ChangeNotifier {
   }
 
   void _set(DictationStage next) {
+    final wasActive = isActive;
     stage = next;
+    if (!wasActive && isActive && !_disposed) {
+      _holdAwake(true);
+    } else if (wasActive && !isActive && _holdingAwake) {
+      _holdAwake(false);
+    }
     _notify();
+  }
+
+  void _holdAwake(bool on) {
+    _holdingAwake = on;
+    unawaited(_engines.screenAwake.setKeepAwake(on));
   }
 
   void _notify() {
@@ -529,6 +545,7 @@ class DictationController extends ChangeNotifier {
       default:
         break;
     }
+    if (_holdingAwake) _holdAwake(false);
     super.dispose();
   }
 }

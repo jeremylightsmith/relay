@@ -18,7 +18,9 @@ import WhisperKit
 ///   `relay/voice/events` EventChannel (AppleSpeechTranscriber).
 ///
 /// Also stores the engine preference in UserDefaults and answers
-/// `isTestFlight` (IosVoiceEngineSettings). Registered from AppDelegate beside
+/// `isTestFlight` (IosVoiceEngineSettings). It also toggles the idle timer for
+/// `setKeepAwake` (IosScreenAwake), so auto-lock can't sleep the phone while
+/// dictation is active (RE512). Registered from AppDelegate beside
 /// `relay/push`, mirroring that channel.
 final class VoicePlugin: NSObject, FlutterStreamHandler {
   private var channel: FlutterMethodChannel?
@@ -103,6 +105,16 @@ final class VoicePlugin: NSObject, FlutterStreamHandler {
         result(nil)
       case "isTestFlight":
         self.isTestFlight(result: result)
+      case "setKeepAwake":
+        guard let args = call.arguments as? [String: Any],
+              let on = args["on"] as? Bool else {
+          return result(FlutterError(code: "bad_args", message: "on is required", details: nil))
+        }
+        // isIdleTimerDisabled is main-thread-only UIKit state.
+        DispatchQueue.main.async {
+          UIApplication.shared.isIdleTimerDisabled = on
+          result(nil)
+        }
       default:
         result(FlutterMethodNotImplemented)
       }

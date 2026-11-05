@@ -776,4 +776,225 @@ void main() {
       });
     });
   });
+
+  group('keep awake', () {
+    test('Apple listening holds the screen awake', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber();
+        final c = _listening(async, fake).controller;
+
+        expect(c.stage, DictationStage.listening);
+        expect(fake.keepAwakeCalls, [true]);
+        c.dispose();
+      });
+    });
+
+    test('Whisper listening holds the screen awake', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber(preference: VoiceEngine.whisper);
+        final c = _listening(async, fake).controller;
+
+        expect(c.stage, DictationStage.listening);
+        expect(fake.keepAwakeCalls, [true]);
+        c.dispose();
+      });
+    });
+
+    test('an Apple stop releases the hold', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber();
+        final c = _listening(async, fake).controller;
+
+        c.stop();
+        async.flushMicrotasks();
+
+        expect(c.stage, DictationStage.idle);
+        expect(fake.keepAwakeCalls, [true, false]);
+        c.dispose();
+      });
+    });
+
+    test('a Whisper stop keeps the hold until the transcript lands', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber(preference: VoiceEngine.whisper)
+          ..holdTranscription = true;
+        final c = _listening(async, fake).controller;
+
+        c.stop();
+        async.flushMicrotasks();
+        expect(c.stage, DictationStage.transcribing);
+        expect(fake.keepAwakeCalls, [true]);
+
+        fake.completeTranscription();
+        async.flushMicrotasks();
+        expect(c.stage, DictationStage.idle);
+        expect(fake.keepAwakeCalls, [true, false]);
+        c.dispose();
+      });
+    });
+
+    test('timer ticks never touch the hold', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber();
+        final c = _listening(async, fake).controller;
+
+        async.elapse(const Duration(seconds: 5));
+
+        expect(c.elapsed, const Duration(seconds: 5));
+        expect(fake.keepAwakeCalls, [true]);
+        c.dispose();
+      });
+    });
+
+    test('an interruption releases the hold', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber();
+        final c = _listening(async, fake).controller;
+
+        fake.interrupt();
+        async.flushMicrotasks();
+
+        expect(c.stage, DictationStage.idle);
+        expect(fake.keepAwakeCalls, [true, false]);
+        c.dispose();
+      });
+    });
+
+    test('an empty Whisper transcript releases the hold on error', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber(
+          preference: VoiceEngine.whisper,
+          transcript: '   ',
+        );
+        final c = _listening(async, fake).controller;
+
+        c.stop();
+        async.flushMicrotasks();
+
+        expect(c.stage, DictationStage.error);
+        expect(fake.keepAwakeCalls, [true, false]);
+        c.dispose();
+      });
+    });
+
+    test('a failed start never takes a hold', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber(
+          preference: VoiceEngine.whisper,
+          startError: Exception('mic busy'),
+        );
+        final c = _listening(async, fake).controller;
+
+        expect(c.stage, DictationStage.error);
+        expect(fake.keepAwakeCalls, isEmpty);
+        c.dispose();
+        async.flushMicrotasks();
+        expect(fake.keepAwakeCalls, isEmpty);
+      });
+    });
+
+    test('switching Apple → Whisper keeps the hold', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber();
+        final c = _listening(async, fake).controller;
+
+        c.chooseEngine(VoiceEngine.whisper);
+        async.flushMicrotasks();
+
+        expect(c.activeEngine, VoiceEngine.whisper);
+        expect(c.stage, DictationStage.listening);
+        expect(fake.keepAwakeCalls, [true]);
+        c.dispose();
+      });
+    });
+
+    test('switching Whisper → Apple keeps the hold', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber(preference: VoiceEngine.whisper);
+        final c = _listening(async, fake).controller;
+
+        c.chooseEngine(VoiceEngine.apple);
+        async.flushMicrotasks();
+
+        expect(c.activeEngine, VoiceEngine.apple);
+        expect(c.stage, DictationStage.listening);
+        expect(fake.keepAwakeCalls, [true]);
+        c.dispose();
+      });
+    });
+
+    test('dispose while listening releases the hold', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber();
+        final c = _listening(async, fake).controller;
+
+        c.dispose();
+        async.flushMicrotasks();
+
+        expect(fake.keepAwakeCalls, [true, false]);
+      });
+    });
+
+    test('disposing an idle controller sends nothing', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber();
+        final c = _Rig(fake).controller;
+
+        c.dispose();
+        async.flushMicrotasks();
+
+        expect(fake.keepAwakeCalls, isEmpty);
+      });
+    });
+
+    test('downloading holds, and keep typing releases', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber(support: LiveSupport.needsDownload);
+        final c = _listening(async, fake).controller;
+        expect(c.stage, DictationStage.downloading);
+        expect(fake.keepAwakeCalls, [true]);
+
+        c.keepTyping();
+        async.flushMicrotasks();
+
+        expect(c.stage, DictationStage.idle);
+        expect(fake.keepAwakeCalls, [true, false]);
+        c.dispose();
+      });
+    });
+
+    test("disposing an idle controller never releases another's hold", () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber();
+        final a = _listening(async, fake).controller;
+        final b = _Rig(fake).controller;
+        expect(a.stage, DictationStage.listening);
+        expect(b.stage, DictationStage.idle);
+
+        b.dispose();
+        async.flushMicrotasks();
+        expect(fake.keepAwakeCalls, [true]);
+
+        a.stop();
+        async.flushMicrotasks();
+        expect(fake.keepAwakeCalls, [true, false]);
+        a.dispose();
+      });
+    });
+
+    test('dispose after a stop sends no second release', () {
+      fakeAsync((async) {
+        final fake = FakeVoiceTranscriber();
+        final c = _listening(async, fake).controller;
+        c.stop();
+        async.flushMicrotasks();
+        expect(c.stage, DictationStage.idle);
+
+        c.dispose();
+        async.flushMicrotasks();
+
+        expect(fake.keepAwakeCalls, [true, false]);
+      });
+    });
+  });
 }

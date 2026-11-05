@@ -137,3 +137,10 @@ abstract class VoiceEngineSettings {
 
   Future<bool> isTestFlight();
 }
+
+/// Holds the screen on while dictating, so iOS auto-lock can't sleep the
+/// phone mid-recording. `true` holds the screen on (disables auto-lock),
+/// `false` releases it. Never throws: keep-awake must never break dictation.
+abstract class ScreenAwake {
+  Future<void> setKeepAwake(bool on);
+}
