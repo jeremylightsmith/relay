@@ -1602,6 +1602,10 @@ defmodule HamacaWeb.CoreComponents do
     default: nil,
     doc: "{:run, summary} | {:queued, flow} — run affordances replace the legacy strip when set (RLY-137 decision 3)"
 
+  attr :tasks, :map,
+    default: nil,
+    doc: "RE513 the card's `%{done, total}` task progress, or nil — the run face draws one notch per task"
+
   attr :progress_at, :any, default: nil, doc: "RLY-191 last-progress timestamp for the run face age"
   attr :stalled?, :boolean, default: false, doc: "RLY-191 run face amber-stalls when its job is stuck"
 
@@ -1683,6 +1687,7 @@ defmodule HamacaWeb.CoreComponents do
         progress_at={@progress_at}
         stalled?={@stalled?}
         rate_limited={@rate_limited}
+        tasks={@tasks}
       />
       <div
         :if={@status == :working and @progress != nil and is_nil(@run)}
@@ -7961,6 +7966,11 @@ defmodule HamacaWeb.CoreComponents do
     end
   end
 
+  # RE513: the run face's `%{done, total}`, or nil when the card's `sub_tasks` aren't a loaded
+  # list (a stage-column story or test map may lack them; `sub_task_progress/1` would raise).
+  defp face_tasks(%{sub_tasks: sub_tasks} = card) when is_list(sub_tasks), do: Cards.sub_task_progress(card)
+  defp face_tasks(_card), do: nil
+
   # RE335 D5 — archiving from the board cancels the card's active run (the runs Listener closes
   # it on {:card_archived, _}), so the native confirm says so. Otherwise the copy is unchanged.
   defp archive_confirm(true),
@@ -8857,6 +8867,7 @@ defmodule HamacaWeb.CoreComponents do
                           lane={:main}
                           category={@category}
                           run={Map.get(@runs, card.id)}
+                          tasks={face_tasks(card)}
                           progress_at={run_meta_at(@run_meta, card.id)}
                           stalled?={run_meta_stalled?(@run_meta, card.id)}
                           rate_limited={run_meta_rate_limited(@run_meta, card.id)}
@@ -8975,6 +8986,7 @@ defmodule HamacaWeb.CoreComponents do
                     lane={sub.lane}
                     category={@category}
                     run={Map.get(@runs, card.id)}
+                    tasks={face_tasks(card)}
                     progress_at={run_meta_at(@run_meta, card.id)}
                     stalled?={run_meta_stalled?(@run_meta, card.id)}
                     rate_limited={run_meta_rate_limited(@run_meta, card.id)}

@@ -165,12 +165,20 @@ defmodule Storybook.Components.CoreComponents.BoardCard do
           status: :working,
           active_owner: :ai,
           owners: [%{actor_type: :agent}],
+          tasks: %{done: 1, total: 4},
           run:
             {:run,
              %{
                status: :running,
-               node_index: 2,
-               node_count: 4,
+               track: %{
+                 zone: :loop,
+                 step: "building",
+                 previous_node: "branch",
+                 setup_total: 1,
+                 setup_reached: 1,
+                 after_total: 13,
+                 after_reached: 0
+               },
                current_node: "implement",
                flow_key: "code",
                flow_version: 3,

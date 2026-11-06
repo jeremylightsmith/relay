@@ -295,8 +295,9 @@ twice renders twice, one group per `fan_out` execution. `RunDetail.branch_bars` 
 `fan_out` key its latest entry's per-branch bars (`RunDetail.branch_bar/1`, closed set
 `bar_states/0`), and the card-face summary carries `branches` — the open entry's tally plus its
 bars, nil once it joins (`Runs.open_region/1`'s rule, read for the whole board in one query).
-`Runs.happy_path/1` still steps from the `fan_out` straight to its `fan_in`, so a card face
-reads "node N of M" against the `fan_out` while the region is open. The full engine rules are in
+On the card face (RE513) the open region appends its branch count to the face's label; a run
+with no three-zone bar (no `track`, or a card with no tasks) draws the branch segment alone in
+the bar's place. The full engine rules are in
 [runner.md](runner.md#fan-out-regions-re437); the runner side — concurrent node jobs in one
 worktree — is in [runner.md's worktree pool](runner.md#runner-mode-hamaca-start-rly-135).
 

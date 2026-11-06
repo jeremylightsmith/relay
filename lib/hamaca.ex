@@ -48,6 +48,7 @@ defmodule Hamaca do
       Runs.RunDetail,
       Runs.SchedulerSupervisor,
       Runs.Supervisor,
+      Runs.Track,
       Scaffold,
       Setup,
       StoryMap,

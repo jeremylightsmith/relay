@@ -55,6 +55,26 @@ defmodule HamacaWeb.BoardRunFaceTest do
     assert has_element?(view, "[data-ref='#{ref}'].border-l-error")
   end
 
+  test "a Code run on a card with tasks draws one notch per task and names the task (RE513 scenario 9)",
+       %{conn: conn, board: board, code: code} do
+    card = ai_card(code, "Three tasks", :working)
+    insert(:sub_task, card: card, done: true)
+    insert(:sub_task, card: card, done: false)
+    insert(:sub_task, card: card, done: false)
+    run = insert(:run, card: card, flow_key: "code", current_node: "implement")
+    insert(:node_execution, run: run, node: "branch")
+    insert(:node_execution, run: run, node: "implement", outcome: nil, duration_s: nil)
+    ref = Cards.ref(board, card)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+    render_async(view)
+
+    face = view |> element("#card-#{ref}-run-face") |> render() |> LazyHTML.from_fragment()
+
+    assert face |> LazyHTML.query(".run-face-zone-tasks .run-face-cell") |> Enum.count() == 3
+    assert face |> LazyHTML.query(".run-face-node") |> LazyHTML.text() |> squish() == "task 2 of 3 · building"
+  end
+
   test "a failed run's tile names the node it died on after close_run!/3",
        %{conn: conn, board: board, code: code} do
     card = ai_card(code, "Died mid flight", :working)

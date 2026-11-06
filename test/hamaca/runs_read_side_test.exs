@@ -41,7 +41,7 @@ defmodule Hamaca.RunsReadSideTest do
       assert Runs.happy_path(flow) == ["prep", "fo", "fi", "after"]
     end
 
-    test "a running run sitting on the fan_out indexes it as node 2 of 4 on the card face (RE437)" do
+    test "a running run sitting on the fan_out has no node counter and no track (RE437, RE513)" do
       board = insert(:board)
       stage = insert(:stage, board: board, type: :work, category: :in_progress)
       region_flow(board, stage)
@@ -50,8 +50,9 @@ defmodule Hamaca.RunsReadSideTest do
 
       summary = Runs.run_summary_for_card(card)
 
-      assert summary.node_index == 2
-      assert summary.node_count == 4
+      refute Map.has_key?(summary, :node_index)
+      refute Map.has_key?(summary, :node_count)
+      assert summary.track == nil
     end
   end
 
@@ -80,8 +81,8 @@ defmodule Hamaca.RunsReadSideTest do
                bars: [:succeeded, :running, :queued]
              }
 
-      assert summary.node_index == 2
-      assert summary.node_count == 4
+      refute Map.has_key?(summary, :node_index)
+      refute Map.has_key?(summary, :node_count)
       assert summary == Runs.run_summaries_for_board(board)[card.id]
     end
 
@@ -218,7 +219,7 @@ defmodule Hamaca.RunsReadSideTest do
   end
 
   describe "run_summaries_for_board/1" do
-    test "aggregates totals and locates the current node on the happy path" do
+    test "aggregates totals and locates the current node on the track" do
       user = insert(:user)
       {:ok, board} = Hamaca.Boards.create_board(user, %{name: "Summaries"})
       board = Hamaca.Repo.preload(board, :stages)
@@ -234,8 +235,10 @@ defmodule Hamaca.RunsReadSideTest do
 
       assert summary.status == :running
       assert summary.current_node == "implement"
-      assert summary.node_index == 2
-      assert summary.node_count > 2
+      refute Map.has_key?(summary, :node_index)
+      refute Map.has_key?(summary, :node_count)
+      assert summary.track.zone == :loop
+      assert summary.track.step == "building"
       assert summary.nodes == 2
       assert summary.attempts == 3
       assert Decimal.equal?(summary.cost, Decimal.new("0.90"))
@@ -375,17 +378,102 @@ defmodule Hamaca.RunsReadSideTest do
       assert Runs.run_summary_for_card(card) == nil
     end
 
-    test "still summarizes when the flow row is gone (path [], node_count nil)", %{board: board, stage: stage} do
+    test "still summarizes when the flow row is gone (no counter, no track)", %{board: board, stage: stage} do
       card = insert(:card, stage: stage)
       run = insert(:run, card: card, flow_key: "ghost", current_node: "implement")
       insert(:node_execution, run: run, node: "implement")
 
       summary = Runs.run_summary_for_card(card)
 
-      assert summary.node_count == nil
-      assert summary.node_index == nil
+      refute Map.has_key?(summary, :node_index)
+      refute Map.has_key?(summary, :node_count)
+      assert summary.track == nil
       assert summary.current_node == "implement"
       assert summary == Runs.run_summaries_for_board(board)[card.id]
+    end
+  end
+
+  describe "run summaries carry the run's track (RE513)" do
+    setup do
+      user = insert(:user)
+      {:ok, board} = Hamaca.Boards.create_board(user, %{name: unique_slug("track")})
+      board = Hamaca.Repo.preload(board, :stages)
+      %{board: board, stage: hd(board.stages)}
+    end
+
+    # A code run back on spec_review after a fix: executions inserted in chronological order,
+    # because the factory gives them all the same started_at and id DESC breaks the tie.
+    defp re_reviewing_run(stage) do
+      card = insert(:card, stage: stage)
+      run = insert(:run, card: card, flow_key: "code", current_node: "spec_review")
+
+      for node <- ~w(branch implement spec_review fix_findings spec_review) do
+        insert(:node_execution, run: run, node: node)
+      end
+
+      card
+    end
+
+    test "the board reader builds the track from the flow's zones and the run's executions (scenario 14)",
+         %{board: board, stage: stage} do
+      card = re_reviewing_run(stage)
+
+      assert Runs.run_summaries_for_board(board)[card.id].track == %{
+               zone: :loop,
+               step: "re-reviewing",
+               previous_node: "fix_findings",
+               setup_total: 1,
+               setup_reached: 1,
+               after_total: 12,
+               after_reached: 0
+             }
+    end
+
+    test "the card reader's track equals the board entry's (scenario 15)", %{board: board, stage: stage} do
+      card = re_reviewing_run(stage)
+
+      summary = Runs.run_summary_for_card(card)
+
+      assert summary.track
+      assert summary == Runs.run_summaries_for_board(board)[card.id]
+    end
+
+    test "a flow with no foreach, or a flow that is gone, has no track (scenario 16)", %{board: board, stage: stage} do
+      region_board = insert(:board)
+      region_stage = insert(:stage, board: region_board, type: :work, category: :in_progress)
+      region_flow(region_board, region_stage)
+      region_card = insert(:card, board: region_board, stage: region_stage)
+      region_run = insert(:run, card: region_card, flow_key: "region", status: :running, current_node: "prep")
+      insert(:node_execution, run: region_run, node: "prep")
+
+      ghost_card = insert(:card, stage: stage)
+      ghost_run = insert(:run, card: ghost_card, flow_key: "ghost", current_node: "implement")
+      insert(:node_execution, run: ghost_run, node: "implement")
+
+      for {card, board} <- [{region_card, region_board}, {ghost_card, board}] do
+        assert Runs.run_summary_for_card(card).track == nil
+        assert Runs.run_summaries_for_board(board)[card.id].track == nil
+      end
+    end
+
+    test "the track adds no per-run query (scenario 17)", %{board: board, stage: stage} do
+      re_reviewing_run(stage)
+      re_reviewing_run(stage)
+
+      other =
+        :user
+        |> insert()
+        |> Hamaca.Boards.create_board(%{name: unique_slug("other")})
+        |> elem(1)
+        |> Hamaca.Repo.preload(:stages)
+
+      re_reviewing_run(hd(other.stages))
+
+      {two_runs, count_two} = count_repo_queries(self(), fn -> Runs.run_summaries_for_board(board) end)
+      {one_run, count_one} = count_repo_queries(self(), fn -> Runs.run_summaries_for_board(other) end)
+
+      assert Enum.all?(Map.values(two_runs) ++ Map.values(one_run), &(&1.track.step == "re-reviewing"))
+      assert count_two == count_one
     end
   end
 

@@ -165,12 +165,20 @@ defmodule HamacaWeb.CoreComponentsTest do
           status: :working,
           active_owner: :ai,
           owners: [%{actor_type: :agent}],
+          tasks: %{done: 1, total: 4},
           run:
             {:run,
              %{
                status: :running,
-               node_index: 2,
-               node_count: 4,
+               track: %{
+                 zone: :loop,
+                 step: "building",
+                 previous_node: "branch",
+                 setup_total: 1,
+                 setup_reached: 1,
+                 after_total: 13,
+                 after_reached: 0
+               },
                current_node: "implement",
                flow_key: "code",
                flow_version: 3,
@@ -179,6 +187,7 @@ defmodule HamacaWeb.CoreComponentsTest do
         )
 
       assert html =~ ~s(id="card-RE321-run-face")
+      assert html =~ "task 2 of 4 · building"
       assert html |> meta_row_ref() |> LazyHTML.text() |> String.trim() == "RE321"
     end
 
@@ -4443,18 +4452,27 @@ defmodule HamacaWeb.CoreComponentsTest do
           {:run,
            %{
              status: :running,
-             node_index: 2,
-             node_count: 4,
+             track: %{
+               zone: :loop,
+               step: "building",
+               previous_node: "branch",
+               setup_total: 1,
+               setup_reached: 1,
+               after_total: 13,
+               after_reached: 0
+             },
              current_node: "implement",
              flow_key: "code",
              flow_version: 3,
              attempts: 2
            }},
-          %{health: :live, log_text: "old strip", log_at: DateTime.utc_now(), progress: 61}
+          %{health: :live, log_text: "old strip", log_at: DateTime.utc_now(), progress: 61, tasks: %{done: 1, total: 4}}
         )
 
       assert html =~ ~s(id="card-RLY-9-run-face")
-      assert html =~ "node 2 of 4"
+      assert html =~ "task 2 of 4 · building"
+      refute html =~ ~r/node \d+ of/
+      refute html =~ "width:61%"
       refute html =~ "card-RLY-9-log-strip"
       refute html =~ "old strip"
       refute html =~ ~s(class="card-status")

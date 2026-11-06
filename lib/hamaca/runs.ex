@@ -32,7 +32,7 @@ defmodule Hamaca.Runs do
       Hamaca.Setup,
       Schemas
     ],
-    exports: [Supervisor, Capacity, Instance, RunDetail, SchedulerSupervisor]
+    exports: [Supervisor, Capacity, Instance, RunDetail, SchedulerSupervisor, Track]
 
   import Ecto.Query
 
@@ -54,6 +54,7 @@ defmodule Hamaca.Runs do
   alias Hamaca.Runs.Scheduler.Server, as: SchedulerServer
   alias Hamaca.Runs.Scheduler.Snapshot
   alias Hamaca.Runs.SchedulerSupervisor
+  alias Hamaca.Runs.Track
   alias Hamaca.Runs.Transitions
   alias Hamaca.Setup
   alias Schemas.Agent
@@ -325,7 +326,9 @@ defmodule Hamaca.Runs do
   """
   # The zero totals a run with no node executions contributes — the fallback for a run id absent
   # from node_totals/1. Named once so both summary readers share it (AGENTS.md "a fact defined once").
-  @empty_totals %{duration_s: nil, cost: nil, nodes: 0, attempts: 0, last_node: nil}
+  @empty_totals %{duration_s: nil, cost: nil, nodes: 0, attempts: 0, last_node: nil, executed: [], recent: []}
+  # The `Track.zones/1` of a run whose flow row is gone (flow_shape/1's fallback): no track.
+  @no_flow_shape nil
 
   def run_summaries_for_board(%Board{id: board_id}) do
     latest =
@@ -342,15 +345,15 @@ defmodule Hamaca.Runs do
     totals = node_totals(run_ids)
     regions = open_regions(run_ids)
 
-    paths =
+    shapes =
       from(f in Flow, where: f.board_id == ^board_id)
       |> Repo.all()
-      |> Map.new(&{&1.key, happy_path(&1)})
+      |> Map.new(&{&1.key, flow_shape(&1)})
 
     Map.new(latest, fn run ->
-      path = Map.get(paths, run.flow_key, [])
+      shape = Map.get(shapes, run.flow_key, @no_flow_shape)
       tot = Map.get(totals, run.id, @empty_totals)
-      {run.card_id, build_summary(run, path, tot, Map.get(regions, run.id, []))}
+      {run.card_id, build_summary(run, shape, tot, Map.get(regions, run.id, []))}
     end)
   end
 
@@ -368,7 +371,7 @@ defmodule Hamaca.Runs do
 
       run ->
         totals = Map.get(node_totals([run.id]), run.id, @empty_totals)
-        build_summary(run, happy_path_for(card, run), totals, open_region(run))
+        build_summary(run, flow_shape_for(card, run), totals, open_region(run))
     end
   end
 
@@ -1017,12 +1020,11 @@ defmodule Hamaca.Runs do
 
   # The one per-run summary map — built identically by run_summaries_for_board/1 (over the
   # whole board) and run_summary_for_card/1 (one card), so the shape lives in exactly one
-  # place. `path` is the flow's happy path (drives node_index/node_count); `totals` is this
-  # run's node-execution aggregate, or @empty_totals when it has no executions yet; `branches`
-  # is the run's open region entry (`open_regions/1`), `[]` when none is open (RE440).
-  defp build_summary(%Run{} = run, path, totals, branches) do
-    index = run.current_node && Enum.find_index(path, &(&1 == run.current_node))
-
+  # place. `zones` is the flow's `flow_shape/1` (its `Track.zones/1`, which drives `track`,
+  # RE513); `totals` is this run's node-execution aggregate, or @empty_totals when it has no
+  # executions yet; `branches` is the run's open region entry (`open_regions/1`), `[]` when none
+  # is open (RE440).
+  defp build_summary(%Run{} = run, zones, totals, branches) do
     %{
       run_id: run.id,
       card_id: run.card_id,
@@ -1032,30 +1034,32 @@ defmodule Hamaca.Runs do
       flow_version: nil,
       current_node: run.current_node,
       last_node: run.current_node || totals.last_node,
-      node_index: index && index + 1,
-      node_count: if(path == [], do: nil, else: length(path)),
       started_at: run.started_at,
       finished_at: run.finished_at,
       duration_s: totals.duration_s,
       cost: totals.cost,
       nodes: totals.nodes,
       attempts: totals.attempts,
-      branches: branch_summary(branches)
+      branches: branch_summary(branches),
+      track: Track.build(zones, run.current_node, totals.executed, totals.recent)
     }
   end
+
+  # What the summary reads from a flow's shape, computed once per flow: its `Track.zones/1`.
+  defp flow_shape(%Flow{} = flow), do: Track.zones(flow)
 
   defp branch_summary([]), do: nil
 
   defp branch_summary(rows),
     do: rows |> RunDetail.branch_tally() |> Map.put(:bars, Enum.map(rows, &RunDetail.branch_bar/1))
 
-  # The single-flow analog of run_summaries_for_board/1's `paths` map: the happy path of the
+  # The single-flow analog of run_summaries_for_board/1's `shapes` map: the `flow_shape/1` of the
   # flow this run points at (matched by key within the card's board, exactly as the board
-  # function matches), or [] when that flow row is gone.
-  defp happy_path_for(%Card{board_id: board_id}, %Run{flow_key: flow_key}) do
+  # function matches), or @no_flow_shape when that flow row is gone.
+  defp flow_shape_for(%Card{board_id: board_id}, %Run{flow_key: flow_key}) do
     case Flows.get_flow(%Board{id: board_id}, flow_key) do
-      nil -> []
-      flow -> happy_path(flow)
+      nil -> @no_flow_shape
+      flow -> flow_shape(flow)
     end
   end
 
@@ -1205,7 +1209,9 @@ defmodule Hamaca.Runs do
            cost: sum(ne.cost),
            nodes: count(ne.node_key, :distinct),
            attempts: count(ne.id),
-           last_node: fragment("(array_agg(? ORDER BY ? DESC, ? DESC))[1]", ne.node_key, ne.started_at, ne.id)
+           last_node: fragment("(array_agg(? ORDER BY ? DESC, ? DESC))[1]", ne.node_key, ne.started_at, ne.id),
+           executed: fragment("array_agg(DISTINCT ?)", ne.node_key),
+           recent: fragment("(array_agg(? ORDER BY ? DESC, ? DESC))[1:2]", ne.node_key, ne.started_at, ne.id)
          }}
     )
     |> Repo.all()

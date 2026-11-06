@@ -715,122 +715,190 @@ defmodule HamacaWeb.RunComponentsTest do
     end
   end
 
+  # Scenario 1's summary track: in the loop, fixing review notes, after zone not reached.
+  @loop_track %{
+    zone: :loop,
+    step: "fixing review notes",
+    previous_node: "spec_review",
+    setup_total: 1,
+    setup_reached: 1,
+    after_total: 13,
+    after_reached: 0
+  }
+
+  defp running_summary(overrides) do
+    Map.merge(%{status: :running, flow_key: "code", current_node: "fix_findings", track: @loop_track}, overrides)
+  end
+
+  defp face_html(summary, opts \\ []),
+    do: render_component(&RunComponents.run_face/1, [ref: "RE1", run: {:run, summary}] ++ opts)
+
+  # `opts` carries `track:` (default nil) into the summary; the rest (e.g. `tasks:`) are attrs.
   defp face_doc(branches, opts \\ []) do
+    {track, opts} = Keyword.pop(opts, :track)
+
     summary = %{
       status: :running,
-      node_index: 3,
-      node_count: 7,
       current_node: "fo",
       flow_key: "code",
       flow_version: nil,
       attempts: 4,
-      branches: branches
+      branches: branches,
+      track: track
     }
 
-    LazyHTML.from_fragment(render_component(&RunComponents.run_face/1, [ref: "RE1", run: {:run, summary}] ++ opts))
+    summary |> face_html(opts) |> LazyHTML.from_fragment()
   end
 
   defp face_text(doc, selector),
     do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.split() |> Enum.join(" ")
 
-  describe "run_face/1" do
-    test "running: segment bar + node x of y" do
-      html =
-        render_component(&RunComponents.run_face/1,
-          ref: "RLY-1",
-          run:
-            {:run,
-             %{
-               status: :running,
-               node_index: 2,
-               node_count: 4,
-               current_node: "implement",
-               flow_key: "code",
-               flow_version: 3,
-               attempts: 2
-             }}
-        )
+  # Scenario 7: the retired `node N of M` counter, rework count and `N/N tasks` never render.
+  defp refute_retired_counter(html) do
+    refute html =~ ~r/node \d+ of/
+    refute html =~ "↻"
+    refute html =~ ~r/\d+\/\d+ tasks/
+  end
 
-      assert html =~ ~s(id="card-RLY-1-run-face")
-      assert html =~ "node 2 of 4"
-      assert html =~ "height:5px"
-      assert html =~ "color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100))"
-      refute html =~ "run-face-branches"
+  @three_branches %{
+    total: 3,
+    ended: 1,
+    running: 2,
+    queued: 0,
+    parked: 0,
+    succeeded: 1,
+    failed: 0,
+    bars: [:succeeded, :running, :running]
+  }
+
+  @queued_branches %{
+    total: 3,
+    ended: 0,
+    running: 2,
+    queued: 1,
+    parked: 0,
+    succeeded: 0,
+    failed: 0,
+    bars: [:running, :running, :queued]
+  }
+
+  describe "run_face/1" do
+    test "running in the loop: a setup notch, one notch per task, and an unfilled after track (RE513 scenario 1)" do
+      html = face_html(running_summary(%{}), tasks: %{done: 2, total: 7})
+      doc = LazyHTML.from_fragment(html)
+
+      assert html =~ ~s(id="card-RE1-run-face")
+      assert [zone_style] = styles(doc, ".run-face-bar .run-face-zone-tasks")
+      assert zone_style =~ "flex:7"
+
+      assert doc |> LazyHTML.query(".run-face-zone-tasks .run-face-cell") |> LazyHTML.attribute("data-cell-state") ==
+               ["done", "done", "current", "pending", "pending", "pending", "pending"]
+
+      assert doc |> LazyHTML.query(".run-face-zone-setup .run-face-cell") |> LazyHTML.attribute("data-cell-state") ==
+               ["done"]
+
+      assert [current_style] = styles(doc, ~s(.run-face-zone-tasks .run-face-cell[data-cell-state="current"]))
+      assert current_style =~ "repeating-linear-gradient(135deg, var(--color-secondary) 0 3px"
+      assert current_style =~ "relaypulse"
+
+      assert [pending_style | _] = styles(doc, ~s(.run-face-cell[data-cell-state="pending"]))
+      assert pending_style =~ "color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100))"
+
+      assert doc |> LazyHTML.query(".run-face-zone-after .run-face-after") |> LazyHTML.attribute("data-striped") ==
+               ["false"]
+
+      assert [fill_style] = styles(doc, ".run-face-after .run-face-after-fill")
+      assert fill_style =~ "width:0.0%"
+      assert doc |> LazyHTML.query(".run-face-after-tail") |> Enum.count() == 0
+      assert face_text(doc, ".run-face-node") == "task 3 of 7 · fixing review notes"
       refute html =~ "run-branch-segment"
+      refute_retired_counter(html)
     end
 
-    test "an open region splits the fan_out's segment and counts branches (RE440 scenario 6)" do
-      doc =
-        face_doc(%{
-          total: 3,
-          ended: 1,
-          running: 2,
-          queued: 0,
-          parked: 0,
-          succeeded: 1,
-          failed: 0,
-          bars: [:succeeded, :running, :running]
-        })
+    test "after the tasks: every notch solid and the after track striped (RE513 scenario 2)" do
+      track = %{@loop_track | zone: :after, step: "fixing smoke", previous_node: "smoke", after_reached: 6}
+      html = face_html(running_summary(%{current_node: "final_fix", track: track}), tasks: %{done: 7, total: 7})
+      doc = LazyHTML.from_fragment(html)
 
-      assert LazyHTML.text(doc) =~ "node 3 of 7"
-      assert face_text(doc, ".run-face-branches") == "· 1/3 branches"
-      assert [segment_style] = doc |> LazyHTML.query(".run-branch-segment") |> LazyHTML.attribute("style")
+      assert doc |> LazyHTML.query(".run-face-cell") |> LazyHTML.attribute("data-cell-state") == List.duplicate("done", 8)
+      assert doc |> LazyHTML.query(".run-face-after") |> LazyHTML.attribute("data-striped") == ["true"]
+      assert [fill_style] = styles(doc, ".run-face-after-fill")
+      assert fill_style =~ "width:min(46.2%, calc(100% - 16px))"
+      assert [tail_style] = styles(doc, ".run-face-after-tail")
+      assert tail_style =~ "width:max(7.7%, 16px)"
+      assert tail_style =~ "relaypulse"
+      assert face_text(doc, ".run-face-node") == "tasks done · fixing smoke"
+      refute_retired_counter(html)
+    end
+
+    test "a run with no track and no tasks shows no bar, only flow · node (RE513 scenario 3)" do
+      html = face_html(%{status: :running, flow_key: "deploy", current_node: "fly", track: nil})
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query(".run-face-bar") |> Enum.count() == 0
+      assert face_text(doc, ".run-face-node") == "deploy · fly"
+      refute_retired_counter(html)
+    end
+
+    test "stalled re-colors every cell amber (RE513 scenario 4)" do
+      html = face_html(running_summary(%{}), tasks: %{done: 2, total: 7}, stalled?: true)
+      doc = LazyHTML.from_fragment(html)
+
+      cell_styles =
+        styles(doc, ".run-face-cell") ++
+          styles(doc, ".run-face-after") ++ styles(doc, ".run-face-after-fill") ++ styles(doc, ".run-face-after-tail")
+
+      assert length(cell_styles) == 10
+      assert Enum.all?(cell_styles, &(&1 =~ "var(--color-warning)"))
+      refute Enum.any?(cell_styles, &(&1 =~ "var(--color-secondary)"))
+      assert html =~ ~s(data-stalled="true")
+      assert face_text(doc, ".run-face-stalled-note") == "Quiet for a while — may be stuck"
+      refute_retired_counter(html)
+    end
+
+    test "an open region with no bar draws the branch segment alone and counts branches (RE440 scenario 6)" do
+      doc = face_doc(@three_branches)
+
+      assert [segment_style] = styles(doc, ".run-face-bar .run-branch-segment")
       assert segment_style =~ "height:7px"
-      assert doc |> LazyHTML.query(".run-branch-segment .run-branch-bar") |> Enum.count() == 3
+      assert doc |> LazyHTML.query(".run-face-bar .run-branch-segment .run-branch-bar") |> Enum.count() == 3
+      assert doc |> LazyHTML.query(".run-face-cell") |> Enum.count() == 0
+      assert face_text(doc, ".run-face-branches") == "· 1/3 branches"
+      assert face_text(doc, ".run-face-node") == "code · fo · 1/3 branches"
+      refute_retired_counter(LazyHTML.to_html(doc))
+    end
 
-      plain =
-        doc
-        |> LazyHTML.query(".run-face-segments > span")
-        |> LazyHTML.attribute("style")
-        |> Enum.filter(&(&1 =~ "height:5px"))
+    test "an open region over a bar keeps the notches and counts branches in the label (RE513 scenario 5)" do
+      doc = face_doc(@three_branches, track: @loop_track, tasks: %{done: 2, total: 7})
 
-      assert length(plain) == 6
+      assert doc |> LazyHTML.query(".run-branch-segment") |> Enum.count() == 0
+      assert doc |> LazyHTML.query(".run-face-zone-tasks .run-face-cell") |> Enum.count() == 7
+      assert face_text(doc, ".run-face-node") == "task 3 of 7 · fixing review notes · 1/3 branches"
+      refute_retired_counter(LazyHTML.to_html(doc))
     end
 
     test "queued branches are counted after the ended tally (RE440 scenario 7)" do
-      doc =
-        face_doc(%{
-          total: 3,
-          ended: 0,
-          running: 2,
-          queued: 1,
-          parked: 0,
-          succeeded: 0,
-          failed: 0,
-          bars: [:running, :running, :queued]
-        })
+      doc = face_doc(@queued_branches)
 
       assert face_text(doc, ".run-face-branches") == "· 0/3 branches · 1 queued"
     end
 
-    test "the node position and branch count flow as one text run beside fixed dot and age (RE440 smoke)" do
-      doc =
-        face_doc(
-          %{
-            total: 3,
-            ended: 0,
-            running: 2,
-            queued: 1,
-            parked: 0,
-            succeeded: 0,
-            failed: 0,
-            bars: [:running, :running, :queued]
-          },
-          progress_at: DateTime.utc_now()
-        )
+    test "the label and branch count flow as one text run beside fixed dot and age (RE440 smoke)" do
+      doc = face_doc(@queued_branches, progress_at: DateTime.utc_now())
 
-      assert face_text(doc, ".run-face-node") == "node 3 of 7 · 0/3 branches · 1 queued"
-      assert [node_style] = doc |> LazyHTML.query(".run-face-node") |> LazyHTML.attribute("style")
+      assert face_text(doc, ".run-face-node") == "code · fo · 0/3 branches · 1 queued"
+      assert [node_style] = styles(doc, ".run-face-node")
       assert node_style =~ "min-width:0"
       assert doc |> LazyHTML.query(".run-face-node .run-face-branches") |> Enum.count() == 1
 
       for selector <- [".run-face-dot", ".run-face-ring", ".run-face-age"] do
-        assert [style] = doc |> LazyHTML.query(selector) |> LazyHTML.attribute("style")
+        assert [style] = styles(doc, selector)
         assert style =~ "flex-shrink:0", "#{selector} must not shrink"
       end
 
-      assert [age_style] = doc |> LazyHTML.query(".run-face-age") |> LazyHTML.attribute("style")
+      assert [age_style] = styles(doc, ".run-face-age")
       assert age_style =~ "white-space:nowrap"
+      refute_retired_counter(LazyHTML.to_html(doc))
     end
 
     test "parked, failed, queued, done, cancelled badges" do
@@ -959,7 +1027,21 @@ defmodule HamacaWeb.RunComponentsTest do
   end
 
   describe "run_face/1 rate limited (RE320)" do
-    @running {:run, %{status: :running, node_index: 2, node_count: 4, current_node: "implement", flow_key: "code"}}
+    @running {:run,
+              %{
+                status: :running,
+                current_node: "implement",
+                flow_key: "code",
+                track: %{
+                  zone: :loop,
+                  step: "building",
+                  previous_node: "branch",
+                  setup_total: 1,
+                  setup_reached: 1,
+                  after_total: 13,
+                  after_reached: 0
+                }
+              }}
 
     test "renders the amber rate-limited note, which outranks stalled" do
       html =

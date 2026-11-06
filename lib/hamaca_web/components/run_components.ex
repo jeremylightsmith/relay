@@ -23,6 +23,7 @@ defmodule HamacaWeb.RunComponents do
 
   alias Hamaca.Runs
   alias Hamaca.Runs.RunDetail
+  alias Hamaca.Runs.Track
   alias HamacaWeb.CoreComponents
   alias HamacaWeb.RunStatus
   alias HamacaWeb.TimeAgo
@@ -1429,6 +1430,10 @@ defmodule HamacaWeb.RunComponents do
     default: nil,
     doc: "RE320 %{resumes_at} when this run's queued job waits on a roster paused at its usage limit"
 
+  attr :tasks, :map,
+    default: nil,
+    doc: "RE513 the card's `%{done, total}` (`Hamaca.Cards.sub_task_progress/1`), or nil — one notch per task"
+
   def run_face(assigns) do
     # A reported pause is the more specific fact than an inferred stall — never show both.
     assigns =
@@ -1451,6 +1456,7 @@ defmodule HamacaWeb.RunComponents do
         progress_at={@progress_at}
         stalled?={@stalled?}
         rate_limited={@rate_limited}
+        tasks={@tasks}
       />
       <.face_parked :if={@state == :parked} summary={run_summary(@run)} />
       <.face_failed :if={@state == :failed} summary={run_summary(@run)} />
@@ -1476,16 +1482,24 @@ defmodule HamacaWeb.RunComponents do
   attr :progress_at, :any, default: nil
   attr :stalled?, :boolean, default: false
   attr :rate_limited, :map, default: nil
+  attr :tasks, :map, default: nil
 
   defp face_running(assigns) do
     # RE320: rate limited wears the stalled treatment's amber tokens (no artboard covers it), but
-    # it is a REPORTED state, so it shows without the stall threshold.
+    # it is a REPORTED state, so it shows without the stall threshold — amber re-colors every cell.
     # RE440: `branches` is set only while a fan-out region is open (face tests and stories pass
-    # summaries without the key); the fan_out — still `current_node` — draws the split segment.
+    # summaries without the key). RE513: `Track.face/2` is the bar and its label; with no bar, an
+    # open region draws its branch segment alone, and the label still counts the branches.
+    amber? = assigns.stalled? or assigns.rate_limited != nil
+    face = Track.face(assigns.summary, assigns.tasks)
+
     assigns =
       assigns
-      |> assign(:amber?, assigns.stalled? or assigns.rate_limited != nil)
+      |> assign(:amber?, amber?)
+      |> assign(:accent, if(amber?, do: "var(--color-warning)", else: "var(--color-secondary)"))
       |> assign(:branches, Map.get(assigns.summary, :branches))
+      |> assign(:label, face.label)
+      |> assign(:zones, face_zones(face.cells))
 
     ~H"""
     <div
@@ -1503,21 +1517,44 @@ defmodule HamacaWeb.RunComponents do
           )
       }
     >
-      <div class="run-face-segments" style="display:flex;gap:2px;align-items:center;">
-        <%= for i <- 1..(@summary.node_count || 1) do %>
-          <%= if @branches && i == @summary.node_index do %>
-            <.branch_segment bars={@branches.bars} size={:face} />
-          <% else %>
-            <span style={"flex:1;height:5px;border-radius:2px;#{face_segment_style(i, @summary)}"} />
-          <% end %>
+      <div
+        :if={@zones || @branches}
+        class="run-face-bar"
+        style="display:flex;gap:6px;align-items:center;"
+      >
+        <.branch_segment :if={is_nil(@zones)} bars={@branches.bars} size={:face} />
+        <%= if @zones do %>
+          <div class="run-face-zone-setup" style="flex:1;display:flex;">
+            <.face_cell state={@zones.setup} accent={@accent} />
+          </div>
+          <div
+            class="run-face-zone-tasks"
+            style={"flex:#{length(@zones.tasks)};display:flex;gap:2px;"}
+          >
+            <.face_cell :for={state <- @zones.tasks} state={state} accent={@accent} />
+          </div>
+          <div class="run-face-zone-after" style="flex:4;display:flex;">
+            <span
+              class="run-face-after"
+              data-striped={to_string(@zones.after.striped?)}
+              style={"flex:4;height:5px;border-radius:2px;background:#{face_fill(:pending, @accent)};position:relative;overflow:hidden;display:block;"}
+            >
+              <span class="run-face-after-fill" style={face_after_fill_style(@zones.after, @accent)} />
+              <span
+                :if={@zones.after.striped?}
+                class="run-face-after-tail"
+                style={"position:absolute;top:0;bottom:0;left:#{face_after_edge(@zones.after)};width:max(#{@zones.after.tail_pct}%, 16px);background:#{face_fill(:current, @accent)};animation:relaypulse 1.6s ease-in-out infinite;"}
+              />
+            </span>
+          </div>
         <% end %>
       </div>
       <div style={"display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:#{if(@amber?, do: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-content))", else: "color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content))")};"}>
-        <%!-- RE440: the dot, ring and age keep their size; the node position and the branch
-             count are ONE text run that wraps inside the remaining width. --%>
+        <%!-- RE440: the dot, ring and age keep their size; the label and the branch count are ONE
+             text run that wraps inside the remaining width. --%>
         <span
           class="run-face-dot"
-          style={"flex-shrink:0;width:6px;height:6px;border-radius:50%;background:#{if(@amber?, do: "var(--color-warning)", else: "var(--color-secondary)")};#{unless @amber?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"}
+          style={"flex-shrink:0;width:6px;height:6px;border-radius:50%;background:#{@accent};#{unless @amber?, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"}
         />
         <span
           :if={not @amber?}
@@ -1525,7 +1562,7 @@ defmodule HamacaWeb.RunComponents do
           style="flex-shrink:0;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--color-secondary);animation:relayring 1.6s ease-out infinite;"
         />
         <span class="run-face-node" style="flex:1;min-width:0;">
-          node {@summary.node_index} of {@summary.node_count}<span
+          {@label}<span
             :if={@branches}
             class="run-face-branches"
           > {face_branches_label(@branches)}</span>
@@ -1558,19 +1595,48 @@ defmodule HamacaWeb.RunComponents do
     """
   end
 
+  attr :state, :atom, required: true
+  attr :accent, :string, required: true
+
+  defp face_cell(assigns) do
+    ~H"""
+    <span
+      class="run-face-cell"
+      data-cell-state={@state}
+      style={"flex:1;height:5px;border-radius:2px;background:#{face_fill(@state, @accent)};#{if @state == :current, do: "animation:relaypulse 1.6s ease-in-out infinite;"}"}
+    />
+    """
+  end
+
+  # `Track.face/2`'s ordered cells, split into the three zones the bar draws; nil when no bar.
+  defp face_zones([]), do: nil
+
+  defp face_zones([{:setup, setup} | rest]) do
+    {tasks, [{:after, after_cell}]} = Enum.split(rest, -1)
+    %{setup: setup, tasks: Enum.map(tasks, fn {:task, state} -> state end), after: after_cell}
+  end
+
   defp face_branches_label(%{ended: ended, total: total, queued: queued}) do
     count = "· #{ended}/#{total} branches"
     if queued > 0, do: "#{count} · #{queued} queued", else: count
   end
 
-  defp face_segment_style(i, %{node_index: idx}) when is_integer(idx) and i < idx,
-    do: "background:var(--color-secondary);"
+  # The ONE cell fill per state, over the accent token (secondary, or warning when amber):
+  # solid when done, pale when pending, striped when current.
+  defp face_fill(:done, accent), do: accent
+  defp face_fill(:pending, accent), do: "color-mix(in oklab, #{accent} 25%, var(--color-base-100))"
 
-  defp face_segment_style(i, %{node_index: idx}) when is_integer(idx) and i == idx,
-    do: "background:var(--color-secondary);animation:relaypulse 1.6s ease-in-out infinite;"
+  defp face_fill(:current, accent),
+    do:
+      "repeating-linear-gradient(135deg, #{accent} 0 3px, color-mix(in oklab, #{accent} 30%, var(--color-base-100)) 3px 6px)"
 
-  defp face_segment_style(_i, _summary),
-    do: "background:color-mix(in oklab, var(--color-secondary) 25%, var(--color-base-100));"
+  # A striped track keeps 16px for its tail, so the fill stops short of the end.
+  defp face_after_fill_style(%{striped?: striped?} = after_cell, accent) do
+    width = if striped?, do: face_after_edge(after_cell), else: "#{after_cell.fill_pct}%"
+    "position:absolute;inset:0 auto 0 0;width:#{width};background:#{face_fill(:done, accent)};"
+  end
+
+  defp face_after_edge(%{fill_pct: fill_pct}), do: "min(#{fill_pct}%, calc(100% - 16px))"
 
   attr :summary, :map, required: true
 
