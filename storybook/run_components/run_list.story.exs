@@ -58,8 +58,44 @@ defmodule Storybook.RunComponents.RunList do
     ]
   end
 
+  # RE514 — the card mockup's cost map: the heading's total and the BY STAGE panel.
+  defp mockup_cost do
+    %{
+      total: Decimal.new("5.54"),
+      unpriced: 2,
+      in_flight?: true,
+      runs: 6,
+      by_stage: [
+        %{label: "Design", runs: 3, failed: 0, cost: Decimal.new("1.17"), bar: 29},
+        %{label: "Spec", runs: 1, failed: 0, cost: Decimal.new("0.35"), bar: 9},
+        %{label: "Code", runs: 2, failed: 1, cost: Decimal.new("4.02"), bar: 100}
+      ],
+      failed: %{runs: 2, cost: Decimal.new("2.17"), bar: 54}
+    }
+  end
+
+  defp running_head do
+    %{
+      detail:
+        detail("Code", %{status: :running, flow_key: "code", current_node: "implement", started_at: ago(291)}, [
+          ne("branch", 1, :succeeded, %{duration_s: 8, cost: Decimal.new("0.02")}),
+          ne("implement", 1, nil, %{duration_s: nil})
+        ]),
+      number: 3
+    }
+  end
+
   def variations do
     [
+      %Variation{
+        id: :with_cost,
+        description: "RE514: RUNS · N · ≥ $X TOTAL, so far, unpriced, then the BY STAGE panel",
+        attributes: %{
+          entries: [running_head() | earlier_runs()],
+          cost: mockup_cost(),
+          task_progress: %{done: 1, total: 4}
+        }
+      },
       %Variation{
         id: :running_latest,
         description: "Latest run going; earlier Code and Spec runs collapsed",

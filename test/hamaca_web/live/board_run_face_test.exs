@@ -111,6 +111,28 @@ defmodule HamacaWeb.BoardRunFaceTest do
     assert has_element?(view, "#card-#{ref}-run-face", "stopped at implement")
   end
 
+  test "a Done card's face shows the card total across every run (RE514 scenario 8)",
+       %{conn: conn, board: board, code: code} do
+    card = ai_card(code, "Paid for twice", :working)
+    failed = insert(:run, card: card, current_node: "quality_review")
+    insert(:node_execution, run: failed, node: "implement", cost: Decimal.new("1.67"))
+    Runs.close_run!(failed, :failed, "boom")
+    done = insert(:run, card: card, current_node: "implement")
+    insert(:node_execution, run: done, node: "implement", cost: Decimal.new("1.51"))
+    Runs.close_run!(done, :done, nil)
+    ref = Cards.ref(board, card)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+    render_async(view)
+
+    assert view
+           |> element("#card-#{ref}-run-face .run-face-done-cost")
+           |> render()
+           |> LazyHTML.from_fragment()
+           |> LazyHTML.text()
+           |> squish() == "$3.18"
+  end
+
   test "a queued card face names the flow", %{conn: conn, board: board} do
     flow = Flows.get_flow!(board, "code")
     {:ok, flow} = Flows.enable_flow(flow)

@@ -153,9 +153,20 @@ defmodule Hamaca.Runs.RunDetail do
 
   # ---- stage_name (RE426): the run's own flow's work stage, never the `flow` argument ----
 
+  @doc """
+  The one display fallback for a run's stage (RE514): the work stage's name, else the flow key.
+
+  Takes a detail (a `%RunDetail{}` or any map with a `:stage_name` key) or a run (its
+  `flow: %{stage: %{name: _}}`). nil only when both the name and the flow key are nil — a
+  persisted run always has a `flow_key`.
+  """
+  @spec stage_label(map()) :: String.t() | nil
+  def stage_label(%{stage_name: name} = detail), do: name || Map.get(detail, :flow_key)
+  def stage_label(run), do: stage_name(run) || Map.get(run, :flow_key)
+
   # Read from `run.flow` (join-preloaded by `Runs.list_runs_for_card/1`). An unloaded association,
-  # a deleted flow (nilified `flow_id`) or a flow with no work stage all yield nil; the web layer
-  # falls back to `flow_key`.
+  # a deleted flow (nilified `flow_id`) or a flow with no work stage all yield nil;
+  # `stage_label/1` falls back to `flow_key`.
   defp stage_name(%{flow: %{stage: %{name: name}}}) when is_binary(name), do: name
   defp stage_name(_run), do: nil
 

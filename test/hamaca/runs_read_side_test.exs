@@ -605,4 +605,128 @@ defmodule Hamaca.RunsReadSideTest do
       assert_receive {:run_changed, 7}
     end
   end
+
+  describe "card_cost/1 (RE514)" do
+    test "9: totals every run, counts only the agent execution with no cost as unpriced" do
+      card = insert(:card)
+      done = insert(:run, card: card, status: :done)
+      insert(:node_execution, run: done, cost: Decimal.new("0.90"))
+      insert(:node_job, node_execution: insert(:node_execution, run: done), harness_key: "claude")
+      insert(:node_job, node_execution: insert(:node_execution, run: done), harness_key: nil)
+      failed = insert(:run, card: card, status: :failed)
+      insert(:node_execution, run: failed, cost: Decimal.new("0.10"))
+
+      cost = Runs.card_cost(Runs.list_runs_for_card(card))
+
+      assert Decimal.equal?(cost.total, Decimal.new("1.00"))
+      assert cost.unpriced == 1
+      assert cost.runs == 2
+      assert cost.failed.runs == 1
+    end
+
+    test "10: finds the agent executions of any number of runs in one query" do
+      card = insert(:card)
+
+      for _ <- 1..3 do
+        run = insert(:run, card: card, status: :done)
+
+        for harness_key <- ["claude", nil] do
+          ne = insert(:node_execution, run: run, cost: Decimal.new("0.10"))
+          insert(:node_job, node_execution: ne, harness_key: harness_key)
+          # RE267 requeue: a second job for the same execution must not double-count it.
+          insert(:node_job, node_execution: ne, harness_key: harness_key)
+        end
+      end
+
+      runs = Runs.list_runs_for_card(card)
+
+      {cost, count} = count_repo_queries(self(), fn -> Runs.card_cost(runs) end)
+
+      assert count == 1
+      assert Decimal.equal?(cost.total, Decimal.new("0.60"))
+    end
+
+    test "10: no runs issues no query and has no cost" do
+      assert count_repo_queries(self(), fn -> Runs.card_cost([]) end) == {nil, 0}
+    end
+  end
+
+  describe "run summaries carry card_cost (RE514)" do
+    defp cost_board(name) do
+      :user
+      |> insert()
+      |> Hamaca.Boards.create_board(%{name: unique_slug(name)})
+      |> elem(1)
+      |> Hamaca.Repo.preload(:stages)
+    end
+
+    defp priced_run(card, status, costs) do
+      run = insert(:run, card: card, status: status, current_node: nil)
+      for cost <- costs, do: insert(:node_execution, run: run, cost: cost && Decimal.new(cost))
+      run
+    end
+
+    test "1: sums every execution of every run on the card, beside the latest run's own cost" do
+      board = cost_board("card-cost")
+      card = insert(:card, stage: hd(board.stages))
+      priced_run(card, :failed, ["1.67", nil])
+      priced_run(card, :cancelled, [])
+      priced_run(card, :done, ["0.42", "1.09"])
+
+      summary = Runs.run_summaries_for_board(board)[card.id]
+
+      assert summary.status == :done
+      assert Decimal.equal?(summary.card_cost, Decimal.new("3.18"))
+      assert Decimal.equal?(summary.cost, Decimal.new("1.51"))
+      assert Runs.run_summary_for_card(card) == summary
+    end
+
+    test "2: a card whose executions all lack a cost has a nil card_cost" do
+      board = cost_board("unpriced")
+      card = insert(:card, stage: hd(board.stages))
+      priced_run(card, :failed, [nil])
+      priced_run(card, :done, [nil, nil])
+
+      assert Runs.run_summaries_for_board(board)[card.id].card_cost == nil
+      assert Runs.run_summary_for_card(card).card_cost == nil
+    end
+
+    test "3: each card carries only its own total, and another board's cards are absent" do
+      board = cost_board("two-cards")
+      a = insert(:card, stage: hd(board.stages))
+      b = insert(:card, stage: hd(board.stages))
+      priced_run(a, :done, ["0.50"])
+      priced_run(b, :done, ["2.00"])
+
+      elsewhere = insert(:card, stage: hd(cost_board("elsewhere").stages))
+      priced_run(elsewhere, :done, ["4.00"])
+
+      summaries = Runs.run_summaries_for_board(board)
+
+      assert Decimal.equal?(summaries[a.id].card_cost, Decimal.new("0.50"))
+      assert Decimal.equal?(summaries[b.id].card_cost, Decimal.new("2.00"))
+      refute Map.has_key?(summaries, elsewhere.id)
+    end
+
+    test "4: card_cost adds no per-card query" do
+      one = cost_board("one-card")
+      card = insert(:card, stage: hd(one.stages))
+      priced_run(card, :done, ["0.10"])
+
+      three = cost_board("three-cards")
+
+      for _ <- 1..3 do
+        card = insert(:card, stage: hd(three.stages))
+        priced_run(card, :failed, ["0.10"])
+        priced_run(card, :done, ["0.20"])
+      end
+
+      {three_summaries, count_three} = count_repo_queries(self(), fn -> Runs.run_summaries_for_board(three) end)
+      {one_summary, count_one} = count_repo_queries(self(), fn -> Runs.run_summaries_for_board(one) end)
+
+      assert Enum.all?(Map.values(three_summaries), &Decimal.equal?(&1.card_cost, Decimal.new("0.30")))
+      assert Enum.all?(Map.values(one_summary), &Decimal.equal?(&1.card_cost, Decimal.new("0.10")))
+      assert count_three == count_one
+    end
+  end
 end

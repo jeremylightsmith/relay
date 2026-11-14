@@ -997,6 +997,50 @@ defmodule HamacaWeb.RunComponentsTest do
       assert breaker =~ "CIRCUIT BREAKER"
       refute plain =~ "CIRCUIT BREAKER"
     end
+
+    # RE514: the Done face's right-hand figure is the card total, falling back to the run's cost.
+    defp done_cost(summary) do
+      summary
+      |> face_html()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(".run-face-done-cost")
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    defp done_summary(overrides),
+      do:
+        Map.merge(%{status: :done, duration_s: 720, cost: Decimal.new("0.42"), flow_key: "code", attempts: 1}, overrides)
+
+    test "a Done face shows the card total, with no Σ (RE514 scenario 5)" do
+      summary = done_summary(%{card_cost: Decimal.new("3.18")})
+
+      assert done_cost(summary) == "$3.18"
+      refute face_html(summary) =~ "Σ"
+    end
+
+    test "a Done face falls back to the run's cost when the card total is nil or absent (RE514 scenario 6)" do
+      assert done_cost(done_summary(%{card_cost: nil})) == "$0.42"
+      assert done_cost(done_summary(%{})) == "$0.42"
+      assert done_cost(done_summary(%{cost: nil, card_cost: nil})) == "—"
+    end
+
+    test "non-Done faces show no card total (RE514 scenario 7)" do
+      failed =
+        face_html(%{
+          status: :failed,
+          current_node: nil,
+          last_node: "quality_review",
+          flow_key: "code",
+          attempts: 3,
+          card_cost: Decimal.new("9.99")
+        })
+
+      running = face_html(running_summary(%{card_cost: Decimal.new("9.99")}))
+
+      refute failed =~ "$9.99"
+      refute running =~ "$9.99"
+    end
   end
 
   describe "advance_button/1 (RE279: public, rendered by the Detail needs-input panel)" do
@@ -1217,6 +1261,13 @@ defmodule HamacaWeb.RunComponentsTest do
       assert texts(doc, ".run-entry-stage") == ["DESIGN"]
     end
 
+    test "RE514: a detail with no stage name chips its flow key through RunDetail.stage_label/1" do
+      entry = %{detail: %{detail(%{flow_key: "code"}, []) | stage_name: nil}, number: 1}
+      {_html, doc} = render_list([entry])
+
+      assert texts(doc, ".run-entry-stage") == ["CODE"]
+    end
+
     test "4: exactly one LATEST tag, on the head" do
       {_html, doc} = render_list(three_entries())
 
@@ -1388,6 +1439,175 @@ defmodule HamacaWeb.RunComponentsTest do
       assert texts(doc, ".run-entry-status") == ["Cancelled"]
       [style] = attrs(doc, "#run-entry-1", "style")
       assert style =~ "color-mix(in oklab, var(--color-primary) 20%, var(--color-base-100))"
+    end
+  end
+
+  # RE514 — the card mockup "Card cost — header chip + Run-tab total with per-stage bars…" map.
+  defp mockup_cost(overrides \\ %{}) do
+    Map.merge(
+      %{
+        total: Decimal.new("5.54"),
+        unpriced: 2,
+        in_flight?: true,
+        runs: 6,
+        by_stage: [
+          %{label: "Design", runs: 3, failed: 0, cost: Decimal.new("1.17"), bar: 29},
+          %{label: "Spec", runs: 1, failed: 0, cost: Decimal.new("0.35"), bar: 9},
+          %{label: "Code", runs: 2, failed: 1, cost: Decimal.new("4.02"), bar: 100}
+        ],
+        failed: %{runs: 2, cost: Decimal.new("2.17"), bar: 54}
+      },
+      overrides
+    )
+  end
+
+  defp cost_doc(fun, assigns), do: fun |> render_component(assigns) |> LazyHTML.from_fragment()
+
+  describe "cost_figure/1 (RE514)" do
+    test "1: a ≥ prefix while executions are unpriced, the bare figure otherwise" do
+      assert RunComponents.cost_figure(mockup_cost()) == "≥ $5.54"
+      assert RunComponents.cost_figure(mockup_cost(%{unpriced: 0})) == "$5.54"
+    end
+  end
+
+  describe "card_cost_chip/1 (RE514)" do
+    test "2: an in-flight, unpriced chip is a Run-tab button with a pulse and a ≥ figure" do
+      doc = cost_doc(&RunComponents.card_cost_chip/1, id: "c", cost: mockup_cost())
+
+      assert [_] = doc |> LazyHTML.query("button#c") |> Enum.to_list()
+      assert attrs(doc, "#c", "type") == ["button"]
+      assert attrs(doc, "#c", "phx-click") == ["drawer_tab"]
+      assert attrs(doc, "#c", "phx-value-tab") == ["run"]
+      assert attrs(doc, "#c", "title") == ["Every run of every flow on this card"]
+      assert text_at(doc, "#c") =~ "≥ $5.54"
+      assert count(doc, "#c .card-cost-chip-pulse") == 1
+    end
+
+    test "2: a settled chip reads the bare figure with no pulse" do
+      doc = cost_doc(&RunComponents.card_cost_chip/1, id: "c", cost: mockup_cost(%{in_flight?: false, unpriced: 0}))
+
+      assert text_at(doc, "#c") == "$5.54"
+      assert count(doc, ".card-cost-chip-pulse") == 0
+    end
+
+    test "the chip mirrors the mono stage-chip look with tokens only" do
+      doc = cost_doc(&RunComponents.card_cost_chip/1, id: "c", cost: mockup_cost())
+      [style] = attrs(doc, "#c", "style")
+
+      assert style =~ "font-family:var(--font-mono)"
+      assert style =~ "border:1px solid var(--color-base-300)"
+      assert style =~ "background:var(--color-base-200)"
+      [pulse] = attrs(doc, ".card-cost-chip-pulse", "style")
+      assert pulse =~ "background:var(--color-secondary)"
+      assert pulse =~ "animation:relaypulse 1.6s ease-in-out infinite"
+    end
+  end
+
+  describe "card_cost_heading/1 (RE514)" do
+    test "3: the in-flight heading reads RUNS · 6 · ≥ $5.54 TOTAL, so far, · 2 unpriced" do
+      doc = cost_doc(&RunComponents.card_cost_heading/1, count: 6, cost: mockup_cost())
+      text = doc |> LazyHTML.text() |> String.trim()
+
+      assert text =~ "RUNS · 6"
+      assert text_at(doc, "#run-cost-total") == "≥ $5.54"
+      assert text =~ "TOTAL"
+      assert text_at(doc, "#run-cost-so-far") =~ "so far"
+      assert text_at(doc, "#run-cost-unpriced") == "· 2 unpriced"
+      assert attrs(doc, "#run-cost-unpriced", "title") == ["2 node executions reported no cost"]
+    end
+
+    test "4: a settled heading has the bare total and no so-far or unpriced" do
+      cost = mockup_cost(%{in_flight?: false, unpriced: 0, total: Decimal.new("3.18")})
+      doc = cost_doc(&RunComponents.card_cost_heading/1, count: 3, cost: cost)
+
+      assert text_at(doc, "#run-cost-total") == "$3.18"
+      assert count(doc, "#run-cost-so-far") == 0
+      assert count(doc, "#run-cost-unpriced") == 0
+    end
+
+    test "5: with no cost the heading is exactly RUNS · 4" do
+      doc = cost_doc(&RunComponents.card_cost_heading/1, count: 4, cost: nil)
+
+      assert doc |> LazyHTML.text() |> String.trim() == "RUNS · 4"
+      assert count(doc, "#run-cost-total") == 0
+      refute LazyHTML.text(doc) =~ "TOTAL"
+    end
+  end
+
+  describe "card_cost_stages/1 (RE514)" do
+    test "6: one row per stage in order, neutral bars by width, the failed row, no % text" do
+      doc = cost_doc(&RunComponents.card_cost_stages/1, cost: mockup_cost())
+
+      assert count(doc, "#run-cost-by-stage") == 1
+      assert text_at(doc, "#run-cost-by-stage") =~ "BY STAGE"
+      assert texts(doc, ".run-cost-stage .run-cost-stage-name") == ["Design", "Spec", "Code"]
+      assert texts(doc, ".run-cost-stage .run-cost-stage-runs") == ["3 runs", "1 run", "2 runs · 1 failed"]
+      assert texts(doc, ".run-cost-stage .run-cost-stage-cost") == ["$1.17", "$0.35", "$4.02"]
+
+      bars = attrs(doc, ".run-cost-stage .run-cost-bar", "style")
+      assert [design, spec, code] = bars
+      assert design =~ "width:29%"
+      assert spec =~ "width:9%"
+      assert code =~ "width:100%"
+
+      failed = text_at(doc, "#run-cost-failed")
+      assert failed =~ "↻ Failed / cancelled"
+      assert texts(doc, "#run-cost-failed .run-cost-stage-runs") == ["2 runs"]
+      assert texts(doc, "#run-cost-failed .run-cost-stage-cost") == ["$2.17"]
+      [failed_bar] = attrs(doc, "#run-cost-failed .run-cost-bar", "style")
+      assert failed_bar =~ "width:54%"
+      assert failed_bar =~ "var(--color-error)"
+
+      refute LazyHTML.text(doc) =~ "%"
+    end
+
+    test "7: no failed row and no dashed rule when nothing failed" do
+      doc = cost_doc(&RunComponents.card_cost_stages/1, cost: mockup_cost(%{failed: nil}))
+
+      assert count(doc, "#run-cost-failed") == 0
+      assert count(doc, "[style*='border-top:1px dashed']") == 0
+    end
+
+    test "8: stage bars are neutral grey, never baton blue or violet" do
+      doc = cost_doc(&RunComponents.card_cost_stages/1, cost: mockup_cost())
+      bars = attrs(doc, ".run-cost-stage .run-cost-bar", "style")
+
+      assert length(bars) == 3
+
+      for style <- bars do
+        refute style =~ "--color-primary"
+        refute style =~ "--color-secondary"
+        assert style =~ "var(--color-base-content) 55%"
+      end
+    end
+  end
+
+  describe "run_list/1 cost (RE514)" do
+    defp cost_entries do
+      [
+        %{detail: detail(%{status: :done, finished_at: DateTime.utc_now()}, [ne("implement", 1, :succeeded)]), number: 2},
+        %{detail: detail(%{status: :done, finished_at: DateTime.utc_now()}, [ne("implement", 1, :succeeded)]), number: 1}
+      ]
+    end
+
+    test "9: no cost renders RUNS · N and no BY STAGE panel" do
+      doc = cost_doc(&RunComponents.run_list/1, entries: cost_entries(), cost: nil)
+
+      assert count(doc, "#run-cost-by-stage") == 0
+      assert count(doc, "#run-cost-total") == 0
+      assert doc |> texts("#run-list") |> hd() =~ "RUNS · 2"
+    end
+
+    test "9: with a cost the BY STAGE panel sits between the heading and the first entry" do
+      html = render_component(&RunComponents.run_list/1, entries: cost_entries(), cost: mockup_cost())
+      doc = LazyHTML.from_fragment(html)
+
+      assert text_at(doc, "#run-cost-total") == "≥ $5.54"
+      {heading_at, _} = :binary.match(html, "RUNS · 2")
+      {panel_at, _} = :binary.match(html, ~s(id="run-cost-by-stage"))
+      {entry_at, _} = :binary.match(html, ~s(class="run-entry"))
+      assert heading_at < panel_at
+      assert panel_at < entry_at
     end
   end
 end

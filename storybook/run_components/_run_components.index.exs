@@ -16,4 +16,6 @@ defmodule Storybook.RunComponents do
   def entry("starvation_banner"), do: [icon: {:fa, "hourglass-half", :thin}]
   def entry("rate_limit_note"), do: [icon: {:fa, "gauge-high", :thin}]
   def entry("pre_rename_hint"), do: [icon: {:fa, "arrow-up", :thin}]
+  def entry("card_cost_chip"), do: [icon: {:fa, "dollar-sign", :thin}]
+  def entry("card_cost_stages"), do: [icon: {:fa, "chart-bar", :thin}]
 end

@@ -827,6 +827,7 @@ defmodule HamacaWeb.BoardLive do
         talk_seed_open?={@talk_seed_open?}
         talk_events={@streams.talk_events}
         runs={@card_runs}
+        card_cost={@card_cost}
         run_flow={@card_runs != [] && Enum.find(@flows, &(&1.key == hd(@card_runs).flow_key))}
         advance_available?={@card_runs != [] and Runs.advance_foreach_available?(hd(@card_runs))}
         rate_limited={@run_face_meta |> Map.get(@selected_card.id, %{}) |> Map.get(:rate_limited)}
@@ -2118,7 +2119,7 @@ defmodule HamacaWeb.BoardLive do
          |> assign(:answer_values, %{})
          |> reset_images(:answer_images)
          |> assign_review(card)
-         |> assign(:card_runs, runs)
+         |> assign_card_runs(runs)
          |> assign_in_flight_task(card, :refresh)
          |> assign(:drawer_tab, default_tab)
          |> assign(:note_mode, :note)
@@ -3884,7 +3885,7 @@ defmodule HamacaWeb.BoardLive do
       run ->
         case Runs.retry_run(run, actor: current_actor(socket)) do
           {:ok, _run} ->
-            {:noreply, assign(socket, :card_runs, Runs.list_runs_for_card(card))}
+            {:noreply, assign_card_runs(socket, Runs.list_runs_for_card(card))}
 
           {:error, reason} ->
             {:noreply, put_flash(socket, :error, Runs.retry_refusal_message(reason))}
@@ -3906,7 +3907,7 @@ defmodule HamacaWeb.BoardLive do
       run ->
         case Runs.advance_foreach(run, actor: current_actor(socket)) do
           {:ok, _run} ->
-            {:noreply, assign(socket, :card_runs, Runs.list_runs_for_card(card))}
+            {:noreply, assign_card_runs(socket, Runs.list_runs_for_card(card))}
 
           {:error, reason} ->
             {:noreply, put_flash(socket, :error, Runs.retry_refusal_message(reason))}
@@ -4659,7 +4660,7 @@ defmodule HamacaWeb.BoardLive do
         case socket.assigns.selected_card do
           %Card{id: ^card_id} ->
             socket
-            |> assign(:card_runs, Runs.list_runs_for_card(card))
+            |> assign_card_runs(Runs.list_runs_for_card(card))
             |> assign_in_flight_task(card, :refresh)
             |> refresh_steer(card)
 
@@ -5031,7 +5032,7 @@ defmodule HamacaWeb.BoardLive do
     |> assign(:answer_form, empty_answer_form())
     |> assign_review(card)
     # the card may have parked/resumed a run since the last refresh
-    |> assign(:card_runs, Runs.list_runs_for_card(card))
+    |> assign_card_runs(Runs.list_runs_for_card(card))
     |> assign_in_flight_task(card, :refresh)
     |> assign_steer(card)
     |> stream_notes(Activity.list_conversation(card))
@@ -6667,6 +6668,15 @@ defmodule HamacaWeb.BoardLive do
   #
   # RLY-68 optimistic open: paint from the light card immediately, then
   # (when connected) fetch the heavy body/timeline/conversation async.
+  # RE514 — the one place `:card_runs` is assigned, so the drawer's card cost (`Runs.card_cost/1`,
+  # one query) is recomputed on every refresh — open, `:run_changed` flush, retry, advance, close —
+  # and never in the render path. `[]` gives `card_cost: nil` without a query.
+  defp assign_card_runs(socket, runs) do
+    socket
+    |> assign(:card_runs, runs)
+    |> assign(:card_cost, Runs.card_cost(runs))
+  end
+
   defp assign_selected_card(socket, ref) do
     # RE268 — a card switch (or a close, which routes here with ref: nil) always leaves
     # Talk's subscription behind if the drawer was open on it; the branches below reset the
@@ -6725,7 +6735,7 @@ defmodule HamacaWeb.BoardLive do
           |> assign(:reject_error, nil)
           |> reset_images(:reject_images)
           |> close_header_popovers()
-          |> assign(:card_runs, [])
+          |> assign_card_runs([])
           |> assign(:drawer_tab, :detail)
           |> reset_talk()
           |> reset_steer()

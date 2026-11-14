@@ -700,4 +700,25 @@ defmodule Hamaca.RunDetailTest do
       assert Runs.run_detail(r, code_flow()).parked_attempt == 2
     end
   end
+
+  describe "stage_label/1 (RE514)" do
+    test "8: a run's stage name else its flow key; a detail's stage_name else its flow key" do
+      inputs = [
+        %{flow: %{stage: %{name: "Design"}}, flow_key: "design"},
+        %{flow: nil, flow_key: "triage"},
+        %{stage_name: nil, flow_key: "code"},
+        %{stage_name: "Spec", flow_key: "spec"},
+        %{stage_name: nil, flow_key: nil}
+      ]
+
+      assert Enum.map(inputs, &RunDetail.stage_label/1) == ["Design", "triage", "code", "Spec", nil]
+    end
+
+    test "a built %RunDetail{} reads its stage_name, never falling through to the flow key" do
+      detail =
+        RunDetail.build(%{status: :done, flow_key: "spec", flow: %{stage: %{name: "Spec"}}, node_executions: []}, nil)
+
+      assert RunDetail.stage_label(detail) == "Spec"
+    end
+  end
 end

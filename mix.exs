@@ -132,8 +132,15 @@ defmodule Hamaca.MixProject do
         "test --warnings-as-errors"
       ],
       # Browser journeys need a current JS/CSS bundle, so rebuild assets first —
-      # otherwise the hooks under test run against a stale bundle.
-      "test.browser": ["assets.build", "test --only playwright"],
+      # otherwise the hooks under test run against a stale bundle. Also provision the
+      # headless shell the pinned `playwright` (assets/package.json) launches: a bump of
+      # that pin otherwise fails every journey with "Executable doesn't exist" until
+      # someone runs `npx playwright install` by hand. A no-op when it is already cached.
+      "test.browser": [
+        "assets.build",
+        "cmd npx --prefix assets --no-install playwright install --only-shell chromium",
+        "test --only playwright"
+      ],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": [
         "compile",

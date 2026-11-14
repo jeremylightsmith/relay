@@ -123,6 +123,185 @@ defmodule HamacaWeb.RunComponents do
       chip_bg: "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))"
     }
 
+  # ---------- card cost (RE514) ----------
+  #
+  # Card mockup "Card cost — header chip + Run-tab total with per-stage bars, live so-far /
+  # ≥ unpriced, Done card shows total". Every piece reads `Hamaca.Runs.card_cost/1`'s map, which
+  # BoardLive computes beside `:card_runs`; nothing here queries. Stage bars are neutral grey
+  # (blue/violet mean baton, never stage) and carry no percentages.
+
+  @cost_pulse_dot "display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--color-secondary);animation:relaypulse 1.6s ease-in-out infinite;flex:0 0 auto;"
+
+  @doc ~s{The card's figure: `"≥ $5.54"` while any execution is unpriced, else `"$5.54"`. The chip and the heading both read it.}
+  @spec cost_figure(map()) :: String.t()
+  def cost_figure(%{unpriced: unpriced, total: total}) when unpriced > 0, do: "≥ " <> run_cost(total)
+  def cost_figure(%{total: total}), do: run_cost(total)
+
+  @doc """
+  The drawer header's card-cost chip: the card total (every run of every flow), a pulsing dot
+  while a run is in flight. A click switches the drawer to its Run tab.
+  """
+  attr :id, :string, required: true
+  attr :cost, :map, required: true
+  attr :class, :any, default: nil
+
+  def card_cost_chip(assigns) do
+    assigns = assign(assigns, pulse_dot: @cost_pulse_dot, figure: cost_figure(assigns.cost))
+
+    ~H"""
+    <button
+      type="button"
+      id={@id}
+      class={["card-cost-chip", @class]}
+      phx-click="drawer_tab"
+      phx-value-tab="run"
+      title="Every run of every flow on this card"
+      style="font-family:var(--font-mono);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--color-base-300);background:var(--color-base-200);color:color-mix(in oklab, var(--color-base-content) 85%, transparent);border-radius:4px;padding:1px 7px;height:20px;flex:0 0 auto;cursor:pointer;"
+    >
+      <span :if={@cost.in_flight?} class="card-cost-chip-pulse" style={@pulse_dot} />{@figure}
+    </button>
+    """
+  end
+
+  @doc """
+  The Run tab's `RUNS · N` heading. With a cost it continues `· $X TOTAL`, then `so far` while a
+  run is in flight and `· N unpriced` while executions reported no cost. `count` is the number of
+  run entries, so the heading renders the same as before when `cost` is nil.
+  """
+  attr :count, :integer, required: true
+  attr :cost, :map, default: nil
+
+  def card_cost_heading(assigns) do
+    assigns = assign(assigns, :pulse_dot, @cost_pulse_dot)
+
+    ~H"""
+    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+      <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+        RUNS · {@count}
+      </span>
+      <%= if @cost do %>
+        <span style="font-family:var(--font-mono);font-size:10px;color:color-mix(in oklab, var(--color-base-content) 40%, transparent);">
+          ·
+        </span>
+        <span
+          id="run-cost-total"
+          style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:color-mix(in oklab, var(--color-base-content) 95%, transparent);"
+        >
+          {cost_figure(@cost)}
+        </span>
+        <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
+          TOTAL
+        </span>
+        <span
+          :if={@cost.in_flight?}
+          id="run-cost-so-far"
+          style="font-family:var(--font-mono);font-size:10px;display:inline-flex;align-items:center;gap:5px;color:color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));"
+        >
+          <span style={@pulse_dot} /> so far
+        </span>
+        <span
+          :if={@cost.unpriced > 0}
+          id="run-cost-unpriced"
+          title={"#{@cost.unpriced} node executions reported no cost"}
+          style="font-family:var(--font-mono);font-size:10px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+        >
+          · {@cost.unpriced} unpriced
+        </span>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  The Run tab's BY STAGE panel: one row per stage, oldest first, with its run count, a neutral
+  bar sized against the largest stage and its cost; then a dashed-rule failed/cancelled row when
+  any run failed or was cancelled (a subset of the stage rows, not an extra addend).
+  """
+  attr :cost, :map, required: true
+
+  def card_cost_stages(assigns) do
+    ~H"""
+    <div
+      id="run-cost-by-stage"
+      style="display:flex;flex-direction:column;gap:9px;border:1px solid var(--color-base-300);border-radius:10px;padding:12px 14px;background:var(--color-base-100);"
+    >
+      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
+        BY STAGE
+      </div>
+      <.cost_stage_row
+        :for={row <- @cost.by_stage}
+        class="run-cost-stage"
+        name={row.label}
+        runs={stage_runs_label(row)}
+        bar={row.bar}
+        cost={row.cost}
+        fill="color-mix(in oklab, var(--color-base-content) 55%, transparent)"
+      />
+      <div
+        :if={@cost.failed}
+        style="border-top:1px dashed var(--color-base-300);padding-top:8px;"
+      >
+        <.cost_stage_row
+          id="run-cost-failed"
+          name="↻ Failed / cancelled"
+          runs={runs_label(@cost.failed.runs)}
+          bar={@cost.failed.bar}
+          cost={@cost.failed.cost}
+          fill="color-mix(in oklab, var(--color-error) 55%, var(--color-base-100))"
+          color="color-mix(in oklab, var(--color-error) 55%, var(--color-base-content))"
+        />
+      </div>
+    </div>
+    """
+  end
+
+  attr :id, :string, default: nil
+  attr :class, :string, default: nil
+  attr :name, :string, required: true
+  attr :runs, :string, required: true
+  attr :bar, :integer, required: true
+  attr :cost, :any, required: true
+  attr :fill, :string, required: true
+  attr :color, :string, default: nil
+
+  defp cost_stage_row(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class={@class}
+      style={"display:grid;grid-template-columns:minmax(0,11.5rem) minmax(3rem,1fr) 3.5rem;align-items:center;gap:10px;font-size:12.5px;#{@color && "color:#{@color};"}"}
+    >
+      <div style="display:flex;align-items:baseline;gap:8px;min-width:0;">
+        <span class="run-cost-stage-name truncate" style="font-weight:500;">{@name}</span>
+        <span
+          class="run-cost-stage-runs"
+          style="font-family:var(--font-mono);font-size:10.5px;white-space:nowrap;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+        >
+          {@runs}
+        </span>
+      </div>
+      <div style="height:8px;border-radius:4px;background:var(--color-base-200);overflow:hidden;">
+        <div
+          class="run-cost-bar"
+          style={"width:#{@bar}%;height:100%;border-radius:4px;background:#{@fill};"}
+        />
+      </div>
+      <span
+        class="run-cost-stage-cost"
+        style="font-family:var(--font-mono);font-size:12px;font-weight:600;text-align:right;"
+      >
+        {run_cost(@cost)}
+      </span>
+    </div>
+    """
+  end
+
+  defp stage_runs_label(%{runs: runs, failed: failed}) when failed > 0, do: "#{runs_label(runs)} · #{failed} failed"
+  defp stage_runs_label(%{runs: runs}), do: runs_label(runs)
+
+  defp runs_label(1), do: "1 run"
+  defp runs_label(n), do: "#{n} runs"
+
   # ---------- run_list (RE426) ----------
 
   @doc """
@@ -135,6 +314,11 @@ defmodule HamacaWeb.RunComponents do
   attr :entries, :list, required: true
   attr :now, :any, default: nil
   attr :task_progress, :map, default: nil
+
+  attr :cost, :map,
+    default: nil,
+    doc: "RE514: `Hamaca.Runs.card_cost/1`'s map — the heading's total and the BY STAGE panel; nil hides both"
+
   slot :latest_body
 
   def run_list(assigns) do
@@ -149,9 +333,8 @@ defmodule HamacaWeb.RunComponents do
 
     ~H"""
     <div id="run-list" style="display:flex;flex-direction:column;gap:8px;">
-      <div style="font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);">
-        RUNS · {@count}
-      </div>
+      <.card_cost_heading count={@count} cost={@cost} />
+      <.card_cost_stages :if={@cost} cost={@cost} />
       <details
         :for={entry <- @entries}
         id={"run-entry-#{entry.number}"}
@@ -255,9 +438,13 @@ defmodule HamacaWeb.RunComponents do
     """
   end
 
-  # The one display fallback for a run's stage: the domain's work-stage name, else the flow key.
-  defp stage_chip(%{stage_name: nil, flow_key: nil}), do: nil
-  defp stage_chip(detail), do: String.upcase(detail.stage_name || detail.flow_key)
+  # The fallback (stage name, else flow key) lives in `RunDetail.stage_label/1`; the chip upcases it.
+  defp stage_chip(detail) do
+    case RunDetail.stage_label(detail) do
+      nil -> nil
+      label -> String.upcase(label)
+    end
+  end
 
   defp entry_meta(%{latest?: true, detail: detail}, now) do
     finished? = detail.status in Run.terminal_statuses()
@@ -1726,8 +1913,11 @@ defmodule HamacaWeb.RunComponents do
           @summary[:duration_s]
         )}
       </span>
-      <span style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-success) 70%, var(--color-base-content));">
-        {run_cost(@summary[:cost])}
+      <span
+        class="run-face-done-cost"
+        style="font-family:var(--font-mono);font-size:11px;color:color-mix(in oklab, var(--color-success) 70%, var(--color-base-content));"
+      >
+        {run_cost(@summary[:card_cost] || @summary[:cost])}
       </span>
     </div>
     """

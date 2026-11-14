@@ -2887,6 +2887,9 @@ defmodule HamacaWeb.CoreComponents do
 
   slot :actions, doc: "right-hand controls (44px targets)"
 
+  slot :title_suffix,
+    doc: "RE514: rendered after the title text inside the centered title row (e.g. the card cost chip); clickable"
+
   def mobile_nav_bar(assigns) do
     assigns = assign(assigns, :back_text, nav_back_text(assigns.back_label))
 
@@ -2917,12 +2920,17 @@ defmodule HamacaWeb.CoreComponents do
         >
           <.icon name="hero-chevron-left" class="size-[22px]" />{@back_text}
         </button>
-        <span
-          id={"#{@id}-title"}
-          class="pointer-events-none absolute inset-x-24 truncate text-center text-(length:--m-nav-title) font-(--m-nav-title-weight)"
-        >
-          {@title}
-        </span>
+        <div class="pointer-events-none absolute inset-x-24 flex min-w-0 items-center justify-center gap-1.5">
+          <span
+            id={"#{@id}-title"}
+            class="min-w-0 truncate text-center text-(length:--m-nav-title) font-(--m-nav-title-weight)"
+          >
+            {@title}
+          </span>
+          <div :if={@title_suffix != []} class="pointer-events-auto flex flex-none items-center">
+            {render_slot(@title_suffix)}
+          </div>
+        </div>
         <div id={"#{@id}-actions"} class="ml-auto flex items-center">
           {render_slot(@actions)}
         </div>
@@ -5079,6 +5087,11 @@ defmodule HamacaWeb.CoreComponents do
     doc:
       "RLY-137: the selected card's runs, newest-first, node executions preloaded — [] hides the Run tab unless queued_flow is set"
 
+  attr :card_cost, :map,
+    default: nil,
+    doc:
+      "RE514: `Hamaca.Runs.card_cost/1` of `runs` (computed beside them, never here) — the header chip, the Run tab's total and BY STAGE panel; nil hides them all"
+
   attr :run_flow, :any,
     default: nil,
     doc:
@@ -5331,6 +5344,9 @@ defmodule HamacaWeb.CoreComponents do
             back_label={@back_label}
             title={@ref}
           >
+            <:title_suffix :if={@card_cost}>
+              <RunComponents.card_cost_chip id="card-drawer-nav-bar-cost-chip" cost={@card_cost} />
+            </:title_suffix>
             <:actions>
               <div class="hidden min-h-11 flex-none items-center drawer:flex">
                 <.drawer_talk_button active={@drawer_tab == :talk} />
@@ -5409,6 +5425,11 @@ defmodule HamacaWeb.CoreComponents do
                 <span :if={!@embed} class="drawer-card-ref font-mono text-xs text-base-content/65">
                   {@ref}
                 </span>
+                <RunComponents.card_cost_chip
+                  :if={!@embed and @card_cost}
+                  id="card-drawer-cost-chip"
+                  cost={@card_cost}
+                />
                 <span
                   :if={@done}
                   id="drawer-done-pill"
@@ -6237,6 +6258,7 @@ defmodule HamacaWeb.CoreComponents do
                     <RunComponents.run_list
                       entries={run_entries(@runs, @latest_detail)}
                       task_progress={drawer_task_progress(@card)}
+                      cost={@card_cost}
                     >
                       <:latest_body>
                         <div

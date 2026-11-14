@@ -44,6 +44,7 @@ defmodule Hamaca.Runs do
   alias Hamaca.Repo
   alias Hamaca.Runs.Audit
   alias Hamaca.Runs.Capacity
+  alias Hamaca.Runs.CardCost
   alias Hamaca.Runs.Engine
   alias Hamaca.Runs.Instance
   alias Hamaca.Runs.Policy
@@ -314,8 +315,10 @@ defmodule Hamaca.Runs do
 
   @doc """
   The board's card faces in one pass: %{card_id => summary} for every card
-  whose latest run exists. Four queries (latest run per card, node-execution
-  aggregates, flows for happy paths, open region branches) — no per-card N+1. `duration_s` sums the
+  whose latest run exists. Five queries (latest run per card, node-execution
+  aggregates, card cost totals, flows for happy paths, open region branches) — no per-card N+1.
+  `card_cost` (RE514) is the sum of `cost` over every execution of every run of the card, whatever
+  each run's status — nil when none is priced — while `cost` is the latest run's alone. `duration_s` sums the
   `finished_at - started_at` gap of each execution (the schema stores no
   duration column); an in-flight execution (`finished_at: nil`) contributes
   nothing to the sum. `flow_version` is nil — the run points at the live flow
@@ -329,6 +332,8 @@ defmodule Hamaca.Runs do
   @empty_totals %{duration_s: nil, cost: nil, nodes: 0, attempts: 0, last_node: nil, executed: [], recent: []}
   # The `Track.zones/1` of a run whose flow row is gone (flow_shape/1's fallback): no track.
   @no_flow_shape nil
+  # The card total of a card absent from card_cost_totals/1: no execution on it carries a cost.
+  @no_card_cost nil
 
   def run_summaries_for_board(%Board{id: board_id}) do
     latest =
@@ -343,6 +348,7 @@ defmodule Hamaca.Runs do
 
     run_ids = Enum.map(latest, & &1.id)
     totals = node_totals(run_ids)
+    card_costs = latest |> Enum.map(& &1.card_id) |> card_cost_totals()
     regions = open_regions(run_ids)
 
     shapes =
@@ -353,7 +359,8 @@ defmodule Hamaca.Runs do
     Map.new(latest, fn run ->
       shape = Map.get(shapes, run.flow_key, @no_flow_shape)
       tot = Map.get(totals, run.id, @empty_totals)
-      {run.card_id, build_summary(run, shape, tot, Map.get(regions, run.id, []))}
+      card_cost = Map.get(card_costs, run.card_id, @no_card_cost)
+      {run.card_id, build_summary(run, shape, tot, card_cost, Map.get(regions, run.id, []))}
     end)
   end
 
@@ -362,7 +369,7 @@ defmodule Hamaca.Runs do
   no run — the one-card variant of `run_summaries_for_board/1` (RLY-204). BoardLive
   calls this to refetch only the card a run event names, instead of re-aggregating
   every run on the board. Both functions build each run's summary through the shared
-  private `build_summary/4`, so the summary map shape is defined exactly once.
+  private `build_summary/5`, so the summary map shape is defined exactly once.
   """
   def run_summary_for_card(%Card{} = card) do
     case latest_run(card) do
@@ -371,7 +378,8 @@ defmodule Hamaca.Runs do
 
       run ->
         totals = Map.get(node_totals([run.id]), run.id, @empty_totals)
-        build_summary(run, flow_shape_for(card, run), totals, open_region(run))
+        card_cost = Map.get(card_cost_totals([card.id]), card.id, @no_card_cost)
+        build_summary(run, flow_shape_for(card, run), totals, card_cost, open_region(run))
     end
   end
 
@@ -1022,9 +1030,9 @@ defmodule Hamaca.Runs do
   # whole board) and run_summary_for_card/1 (one card), so the shape lives in exactly one
   # place. `zones` is the flow's `flow_shape/1` (its `Track.zones/1`, which drives `track`,
   # RE513); `totals` is this run's node-execution aggregate, or @empty_totals when it has no
-  # executions yet; `branches` is the run's open region entry (`open_regions/1`), `[]` when none
-  # is open (RE440).
-  defp build_summary(%Run{} = run, zones, totals, branches) do
+  # executions yet; `card_cost` is the card's total over all its runs (`card_cost_totals/1`, RE514);
+  # `branches` is the run's open region entry (`open_regions/1`), `[]` when none is open (RE440).
+  defp build_summary(%Run{} = run, zones, totals, card_cost, branches) do
     %{
       run_id: run.id,
       card_id: run.card_id,
@@ -1038,6 +1046,7 @@ defmodule Hamaca.Runs do
       finished_at: run.finished_at,
       duration_s: totals.duration_s,
       cost: totals.cost,
+      card_cost: card_cost,
       nodes: totals.nodes,
       attempts: totals.attempts,
       branches: branch_summary(branches),
@@ -1086,6 +1095,29 @@ defmodule Hamaca.Runs do
   The web layer renders this instead of re-folding raw executions (RLY-207).
   """
   def run_detail(run, flow), do: RunDetail.build(run, flow)
+
+  @doc """
+  What all the work on a card cost (RE514): a `Hamaca.Runs.CardCost.t/0` map folded from the
+  card's runs as `list_runs_for_card/1` returns them, or nil when no execution is priced. One query finds the runs' agent executions — those with a
+  `NodeJob` carrying a `harness_key` (`distinct`: a requeue copies a job for the same
+  execution); `[]` returns nil without touching the DB.
+  """
+  @spec card_cost([Run.t()]) :: CardCost.t() | nil
+  def card_cost([]), do: nil
+
+  def card_cost(runs) do
+    run_ids = Enum.map(runs, & &1.id)
+
+    agent_ids =
+      Repo.all(
+        from j in NodeJob,
+          where: j.run_id in ^run_ids and not is_nil(j.harness_key),
+          distinct: true,
+          select: j.node_execution_id
+      )
+
+    CardCost.build(runs, MapSet.new(agent_ids))
+  end
 
   # A live run whose node-job is stuck (queued/unclaimed, or held by a silent runner) this long
   # has stopped moving. It never applies to a job a live runner is holding: working_run_ids/2
@@ -1194,6 +1226,24 @@ defmodule Hamaca.Runs do
     node_executions
     |> Enum.max_by(&{DateTime.to_unix(&1.started_at), &1.id})
     |> Map.fetch!(:node_key)
+  end
+
+  # %{card_id => Decimal | nil}: the sum of `cost` over every execution of every run of each card,
+  # whatever the run's status (RE514). Postgres `sum` skips NULL costs and yields NULL when every
+  # cost is NULL, which is the card that was never priced. The raw sum is kept (no to_decimal/1
+  # rounding) — `run_cost/1` rounds for display.
+  defp card_cost_totals([]), do: %{}
+
+  defp card_cost_totals(card_ids) do
+    from(ne in NodeExecution,
+      join: r in Run,
+      on: r.id == ne.run_id,
+      where: r.card_id in ^card_ids,
+      group_by: r.card_id,
+      select: {r.card_id, sum(ne.cost)}
+    )
+    |> Repo.all()
+    |> Map.new()
   end
 
   defp node_totals([]), do: %{}
