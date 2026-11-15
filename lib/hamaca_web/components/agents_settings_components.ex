@@ -604,6 +604,17 @@ defmodule HamacaWeb.AgentsSettingsComponents do
               />
             </div>
             <div class="flex flex-col gap-2 min-w-0">
+              <.meta_label>COST PATH</.meta_label>
+              <.input
+                field={@form[:cost_path]}
+                id="harness-form-cost-path"
+                class="input input-sm w-full font-mono text-[12.5px]"
+              />
+              <p class="text-base-content/65" style="font-size:12px;line-height:1.5;margin:0;">
+                dot path to the session's running cost in USD, e.g. <code>.total_cost_usd</code>
+              </p>
+            </div>
+            <div class="flex flex-col gap-2 min-w-0">
               <.meta_label>SIGNED-IN CHECK</.meta_label>
               <.input
                 field={@form[:signed_in_check]}

@@ -24,6 +24,7 @@ defmodule HamacaWeb.Api.HarnessControllerTest do
                  "models",
                  "resume_command",
                  "session_id_path",
+                 "cost_path",
                  "signed_in_check",
                  "usage"
                ])
@@ -33,6 +34,9 @@ defmodule HamacaWeb.Api.HarnessControllerTest do
     claude = Enum.find(body["harnesses"], &(&1["key"] == "claude-code"))
     assert claude["usage"]["source"] == "output"
     assert Enum.map(claude["usage"]["windows"], & &1["label"]) == ["5h", "7d"]
+
+    # RE516 — the value at `cost_path` is the session's cumulative USD cost.
+    assert claude["cost_path"] == ".total_cost_usd"
 
     assert body["digest"] == Hamaca.Agents.harnesses_digest(board)
   end

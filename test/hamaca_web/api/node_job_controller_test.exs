@@ -118,6 +118,10 @@ defmodule HamacaWeb.Api.NodeJobControllerTest do
     Hamaca.Repo.one!(from e in Schemas.NodeExecution, where: e.run_id == ^run.id and e.outcome == :blocked)
   end
 
+  defp only_execution(run) do
+    Hamaca.Repo.one!(from e in Schemas.NodeExecution, where: e.run_id == ^run.id)
+  end
+
   # Module-level helper (ExUnit forbids defp inside describe): claim a fresh job, return {run, id}.
   defp claim_one(conn, board, flow) do
     {run, _job} = start_queued_job(board, flow)
@@ -706,6 +710,55 @@ defmodule HamacaWeb.Api.NodeJobControllerTest do
 
       assert body["run_state"] == "parked"
       assert blocked_execution(run).resume_at == nil
+    end
+
+    test "RE516: a numeric cost is stored on the execution", %{conn: conn, board: board, flow: flow} do
+      {run, id} = claim_one(conn, board, flow)
+
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/#{id}/outcome",
+          Jason.encode!(%{"outcome" => "succeeded", "detail" => "done", "cost" => 0.4213})
+        )
+        |> json_response(200)
+
+      assert %{"status" => "ok"} = body
+      assert Decimal.equal?(only_execution(run).cost, Decimal.new("0.4213"))
+    end
+
+    test "RE516: a numeric-string cost is stored on the execution", %{conn: conn, board: board, flow: flow} do
+      {run, id} = claim_one(conn, board, flow)
+
+      assert %{"status" => "ok"} =
+               conn
+               |> post(
+                 ~p"/api/node-jobs/#{id}/outcome",
+                 Jason.encode!(%{"outcome" => "succeeded", "detail" => "done", "cost" => "0.75"})
+               )
+               |> json_response(200)
+
+      assert Decimal.equal?(only_execution(run).cost, Decimal.new("0.75"))
+    end
+
+    test "RE516: a missing, non-numeric or negative cost is never refused and stores nil", %{
+      conn: conn,
+      board: board,
+      flow: flow
+    } do
+      for extra <- [%{}, %{"cost" => "abc"}, %{"cost" => -1}] do
+        {run, id} = claim_one(conn, board, flow)
+
+        assert %{"status" => "ok"} =
+                 conn
+                 |> post(
+                   ~p"/api/node-jobs/#{id}/outcome",
+                   Jason.encode!(Map.merge(%{"outcome" => "succeeded", "detail" => "done"}, extra))
+                 )
+                 |> json_response(200)
+
+        assert only_execution(run).cost == nil, "expected #{inspect(extra)} to store a nil cost"
+      end
     end
   end
 

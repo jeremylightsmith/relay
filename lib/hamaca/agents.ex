@@ -44,6 +44,8 @@ defmodule Hamaca.Agents do
       resume_command:
         "claude -p --resume {session} {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
       session_id_path: ".session_id",
+      # RE516 — Claude Code's result event carries the session's running USD total.
+      cost_path: ".total_cost_usd",
       signed_in_check: "claude auth status",
       # RE436 — Claude Code's stream-json carries a `rate_limit_event` per window it tracks.
       usage: %HarnessUsage{
@@ -80,6 +82,7 @@ defmodule Hamaca.Agents do
       resume_command:
         "codex exec resume --json --model {model} -c approval_policy=never -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true {session} {prompt}",
       session_id_path: ".thread_id",
+      cost_path: nil,
       signed_in_check: "codex login status",
       # RE436 — `codex exec --json` prints no usage, but every session's rollout file logs a
       # `token_count` event carrying both rate-limit windows; the command reads the newest one.
@@ -117,6 +120,7 @@ defmodule Hamaca.Agents do
       models: ["gemini-2.5-pro", "gemini-2.5-flash"],
       resume_command: nil,
       session_id_path: nil,
+      cost_path: nil,
       signed_in_check: nil,
       usage: %HarnessUsage{source: "none"}
     }
@@ -176,7 +180,17 @@ defmodule Hamaca.Agents do
   end
 
   # Every harness field a board copy carries over; `key` is set programmatically, never cast.
-  @copied_harness_fields [:key, :name, :command, :models, :resume_command, :session_id_path, :signed_in_check, :usage]
+  @copied_harness_fields [
+    :key,
+    :name,
+    :command,
+    :models,
+    :resume_command,
+    :session_id_path,
+    :cost_path,
+    :signed_in_check,
+    :usage
+  ]
 
   @doc """
   Copies `source`'s harnesses and agents onto `target` (RE447 board copy): each harness under the
@@ -330,6 +344,7 @@ defmodule Hamaca.Agents do
       "models" => h.models,
       "resume_command" => h.resume_command,
       "session_id_path" => h.session_id_path,
+      "cost_path" => h.cost_path,
       "signed_in_check" => h.signed_in_check,
       "usage" => HarnessUsage.wire(h.usage)
     }

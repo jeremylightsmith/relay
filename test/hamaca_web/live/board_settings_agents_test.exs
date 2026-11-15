@@ -509,4 +509,54 @@ defmodule HamacaWeb.BoardSettingsAgentsTest do
 
     assert length(Agents.list_harnesses(board)) == 3
   end
+
+  describe "harness COST PATH (RE516)" do
+    defp open_harness(view, harness), do: view |> element("#harness-card-#{harness.id}-edit") |> render_click()
+
+    defp cost_path_value(view) do
+      view
+      |> render()
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("#harness-form-cost-path")
+      |> LazyHTML.attribute("value")
+    end
+
+    # Task 1 · Scenario 10
+    test "the Claude Code harness shows .total_cost_usd and Gemini CLI shows it empty", %{
+      conn: conn,
+      board: board
+    } do
+      view = open(conn, board)
+
+      open_harness(view, harness(board, "Claude Code"))
+      assert has_element?(view, "#harness-form-cost-path")
+      assert cost_path_value(view) == [".total_cost_usd"]
+
+      view = open(conn, board)
+      open_harness(view, harness(board, "Gemini CLI"))
+      assert has_element?(view, "#harness-form-cost-path")
+      # Present but with no `value` attribute: an empty field.
+      assert cost_path_value(view) == []
+    end
+
+    # Task 1 · Scenario 11
+    test "editing Gemini CLI's cost path stores it, and a bad one is refused in the form", %{
+      conn: conn,
+      board: board
+    } do
+      view = open(conn, board)
+      gemini = harness(board, "Gemini CLI")
+
+      open_harness(view, gemini)
+      view |> form("#harness-form", harness: %{cost_path: ".usage.cost"}) |> render_submit()
+
+      assert harness(board, "Gemini CLI").cost_path == ".usage.cost"
+
+      open_harness(view, gemini)
+      view |> form("#harness-form", harness: %{cost_path: "bad"}) |> render_submit()
+
+      assert has_element?(view, "#harness-form", "must be a dot path like .total_cost_usd")
+      assert harness(board, "Gemini CLI").cost_path == ".usage.cost"
+    end
+  end
 end

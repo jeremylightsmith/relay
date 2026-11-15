@@ -318,8 +318,7 @@ never 403s):
   rollup for a flow over a `?window=7d|30d|all` window (default `30d`): a `scope`
   (`"flow"` | `"card"`), the echoed `card` ref (`null` in flow scope), a `summary` stat band
   (`total_runs`, `completed`, `completed_pct`, `total_spend`, `median_end_to_end`,
-  `total_end_to_end`) and a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95` — `null`
-  until runners report spend — `duration_total`, `cost_total`, `attempts_mean`,
+  `total_end_to_end`) and a `nodes` array (`runs`, `duration_p50/p95`, `cost_p50/p95`, `duration_total`, `cost_total`, `attempts_mean`,
   `verdict_split`, `loop_laps`, and the RE345 idle-gap keys `wait_p50/p95`, `wait_total`,
   `wait_count`, `held_p50/p95`, `held_total`, `held_count`, and the RE348 span keys `work_total`,
   `rework_total`, `work_count`, `rework_count`, `rewind_total`, `rewind_count`). The nodes come from
@@ -753,12 +752,24 @@ that stays server-side.
   waits on a human (`Runs.report_accepted?/2`, RE437). The body's optional `resume_at` (RE267,
   ISO-8601 UTC) is read only with outcome `blocked` — an unparseable value is dropped to nil, never
   refused — and makes the engine requeue the node until that reset instead of parking it
-  ([failures.md](failures.md) A11b). The node outcomes (including the runner-only `blocked`,
+  ([failures.md](failures.md) A11b). The body's optional `cost` (RE516, a JSON number or numeric
+  string) is the agent session's **running total in USD**, read from the harness's `cost_path`;
+  `NodeJobController.report/3` parses it through `Runs.parse_cost/1` (`Hamaca.Runs.Cost.parse/1`),
+  and a missing, negative, non-numeric, NaN or infinite value reads nil — never a 4xx, so an older
+  runner that omits it keeps working and `@min_runner_version` is unchanged. Because Claude Code's
+  `total_cost_usd` carries across `--resume` (a needs-input re-entry or a Steer-now restart resumes
+  the same session), `Runs.finalize_job!/2` stores each execution's **delta**,
+  `Cost.execution_delta/2` = `max(reported − prior, 0)`, where `prior` is the sum of non-nil `cost`
+  on the card's *other* executions sharing the reported `session_id` (0 with no session; a `blocked`
+  row is priced against its reported session though it stores none). A card's summed cost therefore
+  equals the session's final running total. The node outcomes (including the runner-only `blocked`,
   RE308) and what each does to the run and the card are tabulated in the [state reference](state.md).
 - **Harness routing (RE433).** `Hamaca.Runs.build_payload/4` resolves every `agent` node's `llm`
   (nil = the board default) to a board agent with `Hamaca.Agents.resolve/2`, and the job payload —
   hence the node claim — carries top-level **`harness`** (`{key, command, resume_command,
-  session_id_path}`, the template the runner expands), **`model`** (the agent's model) and
+  session_id_path, cost_path}`, the template the runner expands; `cost_path`, RE516, is a dot
+  path whose value in the CLI's JSON events is **the session's cumulative USD cost** — nil when
+  the CLI reports none, `.total_cost_usd` on the claude-code seed), **`model`** (the agent's model) and
   **`effort`** (the node's raw value; the runner drops it for a template without `{effort}`).
   All three are null on shell/gate nodes. `Hamaca.Runs.insert_job!/3` copies `harness.key` onto
   `node_jobs.harness_key`, so the RE267 requeue copy keeps it. A **red** agent (`Hamaca.Agents.red?/1`)
@@ -778,7 +789,9 @@ that stays server-side.
   `harnesses_digest`
   (`Hamaca.Agents.harnesses_digest/1`, SHA-256 of the board's definitions in wire shape, free of
   ids and timestamps). `GET /api/harnesses` (`HamacaWeb.Api.HarnessController`, board key)
-  returns `{harnesses: [Hamaca.Agents.harness_wire/1 …], digest}`; the runner refetches it when
+  returns `{harnesses: [Hamaca.Agents.harness_wire/1 …], digest}` — each `{key, name, command,
+  models, resume_command, session_id_path, cost_path, signed_in_check, usage}`, where the value at
+  `cost_path` is the session's cumulative USD cost (RE516) — and the runner refetches it when
   the digest moves. **The claim's harness set (RE436):** a claim may carry `harnesses`, the keys
   the runner will run now (installed minus paused at a usage limit), normalized by
   `Schemas.Runner.normalize_claim_harnesses/1` and passed to `Hamaca.Runs.claim_next_job/4`, which
@@ -1518,8 +1531,20 @@ silently billed to the paid API.
   `_stream_claude_job`) runs the argv with `stdin=subprocess.DEVNULL` (`codex exec` reads a
   non-TTY stdin) and reads the session id from each JSON event at the harness's
   `session_id_path` with `read_path` (`.session_id`, `.thread_id`; latest non-empty wins, no
-  path captures nothing). Talk is out of scope and stays on `claude`: `run_talk_job` expands the
-  fixed `TALK_COMMAND` / `TALK_RESUME_COMMAND` with session path `.session_id`.
+  path captures nothing). It reads the harness's `cost_path` (RE516; `agent_argv` returns it as
+  the third element of `(argv, session_id_path, cost_path, refusal)`, `.get`-read so a server
+  predating it sends none) from the same events with `read_number` — a finite, non-negative
+  `int`/`float`, never a `bool`, NaN, infinity or numeric string — and the latest number wins onto
+  `ClaudeRunReport.cost` (a non-number never overwrites a captured one; no path captures
+  nothing). That value is the session's cumulative USD (`.total_cost_usd` for Claude Code).
+  `run_node_job` returns it as its **7th** element, `(outcome, detail, git_sha, session_id,
+  no_changes, resume_at, cost)`, for every agent node that ran, failed or blocked included, and
+  `None` for a shell/gate node, a refused detached HEAD or a no-harness/template refusal;
+  `execute_one` hands it to `report_outcome`, and `outcome_body` sends `cost` **only when it is
+  not None** (never `"cost": null`), so a shell or unpriced body is byte-identical to before. The
+  contract fixture's `outcome.request` pins the key. Talk is out of scope and stays on `claude`:
+  `run_talk_job` expands the fixed `TALK_COMMAND` / `TALK_RESUME_COMMAND` with session path
+  `.session_id` and passes no `cost_path`.
 - **Harness inventory (RE433).** `harness_inventory(harnesses)` reports, per board harness,
   `{key, installed, version, signed_in}`: `installed` = the template's executable is on `PATH`,
   `version` = the first line of `<exe> --version`, `signed_in` = the harness's `signed_in_check`
@@ -1986,7 +2011,8 @@ Five rules sit on top of it:
   park itself around its own retry budget. An unclassified non-zero exit stays `failed`, its
   detail now `agent exited non-zero: <the stream's last words>`. When the classification is a
   usage limit AND this job's stream carried a rejected `rate_limit_event` with `resetsAt`,
-  `blocked_resume_at` returns that epoch, `run_node_job` returns it as its 6th element, and
+  `blocked_resume_at` returns that epoch, `run_node_job` returns it as its 6th element (its 7th is
+  RE516's `cost`), and
   `outcome_body` sends it as `resume_at` (the key is omitted otherwise, so every other body is
   unchanged). The server then requeues the node rather than parking it — up to 3 consecutive
   waits — while the runner's own RE320 pause holds its claiming until the reset (RE267). Auth,

@@ -45,6 +45,7 @@ defmodule Hamaca.Runs do
   alias Hamaca.Runs.Audit
   alias Hamaca.Runs.Capacity
   alias Hamaca.Runs.CardCost
+  alias Hamaca.Runs.Cost
   alias Hamaca.Runs.Engine
   alias Hamaca.Runs.Instance
   alias Hamaca.Runs.Policy
@@ -1522,6 +1523,14 @@ defmodule Hamaca.Runs do
   end
 
   @doc """
+  The outcome body's optional `cost` (RE516) as a finite, non-negative `Decimal`, or `nil` for
+  anything else — never an error, so a bad cost can't cost the outcome. The web layer's door to
+  `Hamaca.Runs.Cost.parse/1`.
+  """
+  @spec parse_cost(term()) :: Decimal.t() | nil
+  defdelegate parse_cost(value), to: Cost, as: :parse
+
+  @doc """
   Reports a node outcome for `job` — `%{outcome:, detail:, git_sha:,
   session_id:, cost:}`, outcome required from the closed set. Finalizes
   the execution + job and hands the outcome to the run's `RunServer`
@@ -1530,6 +1539,11 @@ defmodule Hamaca.Runs do
   dropped. So is any job of a run that is not `:running`, except a
   sibling branch's while one branch waits on a human
   (`report_accepted?/2`, RE437).
+
+  `cost` (RE516, a `Decimal` or nil — see `parse_cost/1`) is the session's RUNNING total in USD,
+  not this execution's spend: the execution stores `max(cost − prior, 0)`, where `prior` is the
+  sum of the non-nil `cost` already recorded by this card's other executions on the same reported
+  `session_id` (0 with no session). A nil `cost` stores nil (unpriced).
   """
   def report_outcome(job, attrs)
 
@@ -5302,13 +5316,38 @@ defmodule Hamaca.Runs do
         session_id: if(outcome == :blocked, do: nil, else: attrs[:session_id]),
         # RE267: only a `:blocked` row can be a usage-limit wait, so only it keeps a reset time.
         resume_at: if(outcome == :blocked, do: attrs[:resume_at]),
-        cost: attrs[:cost],
+        # RE516: the reported cost is the session's running total; store only this execution's
+        # share of it.
+        cost: Cost.execution_delta(attrs[:cost], prior_session_cost(job, attrs[:session_id])),
         finished_at: now()
       )
       |> Repo.update!()
 
     job |> Changeset.change(state: :done, finished_at: now()) |> Repo.update!()
     execution
+  end
+
+  # RE516: what the card's OTHER executions already recorded on the REPORTED session — keyed on
+  # the reported id even for a `:blocked` row, which itself stores no session. Unpriced rows (nil
+  # cost: an older runner, a revoked Steer-now) are skipped by `sum`, so their spend lands on the
+  # next priced execution of the session. Mirrors `card_cost_totals/1`'s join.
+  defp prior_session_cost(%NodeJob{} = job, session_id) do
+    if is_binary(session_id) and String.trim(session_id) != "" do
+      card_id = Repo.one!(from r in Run, where: r.id == ^job.run_id, select: r.card_id)
+
+      prior =
+        Repo.one(
+          from ne in NodeExecution,
+            join: r in Run,
+            on: r.id == ne.run_id,
+            where: r.card_id == ^card_id and ne.session_id == ^session_id and ne.id != ^job.node_execution_id,
+            select: sum(ne.cost)
+        )
+
+      prior || Decimal.new(0)
+    else
+      Decimal.new(0)
+    end
   end
 
   @doc false
@@ -5551,7 +5590,8 @@ defmodule Hamaca.Runs do
 
   defp agent_fields(agent, node) do
     %{
-      "harness" => Map.take(Agents.harness_wire(agent.harness), ["key", "command", "resume_command", "session_id_path"]),
+      "harness" =>
+        Map.take(Agents.harness_wire(agent.harness), ["key", "command", "resume_command", "session_id_path", "cost_path"]),
       "model" => agent.model,
       "effort" => node.effort
     }

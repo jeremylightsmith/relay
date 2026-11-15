@@ -71,6 +71,7 @@ defmodule Hamaca.Runs.HarnessPayloadTest do
     assert_receive {:dispatched, %NodeJob{payload: payload} = job}
     assert payload["harness"]["key"] == "claude-code"
     assert payload["harness"]["command"] == harness(board, "claude-code").command
+    assert payload["harness"]["cost_path"] == ".total_cost_usd"
     assert payload["model"] == "opus"
     assert payload["effort"] == "high"
     refute Map.has_key?(payload, "refusal")
@@ -87,6 +88,8 @@ defmodule Hamaca.Runs.HarnessPayloadTest do
     assert payload["harness"]["key"] == "codex"
     assert payload["model"] == "gpt-6-sol"
     assert payload["harness"]["session_id_path"] == ".thread_id"
+    assert Map.has_key?(payload["harness"], "cost_path")
+    assert payload["harness"]["cost_path"] == nil
     assert Repo.get!(NodeJob, job.id).harness_key == "codex"
   end
 

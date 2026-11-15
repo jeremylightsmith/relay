@@ -61,8 +61,8 @@ USAGE = None   # the running `hamaca start`'s HarnessUsageBook (RE436); None out
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 99
-RUNNER_FINGERPRINT = "5f57e0790b1f70547838314d58e4107cc43ee65b20d252b3cc2c845ad0ed7331"
+RUNNER_VERSION = 100
+RUNNER_FINGERPRINT = "16e54e8528dbfed30e38a7c6262621ceea34fca30626ff1296ff035ee13abed9"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -3890,8 +3890,9 @@ def select_command(harness, session_id):
     return harness["command"], None
 
 
-def read_path(event, path):
-    """Follow a dot path (`.a.b`) through nested dicts; a non-empty string, else None."""
+def _follow_path(event, path):
+    """The value at a dot path (`.a.b`) through nested dicts, or None — no path, a non-dict on
+    the way, or a missing key all read None."""
     if not path:
         return None
     value = event
@@ -3899,7 +3900,24 @@ def read_path(event, path):
         if not isinstance(value, dict):
             return None
         value = value.get(key)
+    return value
+
+
+def read_path(event, path):
+    """Follow a dot path (`.a.b`) through nested dicts; a non-empty string, else None."""
+    value = _follow_path(event, path)
     return value if isinstance(value, str) and value else None
+
+
+def read_number(event, path):
+    """Follow a dot path like `read_path`; a finite, non-negative int or float, else None
+    (RE516: a harness's `cost_path`). `bool` is rejected explicitly — it is an `int` in Python —
+    so a `true` in the stream never reads as a cost of 1, and NaN, infinities, negatives and
+    numeric strings read None, so junk never becomes a cost."""
+    value = _follow_path(event, path)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value if math.isfinite(value) and value >= 0 else None
 
 
 # ---- Harness usage rules (RE436) ---------------------------------------------
@@ -4737,7 +4755,8 @@ def claim_node_job(runner, capacity, timeout, running=(), held=(), harnesses=Non
     return resp or None
 
 
-def outcome_body(outcome, detail, git_sha, session_id=None, no_changes=False, resume_at=None):
+def outcome_body(outcome, detail, git_sha, session_id=None, no_changes=False, resume_at=None,
+                 cost=None):
     """The exact body POSTed to /api/node-jobs/:id/outcome.
 
     Pure and separate from the POST so bin/test_relay.py can pin its key set against
@@ -4750,12 +4769,19 @@ def outcome_body(outcome, detail, git_sha, session_id=None, no_changes=False, re
 
     `resume_at` (RE267) is the epoch a usage-limit `blocked` resets at (`blocked_resume_at`),
     sent as ISO-8601 UTC and ONLY when there is one — so every other body is byte-identical to
-    what it was before. With it the server requeues the node instead of parking it."""
+    what it was before. With it the server requeues the node instead of parking it.
+
+    `cost` (RE516) is the session's cumulative USD cost the agent's stream reported at its
+    harness's `cost_path`, sent as a JSON number ONLY when there is one — never `"cost": null` —
+    so a shell or unpriced body is byte-identical to before. The server stores the per-execution
+    delta against prior executions of the same session and never refuses a value it can't read."""
     body = {"outcome": outcome, "detail": detail,
             "git_sha": git_sha, "session_id": session_id,
             "no_changes": bool(no_changes)}
     if resume_at is not None:
         body["resume_at"] = iso_utc(resume_at)
+    if cost is not None:
+        body["cost"] = cost
     return body
 
 
@@ -4805,7 +4831,7 @@ def heartbeat_body(runner, capacity, running, held, capabilities=None, harnesses
 
 
 def report_outcome(job_id, outcome, detail, git_sha, session_id=None, no_changes=False,
-                   resume_at=None):
+                   resume_at=None, cost=None):
     """POST the typed outcome; return the server-assigned run_state
     (running|parked|done|failed|cancelled) that tells the runner whether to keep or free an
     exclusive slot (§3). idempotent=True: the endpoint is first-writer-wins per job (RLY-202),
@@ -4813,7 +4839,7 @@ def report_outcome(job_id, outcome, detail, git_sha, session_id=None, no_changes
     RE449: a transient failure keeps retrying for up to OUTCOME_RETRY_BUDGET_S — the job stays
     in the heartbeat's `running` list meanwhile — so a network outage doesn't lose the outcome."""
     resp = api("POST", f"/api/node-jobs/{job_id}/outcome",
-               outcome_body(outcome, detail, git_sha, session_id, no_changes, resume_at),
+               outcome_body(outcome, detail, git_sha, session_id, no_changes, resume_at, cost),
                idempotent=True, retry_budget_s=OUTCOME_RETRY_BUDGET_S)
     return (resp or {}).get("run_state")
 
@@ -4864,6 +4890,9 @@ class ClaudeRunReport:
         self.error_tag = None
         self.rejected = False
         self.rejected_resets_at = None
+        # RE516: the session's cumulative USD cost, read at the harness's `cost_path` — the
+        # latest finite, non-negative number the stream carried, None until it carries one.
+        self.cost = None
 
     def observe(self, ev):
         if not isinstance(ev, dict):
@@ -4971,7 +5000,7 @@ def classify_claude_failure(report):
 
 def _stream_agent_job(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None,
                       partition=None, scratch=None, plan=None, on_event=None, mirror=True,
-                      usage=None, on_session=None):
+                      usage=None, on_session=None, cost_path=None):
     """Run one agent CLI invocation — `argv`, already expanded from a harness command template
     (RE433) — and stream its JSON events. The session id is read from each event at
     `session_id_path` (a dot path, `.session_id` for Claude Code, `.thread_id` for a CLI that
@@ -4989,7 +5018,10 @@ def _stream_agent_job(argv, cwd, tag="", session_id_path=None, outcome_path=None
     report with its reset (`rejected_resets_at`, which RE267's resume-at reads). A talk turn passes
     none. `on_session`, if given, is called with the captured session id each time it changes to
     a new non-empty value (RE358) — a node job's `JobControl.note_session`, which the heartbeat
-    reads so the session survives a revoke.
+    reads so the session survives a revoke. `cost_path` (RE516) is the harness's dot path to the
+    session's cumulative USD cost (`.total_cost_usd` for Claude Code); each event is read with
+    `read_number` and the latest number wins onto `report.cost` — a non-number never overwrites
+    one already captured, and no path captures nothing (a talk turn passes none).
 
     stdin is DEVNULL: an agent CLI reading a non-TTY stdin (`codex exec` does) would otherwise
     hang on, or append junk from, the runner's own stdin.
@@ -5025,6 +5057,9 @@ def _stream_agent_job(argv, cwd, tag="", session_id_path=None, outcome_path=None
             previous, captured = captured, read_path(ev, session_id_path) or captured
             if on_session and captured and captured != previous:
                 on_session(captured)
+            cost = read_number(ev, cost_path)   # RE516: `is not None` — a cost of 0 is a cost
+            if cost is not None:
+                report.cost = cost
             report.observe(ev)          # RE308: total; never raises
             _print_claude_event(ev, tag, mirror=mirror)
             reading = usage.observe(ev, usage_clock()) if usage is not None else None
@@ -5418,25 +5453,27 @@ NO_HARNESS_REFUSAL = "this job carries no harness — the server and runner disa
 
 
 def agent_argv(job, slot_path, prompt, ref):
-    """(argv, session_id_path, refusal) for an agent node-job, from the harness the server
-    resolved at enqueue (RE433). Resume only where the harness can (`select_command`). A job
+    """(argv, session_id_path, cost_path, refusal) for an agent node-job, from the harness the
+    server resolved at enqueue (RE433). Resume only where the harness can (`select_command`).
+    `cost_path` (RE516) is read with `.get` — a server predating it sends no such key. A job
     with no harness, or a template that cannot expand, is a refusal string and no argv — the
     caller fails the node without spawning anything."""
     harness = job.get("harness")
     if not harness:
-        return None, None, NO_HARNESS_REFUSAL
+        return None, None, None, NO_HARNESS_REFUSAL
     template, session = select_command(harness, job.get("resume_session"))
     values = {"prompt": prompt, "model": job.get("model"), "worktree": slot_path, "ref": ref,
               "effort": job.get("effort"), "subagent": job.get("agent"), "session": session}
     try:
-        return expand_command(template, values), harness.get("session_id_path"), None
+        return (expand_command(template, values), harness.get("session_id_path"),
+                harness.get("cost_path"), None)
     except TemplateError as e:
-        return None, None, str(e)
+        return None, None, None, str(e)
 
 
 def run_node_job(job, slot_path, control, partition=None):
     """Run one claimed node-job in `slot_path`; return (outcome, detail, git_sha, session_id,
-    no_changes, resume_at). Reuses the streaming primitives, tagged per job. Does NOT report — the caller
+    no_changes, resume_at, cost). Reuses the streaming primitives, tagged per job. Does NOT report — the caller
     POSTs the outcome (§6) and acts on the run_state (§3).
 
     `partition` (the caller's `pool.partition_for(slot)`, RLY-213) rides straight through to
@@ -5460,7 +5497,11 @@ def run_node_job(job, slot_path, control, partition=None):
     contract, a shell/gate node gets its command line unchanged.
 
     `resume_at` (RE267) is `blocked_resume_at` for an agent node and always None for a
-    shell/gate node or a refused detached HEAD."""
+    shell/gate node or a refused detached HEAD.
+
+    `cost` (RE516) is the stream's `report.cost` — the session's cumulative USD at the harness's
+    `cost_path` — for an agent node that ran, whatever its outcome (spend is spend), and None for
+    a shell/gate node, a refused detached HEAD or a no-harness/template refusal."""
     ref = (job.get("vars") or {}).get("ref") or job["id"]
     tag = f"[{ref}] "
     raw_vars = dict(job.get("vars") or {})
@@ -5480,15 +5521,15 @@ def run_node_job(job, slot_path, control, partition=None):
     detached = check_branch_attached(slot_path, job.get("isolation"), vars.get("branch"), cmd)
     if detached:
         log(f"  ⚠ {ref}: {detached}", ref=ref, kind="error")
-        return "failed", detached, git_head_sha(slot_path), None, False, None
+        return "failed", detached, git_head_sha(slot_path), None, False, None, None
 
     session_id = None
     if job.get("node_type") == "agent":
-        argv, session_path, refusal = agent_argv(job, slot_path, compose_node_prompt(job, cmd, vars),
-                                                 vars["ref"])
+        argv, session_path, cost_path, refusal = agent_argv(
+            job, slot_path, compose_node_prompt(job, cmd, vars), vars["ref"])
         if refusal:
             log(f"  ⚠ {ref}: {refusal}", ref=ref, kind="error")
-            return "failed", refusal, git_head_sha(slot_path), None, False, None
+            return "failed", refusal, git_head_sha(slot_path), None, False, None, None
         # The outcome file must live OUTSIDE the checkout: reset_worktree() salvages any
         # non-empty `git status --porcelain`, so a file inside slot_path would make every
         # agent job leave a spurious "salvaging leftovers" stash for the next job on this
@@ -5499,12 +5540,13 @@ def run_node_job(job, slot_path, control, partition=None):
         try:
             ok, session_id, report = _stream_agent_job(
                 argv, cwd=slot_path, tag=tag, session_id_path=session_path,
-                outcome_path=outcome_path, on_proc=control.register,
+                cost_path=cost_path, outcome_path=outcome_path, on_proc=control.register,
                 partition=partition, scratch=scratch, plan=plan, usage=usage,
                 on_session=control.note_session)
             outcome, detail, no_changes = determine_agent_outcome(job, ok, outcome_path, cwd=slot_path,
                                                                   report=report)
             resume_at = blocked_resume_at(outcome, report)
+            cost = report.cost
         finally:
             shutil.rmtree(outcome_dir, ignore_errors=True)
     else:  # shell | gate
@@ -5517,10 +5559,11 @@ def run_node_job(job, slot_path, control, partition=None):
         # A shell/gate node's exit code is its whole verdict — it has nothing to assert.
         no_changes = False
         resume_at = None
+        cost = None
     sha_proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=slot_path,
                               capture_output=True, text=True)
     git_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else None
-    return outcome, detail, git_sha, session_id, no_changes, resume_at
+    return outcome, detail, git_sha, session_id, no_changes, resume_at, cost
 
 
 # ---- Talk (RE268 / ADR 0014) ------------------------------------------------
@@ -5954,7 +5997,7 @@ def execute_one(job, slot, reset, control, pool):
             run_state = report_outcome(job["id"], "failed", prep_failure,
                                        git_head_sha(slot_path), None)
             return run_state
-        outcome, detail, git_sha, session_id, no_changes, resume_at = run_node_job(
+        outcome, detail, git_sha, session_id, no_changes, resume_at, cost = run_node_job(
             job, slot_path, control, partition=partition)
         if control.cancelled():
             revoked = True
@@ -5963,7 +6006,7 @@ def execute_one(job, slot, reset, control, pool):
             return None
         completed_outcome = outcome
         run_state = report_outcome(job["id"], outcome, detail, git_sha, session_id, no_changes,
-                                   resume_at)
+                                   resume_at, cost)
         return run_state
     except (Exception, SystemExit) as e:
         # run_node_job (or the report_outcome call above) can raise SystemExit via api()'s

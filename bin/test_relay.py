@@ -186,7 +186,7 @@ def codex_token_count(primary=0.0, primary_resets=1_791_623_773, secondary=3.0,
 def harness_definition(key, name, usage, command=None):
     """One GET /api/harnesses entry, in the fixture's `harness_keys` shape."""
     return {"key": key, "name": name, "command": command or f"{key} -p {{prompt}}",
-            "resume_command": None, "session_id_path": None, "signed_in_check": None,
+            "resume_command": None, "session_id_path": None, "cost_path": None, "signed_in_check": None,
             "models": [], "usage": usage}
 
 
@@ -368,11 +368,24 @@ class ReverseContractTest(unittest.TestCase):
 
     def test_outcome_body_key_set_matches_the_fixture(self):
         # RE267: `resume_at` is OPTIONAL — sent only for a usage-limit `blocked` with a known
-        # reset — so a plain body is a SUBSET of the fixture's keys and a full one matches it.
+        # reset — and so is RE516's `cost`, sent only when the agent's stream reported one; so a
+        # plain body is a SUBSET of the fixture's keys and a full one matches it.
         body = relay.outcome_body("succeeded", "done", "abc123", "sess-1")
         self.assertTrue(set(body) <= set(CONTRACT["outcome"]["request"]))
-        full = relay.outcome_body("blocked", "agent could not run: x", "abc123", None, False, FAR_RESET)
+        full = relay.outcome_body("blocked", "x", "abc123", None, False, FAR_RESET, 0.05)
         self.assertEqual(set(full), set(CONTRACT["outcome"]["request"]))
+
+    def test_outcome_body_sends_the_cost_the_fixture_pins(self):
+        body = relay.outcome_body("succeeded", "done", "abc123", "sess-1", False, None, 0.4213)
+        self.assertEqual(body["cost"], 0.4213)
+        self.assertEqual(body["cost"], CONTRACT["outcome"]["request"]["cost"])
+
+    def test_outcome_body_omits_cost_when_there_is_none(self):
+        # Never `"cost": null` — a shell or unpriced body stays byte-identical to before RE516.
+        plain = relay.outcome_body("succeeded", "done", "abc123")
+        self.assertNotIn("cost", plain)
+        self.assertNotIn("cost", relay.outcome_body("succeeded", "done", "abc123", cost=None))
+        self.assertTrue(set(plain) <= set(CONTRACT["outcome"]["request"]))
 
     def test_outcome_body_omits_resume_at_when_there_is_none(self):
         self.assertNotIn("resume_at", relay.outcome_body("succeeded", "done", "abc123"))
@@ -4324,6 +4337,24 @@ class PrepareWorktreeHookTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(self.wt, "deps", "mine")))
         self.assertFalse(os.path.exists(os.path.join(self.wt, "deps", "foo")))
 
+    def _warm_build(self, dep, baked_dir):
+        # A compiled dep whose beam bakes an absolute source path (as `__DIR__` does).
+        ebin = os.path.join(self.main, "_build", "test", "lib", dep, "ebin")
+        os.makedirs(ebin)
+        with open(os.path.join(ebin, f"Elixir.{dep}.beam"), "wb") as f:
+            f.write(b"FOR1\x00\x00" + baked_dir.encode() + b"/lib/x/engines\x00rest")
+        return os.path.join(self.wt, "_build", "test", "lib", dep)
+
+    # RE516: the repo was renamed relay -> hamaca; the main checkout's `_build` still baked
+    # `/…/src/relay/deps/…` paths, so every warmed worktree read files that no longer exist.
+    def test_drops_a_warmed_dep_build_that_bakes_a_vanished_deps_path(self):
+        stale = self._warm_build("stale", os.path.join(self.tmp, "gone", "deps", "stale"))
+        fresh = self._warm_build("fresh", os.path.join(self.main, "deps", "foo"))
+        proc = self.run_hook()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertFalse(os.path.exists(stale), "a build pointing at a vanished deps dir must be dropped")
+        self.assertTrue(os.path.isdir(fresh), "a build whose baked deps dir exists must be kept")
+
 
 class GenericPrepareHookTest(PrepareWorktreeHookTest):
     """RE443: `./relay update --starter-only` lays down `render_prepare_hook()` — the same
@@ -4369,6 +4400,11 @@ class GenericPrepareHookTest(PrepareWorktreeHookTest):
     def test_does_not_clobber_an_existing_destination(self):
         self.warm("deps")
         super().test_does_not_clobber_an_existing_destination()
+
+    @unittest.skip("RE516's stale-`_build` drop is mix-specific: it lives in this repo's own "
+                   "hook, not the language-agnostic generic WARM-list hook")
+    def test_drops_a_warmed_dep_build_that_bakes_a_vanished_deps_path(self):
+        pass
 
 
 class _FakePopen:
@@ -4517,6 +4553,14 @@ class ClaimAndReportTest(unittest.TestCase):
         self.assertEqual((m, p), ("POST", "/api/node-jobs/nj-1/outcome"))
         self.assertEqual(b, {"outcome": "needs_input", "detail": "asked",
                              "git_sha": "abc123", "session_id": "sess-9", "no_changes": False})
+
+    def test_report_outcome_posts_the_cost(self):
+        """RE516: the session cost run_node_job returns reaches the outcome POST."""
+        sent = []
+        relay.api = lambda m, p, b=None, **k: (sent.append((m, p, b)) or {"run_state": "done"})
+        relay.report_outcome("nj-1", "succeeded", "", "sha", "s-1", False, None, 0.42)
+        _m, _p, b = sent[0]
+        self.assertEqual(b["cost"], 0.42)
 
 
 class ApiTimeoutPassthroughTest(unittest.TestCase):
@@ -4759,6 +4803,35 @@ class ReadPathTest(unittest.TestCase):
         self.assertIsNone(relay.read_path({"session_id": ""}, ".session_id"))
 
 
+class ReadNumberTest(unittest.TestCase):
+    """RE516: the harness's `cost_path` is read with read_number — a finite, non-negative number
+    or nothing, so junk in a stream never becomes a cost."""
+
+    def test_reads_a_top_level_float(self):
+        self.assertEqual(relay.read_number({"total_cost_usd": 0.4213}, ".total_cost_usd"), 0.4213)
+
+    def test_reads_a_nested_int_and_keeps_it_an_int(self):
+        value = relay.read_number({"a": {"b": 3}}, ".a.b")
+        self.assertEqual(value, 3)
+        self.assertIs(type(value), int)
+
+    def test_zero_is_a_cost_not_none(self):
+        value = relay.read_number({"total_cost_usd": 0}, ".total_cost_usd")
+        self.assertIsNotNone(value)
+        self.assertEqual(value, 0)
+
+    def test_anything_but_a_finite_non_negative_number_is_none(self):
+        for ev in ({"c": True}, {"c": False}, {"c": "0.5"}, {"c": -0.1}, {"c": float("nan")},
+                   {"c": float("inf")}, {"c": None}, {}):
+            with self.subTest(ev=ev):
+                self.assertIsNone(relay.read_number(ev, ".c"))
+
+    def test_a_none_or_empty_path_or_a_non_dict_event_is_none(self):
+        self.assertIsNone(relay.read_number({"c": 1.0}, None))
+        self.assertIsNone(relay.read_number({"c": 1.0}, ""))
+        self.assertIsNone(relay.read_number("not a dict", ".c"))
+
+
 class StreamAgentJobTest(unittest.TestCase):
     def setUp(self):
         self._popen = relay.subprocess.Popen
@@ -4801,6 +4874,42 @@ class StreamAgentJobTest(unittest.TestCase):
         relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
         _ok, session, _r = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         self.assertIsNone(session)
+
+    # --- RE516: the session's cumulative cost, read at the harness's cost_path -------------
+    COST_LINES = [json.dumps({"type": "system", "session_id": "s-1"}),
+                  json.dumps({"type": "result", "total_cost_usd": 0.10}),
+                  json.dumps({"type": "result", "total_cost_usd": 0.25}),
+                  json.dumps({"type": "x"})]
+
+    def test_the_latest_cost_at_the_cost_path_rides_on_the_report(self):
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(self.COST_LINES, code=0)
+        _ok, session, report = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                                           session_id_path=".session_id",
+                                           cost_path=".total_cost_usd")
+        self.assertEqual(report.cost, 0.25)
+        self.assertEqual(session, "s-1")
+
+    def test_no_cost_path_captures_no_cost(self):
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(self.COST_LINES, code=0)
+        _ok, _session, report = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                                            session_id_path=".session_id")
+        self.assertIsNone(report.cost)
+
+    def test_a_stream_without_the_cost_key_captures_no_cost(self):
+        lines = [json.dumps({"type": "system", "session_id": "s-1"}),
+                 json.dumps({"type": "result"})]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
+        _ok, _session, report = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                                            cost_path=".total_cost_usd")
+        self.assertIsNone(report.cost)
+
+    def test_a_non_number_never_overwrites_a_captured_cost(self):
+        lines = [json.dumps({"type": "result", "total_cost_usd": 0.30}),
+                 json.dumps({"type": "result", "total_cost_usd": "junk"})]
+        relay.subprocess.Popen = lambda *a, **k: _FakePopen(lines, code=0)
+        _ok, _session, report = capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
+                                            cost_path=".total_cost_usd")
+        self.assertEqual(report.cost, 0.30)
 
     def test_on_session_hears_each_new_session_id_once(self):
         """RE358 Task 3 · Scenario 8: the runner reports a job's live session on the heartbeat,
@@ -5525,7 +5634,7 @@ class RunNodeJobTest(unittest.TestCase):
         relay._stream_agent_job = fake_stream
         relay.determine_agent_outcome = fake_determine
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1", vars={"ref": "RLY-2"})
-        outcome, detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, _sha, _session, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertIs(seen["report"], report)
         self.assertEqual((outcome, detail), ("blocked", "agent could not run: x"))
 
@@ -5536,7 +5645,7 @@ class RunNodeJobTest(unittest.TestCase):
         relay._stream_agent_job = lambda argv, cwd, **kwargs: (False, "sess-9", report)
         relay.get_card = lambda ref: {"status": "working"}
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1", vars={"ref": "RLY-2"})
-        outcome, _detail, _sha, _session, _no_changes, resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, _detail, _sha, _session, _no_changes, resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual((outcome, resume_at), ("blocked", FAR_RESET))
 
     # --- RLY-166: never run a node on a detached HEAD -----------------------------------
@@ -5561,7 +5670,7 @@ class RunNodeJobTest(unittest.TestCase):
         self._git_head("", returncode=1)  # detached: symbolic-ref exits non-zero
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"}, run="true")
-        outcome, detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, _sha, _session, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
 
         self.assertEqual(outcome, "failed")
         self.assertIn("detached", detail)
@@ -5573,7 +5682,7 @@ class RunNodeJobTest(unittest.TestCase):
         self._git_head("refs/heads/some-other-branch\n")
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"}, run="true")
-        outcome, detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, _sha, _session, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
 
         self.assertEqual(outcome, "failed")
         self.assertIn("feature-x", detail)
@@ -5588,7 +5697,7 @@ class RunNodeJobTest(unittest.TestCase):
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"},
                 run="git checkout -B {branch} origin/main")
-        outcome, _detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, _detail, _sha, _session, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(len(ran), 1)
@@ -5607,7 +5716,7 @@ class RunNodeJobTest(unittest.TestCase):
 
         j = job("shared_clean_agent", node_type="shell", run="true")
         self.assertIsNotNone(j["vars"]["branch"], "the fixture must carry a branch var here")
-        outcome, _detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, _detail, _sha, _session, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(len(ran), 1)
@@ -5615,7 +5724,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_shell_job_reports_succeeded_with_git_sha(self):
         relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: True
         j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
-        outcome, detail, sha, session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, sha, session, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", None))
 
     def test_shell_job_failure_carries_the_output_tail(self):
@@ -5625,24 +5734,24 @@ class RunNodeJobTest(unittest.TestCase):
             return False
         relay._stream_shell = fail
         j = job(node_type="gate", run="false", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
-        outcome, detail, _, _, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, _, _, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual(outcome, "failed")
         self.assertIn("boom line", detail)
 
     def test_agent_job_captures_session_and_uses_the_contract(self):
         relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
-            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None: (True, "sess-9", relay.ClaudeRunReport())
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
-        outcome, detail, sha, session, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        outcome, detail, sha, session, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", "sess-9"))
 
     def test_agent_job_carries_the_no_changes_assertion_through_to_the_return(self):
         """RE310: determine_agent_outcome's third element (the --no-changes assertion) must
         reach run_node_job's caller unchanged — that boolean is the entire point of this wire."""
         relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
-            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None: (True, "sess-9", relay.ClaudeRunReport())
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "already committed", True)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -5679,6 +5788,66 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertEqual(seen["argv"][seen["argv"].index("--model") + 1], "opus")
         self.assertEqual(seen["kwargs"]["session_id_path"], ".session_id")
 
+    # --- RE516: the harness's cost_path in, the session's cost out ------------------------
+
+    def test_agent_job_passes_the_harness_cost_path(self):
+        j = job(node_type="agent", run="x", vars={"ref": "RLY-2"})
+        self.assertEqual(j["harness"]["cost_path"], ".total_cost_usd")
+        self.assertEqual(self._argv_for(j)["kwargs"]["cost_path"], ".total_cost_usd")
+
+    def test_a_harness_without_a_cost_path_key_passes_none(self):
+        # A server predating RE516 sends no `cost_path` key at all.
+        harness = {k: v for k, v in CONTRACT["claim"]["shared_clean_agent"]["harness"].items()
+                   if k != "cost_path"}
+        seen = self._argv_for(job(node_type="agent", run="x", harness=harness,
+                                  vars={"ref": "RLY-2"}))
+        self.assertIn("cost_path", seen["kwargs"])
+        self.assertIsNone(seen["kwargs"]["cost_path"])
+
+    def _stream_reporting(self, ok, cost, declare=None):
+        """A _stream_agent_job stand-in whose report carries `cost`; `declare`, if given, is the
+        outcome the agent writes to its outcome file — the real determine_agent_outcome judges."""
+        report = relay.ClaudeRunReport()
+        report.cost = cost
+
+        def fake_stream(argv, cwd, **kwargs):
+            if declare:
+                with open(kwargs["outcome_path"], "w") as f:
+                    json.dump({"outcome": declare, "detail": "done"}, f)
+            return ok, "s-1", report
+
+        relay._stream_agent_job = fake_stream
+        relay.get_card = lambda ref: {"status": "working"}
+
+    def test_an_agent_job_returns_its_session_cost_as_the_7th_element(self):
+        self._stream_reporting(True, 0.42, declare="succeeded")
+        result = relay.run_node_job(job(node_type="agent", run="x", vars={"ref": "RLY-2"}),
+                                    "/tmp/wt", self.control)
+        self.assertEqual(result[0], "succeeded")
+        self.assertEqual(result[6], 0.42)
+
+    def test_a_failed_agent_job_still_returns_its_cost(self):
+        # Spend is spend: an agent that ran and failed still cost money.
+        self._stream_reporting(False, 0.07)
+        result = relay.run_node_job(job(node_type="agent", run="x", vars={"ref": "RLY-2"}),
+                                    "/tmp/wt", self.control)
+        self.assertEqual(result[0], "failed")
+        self.assertEqual(result[6], 0.07)
+
+    def test_a_shell_job_has_no_cost(self):
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: True
+        result = relay.run_node_job(job(node_type="shell", run="true", vars={"ref": "RLY-1"}),
+                                    "/tmp/wt", self.control)
+        self.assertEqual(len(result), 7)
+        self.assertIsNone(result[6])
+
+    def test_an_agent_job_with_no_harness_has_no_cost(self):
+        result = relay.run_node_job(job(node_type="agent", run="x", harness=None,
+                                        vars={"ref": "RLY-2"}), "/tmp/wt", self.control)
+        self.assertEqual(result[:2], ("failed", relay.NO_HARNESS_REFUSAL))
+        self.assertEqual(len(result), 7)
+        self.assertIsNone(result[6])
+
     def test_needs_input_reentry_resumes_the_prior_session(self):
         """The claim payload's server field is `resume_session` (NodeJobController.claim_payload/1),
         not `session_id` (that's the outcome-report field name) — a needs-input re-entry must
@@ -5693,7 +5862,7 @@ class RunNodeJobTest(unittest.TestCase):
         would otherwise leave the next job's reset_worktree() logging a spurious salvage."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
             seen["stream_path"] = outcome_path
             self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
             return True, "sess-9", relay.ClaudeRunReport()
@@ -5724,7 +5893,7 @@ class RunNodeJobTest(unittest.TestCase):
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "", "returncode": 128})()
         j = job(node_type="shell", run="true", id="nj-5", run_id="r1", vars={"ref": "RLY-5"})
-        _, _, sha, _, _no_changes, _resume_at = relay.run_node_job(j, "/tmp/wt", self.control)
+        _, _, sha, _, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertIsNone(sha)
 
     def test_shell_job_expands_ref_branch_relay_and_url_placeholders(self):
@@ -5766,7 +5935,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_agent_job_expands_placeholders_in_the_prompt(self):
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -5784,7 +5953,7 @@ class RunNodeJobTest(unittest.TestCase):
         their exit code IS an unambiguous verdict."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -5823,7 +5992,7 @@ class RunNodeJobTest(unittest.TestCase):
         """The composition helper is only worth anything if run_node_job actually uses it."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -7209,7 +7378,7 @@ class ExecuteOnePrepareHookTest(unittest.TestCase):
         relay.report_outcome = lambda jid, o, d, sha, sid, no_changes=False, resume_at=None: (
             self.reported.append((o, d)) or "failed")
         self.addCleanup(setattr, relay, "run_node_job", relay.run_node_job)
-        relay.run_node_job = lambda *a, **k: ("succeeded", "", "sha", None, False, None)
+        relay.run_node_job = lambda *a, **k: ("succeeded", "", "sha", None, False, None, None)
 
     def job(self):
         return {"id": 1, "isolation": "exclusive", "run_id": "r1",
@@ -7217,7 +7386,7 @@ class ExecuteOnePrepareHookTest(unittest.TestCase):
 
     def test_failing_prepare_hook_fails_the_run_without_running_the_node(self):
         ran = []
-        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None, False, None)
+        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None, False, None, None)
         pool = self._pool("cache restore blew up")
         ctl = relay.JobControl()
         relay.execute_one(self.job(), "exec-RLY-1", True, ctl, pool)
@@ -7229,7 +7398,7 @@ class ExecuteOnePrepareHookTest(unittest.TestCase):
 
     def test_ok_hook_creates_then_runs_the_node(self):
         ran = []
-        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None, False, None)
+        relay.run_node_job = lambda *a, **k: ran.append(True) or ("succeeded", "", "s", None, False, None, None)
         pool = self._pool(None)
         relay.execute_one(self.job(), "exec-RLY-1", True, relay.JobControl(), pool)
         self.assertEqual(pool.created, ["exec-RLY-1"])
@@ -7264,7 +7433,7 @@ class ConcurrentPrepWaitTest(unittest.TestCase):
 
         relay.report_outcome = report
         relay.run_node_job = lambda job, path, control, partition=None: (
-            record(f"run:{job['id']}") or ("succeeded", "", "sha1", None, False, None))
+            record(f"run:{job['id']}") or ("succeeded", "", "sha1", None, False, None, None))
         self.record = record
         self.pool = relay.RunnerPool(
             {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}})
@@ -7350,7 +7519,7 @@ class ExecuteOneTest(unittest.TestCase):
         self.pool._teardown = lambda slot, retain: self.torn.append((slot, retain))
 
     def test_first_exclusive_job_creates_warms_then_runs_and_reports(self):
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha1", None, False, None)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha1", None, False, None, None)
         j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
         slot, reset = self.pool.assign(j)
         self.assertEqual(slot, "exec-RLY-1")
@@ -7358,31 +7527,40 @@ class ExecuteOneTest(unittest.TestCase):
         self.assertEqual(rs, "done")
         self.assertEqual(self.created, ["exec-RLY-1"])               # created before use
         self.assertEqual(self.prepared, ["RLY-1"])                  # then warmed
-        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, False, None))
+        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, False, None, None))
 
     def test_a_no_changes_assertion_reaches_report_outcome(self):
         """RE310: execute_one must forward run_node_job's no_changes element to
         report_outcome unchanged — this is the join between the two ends the fixture and
         determine_agent_outcome tests already pin."""
         relay.run_node_job = lambda job, path, control, partition=None: (
-            "succeeded", "", "sha1", None, True, None)
+            "succeeded", "", "sha1", None, True, None, None)
         j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
         slot, reset = self.pool.assign(j)
         relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
-        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, True, None))
+        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", None, True, None, None))
 
     def test_a_resume_time_reaches_report_outcome(self):
         """RE267: execute_one forwards run_node_job's resume_at to report_outcome unchanged."""
         relay.run_node_job = lambda job, path, control, partition=None: (
-            "blocked", "agent could not run: x", "sha1", None, False, FAR_RESET)
+            "blocked", "agent could not run: x", "sha1", None, False, FAR_RESET, None)
         j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
         slot, reset = self.pool.assign(j)
         relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
         self.assertEqual(self.reports[0],
-                         ("nj-1", "blocked", "agent could not run: x", "sha1", None, False, FAR_RESET))
+                         ("nj-1", "blocked", "agent could not run: x", "sha1", None, False, FAR_RESET, None))
+
+    def test_a_session_cost_reaches_report_outcome(self):
+        """RE516: execute_one forwards run_node_job's cost (its 7th element) to report_outcome."""
+        relay.run_node_job = lambda job, path, control, partition=None: (
+            "succeeded", "", "sha1", "s-1", False, None, 0.42)
+        j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
+        slot, reset = self.pool.assign(j)
+        relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.reports[0], ("nj-1", "succeeded", "", "sha1", "s-1", False, None, 0.42))
 
     def test_shared_job_is_not_reset(self):
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha2", None, False, None)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha2", None, False, None, None)
         j = job(node_type="shell", run="x", id="nj-2", run_id="r2", vars={"ref": "RLY-2"})
         slot, reset = self.pool.assign(j)
         relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
@@ -7398,7 +7576,7 @@ class ExecuteOneTest(unittest.TestCase):
 
         def revoked_run(job, path, ctl, partition=None):
             ctl.cancel()                     # heartbeat revoked it while it ran
-            return ("succeeded", "", "sha", None, False, None)
+            return ("succeeded", "", "sha", None, False, None, None)
 
         relay.run_node_job = revoked_run
         j = job(node_type="shell", run="x", id="nj-9", run_id="r9", vars={"ref": "RLY-9"})
@@ -7414,7 +7592,7 @@ class ExecuteOneTest(unittest.TestCase):
 
         def revoked_run(job, path, ctl, partition=None):
             ctl.cancel()                     # heartbeat revoked it while it ran
-            return ("succeeded", "", "sha", None, False, None)
+            return ("succeeded", "", "sha", None, False, None, None)
 
         relay.run_node_job = revoked_run
         j = job("exclusive_shell", node_type="agent", run="x", id="nj-3", run_id="r3",
@@ -7462,11 +7640,11 @@ class ExecuteOneTest(unittest.TestCase):
         """RLY-202: when the node produced an outcome but reporting it fails after retries, the
         fallback detail must be transport-labeled — not "worker crashed:" — so RLY-194's
         environmental-vs-judgment split and the failure_signature bucket treat it as environmental."""
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "done", "sha", None, False, None)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "done", "sha", None, False, None, None)
         calls = []
 
         def flaky_report(job_id, outcome, detail, git_sha, session_id=None, no_changes=False,
-                         resume_at=None):
+                         resume_at=None, cost=None):
             calls.append((outcome, detail))
             if len(calls) == 1:
                 raise SystemExit(1)        # the real report exhausts its retries and die()s
@@ -8393,7 +8571,7 @@ class ExecuteLoopTest(unittest.TestCase):
         relay.log = lambda *a, **k: None
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None   # loop ff's the idle shared worktree
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None, False, None)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None, False, None, None)
         relay.load_runner_config = lambda: {
             "name": "box", "namespace": "exec",
             "capacity": {"shared_clean": 1, "exclusive": 0},
@@ -8673,12 +8851,12 @@ class ExecuteLoopTest(unittest.TestCase):
             if job["id"] == "nj-a":
                 seen["a_control"], seen["a_thread"] = control, threading.current_thread()
                 control._cancelled.wait(3)
-                return ("succeeded", "", "sha", None, False, None)
+                return ("succeeded", "", "sha", None, False, None, None)
             seen["at_b"] = {"a_cancelled": seen["a_control"].cancelled(),
                             "a_alive": seen["a_thread"].is_alive(),
                             "reports": list(self.reports)}
             relay.signal.getsignal(relay.signal.SIGINT)(None, None)
-            return ("succeeded", "", "sha", None, False, None)
+            return ("succeeded", "", "sha", None, False, None, None)
 
         relay.claim_node_job = claim
         relay.run_node_job = run_node_job
@@ -8718,7 +8896,7 @@ class ExecuteLoopTest(unittest.TestCase):
                 seen["broken"].append(job["id"])
             if control.cancelled():
                 seen["cancelled"].append(job["id"])
-            return ("succeeded", "", "sha", None, False, None)
+            return ("succeeded", "", "sha", None, False, None, None)
 
         relay.claim_node_job = claim
         relay.run_node_job = run_node_job
@@ -8758,7 +8936,7 @@ class ExecuteLoopTest(unittest.TestCase):
         def run_node_job(job, path, control, partition=None):
             control.note_session("sess-1")
             captured["during"] = captured["sessions_fn"]()
-            return ("succeeded", "", "sha", "sess-1", False, None)
+            return ("succeeded", "", "sha", "sess-1", False, None, None)
 
         relay.run_node_job = run_node_job
         relay.report_outcome = lambda *a: "done"
@@ -9154,7 +9332,7 @@ class RateLimitLoopTest(unittest.TestCase):
         def run_node_job(job, path, control, partition=None):
             relay.USAGE.for_key("claude-code").observe(
                 rate_limit_event(five_hour=0.95, resets_at=self.NOW + 600), self.NOW)
-            return ("succeeded", "", "sha", None, False, None)
+            return ("succeeded", "", "sha", None, False, None, None)
 
         relay.claim_node_job = claim
         relay.run_node_job = run_node_job
@@ -9319,7 +9497,7 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
             running.set()
             gate.wait(2)               # still "in flight" for as long as this blocks
             running.clear()
-            return ("succeeded", "", "sha", None, False, None)
+            return ("succeeded", "", "sha", None, False, None, None)
 
         relay.run_node_job = blocking_run
         claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
@@ -9340,7 +9518,7 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
         job from in_flight only after execute_one returns, so the heartbeat keeps listing it the
         whole time — which is what stops the server reclaiming it as abandoned."""
         relay.maybe_auto_update = lambda *a, **k: False
-        relay.run_node_job = lambda *a, **k: ("succeeded", "", "sha", None, False, None)
+        relay.run_node_job = lambda *a, **k: ("succeeded", "", "sha", None, False, None, None)
         gate, reporting = threading.Event(), threading.Event()
         seen = []
 
@@ -10225,7 +10403,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.get_board = lambda **_k: {"board": {"name": "Test Board", "key": "TB"}}
         relay.reset_worktree = lambda *a, **k: None
         relay.refresh_worktree = lambda *a, **k: None
-        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None, False, None)
+        relay.run_node_job = lambda job, path, control, partition=None: ("succeeded", "", "sha", None, False, None, None)
         relay.report_outcome = lambda *a: "done"
         relay.load_runner_config = lambda: {
             "name": "box", "namespace": "exec",
@@ -10309,7 +10487,7 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
 
         def blocking_run(job, path, control, partition=None):
             gate.wait(2)
-            return ("succeeded", "", "sha", None, False, None)
+            return ("succeeded", "", "sha", None, False, None, None)
 
         relay.run_node_job = blocking_run
         claims = [job(node_type="shell", run="true", id="nj-1", run_id="r1",
@@ -10527,7 +10705,7 @@ class RealGitWorktreeTest(unittest.TestCase):
 
         j = job("exclusive_shell", run="true", id="nj-1", run_id="r1",
                 vars={"ref": "RLY-1", "branch": branch})
-        outcome, detail, sha, _session, _no_changes, _resume_at = relay.run_node_job(j, self.dir, self.control)
+        outcome, detail, sha, _session, _no_changes, _resume_at, _cost = relay.run_node_job(j, self.dir, self.control)
 
         self.assertEqual(outcome, "succeeded", detail)
         self.assertEqual(self.head_ref(), "refs/heads/" + branch)
@@ -10541,7 +10719,7 @@ class RealGitWorktreeTest(unittest.TestCase):
         self.git("checkout", "-q", "--detach", "main")
         j = job("exclusive_shell", run="true", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-1", "branch": "never-created"})
-        outcome, detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, self.dir, self.control)
+        outcome, detail, _sha, _session, _no_changes, _resume_at, _cost = relay.run_node_job(j, self.dir, self.control)
 
         self.assertEqual(outcome, "failed")
         self.assertIn("detached", detail)
@@ -10552,7 +10730,7 @@ class RealGitWorktreeTest(unittest.TestCase):
         self.git("checkout", "-q", "--detach", "main")
         j = job(node_type="shell", run="true", id="nj-3", run_id="r1",
                 vars={"ref": "RLY-1", "branch": "rly-1-feature"})
-        outcome, _detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, self.dir, self.control)
+        outcome, _detail, _sha, _session, _no_changes, _resume_at, _cost = relay.run_node_job(j, self.dir, self.control)
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(self.head_ref(), "", "shared_clean must stay detached")
@@ -10562,7 +10740,7 @@ class RealGitWorktreeTest(unittest.TestCase):
         self.git("checkout", "-q", "-b", branch)
         j = job("exclusive_shell", run="true", id="nj-4", run_id="r1",
                 vars={"ref": "RLY-1", "branch": branch})
-        outcome, _detail, _sha, _session, _no_changes, _resume_at = relay.run_node_job(j, self.dir, self.control)
+        outcome, _detail, _sha, _session, _no_changes, _resume_at, _cost = relay.run_node_job(j, self.dir, self.control)
 
         self.assertEqual(outcome, "succeeded")
         self.assertEqual(self.head_ref(), "refs/heads/" + branch)
@@ -13081,7 +13259,7 @@ class TestPartitionTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
             seen["partition"] = partition
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -13108,7 +13286,7 @@ class TestPartitionTest(unittest.TestCase):
         relay.reset_worktree = lambda path, base: None
         relay.report_outcome = lambda *a: "done"
         relay.run_node_job = lambda job, path, control, partition=None: (
-            seen.__setitem__("partition", partition) or ("succeeded", "", "sha", None, False, None))
+            seen.__setitem__("partition", partition) or ("succeeded", "", "sha", None, False, None, None))
         try:
             pool = relay.RunnerPool(
                 {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}})
@@ -13258,7 +13436,7 @@ class ScratchPathTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
             seen["scratch"] = scratch
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -13375,7 +13553,7 @@ class PlanPathTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
             seen["plan"] = plan
             return True, "sess-1", relay.ClaudeRunReport()
 

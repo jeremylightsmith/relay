@@ -43,4 +43,22 @@ copy_dir() {
 copy_dir deps
 copy_dir _build
 copy_dir assets/node_modules
+
+# A compiled dep can bake absolute source paths into its beams (e.g. `Path.join(__DIR__, ...)` in
+# a module attribute) and then read them at run time. If the warm source was compiled at a path
+# that no longer exists (a moved or renamed checkout), those reads fail in every warmed worktree,
+# and mix will not notice, because the dep's sources haven't changed (RE516). Drop any warmed dep
+# build that names a `…/deps/…` dir that is gone, so mix recompiles it here.
+for libdir in "$WORKTREE"/_build/*/lib/*; do
+  [ -d "$libdir/ebin" ] || continue
+  for baked in $(LC_ALL=C grep -aoh '/[[:alnum:]_.@+-][[:alnum:]_./@+-]*/deps/[[:alnum:]_.-]*' \
+                   "$libdir"/ebin/*.beam 2>/dev/null | sort -u); do
+    if [ ! -d "$baked" ]; then
+      echo "prepare-worktree: dropping stale build $libdir (baked path $baked is gone)"
+      rm -rf "$libdir"
+      break
+    fi
+  done
+done
+
 echo "prepare-worktree: warmed $WORKTREE from ${CACHE_DIR:-$MAIN_ROOT}"

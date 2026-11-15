@@ -104,7 +104,11 @@ defmodule HamacaWeb.Api.RunnerContractTest do
       # RE267: optional — the runner sends it only for a usage-limit `blocked` with a known reset.
       # Present here so bin/test_relay.py pins its key and format; on this `needs_input` it is
       # ignored by design (read only on `blocked`), which this POST also proves is not a 422.
-      "resume_at" => "2100-01-01T00:00:00Z"
+      "resume_at" => "2100-01-01T00:00:00Z",
+      # RE516: optional — the runner sends it only when the agent's stream reported a cost (the
+      # session's cumulative USD at the harness's `cost_path`). The server stores the
+      # per-execution delta and never refuses junk; present here so bin/test_relay.py pins it.
+      "cost" => 0.4213
     }
 
     outcome_response =

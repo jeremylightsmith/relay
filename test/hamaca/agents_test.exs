@@ -358,6 +358,68 @@ defmodule Hamaca.AgentsTest do
     end
   end
 
+  describe "harness cost_path (RE516)" do
+    # Task 1 · Scenario 1
+    test "seed_harnesses/0 gives claude-code .total_cost_usd and the others no cost path" do
+      [claude, codex, gemini] = Agents.seed_harnesses()
+
+      assert claude.cost_path == ".total_cost_usd"
+      assert codex.cost_path == nil
+      assert gemini.cost_path == nil
+    end
+
+    # Task 1 · Scenario 2
+    test "create_board/2 seeds claude-code's cost path and leaves codex and gemini empty" do
+      {:ok, board} = Hamaca.Boards.create_board(insert(:user), %{name: "Cost board"})
+
+      assert harness(board, "claude-code").cost_path == ".total_cost_usd"
+      assert harness(board, "codex").cost_path == nil
+      assert harness(board, "gemini-cli").cost_path == nil
+    end
+
+    # Task 1 · Scenario 3
+    test "a cost path without a leading dot is refused" do
+      gemini = harness(seeded_board(), "gemini-cli")
+
+      assert {:error, cs} = Agents.update_harness(gemini, %{"cost_path" => "total_cost_usd"})
+      assert "must be a dot path like .total_cost_usd" in errors_on(cs).cost_path
+    end
+
+    # Task 1 · Scenario 4
+    test "a dot-path cost path is stored, and a blank one clears it to nil" do
+      gemini = harness(seeded_board(), "gemini-cli")
+
+      assert {:ok, h} = Agents.update_harness(gemini, %{"cost_path" => ".usage.cost"})
+      assert h.cost_path == ".usage.cost"
+
+      assert {:ok, cleared} = Agents.update_harness(h, %{"cost_path" => ""})
+      assert cleared.cost_path == nil
+      assert Repo.reload!(cleared).cost_path == nil
+    end
+
+    # Task 1 · Scenario 5
+    test "editing a cost path moves harnesses_digest/1 and reaches harness_wire/1" do
+      board = seeded_board()
+      digest = Agents.harnesses_digest(board)
+
+      {:ok, harness} = Agents.update_harness(harness(board, "claude-code"), %{"cost_path" => ".x"})
+
+      refute Agents.harnesses_digest(board) == digest
+      assert Agents.harness_wire(harness)["cost_path"] == ".x"
+    end
+
+    # Task 1 · Scenario 6
+    test "copy_from!/2 carries a harness's cost path to the target board" do
+      source = seeded_board()
+      {:ok, _} = Agents.update_harness(harness(source, "claude-code"), %{"cost_path" => ".custom"})
+      target = insert(:board)
+
+      :ok = Agents.copy_from!(target, source)
+
+      assert harness(target, "claude-code").cost_path == ".custom"
+    end
+  end
+
   describe "try_usage_line/3 (RE436 Settings → Agents TEST box)" do
     @now ~U[2026-10-10 00:00:00Z]
     @allowed ~s({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.42,"resetsAt":1791651000},"seven_day":{"utilization":0.18,"resetsAt":1792000000}}}})

@@ -166,7 +166,8 @@ sharing behavior.
   `/examples/<slug>` in a new window.
 - **Agents** — a board's LLMs (RE433). **Harnesses** (`Schemas.Harness`, table `harnesses`):
   an agent CLI's command template (`{placeholder}`s from `Schemas.Harness.placeholders/0`,
-  optional `[ … ]` segments), optional `resume_command` / `session_id_path` /
+  optional `[ … ]` segments), optional `resume_command` / `session_id_path` / `cost_path` (RE516,
+  a dot path to the session's cumulative USD cost; `.total_cost_usd` on claude-code) /
   `signed_in_check`, and its closed `models` list; `key` is derived from the name once and never
   changes. **Agents** (`Schemas.Agent`, table `agents`): a unique name, a harness and one of its
   models. `boards.default_agent_id` (nilify on delete) is the agent a node with no `llm`

@@ -301,6 +301,11 @@ defmodule HamacaWeb.Api.NodeJobController do
   `resume_at` (RE267, optional ISO-8601) is when a usage-limit `blocked` resets: with it the
   engine requeues the node instead of parking it (see `Hamaca.Runs.Engine.decide/4`). It is read
   only on `blocked`, and an unparseable value is ignored, never refused.
+
+  `cost` (RE516, optional number or numeric string) is the agent session's running total in USD,
+  read from the harness's `cost_path`. A missing, negative, non-numeric, NaN or infinite value is
+  stored as nil (unpriced), never refused. The execution stores its share of the total, not the
+  raw figure (see `Hamaca.Runs.report_outcome/2`).
   """
   def outcome(conn, %{"id" => id} = params) do
     board = conn.assigns.current_board
@@ -334,7 +339,11 @@ defmodule HamacaWeb.Api.NodeJobController do
       no_changes: params["no_changes"] == true,
       # RE267: when a usage-limit `blocked` resets. Optional — only a runner that knows the reset
       # sends it, and an older runner never does (RE308's park, unchanged).
-      resume_at: parse_resume_at(outcome, params["resume_at"])
+      resume_at: parse_resume_at(outcome, params["resume_at"]),
+      # RE516: the session's running total in USD. A runner predating it omits the key, which
+      # reads nil (unpriced), exactly as before, so `@min_runner_version` is deliberately NOT raised.
+      # A bad value also reads nil and is never a 4xx that would lose the outcome.
+      cost: Runs.parse_cost(params["cost"])
     }
 
     case Runs.report_outcome(job, attrs) do

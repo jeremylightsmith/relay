@@ -29,6 +29,7 @@
       "effort": null,
       "harness": {
         "command": "claude -p {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
+        "cost_path": ".total_cost_usd",
         "key": "claude-code",
         "resume_command": "claude -p --resume {session} {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
         "session_id_path": ".session_id"
@@ -58,6 +59,7 @@
       "effort": null,
       "harness": {
         "command": "claude -p {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
+        "cost_path": ".total_cost_usd",
         "key": "claude-code",
         "resume_command": "claude -p --resume {session} {prompt} --model {model} --permission-mode auto --verbose --output-format stream-json [--effort {effort}] [--agent {subagent}]",
         "session_id_path": ".session_id"
@@ -171,6 +173,7 @@
   "harnesses": {
     "harness_keys": [
       "command",
+      "cost_path",
       "key",
       "models",
       "name",
@@ -314,6 +317,7 @@
   },
   "outcome": {
     "request": {
+      "cost": 0.4213,
       "detail": "asked the human",
       "git_sha": "0000000000000000000000000000000000000000",
       "no_changes": false,

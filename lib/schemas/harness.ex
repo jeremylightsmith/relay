@@ -9,8 +9,10 @@ defmodule Schemas.Harness do
   substituted, and an optional `[ … ]` segment is dropped whole when a placeholder inside it has
   no value. `command` must carry `{prompt}`; `resume_command` (nil = the CLI cannot resume) must
   carry `{prompt}` and `{session}`. `session_id_path` is a dot path (`.session_id`) into the
-  CLI's JSON events naming the session to resume. `signed_in_check` is a command whose exit
-  status says the CLI is signed in. `usage` (`Schemas.HarnessUsage`, RE436) is how the runner
+  CLI's JSON events naming the session to resume. `cost_path` (RE516) is a dot path to the
+  **session's cumulative cost in USD** in the CLI's JSON events (nil = the CLI reports no cost):
+  the runner sends the latest value it read, and the server stores per-execution deltas.
+  `signed_in_check` is a command whose exit status says the CLI is signed in. `usage` (`Schemas.HarnessUsage`, RE436) is how the runner
   reads the CLI's usage and when it pauses the harness.
   """
 
@@ -20,6 +22,9 @@ defmodule Schemas.Harness do
 
   @placeholders ["prompt", "model", "worktree", "ref", "effort", "subagent", "session"]
 
+  # The ONE dot-path shape every JSON-event path field (`session_id_path`, `cost_path`) takes.
+  @dot_path ~r/\A(\.[A-Za-z0-9_]+)+\z/
+
   schema "harnesses" do
     field :key, :string
     field :name, :string
@@ -27,6 +32,7 @@ defmodule Schemas.Harness do
     field :models, {:array, :string}, default: []
     field :resume_command, :string
     field :session_id_path, :string
+    field :cost_path, :string
     field :signed_in_check, :string
 
     # RE436 — how the runner reads this CLI's usage and when it pauses it. Never nil: a harness
@@ -50,14 +56,23 @@ defmodule Schemas.Harness do
   """
   def changeset(harness, attrs) do
     harness
-    |> cast(normalize_models(attrs), [:name, :command, :models, :resume_command, :session_id_path, :signed_in_check])
+    |> cast(normalize_models(attrs), [
+      :name,
+      :command,
+      :models,
+      :resume_command,
+      :session_id_path,
+      :cost_path,
+      :signed_in_check
+    ])
     |> update_change(:name, &String.trim/1)
     |> validate_required([:name, :command])
     |> validate_models()
     |> cast_usage()
     |> validate_template(:command, ["prompt"])
     |> validate_template(:resume_command, ["prompt", "session"])
-    |> validate_format(:session_id_path, ~r/\A(\.[A-Za-z0-9_]+)+\z/, message: "must be a dot path like .session_id")
+    |> validate_format(:session_id_path, @dot_path, message: "must be a dot path like .session_id")
+    |> validate_format(:cost_path, @dot_path, message: "must be a dot path like .total_cost_usd")
     |> unique_constraint(:name, name: :harnesses_board_id_name_index, message: "is already used on this board")
     |> unique_constraint(:key, name: :harnesses_board_id_key_index)
   end
