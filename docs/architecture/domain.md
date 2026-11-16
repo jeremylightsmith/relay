@@ -480,8 +480,18 @@ sharing behavior.
   on phones it is full screen under one bar with no review controls. Switching (a tile, ←/→,
   ‹ ›, a swipe) replaces the history entry, so one browser Back, Esc or "← Back to card" returns
   to the drawer; an invalid or stale `mockup` id falls back to the drawer.
-  Embedded (the native host, RE393), an HTML mockup zooms from Fit to 400% (− · Fit · + over the
-  frame) and its frame scrolls sideways once zoomed, in both phone and desktop render widths.
+  Embedded (the native host, RE393), the open viewer pinch-zooms natively up to 4× (RE517) — the
+  only place pinch is on; everywhere else the root layout's locked viewport (RE400) stands. The
+  colocated `.ViewerPinch` hook on the hidden `#mockup-viewer-pinch` element relaxes
+  `<meta name="viewport">` to its `data-zoom-viewport` on open and calls the shell's
+  `relayViewerZoom` bridge (`CoreComponents.viewer_zoom_handler/0`) with `true`; on an item switch
+  it restores the locked viewport and calls `false`, then relaxes and calls `true` on the next
+  frames so the new item lands at scale 1; on close ("‹ Card", Esc) it restores the root layout's
+  original viewport (read once from the DOM) and calls `false`. While zoomed
+  (`visualViewport.scale > 1`) a sideways drag pans and never pages. There is no zoom control.
+  The Flutter `CardScreen` (only it — the board keeps pinch off) answers `true` with
+  `viewerZoomWebViewSettings()` and `false` with a zoom reset to 1 followed by the locked
+  `embeddedWebViewSettings()` (`flutter/lib/app/embedded_webview.dart`).
   The native card host's `nav` param (RE400, `HamacaWeb.NativeCardNav`) — comma-separated `prev` /
   `next`, e.g. `/cards/:ref?board=<slug>&nav=prev,next` — names the neighbors the native shell has:
   it drives the drawer's ‹ › chevrons in native mode, where each calls the shell's `relayCardNav`

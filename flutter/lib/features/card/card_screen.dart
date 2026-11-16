@@ -124,6 +124,39 @@ class CardScreen extends ConsumerStatefulWidget {
     return null;
   }
 
+  /// The JS handler the embedded mockup viewer calls (RE517) with `true` when it
+  /// opens (or lands on a new item) and `false` when it closes (or before a
+  /// switch) — the only Dart copy of the name; the web side is the viewer's
+  /// `.ViewerPinch` hook (`HamacaWeb.CoreComponents.viewer_zoom_handler/0`).
+  static const viewerZoomHandler = 'relayViewerZoom';
+
+  /// Decodes the [viewerZoomHandler] args: the flag only for a leading `bool`, so
+  /// a malformed call changes nothing.
+  static bool? viewerZoomFromArgs(List<dynamic> args) {
+    if (args.isEmpty) return null;
+    final enabled = args.first;
+    return enabled is bool ? enabled : null;
+  }
+
+  /// The webview settings for a [viewerZoomHandler] call: native pinch-zoom while
+  /// the viewer is open, else the locked RE400 settings.
+  static InAppWebViewSettings viewerZoomSettings(bool enabled) =>
+      enabled ? viewerZoomWebViewSettings() : embeddedWebViewSettings();
+
+  /// Chains a [viewerZoomHandler] call onto [previous] so calls apply strictly in
+  /// arrival order (RE517). Each JS handler call runs as its own async callback,
+  /// and a viewer switch sends `false` then `true` within a frame or two: the
+  /// `false` path awaits a zoom reset before its settings change, so unchained,
+  /// the later `true` could apply first and leave the open viewer locked. The
+  /// returned future never fails — an error is logged and the next call still
+  /// runs — so it can be stored as the next call's [previous].
+  static Future<void> serialViewerZoom(
+    Future<void> previous,
+    Future<void> Function() apply,
+  ) => previous.then((_) => apply()).catchError((Object error) {
+    debugPrint('relayViewerZoom failed: $error');
+  });
+
   /// Moves the enclosing card screen to its neighbor in [direction]. The
   /// [cardNavHandler] callback lands here — a static, testable entry point (the
   /// real webview can't build under `flutter test`). A no-op outside a
@@ -195,6 +228,10 @@ class CardScreen extends ConsumerStatefulWidget {
 }
 
 class _CardScreenState extends ConsumerState<CardScreen> {
+  /// The tail of the [CardScreen.viewerZoomHandler] calls — see
+  /// [CardScreen.serialViewerZoom].
+  Future<void> _viewerZoomQueue = Future<void>.value();
+
   @override
   void initState() {
     super.initState();
@@ -393,11 +430,54 @@ class _CardScreenState extends ConsumerState<CardScreen> {
                       }
                     },
                   );
+                  controller.addJavaScriptHandler(
+                    handlerName: CardScreen.viewerZoomHandler,
+                    callback: (args) async {
+                      if (!context.mounted) return;
+                      final enabled = CardScreen.viewerZoomFromArgs(args);
+                      if (enabled != null) {
+                        await (_viewerZoomQueue = CardScreen.serialViewerZoom(
+                          _viewerZoomQueue,
+                          () => _setViewerZoom(controller, enabled),
+                        ));
+                      }
+                    },
+                  );
                 },
               ),
         ),
       ),
       bottomNavigationBar: _bottomBar(),
+    );
+  }
+
+  /// Applies a [CardScreen.viewerZoomHandler] call (RE517). Leaving the viewer
+  /// must land the card at scale 1: Android keeps a pinched zoom after
+  /// `supportZoom` turns off, so the scale is reset first — while zoom is still
+  /// supported — and the locked settings applied after. iOS un-zooms through the
+  /// web side restoring `maximum-scale=1`; the reset is best-effort (some calls
+  /// are platform-specific) and never blocks the settings change.
+  Future<void> _setViewerZoom(
+    InAppWebViewController controller,
+    bool enabled,
+  ) async {
+    if (!enabled) {
+      try {
+        final scale = await controller.getZoomScale();
+        if (scale != null && scale > 1) {
+          // Android's factor must lie within (0.01, 100); a 4× cap keeps
+          // 1 / scale well inside it.
+          await controller.zoomBy(zoomFactor: 1 / scale);
+        }
+      } catch (error) {
+        // Best-effort: a platform without these zoom APIs falls back on the web
+        // side's viewport restore. Logged so a real failure stays visible.
+        debugPrint('relayViewerZoom: zoom reset skipped: $error');
+      }
+    }
+    if (!mounted) return;
+    await controller.setSettings(
+      settings: CardScreen.viewerZoomSettings(enabled),
     );
   }
 

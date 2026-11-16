@@ -9,3 +9,14 @@ InAppWebViewSettings embeddedWebViewSettings() => InAppWebViewSettings(
   builtInZoomControls: false,
   ignoresViewportScaleLimits: false,
 );
+
+/// The settings while the card's embedded mockup viewer is open (RE517): native
+/// pinch-zoom on, toggled by the `relayViewerZoom` bridge. Android draws no zoom
+/// buttons; iOS stays governed by the viewport meta the viewer relaxes (it caps
+/// at 4×), so `ignoresViewportScaleLimits` stays false here too.
+InAppWebViewSettings viewerZoomWebViewSettings() => InAppWebViewSettings(
+  supportZoom: true,
+  builtInZoomControls: true,
+  displayZoomControls: false,
+  ignoresViewportScaleLimits: false,
+);

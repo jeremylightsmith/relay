@@ -37,7 +37,6 @@ defmodule Storybook.CoreComponents do
   def entry("mockup_preview"), do: [icon: {:fa, "window-maximize", :thin}]
   def entry("mockup_viewer_bar"), do: [icon: {:fa, "mobile-screen", :thin}]
   def entry("mockup_viewer_pager"), do: [icon: {:fa, "ellipsis", :thin}]
-  def entry("mockup_viewer_zoom"), do: [icon: {:fa, "magnifying-glass-plus", :thin}]
   def entry("modal_scrim"), do: [icon: {:fa, "layer-group", :thin}]
   def entry("note_image_row"), do: [icon: {:fa, "image", :thin}]
   def entry("note_origin_tag"), do: [icon: {:fa, "tag", :thin}]

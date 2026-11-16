@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -217,5 +219,72 @@ void main() {
   test('the card nav direction names are the wire tokens', () {
     expect(CardNavDirection.prev.name, 'prev');
     expect(CardNavDirection.next.name, 'next');
+  });
+
+  test('the viewer zoom JS handler name pins the web viewer contract', () {
+    expect(CardScreen.viewerZoomHandler, 'relayViewerZoom');
+  });
+
+  test('viewerZoomFromArgs decodes a leading bool', () {
+    expect(CardScreen.viewerZoomFromArgs([true]), isTrue);
+    expect(CardScreen.viewerZoomFromArgs([false]), isFalse);
+  });
+
+  test('viewerZoomFromArgs ignores a malformed call', () {
+    expect(CardScreen.viewerZoomFromArgs([]), isNull);
+    expect(CardScreen.viewerZoomFromArgs(['true']), isNull);
+    expect(CardScreen.viewerZoomFromArgs([1]), isNull);
+    expect(CardScreen.viewerZoomFromArgs([null]), isNull);
+  });
+
+  test('viewerZoomSettings(true) enables native pinch-zoom', () {
+    final settings = CardScreen.viewerZoomSettings(true);
+
+    expect(settings.supportZoom, isTrue);
+    expect(settings.builtInZoomControls, isTrue);
+  });
+
+  test('viewerZoomSettings(false) is the locked RE400 settings', () {
+    final settings = CardScreen.viewerZoomSettings(false);
+
+    expect(settings.supportZoom, isFalse);
+    expect(settings.builtInZoomControls, isFalse);
+  });
+
+  test(
+    'serialViewerZoom runs a call only after the previous one finishes',
+    () async {
+      // RE517: the viewer's switch sends `false` then `true`; the slower `false`
+      // (it awaits a zoom reset first) must not land its settings last.
+      final order = <String>[];
+      final slow = Completer<void>();
+      var tail = Future<void>.value();
+
+      tail = CardScreen.serialViewerZoom(tail, () async {
+        await slow.future;
+        order.add('false');
+      });
+      final last = tail = CardScreen.serialViewerZoom(tail, () async {
+        order.add('true');
+      });
+
+      await Future<void>.delayed(Duration.zero);
+      expect(order, isEmpty);
+
+      slow.complete();
+      await last;
+      expect(order, ['false', 'true']);
+    },
+  );
+
+  test('serialViewerZoom keeps the chain alive after a failed call', () async {
+    final order = <String>[];
+    var tail = Future<void>.value();
+
+    tail = CardScreen.serialViewerZoom(tail, () async => throw StateError('x'));
+    tail = CardScreen.serialViewerZoom(tail, () async => order.add('next'));
+
+    await tail;
+    expect(order, ['next']);
   });
 }

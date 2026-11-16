@@ -120,7 +120,7 @@ defmodule HamacaWeb.CardMockupViewerEmbedTest do
     assert has_element?(view, "#mockup-viewer-pager")
   end
 
-  test "RE405 4. an embedded screenshot gets the zoom control and an image-kind box at Fit",
+  test "RE517 5. an embedded screenshot has an image-kind box and no zoom control or render width",
        %{conn: conn, board: board, card: card, ref: ref} do
     shot = upload(card, "shot.png", "image/png")
 
@@ -132,18 +132,39 @@ defmodule HamacaWeb.CardMockupViewerEmbedTest do
 
     view = open(conn, ~p"/cards/#{ref}?board=#{board.slug}&embed=1&back=Board&screenshot=1")
 
-    assert has_element?(view, "#mockup-viewer-zoom")
-    assert has_element?(view, ~s(#mockup-viewer-frame-box-1[data-kind=image][data-zoom="1"]))
+    refute has_element?(view, "#mockup-viewer-zoom")
+    assert has_element?(view, "#mockup-viewer-frame-box-1[data-kind=image]")
+    refute has_element?(view, "[data-zoom]")
     refute has_element?(view, "#mockup-viewer-width")
   end
 
-  test "RE405 5. an embedded HTML mockup keeps the width toggle, zoom, phone render and sizer",
+  test "RE517 6. an embedded HTML mockup keeps the width toggle and phone render, no zoom or sizer",
        %{conn: conn, board: board, ref: ref, m1: m1} do
     view = viewer(conn, board, ref, m1)
 
     assert has_element?(view, "#mockup-viewer-width")
-    assert has_element?(view, "#mockup-viewer-zoom")
-    assert has_element?(view, "[data-kind=html][data-render=phone]")
-    assert has_element?(view, "#mockup-viewer-frame-sizer")
+    refute has_element?(view, "#mockup-viewer-zoom")
+    refute has_element?(view, "#mockup-viewer-frame-sizer")
+    assert has_element?(view, "[id^=mockup-viewer-frame-box-][data-kind=html][data-render=phone]")
+  end
+
+  test "RE517 pinch 5. the embedded viewer carries the relayViewerZoom bridge, its item following the pager",
+       %{conn: conn, board: board, ref: ref, m1: m1, m2: m2} do
+    view = viewer(conn, board, ref, m1)
+
+    assert has_element?(view, ~s(#mockup-viewer-pinch[data-zoom-handler="relayViewerZoom"]))
+    assert has_element?(view, ~s(#mockup-viewer-pinch[data-item="#{m1.id}"]))
+
+    view |> element("#mockup-viewer-pager-next") |> render_click()
+
+    assert has_element?(view, ~s(#mockup-viewer-pinch[data-item="#{m2.id}"]))
+  end
+
+  test "RE517 pinch 6. the non-embedded board viewer never enables pinch",
+       %{conn: conn, board: board, ref: ref, m1: m1} do
+    view = open(conn, ~p"/board/#{board.slug}?card=#{ref}&mockup=#{m1.id}")
+
+    assert has_element?(view, "#mockup-viewer")
+    refute has_element?(view, "#mockup-viewer-pinch")
   end
 end

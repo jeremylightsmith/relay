@@ -6799,36 +6799,7 @@ defmodule HamacaWeb.CoreComponentsTest do
     end
   end
 
-  describe "mockup_viewer_zoom/1 (RE393)" do
-    defp zoom_doc(attrs) do
-      (&CoreComponents.mockup_viewer_zoom/1)
-      |> render_component(attrs)
-      |> LazyHTML.from_fragment()
-    end
-
-    test "11. a Zoom group: − disabled, Fit, + live, 44px icon targets, no phx-click" do
-      doc = zoom_doc(%{id: "z"})
-
-      assert pg_count(doc, ~s(div#z[role=group][aria-label=Zoom])) == 1
-      assert pg_count(doc, ~s(#z button#z-out[type=button][disabled][aria-label="Zoom out"])) == 1
-      assert pg_count(doc, ~s(#z button#z-reset[type=button][aria-label="Reset zoom to fit"])) == 1
-      assert pg_text(doc, "#z-reset") == "Fit"
-      assert pg_count(doc, ~s(#z button#z-in[type=button][aria-label="Zoom in"])) == 1
-      assert pg_count(doc, "#z-in[disabled]") == 0
-
-      cls = fn selector -> doc |> pg_attr(selector, "class") |> List.first("") |> String.split() end
-      assert "size-11" in cls.("#z-out")
-      assert "size-11" in cls.("#z-in")
-      assert "h-11" in cls.("#z-reset")
-      assert "min-w-14" in cls.("#z-reset")
-      assert pg_count(doc, "#z-out span.hero-minus") == 1
-      assert pg_count(doc, "#z-in span.hero-plus") == 1
-
-      assert pg_count(doc, "[phx-click]") == 0
-    end
-  end
-
-  describe "card_mockup_viewer/1 embedded zoom (RE393)" do
+  describe "card_mockup_viewer/1 embedded (RE393, RE517: no JS zoom)" do
     defp embed_viewer_doc(items, current_key) do
       assigns = %{items: items, current_key: current_key}
 
@@ -6849,65 +6820,64 @@ defmodule HamacaWeb.CoreComponentsTest do
       |> LazyHTML.from_fragment()
     end
 
+    defp classes_of(doc, selector), do: doc |> pg_attr(selector, "class") |> List.first("") |> String.split()
+
     @zoom_items [
       %{key: 1, src: "/images/a.png", caption: "Board", kind: :image},
       %{key: 2, src: "/attachments/h", caption: "Empty", kind: :html}
     ]
 
-    test "12. an HTML item gets the zoom wrap, data-zoom, a sizer around the frame and no native hook" do
+    test "RE517 1. an embedded HTML item has no zoom control, wrap or sizer: the frame sits in the box" do
       doc = embed_viewer_doc(@zoom_items, 2)
 
-      assert pg_count(doc, ~s(#mockup-viewer-zoom-wrap[phx-update=ignore] #mockup-viewer-zoom)) == 1
+      for selector <-
+            ~w(#mockup-viewer-zoom #mockup-viewer-zoom-wrap [data-zoom] [data-zoom-sizer] #mockup-viewer-frame-sizer),
+          do: assert(pg_count(doc, selector) == 0, selector)
 
-      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-zoom") == ["1"]
-      box = doc |> pg_attr("#mockup-viewer-frame-box-2", "class") |> List.first("") |> String.split()
-      assert "overflow-x-auto" in box
-      assert "overflow-y-hidden" in box
-      refute "overflow-hidden" in box
+      assert pg_count(doc, "#mockup-viewer-frame-box-2 > iframe#mockup-viewer-frame") == 1
+      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-render") == ["phone"]
+      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-kind") == ["html"]
 
-      assert pg_count(
-               doc,
-               "#mockup-viewer-frame-box-2 > #mockup-viewer-frame-sizer[data-zoom-sizer] > iframe#mockup-viewer-frame"
-             ) ==
-               1
+      box = classes_of(doc, "#mockup-viewer-frame-box-2")
+      assert "overflow-hidden" in box
+      assert "data-[render=desktop]:overflow-y-auto" in box
+      refute "overflow-x-auto" in box
 
+      assert pg_count(doc, "#mockup-viewer-width") == 1
       # RE400 — the viewer no longer signals the native shell.
       assert pg_count(doc, "#mockup-viewer-native") == 0
     end
 
-    test "RE405 1. an embedded image item fits with the zoom control, no sizer, iframe or width toggle" do
+    # `JS.ignore_attributes/1` encodes as the `ignore_attrs` op, so decode and match it exactly.
+    test "RE517 2. the hook-written box and frame attributes survive server patches" do
+      doc = embed_viewer_doc(@zoom_items, 2)
+
+      assert [box_mounted] = pg_attr(doc, "#mockup-viewer-frame-box-2", "phx-mounted")
+      assert JSON.decode!(box_mounted) == [["ignore_attrs", %{"attrs" => ["style", "data-render"]}]]
+
+      assert [frame_mounted] = pg_attr(doc, "#mockup-viewer-frame", "phx-mounted")
+      assert JSON.decode!(frame_mounted) == [["ignore_attrs", %{"attrs" => ["style"]}]]
+    end
+
+    test "RE517 3. an embedded image CSS-fits the box: no zoom, render width, or iframe" do
       doc = embed_viewer_doc(@zoom_items, 1)
 
-      assert pg_count(doc, ~s(#mockup-viewer-zoom-wrap[phx-update=ignore] #mockup-viewer-zoom)) == 1
+      img = classes_of(doc, "img#mockup-viewer-image")
+      assert "max-w-full" in img
+      assert "h-auto" in img
+      refute "max-w-none" in img
+
       assert pg_attr(doc, "#mockup-viewer-frame-box-1", "data-kind") == ["image"]
-      assert pg_attr(doc, "#mockup-viewer-frame-box-1", "data-zoom") == ["1"]
       assert pg_count(doc, "#mockup-viewer-frame-box-1[data-render]") == 0
+      assert "overflow-auto" in classes_of(doc, "#mockup-viewer-frame-box-1")
 
-      box = doc |> pg_attr("#mockup-viewer-frame-box-1", "class") |> List.first("") |> String.split()
-      assert "overflow-auto" in box
-      refute "overflow-x-auto" in box
-      refute "overflow-y-hidden" in box
-
-      assert pg_count(doc, "#mockup-viewer-frame-sizer") == 0
-      # The sheet's tile for the HTML item is a miniature iframe; the frame box has none.
-      assert pg_count(doc, "#mockup-viewer-frame-box-1 iframe") == 0
-      assert pg_count(doc, "#mockup-viewer-frame") == 0
-      assert pg_count(doc, "img#mockup-viewer-image") == 1
+      assert pg_count(doc, "#mockup-viewer-zoom") == 0
       assert pg_count(doc, "#mockup-viewer-width") == 0
+      assert pg_count(doc, "#mockup-viewer-frame") == 0
       assert pg_count(doc, "#mockup-viewer-native") == 0
     end
 
-    test "RE405 2. an embedded HTML item is marked data-kind=html with the phone render" do
-      doc = embed_viewer_doc(@zoom_items, 2)
-
-      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-kind") == ["html"]
-      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-render") == ["phone"]
-      assert pg_attr(doc, "#mockup-viewer-frame-box-2", "data-zoom") == ["1"]
-      assert pg_count(doc, ~s(#mockup-viewer-zoom-wrap[phx-update=ignore] #mockup-viewer-zoom)) == 1
-      assert pg_count(doc, "#mockup-viewer-width") == 1
-    end
-
-    test "RE405 3. a non-embedded image item keeps natural size: data-kind, no zoom" do
+    test "RE517 4. a non-embedded image item keeps natural size, no zoom or render width" do
       assigns = %{items: @zoom_items}
 
       doc =
@@ -6927,10 +6897,59 @@ defmodule HamacaWeb.CoreComponentsTest do
         |> LazyHTML.from_fragment()
 
       assert pg_attr(doc, "#mockup-viewer-frame-box-1", "data-kind") == ["image"]
+      assert "max-w-none" in classes_of(doc, "img#mockup-viewer-image")
       assert pg_count(doc, "[data-zoom]") == 0
-      assert pg_count(doc, "#mockup-viewer-zoom-wrap") == 0
-      box = doc |> pg_attr("#mockup-viewer-frame-box-1", "class") |> List.first("") |> String.split()
-      assert "overflow-auto" in box
+      assert pg_count(doc, "[data-render]") == 0
+      assert pg_count(doc, "#mockup-viewer-zoom") == 0
+      assert "overflow-auto" in classes_of(doc, "#mockup-viewer-frame-box-1")
+    end
+
+    @zoom_viewport "width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=4, user-scalable=yes, viewport-fit=cover"
+
+    test "RE517 pinch 1. an embedded HTML item carries the hidden .ViewerPinch bridge element" do
+      doc = embed_viewer_doc(@zoom_items, 2)
+
+      assert pg_count(doc, "#mockup-viewer-pinch") == 1
+      assert [hook] = pg_attr(doc, "#mockup-viewer-pinch", "phx-hook")
+      assert String.ends_with?(hook, "ViewerPinch"), hook
+      assert pg_attr(doc, "#mockup-viewer-pinch", "data-zoom-handler") == ["relayViewerZoom"]
+      assert pg_attr(doc, "#mockup-viewer-pinch", "data-zoom-viewport") == [@zoom_viewport]
+      assert pg_attr(doc, "#mockup-viewer-pinch", "data-item") == ["2"]
+      assert "hidden" in classes_of(doc, "#mockup-viewer-pinch")
+    end
+
+    test "RE517 pinch 2. an embedded image item pinches too" do
+      doc = embed_viewer_doc(@zoom_items, 1)
+
+      assert pg_count(doc, "#mockup-viewer-pinch") == 1
+      assert pg_attr(doc, "#mockup-viewer-pinch", "data-item") == ["1"]
+    end
+
+    test "RE517 pinch 3. the non-embedded viewer has no pinch element or zoom handler" do
+      assigns = %{items: @zoom_items}
+
+      doc =
+        ~H"""
+        <CoreComponents.card_mockup_viewer
+          ref="RE9"
+          card={%{title: "Notif"}}
+          stage_name="Review"
+          stage_owner={:human}
+          items={@items}
+          current_key={1}
+          back_patch="/cards/RE9?board=b"
+          item_href={&"/v/#{&1}"}
+        />
+        """
+        |> rendered_to_string()
+        |> LazyHTML.from_fragment()
+
+      assert pg_count(doc, "#mockup-viewer-pinch") == 0
+      assert pg_count(doc, "[data-zoom-handler]") == 0
+    end
+
+    test "RE517 pinch 4. viewer_zoom_handler/0 names the native bridge" do
+      assert CoreComponents.viewer_zoom_handler() == "relayViewerZoom"
     end
   end
 

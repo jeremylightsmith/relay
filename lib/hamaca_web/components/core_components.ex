@@ -3164,54 +3164,6 @@ defmodule HamacaWeb.CoreComponents do
     """
   end
 
-  @doc """
-  The embedded mockup viewer's zoom control (RE393): − · Fit · + over the bottom-right of the
-  frame — an HTML mockup's or (RE405) a screenshot's — 44px targets. It is client-owned — no
-  `phx-click`: `card_mockup_viewer/1`'s `.MockupRenderWidth` hook handles the clicks, rewrites the
-  label (`Fit`, `150%` … `400%`, or any whole percentage in between after a pinch on a
-  screenshot, e.g. `173%`) and toggles `disabled` (− at Fit, + at 400%). + and − step to the next
-  zoom step above / below the current zoom. The server renders the Fit state, − disabled.
-  """
-  attr :id, :string, default: "mockup-viewer-zoom"
-  attr :class, :any, default: nil
-
-  def mockup_viewer_zoom(assigns) do
-    ~H"""
-    <div
-      id={@id}
-      role="group"
-      aria-label="Zoom"
-      class={[
-        "flex items-center rounded-full border border-base-300 bg-base-100 shadow-sm",
-        @class
-      ]}
-    >
-      <button
-        type="button"
-        id={"#{@id}-out"}
-        aria-label="Zoom out"
-        disabled
-        class={zoom_button_class()}
-      >
-        <.icon name="hero-minus" class="size-5" />
-      </button>
-      <button
-        type="button"
-        id={"#{@id}-reset"}
-        aria-label="Reset zoom to fit"
-        class="flex h-11 min-w-14 items-center justify-center font-mono text-(length:--m-meta) text-base-content"
-      >
-        Fit
-      </button>
-      <button type="button" id={"#{@id}-in"} aria-label="Zoom in" class={zoom_button_class()}>
-        <.icon name="hero-plus" class="size-5" />
-      </button>
-    </div>
-    """
-  end
-
-  defp zoom_button_class, do: "flex size-11 items-center justify-center text-primary disabled:text-base-content/25"
-
   defp pager_chevron_class(disabled?) do
     [
       "flex size-11 items-center justify-center",
@@ -3269,6 +3221,17 @@ defmodule HamacaWeb.CoreComponents do
     """
   end
 
+  # RE517 — the embedded viewer's zoomable viewport: the one place the 4× pinch ceiling lives.
+  @viewer_zoom_viewport "width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=4, user-scalable=yes, viewport-fit=cover"
+
+  @doc """
+  The native bridge `card_mockup_viewer/1`'s `.ViewerPinch` hook calls while the embedded viewer
+  is open (`true`) and when it closes or switches item (`false`) — RE517. The Flutter shell
+  registers a handler of exactly this name.
+  """
+  @spec viewer_zoom_handler() :: String.t()
+  def viewer_zoom_handler, do: "relayViewerZoom"
+
   @doc """
   The same-tab viewer (RE380, RE390): the item on screen (`current_key` among `items`, the
   `HamacaWeb.CardMedia` shape) fills the right of the screen — an HTML item framed in the sandboxed
@@ -3285,14 +3248,23 @@ defmodule HamacaWeb.CoreComponents do
   `segmented_control/1`), and `mockup_viewer_pager/1` sits under the frame. The colocated
   `.MockupRenderWidth` hook on the stable `\#{id}-stage` owns the width: it keeps the choice in
   sessionStorage and re-applies `data-render` on each freshly keyed frame box — desktop lays the
-  iframe out at 1280px and CSS-scales it to the box width. Embedded, `mockup_viewer_zoom/1` zooms
-  the frame; an image item (RE405) fits the box width (never upscaled past its natural width),
-  zooms by width with the control or a two-finger pinch (1×–4×) and pans with one finger.
+  iframe out at 1280px and CSS-scales it to the box width. The box and the iframe protect what the
+  hook writes (`style`, `data-render`) from server patches with `JS.ignore_attributes/1` (RE517).
+  Embedded, an image item (RE405) fits the box width with CSS alone (`max-w-full h-auto`, never
+  upscaled past its natural width); there is no zoom control.
+
+  Embedded, every item pinch-zooms natively (RE517): the colocated `.ViewerPinch` hook on the
+  hidden, stable `\#{id}-pinch` element relaxes `<meta name="viewport">` to its
+  `data-zoom-viewport` (up to 4×) while the viewer is open and calls the native shell's
+  `relayViewerZoom` bridge (`viewer_zoom_handler/0`) with `true`; on an item switch it briefly
+  restores the locked viewport and calls `false`, then relaxes and calls `true` on the next frames
+  so the new item lands at scale 1; on close it restores the root layout's original viewport (read
+  once from the DOM, RE400) and calls `false`. Outside embed there is no pinch element.
 
   It is a `fixed` overlay, so whatever page is underneath stays mounted. ←/→ push
   `mockup_prev`/`mockup_next` and Esc pushes `mockup_back` (window bindings, guarded by
-  `ArrowKeyGuard` while typing), and a horizontal swipe on an HTML item at Fit does the same through
-  the colocated `.MockupSwipe` hook — an image item never pages by swipe (a sideways drag pans it).
+  `ArrowKeyGuard` while typing), and a horizontal swipe on an HTML item does the same through the
+  colocated `.MockupSwipe` hook — an image item never pages by swipe (a sideways drag pans it).
   """
   attr :id, :string, default: "mockup-viewer"
   attr :ref, :string, required: true
@@ -3321,8 +3293,8 @@ defmodule HamacaWeb.CoreComponents do
       assign(assigns,
         index: index + 1,
         item: item,
+        zoom_viewport: @viewer_zoom_viewport,
         caption: caption,
-        zoomable: assigns.embed,
         frame_title: "#{assigns.noun}: #{caption} (#{assigns.ref})"
       )
 
@@ -3351,6 +3323,18 @@ defmodule HamacaWeb.CoreComponents do
       >
       </div>
       <div id={"#{@id}-key-back"} class="hidden" phx-window-keydown="mockup_back" phx-key="Escape">
+      </div>
+      <%!-- RE517 — native pinch while the embedded viewer is open. Its own element (the root
+      already has a hook) with a stable id, so an item switch is an `updated()`. --%>
+      <div
+        :if={@embed}
+        id={"#{@id}-pinch"}
+        class="hidden"
+        phx-hook=".ViewerPinch"
+        data-zoom-handler={viewer_zoom_handler()}
+        data-zoom-viewport={@zoom_viewport}
+        data-item={@item.key}
+      >
       </div>
       <.mockup_viewer_bar
         :if={!@embed}
@@ -3474,17 +3458,18 @@ defmodule HamacaWeb.CoreComponents do
           <%!-- Keyed by the item on screen, so switching REPLACES the frame instead of
           patching its src: a src change navigates the frame and pushes a joint-history entry
           (browser Back would then step the frame, not leave the viewer), while a fresh
-          iframe's first load adds none. An image scrolls both ways — at its natural size on the
-          web, at the hook's fit × zoom width embedded: `max-w-none` undoes preflight's
-          `img { max-width: 100% }`. --%>
+          iframe's first load adds none. An image scrolls both ways: on the web at its natural
+          size (`max-w-none` undoes preflight's `img { max-width: 100% }`), embedded fitted to the
+          box width and never upscaled. `data-render` and the iframe's inline style are written
+          by `.MockupRenderWidth`, so a server patch must leave them alone (RE517). --%>
           <div
             id={"#{@id}-frame-box-#{@item.key}"}
             data-kind={@item.kind}
-            data-render={@zoomable and @item.kind == :html and "phone"}
-            data-zoom={@zoomable && "1"}
+            data-render={@embed and @item.kind == :html and "phone"}
+            phx-mounted={@embed && JS.ignore_attributes(["style", "data-render"])}
             class={[
               "h-full bg-base-100 drawer:rounded-lg drawer:border drawer:border-base-300 drawer:shadow-sm",
-              mockup_box_overflow(@item.kind, @zoomable),
+              mockup_box_overflow(@item.kind),
               "data-[render=desktop]:bg-base-200"
             ]}
           >
@@ -3493,34 +3478,15 @@ defmodule HamacaWeb.CoreComponents do
               id={"#{@id}-image"}
               src={@item.src}
               alt={@caption}
-              class="block max-w-none"
+              class={if(@embed, do: "block max-w-full h-auto", else: "block max-w-none")}
             />
-            <%!-- Embedded, the sizer carries the zoomed frame's scaled width (a transform never
-            changes layout size), so the box scrolls sideways when zoomed past Fit. --%>
-            <div
-              :if={@zoomable and @item.kind == :html}
-              id={"#{@id}-frame-sizer"}
-              data-zoom-sizer
-              class="relative h-full overflow-hidden"
-            >
-              <.mockup_viewer_iframe id={"#{@id}-frame"} src={@item.src} title={@frame_title} />
-            </div>
             <.mockup_viewer_iframe
-              :if={@item.kind != :image and !@zoomable}
+              :if={@item.kind != :image}
               id={"#{@id}-frame"}
               src={@item.src}
               title={@frame_title}
+              phx-mounted={@embed && JS.ignore_attributes(["style"])}
             />
-          </div>
-          <%!-- Client-owned like the width toggle: `.MockupRenderWidth` rewrites the label and
-          the disabled flags, so a server patch must never redraw it. --%>
-          <div
-            :if={@zoomable}
-            id={"#{@id}-zoom-wrap"}
-            phx-update="ignore"
-            class="absolute right-3 bottom-3 z-10"
-          >
-            <.mockup_viewer_zoom id={"#{@id}-zoom"} />
           </div>
         </div>
         <.mockup_viewer_pager
@@ -3541,26 +3507,16 @@ defmodule HamacaWeb.CoreComponents do
         //
         // The frame box is keyed by item and replaced on every switch (resetting data-render),
         // so the hook sits on the stable stage and re-applies whenever its children change.
+        // Within one item, the box's data-render and the iframe's inline style are kept across
+        // server patches by their `JS.ignore_attributes` phx-mounted (RE517).
         // Outside embed the stage has no toggle and the box no data-render: every step no-ops.
         const KEY = "relay:mockup-render"
         const DESKTOP_WIDTH = 1280
-        // Zoom multiplies the fit scale; ZOOM_STEPS[0] is Fit. Not persisted: it resets to Fit on
-        // every item switch (a new frame box) and every width-mode switch. The buttons step
-        // through ZOOM_STEPS; a pinch on a screenshot (RE405) lands anywhere between its ends.
-        const ZOOM_STEPS = [1, 1.5, 2, 3, 4]
-        const ZOOM_MIN = ZOOM_STEPS[0]
-        const ZOOM_MAX = ZOOM_STEPS[ZOOM_STEPS.length - 1]
-        const ZOOM_BUTTON = '[id$="-zoom-in"], [id$="-zoom-out"], [id$="-zoom-reset"]'
-        const clampZoom = (z) => Math.min(Math.max(z, ZOOM_MIN), ZOOM_MAX)
-        const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
 
         export default {
           mounted() {
-            this.zoom = ZOOM_MIN
             this.apply = () => this.render()
             this.onClick = (e) => {
-              const zoomButton = e.target.closest(ZOOM_BUTTON)
-              if (zoomButton && this.el.contains(zoomButton)) return this.zoomBy(zoomButton.id)
               const choice = e.target.closest("[data-render-choice]")
               const toggleId = this.el.dataset.widthToggle
               if (!choice || !toggleId || !choice.closest(`#${toggleId}`)) return
@@ -3568,16 +3524,7 @@ defmodule HamacaWeb.CoreComponents do
               this.render()
             }
             document.addEventListener("click", this.onClick)
-            // Pinch on an embedded screenshot. touchmove is non-passive so a two-finger move can
-            // stop the native gesture; a one-finger drag is left alone and scrolls the box.
-            this.onTouchStart = (e) => this.pinchStart(e)
-            this.onTouchMove = (e) => this.pinchMove(e)
-            this.onTouchEnd = (e) => { if (e.touches.length < 2) this.pinch = null }
-            this.el.addEventListener("touchstart", this.onTouchStart, { passive: true })
-            this.el.addEventListener("touchmove", this.onTouchMove, { passive: false })
-            this.el.addEventListener("touchend", this.onTouchEnd, { passive: true })
-            this.el.addEventListener("touchcancel", this.onTouchEnd, { passive: true })
-            // childList/subtree only: the inline styles and data-zoom render() writes are
+            // childList/subtree only: the inline styles and data-render render() writes are
             // attributes, so they never re-trigger it.
             this.mutations = new MutationObserver(this.apply)
             this.mutations.observe(this.el, { childList: true, subtree: true })
@@ -3588,111 +3535,29 @@ defmodule HamacaWeb.CoreComponents do
           updated() { this.render() },
           destroyed() {
             document.removeEventListener("click", this.onClick)
-            this.el.removeEventListener("touchstart", this.onTouchStart)
-            this.el.removeEventListener("touchmove", this.onTouchMove)
-            this.el.removeEventListener("touchend", this.onTouchEnd)
-            this.el.removeEventListener("touchcancel", this.onTouchEnd)
             this.mutations.disconnect()
             this.resizes.disconnect()
           },
           mode() {
             return sessionStorage.getItem(KEY) === "desktop" ? "desktop" : "phone"
           },
-          // + goes to the next step above the current zoom, − to the next below — so a pinched
-          // 173% steps to 200% or 150%.
-          zoomBy(id) {
-            if (id.endsWith("-zoom-in")) this.zoom = ZOOM_STEPS.find((z) => z > this.zoom) ?? ZOOM_MAX
-            else if (id.endsWith("-zoom-out")) this.zoom = [...ZOOM_STEPS].reverse().find((z) => z < this.zoom) ?? ZOOM_MIN
-            else this.zoom = ZOOM_MIN
-            this.render()
-          },
-          // The zoomable screenshot box, or null (an HTML item, or the web viewer's natural size).
-          imageBox() {
-            const box = this.el.querySelector('[data-kind="image"][data-zoom]')
-            const img = box && box.querySelector("img")
-            return img ? { box, img } : null
-          },
           render() {
             const mode = this.mode()
             this.syncToggle(mode)
-            const image = this.imageBox()
-            if (image) return this.renderImage(image)
             const box = this.el.querySelector("[data-render]")
             const frame = box && box.querySelector("iframe")
             if (!frame) return
             if (box.dataset.render !== mode) box.dataset.render = mode
-            if (box.id !== this.zoomBoxId || mode !== this.zoomMode) this.zoom = ZOOM_MIN
-            this.zoomBoxId = box.id
-            this.zoomMode = mode
-            const z = this.zoom
-            this.syncZoom(box, z)
-            const sizer = box.querySelector("[data-zoom-sizer]")
-            if (mode === "phone" && z === ZOOM_MIN) {
-              if (sizer) sizer.style.width = ""
+            if (mode === "phone") {
               frame.style.width = frame.style.height = ""
               frame.style.transform = frame.style.transformOrigin = ""
               return
             }
-            const fit = mode === "desktop" ? box.clientWidth / DESKTOP_WIDTH : 1
-            const layoutWidth = mode === "desktop" ? DESKTOP_WIDTH : box.clientWidth
-            const scale = fit * z
-            // Size the sizer first: once it overflows, a classic horizontal scrollbar takes
-            // height from the box, and the frame's layout height must account for it.
-            if (sizer) sizer.style.width = `${layoutWidth * scale}px`
-            frame.style.width = `${layoutWidth}px`
+            const scale = box.clientWidth / DESKTOP_WIDTH
+            frame.style.width = `${DESKTOP_WIDTH}px`
             frame.style.height = `${box.clientHeight / scale}px`
             frame.style.transformOrigin = "top left"
             frame.style.transform = `scale(${scale})`
-          },
-          // RE405 — a screenshot fits the box width (never upscaled past its natural width) and
-          // zooms by its layout width, not a transform, so the overflow-auto box pans both ways.
-          renderImage({ box, img }) {
-            if (box.id !== this.zoomBoxId) this.zoom = ZOOM_MIN
-            this.zoomBoxId = box.id
-            this.syncZoom(box, this.zoom)
-            // naturalWidth is 0 until the image loads, and the stage's ResizeObserver never sees
-            // the load — re-render once it lands. Same listener + options: added at most once.
-            if (!img.complete || !img.naturalWidth) return img.addEventListener("load", this.apply, { once: true })
-            const width = `${Math.min(img.naturalWidth, box.clientWidth) * this.zoom}px`
-            if (img.style.width !== width) img.style.width = width
-          },
-          pinchStart(e) {
-            const image = e.touches.length === 2 && this.imageBox()
-            this.pinch = image && { distance: distance(...e.touches), zoom: this.zoom }
-          },
-          // Scales by the change in finger distance, keeping the content point under the
-          // fingers' midpoint under it.
-          pinchMove(e) {
-            if (e.touches.length !== 2) return
-            const image = this.imageBox()
-            if (!image) return
-            e.preventDefault()
-            if (!this.pinch) return
-            const { box } = image
-            const [a, b] = e.touches
-            const rect = box.getBoundingClientRect()
-            const x = (a.clientX + b.clientX) / 2 - rect.left - box.clientLeft
-            const y = (a.clientY + b.clientY) / 2 - rect.top - box.clientTop
-            const before = this.zoom
-            const after = clampZoom(this.pinch.zoom * distance(a, b) / this.pinch.distance)
-            const contentX = (box.scrollLeft + x) / before
-            const contentY = (box.scrollTop + y) / before
-            this.zoom = after
-            this.renderImage(image)
-            box.scrollLeft = contentX * after - x
-            box.scrollTop = contentY * after - y
-          },
-          // The zoom control is phx-update="ignore": the hook owns its label and disabled flags.
-          // Text is only written when it changes — a text write is a childList mutation.
-          syncZoom(box, z) {
-            if (box.dataset.zoom !== undefined && box.dataset.zoom !== String(z)) box.dataset.zoom = String(z)
-            const control = this.el.querySelector('[role="group"][aria-label="Zoom"]')
-            if (!control) return
-            const label = z === ZOOM_MIN ? "Fit" : `${Math.round(z * 100)}%`
-            const reset = control.querySelector('[id$="-zoom-reset"]')
-            if (reset.textContent.trim() !== label) reset.textContent = label
-            control.querySelector('[id$="-zoom-out"]').disabled = z <= ZOOM_MIN
-            control.querySelector('[id$="-zoom-in"]').disabled = z >= ZOOM_MAX
           },
           // The toggle is phx-update="ignore": move the active look by swapping the server's
           // own active / inactive class lists between segments, so no class is re-typed here.
@@ -3709,6 +3574,60 @@ defmodule HamacaWeb.CoreComponents do
             target.className = activeClass
             active.dataset.active = "false"
             target.dataset.active = "true"
+          }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".ViewerPinch">
+        // RE517 — the embedded viewer enables the WebView's native pinch only while it is open.
+        // The root layout's locked viewport (RE400) is read from the DOM once per page — never
+        // re-typed here, and never re-captured by a remount while relaxed.
+        let original = null
+
+        const viewportMeta = () => document.querySelector('meta[name="viewport"]')
+
+        export default {
+          mounted() {
+            const meta = viewportMeta()
+            if (meta && original === null) original = meta.getAttribute("content")
+            this.item = this.el.dataset.item
+            this.relax()
+          },
+          // A new item (pager, ←/→, a tile, a swipe) lands at scale 1: lock, then relax again
+          // once the locked viewport has been applied.
+          updated() {
+            if (this.el.dataset.item === this.item) return
+            this.item = this.el.dataset.item
+            this.cancel()
+            this.lock()
+            this.frame = requestAnimationFrame(() => {
+              this.frame = requestAnimationFrame(() => {
+                this.frame = null
+                this.relax()
+              })
+            })
+          },
+          destroyed() {
+            this.cancel()
+            this.lock()
+          },
+          cancel() {
+            if (this.frame) cancelAnimationFrame(this.frame)
+            this.frame = null
+          },
+          relax() {
+            const meta = viewportMeta()
+            if (meta) meta.setAttribute("content", this.el.dataset.zoomViewport)
+            this.bridge(true)
+          },
+          lock() {
+            const meta = viewportMeta()
+            if (meta && original !== null) meta.setAttribute("content", original)
+            this.bridge(false)
+          },
+          bridge(enabled) {
+            if (window.flutter_inappwebview) {
+              window.flutter_inappwebview.callHandler(this.el.dataset.zoomHandler, enabled)
+            }
           }
         }
       </script>
@@ -3730,11 +3649,10 @@ defmodule HamacaWeb.CoreComponents do
               const dx = t.clientX - this.start.x
               const dy = t.clientY - this.start.y
               this.start = null
+              // Natively pinch-zoomed, a sideways drag pans the page: never page (RE517).
+              if (window.visualViewport && window.visualViewport.scale > 1) return
               // A screenshot never pages by swipe: a sideways drag pans it (RE405).
               if (this.el.querySelector('[data-kind="image"]')) return
-              // Zoomed past Fit, a sideways drag pans the mockup; it never pages.
-              const box = this.el.querySelector("[data-zoom]")
-              if (box && box.dataset.zoom !== "1") return
               if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy)) {
                 this.pushEvent(dx < 0 ? "mockup_next" : "mockup_prev", {})
               }
@@ -3746,16 +3664,15 @@ defmodule HamacaWeb.CoreComponents do
     """
   end
 
-  # An image scrolls both ways (natural size on the web, fit-to-width and zoomable embedded);
-  # embedded HTML scrolls sideways when zoomed (vertical scroll stays inside the iframe); the web
-  # viewer's frame clips, desktop mode scrolling.
-  defp mockup_box_overflow(:image, _zoomable), do: "overflow-auto"
-  defp mockup_box_overflow(_kind, true = _zoomable), do: "overflow-x-auto overflow-y-hidden"
-  defp mockup_box_overflow(_kind, _zoomable), do: "overflow-hidden data-[render=desktop]:overflow-y-auto"
+  # An image scrolls both ways (natural size on the web, fit-to-width embedded); an HTML frame
+  # clips, desktop mode scrolling.
+  defp mockup_box_overflow(:image), do: "overflow-auto"
+  defp mockup_box_overflow(_kind), do: "overflow-hidden data-[render=desktop]:overflow-y-auto"
 
   attr :id, :string, required: true
   attr :src, :string, required: true
   attr :title, :string, required: true
+  attr :rest, :global
 
   defp mockup_viewer_iframe(assigns) do
     ~H"""
@@ -3765,6 +3682,7 @@ defmodule HamacaWeb.CoreComponents do
       sandbox={HamacaWeb.mockup_sandbox()}
       title={@title}
       class="block h-full w-full border-0"
+      {@rest}
     >
     </iframe>
     """

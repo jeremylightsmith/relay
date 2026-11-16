@@ -9,4 +9,13 @@ void main() {
     expect(settings.builtInZoomControls, isFalse);
     expect(settings.ignoresViewportScaleLimits, isFalse);
   });
+
+  test('the viewer zoom variant allows native pinch-zoom (RE517)', () {
+    final settings = viewerZoomWebViewSettings();
+
+    expect(settings.supportZoom, isTrue);
+    expect(settings.builtInZoomControls, isTrue);
+    expect(settings.displayZoomControls, isFalse);
+    expect(settings.ignoresViewportScaleLimits, isFalse);
+  });
 }
