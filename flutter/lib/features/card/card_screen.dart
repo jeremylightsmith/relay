@@ -143,6 +143,23 @@ class CardScreen extends ConsumerStatefulWidget {
   static InAppWebViewSettings viewerZoomSettings(bool enabled) =>
       enabled ? viewerZoomWebViewSettings() : embeddedWebViewSettings();
 
+  /// Whether a [viewerZoomHandler] call changes native webview settings on
+  /// [platform] (RE517): Android only. On iOS zoom is governed solely by the
+  /// viewport meta the web `.ViewerPinch` hook owns — `flutter_inappwebview`'s
+  /// `supportZoom` toggle there doesn't flip a native flag, it *appends* a
+  /// `<meta name="viewport">` (and `zoomBy` drives WKWebView's scroll view
+  /// behind WebKit), which fought the hook and blanked the webview mid-pinch.
+  /// Callers pass `defaultTargetPlatform` (not `dart:io`'s `Platform`), so
+  /// tests can name the platform.
+  static bool viewerZoomUsesNativeSettings(TargetPlatform platform) =>
+      platform == TargetPlatform.android;
+
+  /// The card webview's key for remount [generation] (RE517). A dead webview
+  /// (iOS web content process terminated, Android renderer gone) can't be
+  /// reused, and `initialUrlRequest` only applies on mount — so recovery bumps
+  /// the generation, the key changes, and a fresh webview reloads the card.
+  static Key webViewKey(int generation) => ValueKey('card_webview_$generation');
+
   /// Chains a [viewerZoomHandler] call onto [previous] so calls apply strictly in
   /// arrival order (RE517). Each JS handler call runs as its own async callback,
   /// and a viewer switch sends `false` then `true` within a frame or two: the
@@ -231,6 +248,9 @@ class _CardScreenState extends ConsumerState<CardScreen> {
   /// The tail of the [CardScreen.viewerZoomHandler] calls — see
   /// [CardScreen.serialViewerZoom].
   Future<void> _viewerZoomQueue = Future<void>.value();
+
+  /// Bumped by [_recoverWebView] to remount a dead webview (RE517).
+  int _webViewGeneration = 0;
 
   @override
   void initState() {
@@ -375,7 +395,7 @@ class _CardScreenState extends ConsumerState<CardScreen> {
           child:
               widget.bodyBuilder?.call(context) ??
               InAppWebView(
-                key: const Key('card_webview'),
+                key: CardScreen.webViewKey(_webViewGeneration),
                 // RE400: no native swipe — the webview owns every gesture
                 // (vertical scroll and in-page horizontal scrollers alike), with
                 // no arena ambiguity; cards change through the web ‹ › chevrons.
@@ -397,6 +417,10 @@ class _CardScreenState extends ConsumerState<CardScreen> {
                     ),
                   ),
                 ),
+                // RE517: a killed web process leaves a blank, dead webview (iOS)
+                // or, unhandled, kills the app (Android) — remount instead.
+                onWebContentProcessDidTerminate: (_) => _recoverWebView(),
+                onRenderProcessGone: (_, _) => _recoverWebView(),
                 onWebViewCreated: (controller) {
                   controller.addJavaScriptHandler(
                     handlerName: CardScreen.navBackHandler,
@@ -451,16 +475,31 @@ class _CardScreenState extends ConsumerState<CardScreen> {
     );
   }
 
-  /// Applies a [CardScreen.viewerZoomHandler] call (RE517). Leaving the viewer
-  /// must land the card at scale 1: Android keeps a pinched zoom after
-  /// `supportZoom` turns off, so the scale is reset first — while zoom is still
-  /// supported — and the locked settings applied after. iOS un-zooms through the
-  /// web side restoring `maximum-scale=1`; the reset is best-effort (some calls
-  /// are platform-specific) and never blocks the settings change.
+  /// Remounts the card webview after its web process died (RE517): a new
+  /// [CardScreen.webViewKey] builds a fresh webview that reloads the card page.
+  /// The old controller is never touched again — any queued
+  /// [CardScreen.viewerZoomHandler] chain still pointing at it is dropped.
+  void _recoverWebView() {
+    debugPrint('card webview process died; remounting ${widget.cardRef}');
+    _viewerZoomQueue = Future<void>.value();
+    if (mounted) setState(() => _webViewGeneration++);
+  }
+
+  /// Applies a [CardScreen.viewerZoomHandler] call (RE517) — on Android only
+  /// ([CardScreen.viewerZoomUsesNativeSettings]). On iOS the viewport meta alone
+  /// governs zoom: the plugin's `supportZoom` toggle appends viewport metas and
+  /// `zoomBy` drives WKWebView's scroll view directly, so nothing native is
+  /// touched there. Leaving the viewer must land the card at scale 1: Android
+  /// keeps a pinched zoom after `supportZoom` turns off, so the scale is reset
+  /// first — while zoom is still supported — and the locked settings applied
+  /// after. The reset is best-effort and never blocks the settings change.
   Future<void> _setViewerZoom(
     InAppWebViewController controller,
     bool enabled,
   ) async {
+    if (!CardScreen.viewerZoomUsesNativeSettings(defaultTargetPlatform)) {
+      return;
+    }
     if (!enabled) {
       try {
         final scale = await controller.getZoomScale();

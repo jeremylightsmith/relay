@@ -237,6 +237,44 @@ void main() {
     expect(CardScreen.viewerZoomFromArgs([null]), isNull);
   });
 
+  test('viewerZoomUsesNativeSettings is true on Android', () {
+    expect(
+      CardScreen.viewerZoomUsesNativeSettings(TargetPlatform.android),
+      isTrue,
+    );
+  });
+
+  test('viewerZoomUsesNativeSettings is false on iOS', () {
+    // RE517: iOS zoom is the viewport meta's alone — the plugin's supportZoom
+    // toggle appends viewport metas that fight the web hook.
+    expect(
+      CardScreen.viewerZoomUsesNativeSettings(TargetPlatform.iOS),
+      isFalse,
+    );
+  });
+
+  test('viewerZoomUsesNativeSettings is false on every other platform', () {
+    for (final platform in [
+      TargetPlatform.macOS,
+      TargetPlatform.fuchsia,
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+    ]) {
+      expect(
+        CardScreen.viewerZoomUsesNativeSettings(platform),
+        isFalse,
+        reason: '$platform',
+      );
+    }
+  });
+
+  test('webViewKey is keyed by the remount generation', () {
+    expect(CardScreen.webViewKey(0), const ValueKey('card_webview_0'));
+    expect(CardScreen.webViewKey(1), const ValueKey('card_webview_1'));
+    expect(CardScreen.webViewKey(0), isNot(CardScreen.webViewKey(1)));
+    expect(CardScreen.webViewKey(1) == CardScreen.webViewKey(1), isTrue);
+  });
+
   test('viewerZoomSettings(true) enables native pinch-zoom', () {
     final settings = CardScreen.viewerZoomSettings(true);
 

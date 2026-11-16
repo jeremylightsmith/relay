@@ -3254,12 +3254,16 @@ defmodule HamacaWeb.CoreComponents do
   upscaled past its natural width); there is no zoom control.
 
   Embedded, every item pinch-zooms natively (RE517): the colocated `.ViewerPinch` hook on the
-  hidden, stable `\#{id}-pinch` element relaxes `<meta name="viewport">` to its
-  `data-zoom-viewport` (up to 4×) while the viewer is open and calls the native shell's
-  `relayViewerZoom` bridge (`viewer_zoom_handler/0`) with `true`; on an item switch it briefly
-  restores the locked viewport and calls `false`, then relaxes and calls `true` on the next frames
-  so the new item lands at scale 1; on close it restores the root layout's original viewport (read
-  once from the DOM, RE400) and calls `false`. Outside embed there is no pinch element.
+  hidden, stable `\#{id}-pinch` element relaxes **every** `<meta name="viewport">` (the root
+  layout's, and any the native WebView plugin appended) to its `data-zoom-viewport` (up to 4×)
+  while the viewer is open and calls the native shell's `relayViewerZoom` bridge
+  (`viewer_zoom_handler/0`) with `true`; on an item switch it briefly restores the locked viewport
+  and calls `false`, then relaxes and calls `true` on the next frames so the new item lands at
+  scale 1; on close it restores each meta to its own original content (read from the DOM the first
+  time the hook sees that meta, RE400) and calls `false`. It writes a meta only when its content
+  changes and calls the bridge only when the value differs from the last one sent on the page, so
+  a server patch or a socket reconnect while zoomed touches neither. Outside embed there is no
+  pinch element.
 
   It is a `fixed` overlay, so whatever page is underneath stays mounted. ←/→ push
   `mockup_prev`/`mockup_next` and Esc pushes `mockup_back` (window bindings, guarded by
@@ -3579,16 +3583,25 @@ defmodule HamacaWeb.CoreComponents do
       </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".ViewerPinch">
         // RE517 — the embedded viewer enables the WebView's native pinch only while it is open.
-        // The root layout's locked viewport (RE400) is read from the DOM once per page — never
-        // re-typed here, and never re-captured by a remount while relaxed.
-        let original = null
+        // Inside the app the page can carry more than one viewport meta (flutter_inappwebview_ios
+        // appends a locked one while supportZoom is off), and WebKit applies whichever it
+        // processed last — so every meta is kept in step. Each meta's original content (the root
+        // layout's locked viewport, RE400) is read from the DOM the first time the hook sees it —
+        // never re-typed here, and never re-captured by a remount while relaxed. Module scope, so
+        // it survives remounts within the page.
+        const originals = new WeakMap()
+        // The last value sent over the bridge on this page (none yet).
+        let sent = null
 
-        const viewportMeta = () => document.querySelector('meta[name="viewport"]')
+        const viewportMetas = () => document.querySelectorAll('meta[name="viewport"]')
+
+        // Every write makes WebKit re-process the viewport: write only a real change.
+        const setContent = (meta, content) => {
+          if (meta.getAttribute("content") !== content) meta.setAttribute("content", content)
+        }
 
         export default {
           mounted() {
-            const meta = viewportMeta()
-            if (meta && original === null) original = meta.getAttribute("content")
             this.item = this.el.dataset.item
             this.relax()
           },
@@ -3615,19 +3628,23 @@ defmodule HamacaWeb.CoreComponents do
             this.frame = null
           },
           relax() {
-            const meta = viewportMeta()
-            if (meta) meta.setAttribute("content", this.el.dataset.zoomViewport)
+            for (const meta of viewportMetas()) {
+              if (!originals.has(meta)) originals.set(meta, meta.getAttribute("content"))
+              setContent(meta, this.el.dataset.zoomViewport)
+            }
             this.bridge(true)
           },
           lock() {
-            const meta = viewportMeta()
-            if (meta && original !== null) meta.setAttribute("content", original)
+            for (const meta of viewportMetas()) {
+              if (originals.has(meta)) setContent(meta, originals.get(meta))
+            }
             this.bridge(false)
           },
+          // Only a change goes out — a LiveView reconnect or remount while open re-sends nothing.
           bridge(enabled) {
-            if (window.flutter_inappwebview) {
-              window.flutter_inappwebview.callHandler(this.el.dataset.zoomHandler, enabled)
-            }
+            if (!window.flutter_inappwebview || enabled === sent) return
+            sent = enabled
+            window.flutter_inappwebview.callHandler(this.el.dataset.zoomHandler, enabled)
           }
         }
       </script>

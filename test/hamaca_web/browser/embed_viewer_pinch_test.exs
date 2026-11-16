@@ -1,10 +1,11 @@
 defmodule HamacaWeb.Browser.EmbedViewerPinchTest do
   @moduledoc """
   Real-browser (Playwright) test for RE517: the embedded mockup viewer enables the WebView's
-  native pinch only while it is open. The colocated `.ViewerPinch` hook relaxes
-  `<meta name="viewport">` to the zoomable value on open, restores the root layout's original
-  (locked, RE400) value on close, re-locks briefly on every item switch, and tells the native
-  shell through the `relayViewerZoom` bridge. Only a real browser runs the hook.
+  native pinch only while it is open. The colocated `.ViewerPinch` hook relaxes every
+  `<meta name="viewport">` to the zoomable value on open, restores each to its own original
+  (the root layout's is locked, RE400) on close, re-locks briefly on every item switch, and tells
+  the native shell through the `relayViewerZoom` bridge — writing a meta or calling the bridge
+  only on a real change. Only a real browser runs the hook.
   """
   use PhoenixTest.Playwright.Case, async: false
 
@@ -19,6 +20,8 @@ defmodule HamacaWeb.Browser.EmbedViewerPinchTest do
 
   @zoomable "width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=4, user-scalable=yes, viewport-fit=cover"
   @locked "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+  # What flutter_inappwebview_ios appends to <head> while the webview's supportZoom is false.
+  @plugin_lock "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
 
   setup do
     user = Accounts.ensure_dev_user!()
@@ -84,6 +87,30 @@ defmodule HamacaWeb.Browser.EmbedViewerPinchTest do
   defp viewport(conn), do: measure(conn, "document.querySelector('meta[name=viewport]').content")
   defp calls(conn), do: measure(conn, "window.__calls")
 
+  defp viewports(conn),
+    do: measure(conn, "Array.from(document.querySelectorAll('meta[name=viewport]')).map(m => m.content)")
+
+  defp viewport_count(conn), do: measure(conn, "document.querySelectorAll('meta[name=viewport]').length")
+
+  @append_plugin_meta """
+  (() => {
+    const meta = document.createElement('meta');
+    meta.name = 'viewport';
+    meta.content = '#{@plugin_lock}';
+    document.head.appendChild(meta);
+    return true;
+  })()
+  """
+
+  @count_meta_writes """
+  (() => {
+    window.__metaWrites = 0;
+    new MutationObserver((ms) => { window.__metaWrites += ms.length; })
+      .observe(document.head, {attributes: true, subtree: true, attributeFilter: ['content']});
+    return true;
+  })()
+  """
+
   @stub_bridge """
   (() => {
     window.__calls = [];
@@ -121,6 +148,16 @@ defmodule HamacaWeb.Browser.EmbedViewerPinchTest do
     |> visit(card_url(ctx))
     |> await_connected()
     |> tap(&measure(&1, @stub_bridge))
+    |> open_from_drawer()
+  end
+
+  defp open_with_plugin_meta(conn, ctx) do
+    conn
+    |> login()
+    |> visit(card_url(ctx))
+    |> await_connected()
+    |> tap(&measure(&1, @stub_bridge))
+    |> tap(&measure(&1, @append_plugin_meta))
     |> open_from_drawer()
   end
 
@@ -188,5 +225,77 @@ defmodule HamacaWeb.Browser.EmbedViewerPinchTest do
     conn = close_viewer(conn)
     assert viewport(conn) == @locked
     assert measure(conn, "window.__errors") == []
+  end
+
+  test "RE517 pinch 12. opening the viewer relaxes every viewport meta, the plugin's too",
+       %{conn: conn} = ctx do
+    conn = open_with_plugin_meta(conn, ctx)
+
+    assert viewports(conn) == [@zoomable, @zoomable]
+  end
+
+  test "RE517 pinch 13. closing the viewer restores each viewport meta to its own original",
+       %{conn: conn} = ctx do
+    conn = conn |> open_with_plugin_meta(ctx) |> close_viewer()
+
+    assert viewports(conn) == [@locked, @plugin_lock]
+  end
+
+  test "RE517 pinch 14. paging and closing never adds or removes a viewport meta",
+       %{conn: conn} = ctx do
+    conn = open_with_plugin_meta(conn, ctx)
+    assert viewport_count(conn) == 2
+
+    conn =
+      conn
+      |> click("#mockup-viewer-pager-next")
+      |> assert_has("#mockup-viewer-pager-count", text: "2 of 2")
+      |> settle()
+
+    assert viewport_count(conn) == 2
+
+    conn =
+      conn
+      |> click("#mockup-viewer-pager-prev")
+      |> assert_has("#mockup-viewer-pager-count", text: "1 of 2")
+      |> settle()
+
+    assert viewport_count(conn) == 2
+
+    conn = close_viewer(conn)
+    assert viewport_count(conn) == 2
+    assert viewports(conn) == [@locked, @plugin_lock]
+  end
+
+  test "RE517 pinch 15. server patches while open neither rewrite the viewport nor re-call the bridge",
+       %{conn: conn} = ctx do
+    conn = open_stubbed(conn, ctx)
+    assert calls(conn) == [["relayViewerZoom", true]]
+    measure(conn, @count_meta_writes)
+
+    conn =
+      Enum.reduce(1..3, conn, fn i, conn ->
+        {:ok, _card} = Cards.update_card(ctx.card, %{title: "Patched #{i}"})
+        await_attached(conn, ~s{#mockup-viewer-card-title:has-text("Patched #{i}")})
+        settle(conn)
+      end)
+
+    assert measure(conn, "window.__metaWrites") == 0
+    assert calls(conn) == [["relayViewerZoom", true]]
+    assert viewport(conn) == @zoomable
+  end
+
+  test "RE517 pinch 16. a LiveView reconnect while open neither re-calls nor flips the bridge",
+       %{conn: conn} = ctx do
+    conn = open_stubbed(conn, ctx)
+    assert calls(conn) == [["relayViewerZoom", true]]
+
+    measure(conn, "(() => { liveSocket.disconnect(); return true; })()")
+    await_attached(conn, "[data-phx-main]:not(.phx-connected)")
+    measure(conn, "(() => { liveSocket.connect(); return true; })()")
+    conn = conn |> await_connected() |> settle()
+
+    assert calls(conn) == [["relayViewerZoom", true]]
+    assert viewport(conn) == @zoomable
   end
 end

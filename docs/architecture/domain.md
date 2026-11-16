@@ -482,16 +482,25 @@ sharing behavior.
   to the drawer; an invalid or stale `mockup` id falls back to the drawer.
   Embedded (the native host, RE393), the open viewer pinch-zooms natively up to 4× (RE517) — the
   only place pinch is on; everywhere else the root layout's locked viewport (RE400) stands. The
-  colocated `.ViewerPinch` hook on the hidden `#mockup-viewer-pinch` element relaxes
-  `<meta name="viewport">` to its `data-zoom-viewport` on open and calls the shell's
-  `relayViewerZoom` bridge (`CoreComponents.viewer_zoom_handler/0`) with `true`; on an item switch
-  it restores the locked viewport and calls `false`, then relaxes and calls `true` on the next
-  frames so the new item lands at scale 1; on close ("‹ Card", Esc) it restores the root layout's
-  original viewport (read once from the DOM) and calls `false`. While zoomed
+  colocated `.ViewerPinch` hook on the hidden `#mockup-viewer-pinch` element relaxes **every**
+  `<meta name="viewport">` (the root layout's and any the iOS WebView plugin appended — WebKit
+  applies whichever it processed last, so they are kept in step) to its `data-zoom-viewport` on open
+  and calls the shell's `relayViewerZoom` bridge (`CoreComponents.viewer_zoom_handler/0`) with
+  `true`; on an item switch it restores the locked viewport and calls `false`, then relaxes and calls
+  `true` on the next frames so the new item lands at scale 1; on close ("‹ Card", Esc) it restores
+  each meta to its own original content (read from the DOM the first time the hook sees it, kept
+  per page across remounts) and calls `false`. It writes a meta only when the content changes and
+  calls the bridge only when the value differs from the last one sent on the page, so a LiveView
+  patch or socket reconnect while zoomed re-processes no viewport and re-sends nothing. While zoomed
   (`visualViewport.scale > 1`) a sideways drag pans and never pages. There is no zoom control.
-  The Flutter `CardScreen` (only it — the board keeps pinch off) answers `true` with
-  `viewerZoomWebViewSettings()` and `false` with a zoom reset to 1 followed by the locked
-  `embeddedWebViewSettings()` (`flutter/lib/app/embedded_webview.dart`).
+  The Flutter `CardScreen` (only it — the board keeps pinch off) answers the bridge on Android
+  only: `true` with `viewerZoomWebViewSettings()` and `false` with a zoom reset to 1 followed by
+  the locked `embeddedWebViewSettings()` (`flutter/lib/app/embedded_webview.dart`). On iOS the
+  bridge changes no native setting (`CardScreen.viewerZoomUsesNativeSettings/1`) — the plugin's
+  `supportZoom` toggle there appends `<meta name="viewport">` elements and its zoom reset drives
+  WKWebView's scroll view directly — so the viewport meta alone governs zoom. A terminated web
+  content process (iOS) or a gone renderer (Android) remounts the card webview under a new
+  `CardScreen.webViewKey/1` generation, reloading the card page instead of leaving it blank.
   The native card host's `nav` param (RE400, `HamacaWeb.NativeCardNav`) — comma-separated `prev` /
   `next`, e.g. `/cards/:ref?board=<slug>&nav=prev,next` — names the neighbors the native shell has:
   it drives the drawer's ‹ › chevrons in native mode, where each calls the shell's `relayCardNav`
