@@ -46,7 +46,10 @@ import initImageLightbox from "./image_lightbox"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
-  longPollFallbackMs: 2500,
+  // No `longPollFallbackMs`: the fallback fired on any reconnect error (laptop wake, Wi-Fi blip)
+  // and pinned the page to LongPoll, where a main-thread stall ends in `410 session_gone` and a
+  // full remount that wipes in-progress typing. WebSocket survives the same stall and reconnects
+  // on its own. Guarded by test/hamaca_web/live_socket_transport_test.exs.
   // RE504 — the viewer's IANA time zone: the board buckets its Done column into weeks there.
   params: {_csrf_token: csrfToken, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone},
   // RE268 quality review — ArrowKeyGuard (RLY-234) and TypingKeyGuard were near-verbatim
