@@ -36,7 +36,13 @@ defmodule Storybook.StoryMapComponents.StoryMapCell do
           draft?: false,
           last_of_activity?: true
         },
-        lane: %{key: "r:100", release: %Schemas.Release{id: 100, board_id: 1, name: "MVP", position: 1}, count: 0},
+        lane: %{
+          key: "r:100",
+          release: %Schemas.Release{id: 100, board_id: 1, name: "MVP", position: 1},
+          count: 0,
+          total: 0,
+          complete?: false
+        },
         cards: [],
         board: %Schemas.Board{id: 1, key: "RLY", slug: "my-board", name: "My board"},
         stages: stages(),

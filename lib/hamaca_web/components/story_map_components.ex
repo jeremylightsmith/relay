@@ -780,8 +780,8 @@ defmodule HamacaWeb.StoryMapComponents do
       <div style={band_backing(1)}></div>
       <div style={band_backing(2)}></div>
       <div
-        :for={{_lane, index} <- Enum.with_index(@grid.lanes)}
-        style={lane_stripe_style(index)}
+        :for={{lane, index} <- Enum.with_index(@grid.lanes)}
+        style={lane_stripe_style(lane, index)}
         aria-hidden="true"
       >
       </div>
@@ -790,15 +790,28 @@ defmodule HamacaWeb.StoryMapComponents do
         id={lane_dom_id(lane)}
         class={[lane.release && not @read_only && "story-map-header story-map-header-drop"]}
         data-lane={lane.key}
+        data-complete={to_string(lane.complete?)}
         data-kind={lane.release && "release"}
         data-id={lane.release && lane.release.id}
         draggable={
           to_string(!!lane.release and not @read_only and @edit != {:release, lane.release.id})
         }
-        style={lane_label_style(index)}
+        style={lane_label_style(lane, index)}
       >
         <div style="display:flex;align-items:center;gap:5px;">
-          <span style={"width:8px;height:8px;border-radius:50%;background:#{lane_dot(index)};"}>
+          <%!-- RE351 — a complete release swaps its 8px palette dot for a green ✓. --%>
+          <span
+            :if={lane.complete?}
+            id={"story-map-lane-done-#{lane.release.id}"}
+            title="All cards complete"
+            style={release_done_mark_style()}
+          >
+            ✓
+          </span>
+          <span
+            :if={not lane.complete?}
+            style={"width:8px;height:8px;border-radius:50%;background:#{lane_dot(index)};"}
+          >
           </span>
           <span :if={lane.release && not @read_only} style={grip_style(:release)}>⠿</span>
           <%!-- The synthetic `(No release)` lane is not a structure: no grip, no rename, no ✕. --%>
@@ -813,14 +826,15 @@ defmodule HamacaWeb.StoryMapComponents do
             read_only={@read_only}
             style={lane_name_style() <> "flex:1;"}
           />
-          <%!-- Artboard `canDelete: rels.length > 1` (line ~506): the board's LAST swimlane
-                renders no ✕ at all. With zero releases the only lane is synthetic, so
-                `length(@grid.lanes) > 1` is exactly "more than one real release". --%>
+          <%!-- Artboard `canDelete: rels.length > 1` (line ~506): the board's LAST release
+                renders no ✕ at all. "Last" counts the releases Hide complete took off the
+                grid too (RE351), so hiding complete lanes never strands the one still showing.
+                The ✕ blocks on the release's `total`, not the filtered `count`. --%>
           <.delete_button
-            :if={lane.release && not @read_only && length(@grid.lanes) > 1}
+            :if={lane.release && not @read_only && StoryMapGrid.release_count(@grid) > 1}
             kind="release"
             id={lane.release.id}
-            count={lane.count}
+            count={lane.total}
           />
           <%!-- RE502 — the release row's select-all box. The synthetic `(No release)` lane only
                 gets one while it holds cards; a real release always does. --%>
@@ -835,10 +849,21 @@ defmodule HamacaWeb.StoryMapComponents do
             aria-label="Select every card in this release"
           />
         </div>
-        <span style="font-family:var(--font-mono);font-size:9px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
-          {lane.count} cards
-        </span>
+        <div :if={lane.complete?} style="display:flex;align-items:center;gap:6px;">
+          <span
+            id={"story-map-lane-complete-#{lane.release.id}"}
+            class="badge badge-success badge-soft badge-xs font-semibold"
+            style="font-size:9px;"
+          >
+            Complete
+          </span>
+          <.lane_count lane={lane} />
+        </div>
+        <.lane_count :if={not lane.complete?} lane={lane} />
       </div>
+      <%!-- RE351 — the complete releases Hide complete took off the grid, folded into one row
+            directly above ＋ Release. Renders nothing when none is hidden. --%>
+      <.story_map_hidden_releases releases={@grid.hidden_complete} row={add_release_row(@grid) - 1} />
       <%!-- RE263 — the add-release row: a 44px grid row directly below the last swimlane
             label, in the sticky-left rail (artboard `addRelStyle`, line ~512 + lines ~152-155). --%>
       <div style={add_release_style(@grid)}>
@@ -1001,6 +1026,73 @@ defmodule HamacaWeb.StoryMapComponents do
     """
   end
 
+  # RE351 — a lane's card count. `count` is what the filters leave visible and `total` every
+  # map card in the release, so a partly visible lane says how much is hidden.
+  attr :lane, :map, required: true
+
+  defp lane_count(assigns) do
+    ~H"""
+    <span
+      id={lane_count_dom_id(@lane)}
+      style="font-family:var(--font-mono);font-size:9px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);"
+    >
+      {lane_count_label(@lane)}
+    </span>
+    """
+  end
+
+  defp lane_count_label(%{count: count, total: total}) when count < total, do: "#{count} of #{total} cards"
+  defp lane_count_label(%{count: count}), do: "#{count} cards"
+
+  @doc """
+  RE351 — the one row that stands in for every complete release Hide complete took off the
+  grid: "✓ N complete release(s) hidden (Name, Name) · Show". It spans the whole grid, and its
+  button is sticky-left so it stays in view on horizontal scroll; clicking it turns Hide
+  complete off — the filter bar's own `toggle_story_map_hide_complete`, so read-only boards get
+  it too. Renders nothing when `releases` is empty.
+
+  Card mockup "A — complete releases: marked when shown, folded into one line when hidden".
+  `z-index:16` matches the lane rail and ＋ Release row, under the sticky headers.
+  """
+  attr :releases, :list, required: true, doc: "the hidden complete %Schemas.Release{}s, in lane order"
+  attr :row, :integer, required: true, doc: "the CSS grid-row it occupies"
+
+  def story_map_hidden_releases(assigns) do
+    ~H"""
+    <div
+      :if={@releases != []}
+      id="story-map-hidden-releases-row"
+      style={hidden_releases_row_style(@row)}
+    >
+      <button
+        type="button"
+        id="story-map-hidden-releases"
+        class="hover:text-base-content"
+        phx-click="toggle_story_map_hide_complete"
+        style="position:sticky;left:0;display:flex;align-items:center;gap:7px;padding:0 12px;height:100%;font-size:11.5px;color:color-mix(in oklab, var(--color-base-content) 60%, transparent);"
+      >
+        <span style="color:var(--color-success);font-weight:700;">✓</span>
+        <span>
+          <b style="font-weight:600;color:color-mix(in oklab, var(--color-base-content) 75%, transparent);">
+            {hidden_releases_label(@releases)}
+          </b>
+          ({Enum.map_join(@releases, ", ", & &1.name)})
+        </span>
+        <span style="color:color-mix(in oklab, var(--color-base-content) 40%, transparent);">·</span>
+        <span style="color:var(--color-primary);font-weight:600;">Show</span>
+      </button>
+    </div>
+    """
+  end
+
+  defp hidden_releases_label([_release]), do: "1 complete release hidden"
+  defp hidden_releases_label(releases), do: "#{length(releases)} complete releases hidden"
+
+  defp hidden_releases_row_style(row) do
+    "grid-column:1 / -1;grid-row:#{row};align-self:stretch;border-bottom:#{@gl_light};" <>
+      "background:var(--color-base-100);display:flex;align-items:center;position:relative;z-index:16;"
+  end
+
   @doc """
   One body cell (RE262): its cards, then either the dashed `＋` add button or the open
   composer. Extracted from `story_map/1` so that function stays pure layout and the composer
@@ -1046,7 +1138,7 @@ defmodule HamacaWeb.StoryMapComponents do
       class="story-map-drop"
       data-column={@column.key}
       data-lane={@lane.key}
-      style={cell_style(@column, @column_index, @lane_index, @zoom)}
+      style={cell_style(@column, @column_index, @lane, @lane_index, @zoom)}
     >
       <.story_map_card
         :for={{card, face} <- Enum.map(@cards, &{&1, card_face(&1, @board, @stages, @stalled_ids)})}
@@ -1712,6 +1804,10 @@ defmodule HamacaWeb.StoryMapComponents do
 
     rows = Enum.map_join(grid.lanes, " ", fn _lane -> "auto" end)
 
+    # RE351 — the 34px hidden-releases row sits between the last lane and ＋ Release, only
+    # while Hide complete is hiding something.
+    hidden = if grid.hidden_complete == [], do: "", else: " 34px"
+
     # RE263 — the artboard's `colTemplate` ends `' 58px'` (line ~492) and `rowsTemplate` ends
     # `' 44px'` (line ~493): the add-activity column and the add-release row. The trailing
     # column takes a step column's 156px while the activity draft is open, so there is room to
@@ -1719,7 +1815,7 @@ defmodule HamacaWeb.StoryMapComponents do
     add_activity = if draft == :activity, do: "156px", else: "58px"
 
     "display:grid;grid-template-columns:128px #{columns} #{add_activity};" <>
-      "grid-template-rows:#{@h1}px #{@h2}px #{rows} 44px;align-items:start;min-width:max-content;"
+      "grid-template-rows:#{@h1}px #{@h2}px #{rows}#{hidden} 44px;align-items:start;min-width:max-content;"
   end
 
   # Artboard `inputStyle`, line ~404.
@@ -1751,10 +1847,15 @@ defmodule HamacaWeb.StoryMapComponents do
 
   # Artboard `addRelStyle`, line ~512: the 44px row under the last swimlane label.
   defp add_release_style(grid) do
-    "grid-column:1;grid-row:#{length(grid.lanes) + 3};position:sticky;left:0;z-index:16;" <>
+    "grid-column:1;grid-row:#{add_release_row(grid)};position:sticky;left:0;z-index:16;" <>
       "background:var(--color-field-hover);border-right:#{@gl_strong};border-top:#{@gl_light};" <>
       "display:flex;align-items:center;padding:8px 12px;"
   end
+
+  # The ONE owner of the ＋ Release row number: right under the last rendered lane, pushed one
+  # row down by RE351's hidden-releases row, which therefore always sits at this minus one.
+  defp add_release_row(%{lanes: lanes, hidden_complete: []}), do: length(lanes) + 3
+  defp add_release_row(%{lanes: lanes}), do: length(lanes) + 4
 
   # Artboard line ~154.
   defp add_release_button_style do
@@ -1777,15 +1878,36 @@ defmodule HamacaWeb.StoryMapComponents do
     "grid-column:1 / -1;grid-row:2;position:sticky;top:#{@h1}px;z-index:8;background:var(--color-field-hover);"
   end
 
-  defp lane_stripe_style(index) do
-    background = if rem(index, 2) == 1, do: "var(--color-field-hover)", else: "transparent"
+  # RE351 — a complete lane's stripe takes the success tint regardless of the alternation.
+  defp lane_stripe_style(lane, index) do
+    background =
+      cond do
+        lane.complete? -> "color-mix(in oklab, var(--color-success) 7%, var(--color-base-100))"
+        rem(index, 2) == 1 -> "var(--color-field-hover)"
+        true -> "transparent"
+      end
+
     "grid-column:1 / -1;grid-row:#{index + 3};z-index:0;background:#{background};border-bottom:#{@gl_light};"
   end
 
-  defp lane_label_style(index) do
+  # RE351 — the rail is sticky, so a complete lane's success tint is mixed into the surface
+  # (opaque) rather than layered over it.
+  defp lane_label_style(lane, index) do
+    background =
+      if lane.complete?,
+        do: "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))",
+        else: "var(--color-field-hover)"
+
     "grid-column:1;grid-row:#{index + 3};position:sticky;left:0;z-index:16;" <>
-      "background:var(--color-field-hover);border-right:#{@gl_strong};display:flex;" <>
+      "background:#{background};border-right:#{@gl_strong};display:flex;" <>
       "flex-direction:column;gap:5px;padding:8px 12px;"
+  end
+
+  # RE351 — the complete lane's ✓, in the 8px dot's place.
+  defp release_done_mark_style do
+    "width:13px;height:13px;border-radius:50%;background:var(--color-success);" <>
+      "color:var(--color-success-content);font-size:8.5px;font-weight:700;display:flex;" <>
+      "align-items:center;justify-content:center;flex:none;"
   end
 
   defp lane_dot(index),
@@ -1797,6 +1919,12 @@ defmodule HamacaWeb.StoryMapComponents do
 
   defp lane_dom_id(%{release: nil}), do: "story-map-release-none"
   defp lane_dom_id(%{release: release}), do: "story-map-release-#{release.id}"
+
+  # `story-map-lane-`, never `story-map-release-`: `StoryMapDnD` finds the lane labels by
+  # `[id^="story-map-release-"]` and measures the LAST match, so an id with that prefix inside a
+  # label would become the "last lane" and cut the vertical drop line short.
+  defp lane_count_dom_id(%{release: nil}), do: "story-map-lane-count-none"
+  defp lane_count_dom_id(%{release: release}), do: "story-map-lane-count-#{release.id}"
 
   defp lane_name(%{release: nil}), do: "(No release)"
   defp lane_name(%{release: release}), do: release.name
@@ -1868,7 +1996,7 @@ defmodule HamacaWeb.StoryMapComponents do
       "display:flex;align-items:center;gap:6px;#{cursor}"
   end
 
-  defp cell_style(column, column_index, lane_index, zoom) do
+  defp cell_style(column, column_index, lane, lane_index, zoom) do
     # RE263 — the draft column's body cells are empty and dashed, exactly like `— No step yet`.
     placeholder? = column.no_step? or column.draft?
 
@@ -1884,9 +2012,12 @@ defmodule HamacaWeb.StoryMapComponents do
     # Artboard line ~524: `gap:(z==='map'?'3px':'7px')`.
     gap = if zoom == :map, do: "3px", else: "7px"
 
+    # RE351 — a complete release's cards recede.
+    dim = if lane.complete?, do: "opacity:0.7;", else: ""
+
     "grid-column:#{column_index + 2};grid-row:#{lane_index + 3};display:flex;" <>
       "flex-direction:column;gap:#{gap};padding:8px;min-height:26px;" <>
-      "border-right:#{border_right};#{background}"
+      "border-right:#{border_right};#{background}#{dim}"
   end
 
   # Artboard `addBtnStyle` (line ~527): 7px of padding in an empty cell, 3px once it has cards —

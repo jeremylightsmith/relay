@@ -733,4 +733,133 @@ defmodule HamacaWeb.StoryMapGridTest do
                )
     end
   end
+
+  describe "RE351 — release completeness (apply_completion/6)" do
+    @done 9
+    @open 1
+
+    defp acts, do: [activity(1, 1), activity(2, 2)]
+    defp steps, do: [step(10, 1, 1), step(20, 2, 1)]
+    defp rels, do: [release(100, 1), release(200, 2), release(300, 3)]
+
+    defp on_step(id, step_id, release_id, stage_id),
+      do: card(id, story_step_id: step_id, release_id: release_id, stage_id: stage_id)
+
+    # Build from `visible`, then apply completeness over `all` — the BoardLive pipeline.
+    defp built(releases, visible, all, hide?, collapsed \\ MapSet.new()) do
+      acts()
+      |> StoryMapGrid.build(steps(), releases, visible, nil, false, collapsed)
+      |> StoryMapGrid.apply_completion(all, steps(), acts(), [@done], hide?)
+    end
+
+    defp lane(grid, key), do: Enum.find(grid.lanes, &(&1.key == key))
+
+    test "a release whose every card is in a done stage is complete" do
+      cards = [on_step(1, 10, 100, @done), on_step(2, 10, 100, @done)]
+      grid = built(rels(), cards, cards, false)
+
+      assert %{total: 2, complete?: true} = lane(grid, "r:100")
+    end
+
+    test "one open card keeps the release incomplete" do
+      cards = [on_step(1, 10, 100, @done), on_step(2, 10, 100, @open)]
+      grid = built(rels(), cards, cards, false)
+
+      assert %{total: 2, complete?: false} = lane(grid, "r:100")
+    end
+
+    test "an empty release is never complete and is never dropped" do
+      cards = [on_step(1, 10, 100, @open)]
+      grid = built(rels(), cards, cards, true)
+
+      assert %{total: 0, complete?: false} = lane(grid, "r:200")
+      assert "r:200" in Enum.map(grid.lanes, & &1.key)
+    end
+
+    test "release_count/1 counts the releases Hide complete hid, and never the synthetic lane" do
+      cards = [on_step(1, 10, 100, @done), on_step(2, 10, 200, @open)]
+
+      assert StoryMapGrid.release_count(built(rels(), cards, cards, false)) == 3
+      assert StoryMapGrid.release_count(built(rels(), [on_step(2, 10, 200, @open)], cards, true)) == 3
+      assert StoryMapGrid.release_count(built([], cards, cards, true)) == 0
+    end
+
+    test "the synthetic (No release) lane is never complete" do
+      cards = [on_step(1, 10, nil, @done), on_step(2, 10, nil, @done)]
+      grid = built([], cards, cards, true)
+
+      assert [%{key: "r:none", complete?: false, total: 2}] = grid.lanes
+      assert grid.hidden_complete == []
+    end
+
+    test "a collapsed activity's cards still count toward the release" do
+      cards = [on_step(1, 10, 100, @done), on_step(2, 20, 100, @open)]
+      grid = built(rels(), cards, cards, false, MapSet.new([2]))
+
+      assert %{count: 1, total: 2, complete?: false} = lane(grid, "r:100")
+    end
+
+    test "an orphan card counts toward the last lane, as build/7 places it" do
+      for release_id <- [nil, 999] do
+        cards = [on_step(1, 10, 300, @done), on_step(2, 10, release_id, @open)]
+        grid = built(rels(), cards, cards, false)
+
+        assert %{total: 2, complete?: false} = lane(grid, "r:300")
+      end
+    end
+
+    test "a tray card does not count toward its release" do
+      cards = [on_step(1, 10, 100, @done), card(2, release_id: 100, stage_id: @open)]
+      grid = built(rels(), cards, cards, false)
+
+      assert %{total: 1, complete?: true} = lane(grid, "r:100")
+    end
+
+    test "completeness is computed over all cards, not the visible ones" do
+      all = [on_step(1, 10, 100, @open), on_step(2, 10, 100, @open), on_step(3, 10, 100, @done)]
+      grid = built(rels(), [hd(all)], all, false)
+
+      assert %{count: 1, total: 3, complete?: false} = lane(grid, "r:100")
+    end
+
+    defp mixed_cards do
+      done = [on_step(1, 10, 100, @done), on_step(2, 10, 100, @done), on_step(4, 10, 300, @done)]
+      [on_step(3, 10, 200, @open) | done]
+    end
+
+    test "Hide complete drops complete lanes and their cells into hidden_complete" do
+      all = mixed_cards()
+      visible = Enum.filter(all, &(&1.stage_id == @open))
+      grid = built(rels(), visible, all, true)
+
+      assert Enum.map(grid.lanes, & &1.key) == ["r:200"]
+      assert Enum.map(grid.hidden_complete, & &1.id) == [100, 300]
+      refute Enum.any?(Map.keys(grid.cells), fn {_column, lane} -> lane in ["r:100", "r:300"] end)
+    end
+
+    test "with Hide complete off every lane stays and is marked" do
+      all = mixed_cards()
+      grid = built(rels(), all, all, false)
+
+      assert Enum.map(grid.lanes, & &1.key) == ["r:100", "r:200", "r:300"]
+      assert Enum.map(grid.lanes, & &1.complete?) == [true, false, true]
+      assert grid.hidden_complete == []
+    end
+
+    test "hidden_complete keeps the board's lane order" do
+      cards = [on_step(1, 10, 100, @done), on_step(2, 10, 300, @done)]
+      grid = built([release(300, 1), release(100, 2)], cards, cards, true)
+
+      assert Enum.map(grid.hidden_complete, & &1.id) == [300, 100]
+    end
+
+    test "build/7 alone emits the full lane shape with neutral defaults" do
+      cards = [on_step(1, 10, 100, @done), on_step(2, 10, 100, @done)]
+      grid = StoryMapGrid.build(acts(), steps(), rels(), cards)
+
+      assert Enum.all?(grid.lanes, &(&1.total == &1.count and &1.complete? == false))
+      assert lane(grid, "r:100").total == 2
+      assert grid.hidden_complete == []
+    end
+  end
 end

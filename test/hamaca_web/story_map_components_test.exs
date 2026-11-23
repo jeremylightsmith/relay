@@ -126,6 +126,43 @@ defmodule HamacaWeb.StoryMapComponentsTest do
     html |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> LazyHTML.attribute("id") != []
   end
 
+  # RE351 — the complete-release fixtures: one activity (1) with step 10 and three releases.
+  # Stage 3 is `stages/0`'s top-level `:complete` stage, passed as the done set.
+  defp mvp, do: %Release{id: 100, board_id: 1, name: "MVP", position: 1}
+  defp fast_follow, do: %Release{id: 200, board_id: 1, name: "Fast follow", position: 2}
+  defp later, do: %Release{id: 300, board_id: 1, name: "Later", position: 3}
+
+  # `visible` is what `build/7` places (the filtered list); `all` is the board's unfiltered map
+  # cards `apply_completion/6` derives completeness from.
+  defp completion_grid(releases, visible, all, hide_complete?) do
+    activity = %StoryActivity{id: 1, board_id: 1, name: "Onboard & access", position: 1}
+    step = %StoryStep{id: 10, board_id: 1, story_activity_id: 1, name: "Sign in", position: 1}
+
+    [activity]
+    |> StoryMapGrid.build([step], releases, visible)
+    |> StoryMapGrid.apply_completion(all, [step], [activity], [3], hide_complete?)
+  end
+
+  defp mapped(id, release_id, stage_id),
+    do: card(id, story_activity_id: 1, story_step_id: 10, release_id: release_id, stage_id: stage_id)
+
+  # Release 100's two cards are done; release 200 holds one open card. Hide complete off.
+  defp mvp_complete_grid do
+    cards = [mapped(1, 100, 3), mapped(2, 100, 3), mapped(3, 200, 2)]
+    completion_grid([mvp(), fast_follow()], cards, cards, false)
+  end
+
+  # The element's text with runs of whitespace collapsed, so HEEx's line breaks between
+  # interpolations do not leak into a sentence assertion.
+  defp squished_text(html, selector) do
+    html
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(selector)
+    |> LazyHTML.text()
+    |> String.split()
+    |> Enum.join(" ")
+  end
+
   defp tray(open) do
     render_component(&StoryMapComponents.unmapped_tray/1,
       cards: [card(7, []), card(8, [])],
@@ -705,7 +742,7 @@ defmodule HamacaWeb.StoryMapComponentsTest do
   defp cell_column,
     do: %{key: "s:10", activity: nil, step: nil, no_step?: false, bare?: false, draft?: false, last_of_activity?: true}
 
-  defp cell_lane, do: %{key: "r:100", release: nil, count: 0}
+  defp cell_lane, do: %{key: "r:100", release: nil, count: 0, total: 0, complete?: false}
 
   defp cell_html(overrides) do
     defaults = %{
@@ -1673,6 +1710,154 @@ defmodule HamacaWeb.StoryMapComponentsTest do
   # `matches?/2` for an element that carries no id (an icon, a hint span).
   defp present?(html, selector) do
     html |> LazyHTML.from_fragment() |> LazyHTML.query(selector) |> Enum.count() > 0
+  end
+
+  describe "RE351 — complete release lanes" do
+    test "a complete lane carries the ✓ mark, the Complete badge and data-complete=true" do
+      html = grid_html(mvp_complete_grid())
+
+      assert attr_of(html, "#story-map-lane-done-100", "title") == "All cards complete"
+      done = style_of(html, "#story-map-lane-done-100")
+      assert done =~ "background:var(--color-success)"
+      assert done =~ "width:13px"
+
+      assert attr_of(html, "#story-map-lane-complete-100", "class") =~
+               "badge badge-success badge-soft badge-xs font-semibold"
+
+      assert squished_text(html, "#story-map-lane-complete-100") == "Complete"
+      assert matches?(html, "#story-map-release-100[data-complete='true']")
+    end
+
+    # `StoryMapDnD` finds the lane labels by `[id^="story-map-release-"]` and takes the LAST
+    # match as the last lane; a descendant with that prefix would cut the vertical drop line short.
+    test "nothing inside a lane label reuses the lane labels' id prefix" do
+      html = grid_html(mvp_complete_grid())
+
+      ids =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s([id^="story-map-release-"] [id^="story-map-release-"]))
+        |> LazyHTML.attribute("id")
+
+      assert ids == []
+    end
+
+    test "an in-progress lane has no mark, no badge and today's rail" do
+      html = grid_html(mvp_complete_grid())
+
+      refute matches?(html, "#story-map-lane-done-200")
+      refute matches?(html, "#story-map-lane-complete-200")
+      assert matches?(html, "#story-map-release-200[data-complete='false']")
+      assert style_of(html, "#story-map-release-200") =~ "background:var(--color-field-hover)"
+    end
+
+    test "a complete lane's rail and stripe take the success tint and its cells dim" do
+      html = grid_html(mvp_complete_grid())
+
+      assert style_of(html, "#story-map-release-100") =~
+               "color-mix(in oklab, var(--color-success) 10%, var(--color-base-100))"
+
+      assert html =~ "color-mix(in oklab, var(--color-success) 7%, var(--color-base-100))"
+      assert style_of(html, "#story-map-cell-s-10-r-100") =~ "opacity:0.7"
+      refute style_of(html, "#story-map-cell-s-10-r-200") =~ "opacity"
+    end
+
+    test "a partly visible lane reads N of M cards; a fully visible or empty one reads N cards" do
+      all = [mapped(1, 100, 2), mapped(2, 100, 2), mapped(3, 100, 2), mapped(4, 200, 2), mapped(5, 200, 2)]
+      visible = [mapped(1, 100, 2), mapped(4, 200, 2), mapped(5, 200, 2)]
+      html = grid_html(completion_grid([mvp(), fast_follow(), later()], visible, all, false))
+
+      assert squished_text(html, "#story-map-lane-count-100") == "1 of 3 cards"
+      assert squished_text(html, "#story-map-lane-count-200") == "2 cards"
+      assert squished_text(html, "#story-map-lane-count-300") == "0 cards"
+    end
+
+    test "with Hide complete on, two hidden releases fold into one row above ＋ Release" do
+      all = [mapped(1, 100, 3), mapped(2, 100, 3), mapped(3, 200, 3), mapped(4, 300, 2)]
+      visible = [mapped(4, 300, 2)]
+      html = grid_html(completion_grid([mvp(), fast_follow(), later()], visible, all, true))
+
+      text = squished_text(html, "#story-map-hidden-releases")
+      assert text =~ "2 complete releases hidden"
+      assert text =~ "(MVP, Fast follow)"
+      assert text =~ "Show"
+      assert attr_of(html, "#story-map-hidden-releases", "phx-click") == "toggle_story_map_hide_complete"
+
+      row = style_of(html, "#story-map-hidden-releases-row")
+      assert row =~ "grid-row:4"
+      assert row =~ "grid-column:1 / -1"
+      assert html =~ "grid-column:1;grid-row:5;position:sticky;left:0;z-index:16;"
+      assert html =~ "grid-template-rows:56px 40px auto 34px 44px"
+    end
+
+    test "one hidden release reads in the singular" do
+      all = [mapped(1, 100, 3), mapped(2, 200, 2)]
+      html = grid_html(completion_grid([mvp(), fast_follow()], [mapped(2, 200, 2)], all, true))
+
+      text = squished_text(html, "#story-map-hidden-releases")
+      assert text =~ "1 complete release hidden"
+      refute text =~ "releases"
+      assert text =~ "(MVP)"
+    end
+
+    # The ✕ guard is "the board has more than one release", not "more than one lane renders":
+    # Hide complete (on by default) must not strand the last visible release undeletable.
+    test "with one of two releases hidden as complete, the visible release keeps its ✕" do
+      all = [mapped(1, 100, 3), mapped(2, 200, 2)]
+      html = grid_html(completion_grid([mvp(), fast_follow()], [mapped(2, 200, 2)], all, true))
+
+      refute matches?(html, "#story-map-release-100")
+      assert matches?(html, "#story-map-delete-release-200")
+    end
+
+    test "a sole release has no ✕" do
+      cards = [mapped(1, 100, 2)]
+      html = grid_html(completion_grid([mvp()], cards, cards, true))
+
+      refute matches?(html, "#story-map-delete-release-100")
+    end
+
+    # The ✕ blocks on the release's cards, not just the ones the filters left visible.
+    test "a release whose cards are all filtered out still blocks its ✕" do
+      all = [mapped(1, 100, 2), mapped(2, 200, 2)]
+      html = grid_html(completion_grid([mvp(), fast_follow()], [mapped(2, 200, 2)], all, false))
+
+      assert attr_of(html, "#story-map-delete-release-100", "title") ==
+               "Move 1 card out of this release before deleting it"
+    end
+
+    test "nothing hidden: no row, ＋ Release stays at lanes + 3 and the row template is unchanged" do
+      html = grid_html()
+
+      refute matches?(html, "#story-map-hidden-releases-row")
+      assert html =~ "grid-column:1;grid-row:4;position:sticky;left:0;z-index:16;"
+      assert html =~ "grid-template-rows:56px 40px auto 44px"
+    end
+  end
+
+  describe "RE351 — story_map_hidden_releases/1" do
+    test "renders nothing when no release is hidden" do
+      html = render_component(&StoryMapComponents.story_map_hidden_releases/1, releases: [], row: 4)
+
+      refute html =~ "story-map-hidden-releases"
+    end
+
+    test "is a sticky-left button in the given grid row with a primary Show" do
+      html = render_component(&StoryMapComponents.story_map_hidden_releases/1, releases: [mvp()], row: 6)
+
+      button = style_of(html, "#story-map-hidden-releases")
+      assert button =~ "position:sticky;left:0"
+      assert button =~ "height:100%"
+      assert style_of(html, "#story-map-hidden-releases-row") =~ "grid-row:6"
+
+      show =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("#story-map-hidden-releases span")
+        |> Enum.find(&(&1 |> LazyHTML.text() |> String.trim() == "Show"))
+
+      assert show |> LazyHTML.attribute("style") |> List.first() =~ "color:var(--color-primary)"
+    end
   end
 
   describe "RE237 theme tokens" do

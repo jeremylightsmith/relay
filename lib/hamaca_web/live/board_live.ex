@@ -100,7 +100,9 @@ defmodule HamacaWeb.BoardLive do
   `Hamaca.StoryMap.filters_active?/1` over the same view map — filters differ from the board's
   DEFAULTS — assigned in `assign_story_map_view/2` and passed down as an attr, and `Clear`
   merges `Map.take(view_defaults(), filter_keys())` rather than re-typing which keys are
-  filters.
+  filters. RE351 pipes the grid through `StoryMapGrid.apply_completion/6` in
+  `story_map_grid/1` — over the UNFILTERED cards and the same done-stage set — so a release
+  whose cards are all done is marked complete, and leaves the grid while Hide complete is on.
 
   RE443 adds the setup wizard for a board created from a template: `:setup` is
   `Hamaca.Setup.checklist/1` (nil for a board without one), rendered by `HamacaWeb.SetupComponents`
@@ -1413,14 +1415,21 @@ defmodule HamacaWeb.BoardLive do
       )
 
     grid =
-      StoryMapGrid.build(
-        inputs.activities,
+      inputs.activities
+      |> StoryMapGrid.build(
         inputs.steps,
         inputs.releases,
         visible,
         inputs.draft,
         inputs.hide_steps,
         StoryMapGrid.collapsed_set(inputs.activities, inputs.collapsed, inputs.focus)
+      )
+      |> StoryMapGrid.apply_completion(
+        inputs.cards,
+        inputs.steps,
+        inputs.activities,
+        Boards.top_level_done_stage_ids(inputs.board.stages),
+        inputs.hide_complete
       )
 
     {visible, grid}

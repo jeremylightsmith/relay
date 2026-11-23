@@ -2370,4 +2370,105 @@ defmodule HamacaWeb.BoardLiveStoryMapTest do
       assert has_element?(view, "#story-map-count", "5 cards")
     end
   end
+
+  describe "RE351 — complete releases leave the grid under Hide complete" do
+    # MVP holds `sso` and `audit`; moving both to the top-level Done stage completes it.
+    # Fast follow holds `bulk` (open); Later holds only `limits`, which has no release and so
+    # falls into the last lane.
+    setup ctx do
+      done = Enum.find(ctx.board.stages, &(&1.category == :complete and is_nil(&1.parent_id)))
+      {:ok, _sso} = Cards.move_card(ctx.sso, done, 0)
+      {:ok, _audit} = Cards.move_card(ctx.audit, done, 0)
+      [_mvp, fast_follow, _later] = StoryMap.list_releases(ctx.board)
+
+      %{done: done, fast_follow: fast_follow}
+    end
+
+    test "a complete release's lane is absent on first paint", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      refute has_element?(view, "#story-map-release-#{ctx.mvp.id}")
+      assert has_element?(view, "#story-map-release-#{ctx.later.id}")
+      assert has_element?(view, "#story-map-release-#{ctx.fast_follow.id}")
+    end
+
+    test "turning Hide complete off brings the complete lane back", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      render_click(view, "toggle_story_map_hide_complete", %{})
+
+      assert has_element?(view, "#story-map-release-#{ctx.mvp.id}")
+    end
+
+    test "an empty release still shows under Hide complete", %{conn: conn} = ctx do
+      {:ok, empty} = StoryMap.create_release(ctx.board, %{name: "R-empty", position: 4})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-release-#{empty.id}")
+    end
+
+    test "an orphan card counts toward the last lane's completeness", %{conn: conn} = ctx do
+      {:ok, limits} = Cards.move_card(ctx.limits, ctx.done, 0)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      refute has_element?(view, "#story-map-release-#{ctx.later.id}")
+
+      {:ok, _limits} = Cards.move_card(limits, ctx.backlog, 0)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+      assert has_element?(view, "#story-map-release-#{ctx.later.id}")
+    end
+
+    test "the hidden-releases row names the hidden release", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-hidden-releases", "1 complete release hidden")
+      assert has_element?(view, "#story-map-hidden-releases", "(#{ctx.mvp.name})")
+    end
+
+    test "Show turns Hide complete off and the lane comes back marked complete", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      view |> element("#story-map-hidden-releases") |> render_click()
+
+      assert has_element?(view, "#story-map-hide-complete-filter[aria-pressed='false']")
+      refute has_element?(view, "#story-map-hidden-releases")
+      assert has_element?(view, "#story-map-lane-done-#{ctx.mvp.id}")
+      assert has_element?(view, "#story-map-lane-complete-#{ctx.mvp.id}")
+      assert StoryMap.view(Repo.get!(Schemas.Board, ctx.board.id))["hide_complete"] == false
+    end
+
+    test "a partly hidden lane reads N of M cards and is not complete", %{conn: conn} = ctx do
+      {:ok, card} = Cards.create_card(ctx.backlog, %{title: "Shipped limit tweak"})
+      {:ok, card} = StoryMap.assign_card(card, %{story_step_id: ctx.sign_in.id, release_id: ctx.later.id})
+      {:ok, _card} = Cards.move_card(card, ctx.done, 0)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-lane-count-#{ctx.later.id}", "1 of 2 cards")
+      refute has_element?(view, "#story-map-lane-complete-#{ctx.later.id}")
+    end
+  end
+
+  describe "RE351 — no complete release" do
+    test "the unmodified board shows no hidden-releases row", %{conn: conn} = ctx do
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-hide-complete-filter[aria-pressed='true']")
+      refute has_element?(view, "#story-map-hidden-releases")
+    end
+
+    test "an empty release reads 0 cards and is not complete", %{conn: conn} = ctx do
+      # `limits` has no release, so it would fall into the LAST lane — which R-empty becomes.
+      # Pin it to Later so R-empty genuinely holds nothing.
+      {:ok, _limits} = StoryMap.assign_card(ctx.limits, %{story_step_id: ctx.sign_in.id, release_id: ctx.later.id})
+      {:ok, empty} = StoryMap.create_release(ctx.board, %{name: "R-empty", position: 4})
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{ctx.board.slug}/story-map")
+
+      assert has_element?(view, "#story-map-lane-count-#{empty.id}", "0 cards")
+      refute has_element?(view, "#story-map-lane-complete-#{empty.id}")
+    end
+  end
 end

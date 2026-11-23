@@ -59,6 +59,20 @@ defmodule HamacaWeb.StoryMapGrid do
   nowhere. (The artboard's `relLabels` is filter-aware only; it keeps counting a collapsed
   activity's cards.)
 
+  **Release completeness (RE351).** `apply_completion/6` runs after `build/7` and gives every
+  lane a `total` and a `complete?`. A release is complete iff its lane holds at least one card
+  and every one of them sits in a top-level done stage (`Hamaca.Boards.top_level_done_stage_ids/1`,
+  resolved by the caller and passed in, so this module stays pure — the same definition Hide
+  complete uses). The synthetic `(No release)` lane is never complete, and neither is an empty
+  release. Completeness belongs to the release, not to the view, so it runs over the board's
+  **unfiltered** cards and re-places them with the same `place/3` / `lane_key/3` `build/7`
+  uses: a collapsed activity's cards count toward their lane even though they render nowhere,
+  an orphan counts toward the last lane, and a tray card counts toward nothing. With Hide
+  complete on, complete lanes leave `lanes` (and `cells`) for `hidden_complete`. Under
+  consistent inputs (the same Hide complete drove the visible-cards pre-pass) a complete lane's
+  cells are already empty, so dropping it removes no card and the no-card-can-disappear
+  invariant still holds — which is why `columns`, `bands` and `total` are not recounted.
+
   Keys are strings so they go straight into DOM ids: a step column is `"s:<step_id>"`, a
   no-step column `"ns:<activity_id>"`, a merged column `"m:<activity_id>"`, a collapsed stub
   `"c:<activity_id>"`, a lane `"r:<release_id>"` or `"r:none"`.
@@ -69,7 +83,7 @@ defmodule HamacaWeb.StoryMapGrid do
 
   @none_lane_key "r:none"
 
-  defstruct bands: [], columns: [], lanes: [], cells: %{}, unmapped: [], total: 0
+  defstruct bands: [], columns: [], lanes: [], cells: %{}, unmapped: [], total: 0, hidden_complete: []
 
   @typedoc "A built grid — see `build/7` for each field."
   @type t :: %__MODULE__{}
@@ -115,11 +129,15 @@ defmodule HamacaWeb.StoryMapGrid do
       Hide-steps column, whose `step_count` is the activity's step count for the
       `<n> steps · merged` header (unrelated to `count`, the card tally); `collapsed?` marks
       RE259's stub column, whose `count` is how many cards are hidden under it.
-    * `lanes` — `[%{key:, release:, count:}]`, top to bottom. `release` is `nil` on the
-      synthetic `(No release)` lane.
+    * `lanes` — `[%{key:, release:, count:, total:, complete?:}]`, top to bottom. `release` is
+      `nil` on the synthetic `(No release)` lane. `count` is the cards rendered in the lane;
+      `total` and `complete?` are RE351's, and `build/7` alone defaults them to `count` and
+      `false` — `apply_completion/6` derives the real values.
     * `cells` — `%{{column_key, lane_key} => [card]}`. A pair with no cards is simply absent.
     * `unmapped` — the tray's cards.
     * `total` — `length(cards)`.
+    * `hidden_complete` — `[]` from `build/7`; RE351's `apply_completion/6` fills it with the
+      releases of the complete lanes it dropped under Hide complete, in lane order.
   """
   def build(activities, steps, releases, cards, draft \\ nil, hide_steps? \\ false, collapsed \\ MapSet.new()) do
     steps_by_id = Map.new(steps, &{&1.id, &1})
@@ -149,6 +167,71 @@ defmodule HamacaWeb.StoryMapGrid do
       unmapped: unmapped,
       total: length(cards)
     }
+  end
+
+  @doc """
+  Derives each lane's `total` and `complete?` (RE351 — see the module doc) and, when
+  `hide_complete?` is true, moves the complete lanes out of `lanes` and `cells` into
+  `hidden_complete`, in lane order.
+
+  `grid` comes from `build/7`; `all_cards` is the board's UNFILTERED cards; `steps` and
+  `activities` are the same structure `build/7` got; `done_stage_ids` is
+  `Hamaca.Boards.top_level_done_stage_ids/1`. `grid.total`, `columns`, `bands` and `unmapped`
+  are left alone — the grid-level `total` is the visible count, unrelated to a lane's `total`.
+  """
+  @spec apply_completion(
+          t(),
+          [Schemas.Card.t()],
+          [Schemas.StoryStep.t()],
+          [Schemas.StoryActivity.t()],
+          [integer()],
+          boolean()
+        ) :: t()
+  def apply_completion(%__MODULE__{} = grid, all_cards, steps, activities, done_stage_ids, hide_complete?) do
+    steps_by_id = Map.new(steps, &{&1.id, &1})
+    activity_ids = MapSet.new(activities, & &1.id)
+    # From ALL lanes, before any is dropped, so an orphan falls into the same last lane
+    # `build/7` used.
+    lane_keys = MapSet.new(grid.lanes, & &1.key)
+    last_lane_key = last_key(grid.lanes)
+    done = MapSet.new(done_stage_ids)
+
+    stage_ids_by_lane =
+      for card <- all_cards,
+          match?({:grid, _activity_id, _step_id, _card}, place(card, steps_by_id, activity_ids)),
+          reduce: %{} do
+        acc -> Map.update(acc, lane_key(card, lane_keys, last_lane_key), [card.stage_id], &[card.stage_id | &1])
+      end
+
+    lanes =
+      Enum.map(grid.lanes, fn lane ->
+        stage_ids = Map.get(stage_ids_by_lane, lane.key, [])
+
+        complete? =
+          lane.release != nil and stage_ids != [] and Enum.all?(stage_ids, &MapSet.member?(done, &1))
+
+        %{lane | total: length(stage_ids), complete?: complete?}
+      end)
+
+    if hide_complete?, do: drop_complete(grid, lanes), else: %{grid | lanes: lanes}
+  end
+
+  @doc """
+  How many real releases the board has — the rendered lanes' releases plus the ones Hide
+  complete moved to `hidden_complete` (RE351). The synthetic `(No release)` lane is not one.
+  This, not `length(grid.lanes)`, is what the release ✕'s "not the last release" rule counts.
+  """
+  @spec release_count(t()) :: non_neg_integer()
+  def release_count(%__MODULE__{lanes: lanes, hidden_complete: hidden}),
+    do: Enum.count(lanes, &(&1.release != nil)) + length(hidden)
+
+  defp drop_complete(grid, lanes) do
+    {complete, shown} = Enum.split_with(lanes, & &1.complete?)
+    hidden_keys = MapSet.new(complete, & &1.key)
+
+    cells = Map.reject(grid.cells, fn {{_column_key, lane_key}, _cards} -> MapSet.member?(hidden_keys, lane_key) end)
+
+    %{grid | lanes: shown, cells: cells, hidden_complete: Enum.map(complete, & &1.release)}
   end
 
   # RE263 — only a `{:step, activity_id}` draft reaches the view model: `:activity` and
@@ -436,8 +519,12 @@ defmodule HamacaWeb.StoryMapGrid do
     leading ++ [%{last | last_of_activity?: true}]
   end
 
-  defp lane_list([]), do: [%{key: @none_lane_key, release: nil, count: 0}]
-  defp lane_list(releases), do: Enum.map(releases, &%{key: "r:#{&1.id}", release: &1, count: 0})
+  # `total`/`complete?` (RE351) are neutral until `apply_completion/6` derives them;
+  # `count_lanes/2` defaults `total` to the rendered count.
+  defp lane_list([]), do: [new_lane(@none_lane_key, nil)]
+  defp lane_list(releases), do: Enum.map(releases, &new_lane("r:#{&1.id}", &1))
+
+  defp new_lane(key, release), do: %{key: key, release: release, count: 0, total: 0, complete?: false}
 
   defp last_key(lanes), do: lanes |> List.last() |> Map.fetch!(:key)
 
@@ -510,7 +597,11 @@ defmodule HamacaWeb.StoryMapGrid do
 
   defp count_lanes(lanes, cells) do
     per_lane = tally(cells, fn {_column_key, lane_key} -> lane_key end)
-    Enum.map(lanes, &%{&1 | count: Map.get(per_lane, &1.key, 0)})
+
+    Enum.map(lanes, fn lane ->
+      count = Map.get(per_lane, lane.key, 0)
+      %{lane | count: count, total: count}
+    end)
   end
 
   defp tally(cells, key_fun) do
