@@ -8,6 +8,10 @@ defmodule Hamaca.Runs.ResumeTest do
   alias Schemas.NodeJob
   alias Schemas.Run
 
+  # Dispatch and the run broadcasts happen inside the RunServer (its handle_continue), not in
+  # the test process — under a loaded full suite that outlasts assert_receive's default 500ms.
+  @async_timeout 5_000
+
   setup do
     FakeDispatcher.register(self())
 
@@ -33,7 +37,7 @@ defmodule Hamaca.Runs.ResumeTest do
        %{board: board, flow: flow, card: card} do
     start_engine!()
     {:ok, run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{id: job_id, node_key: "brainstorm"}}
+    assert_receive {:dispatched, %NodeJob{id: job_id, node_key: "brainstorm"}}, @async_timeout
     claimed = claim!(board, "r1")
     assert claimed.id == job_id
 
@@ -56,7 +60,7 @@ defmodule Hamaca.Runs.ResumeTest do
        %{board: board, flow: flow, card: card} do
     start_engine!()
     {:ok, run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{id: job_id}}
+    assert_receive {:dispatched, %NodeJob{id: job_id}}, @async_timeout
 
     restart_engine!()
 
@@ -75,26 +79,24 @@ defmodule Hamaca.Runs.ResumeTest do
   test "an app restart re-enters a running run that has no active job", %{flow: flow, card: card} do
     start_engine!()
     {:ok, run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{id: job_id}}
+    assert_receive {:dispatched, %NodeJob{id: job_id}}, @async_timeout
     Runs.revoke_active_jobs(run)
-    assert_receive {:revoked, %NodeJob{id: ^job_id}}
+    assert_receive {:revoked, %NodeJob{id: ^job_id}}, @async_timeout
 
     restart_engine!()
 
-    # Re-entry happens on the boot task and the run server it starts, not in this process —
-    # under a loaded full suite that outlasts assert_receive's default 500ms.
-    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm", state: :queued} = fresh}, 5_000
+    assert_receive {:dispatched, %NodeJob{node_key: "brainstorm", state: :queued} = fresh}, @async_timeout
     refute fresh.id == job_id
 
     assert_receive {:node_started, _run, %NodeExecution{node_key: "brainstorm", visit: 1, attempt: 2}},
-                   5_000
+                   @async_timeout
   end
 
   test "boot_mode/1 attaches a run with a queued or claimed job and re-enters one with none",
        %{board: board, flow: flow, card: card} do
     start_engine!()
     {:ok, run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{}}
+    assert_receive {:dispatched, %NodeJob{}}, @async_timeout
 
     assert Runs.boot_mode(run) == :attach
 
@@ -109,7 +111,7 @@ defmodule Hamaca.Runs.ResumeTest do
        %{board: board, flow: flow, card: card} do
     start_engine!()
     {:ok, _run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, %NodeJob{}}
+    assert_receive {:dispatched, %NodeJob{}}, @async_timeout
     claimed = claim!(board, "gone")
 
     restart_engine!()
@@ -143,7 +145,7 @@ defmodule Hamaca.Runs.ResumeTest do
 
     start_engine!()
     {:ok, run} = Runs.start_run(card, excl)
-    assert_receive {:dispatched, %NodeJob{}}
+    assert_receive {:dispatched, %NodeJob{}}, @async_timeout
 
     {:ok, gone} =
       Runs.upsert_runner(board, %{"name" => "gone2", "interval" => 30, "capacity" => %{"exclusive" => 1}})
@@ -164,7 +166,7 @@ defmodule Hamaca.Runs.ResumeTest do
        %{flow: flow, card: card} do
     start_engine!()
     {:ok, run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, job}
+    assert_receive {:dispatched, job}, @async_timeout
     {:ok, _run} = Runs.report_outcome(job, %{outcome: :needs_input, detail: "?", session_id: "s1"})
 
     restart_engine!()
@@ -178,13 +180,13 @@ defmodule Hamaca.Runs.ResumeTest do
        %{flow: flow, card: card} do
     start_engine!()
     {:ok, _run} = Runs.start_run(card, flow)
-    assert_receive {:dispatched, job}
+    assert_receive {:dispatched, job}, @async_timeout
     {:ok, parked} = Runs.report_outcome(job, %{outcome: :needs_input, detail: "?", session_id: "s1"})
-    assert_receive {:run_parked, _run}
+    assert_receive {:run_parked, _run}, @async_timeout
 
     assert {:ok, %Run{status: :running}} = Runs.resume_run(parked)
-    assert_receive {:run_resumed, %Run{status: :running}}
-    assert_receive {:dispatched, _job}
+    assert_receive {:run_resumed, %Run{status: :running}}, @async_timeout
+    assert_receive {:dispatched, _job}, @async_timeout
 
     # `parked` is now a stale struct (still shows status: :parked in memory) — a second
     # caller racing on it must be refused, not silently re-write the run or start a

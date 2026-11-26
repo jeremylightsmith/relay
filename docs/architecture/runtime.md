@@ -71,11 +71,19 @@ What never redirects, and why:
 | `/api/*`, `/api/auth/native/*` | runners, `.envrc` `RELAY_URL`s and old app builds point at the old host; not in `:browser` |
 | `/b/:slug/install` | install scripts are piped into `sh` (pipeline-free route) |
 | `/webhooks/*` | Stripe posts to the URL it was configured with (`:webhook` pipeline) |
+| `/.well-known/oauth-*`, `/oauth/register`, `/oauth/token` | Claude clients call the URL they discovered; pipeline-free routes (RE519) |
+| `/mcp` | Claude clients call the connector URL they were given; its `:mcp` pipeline has no CanonicalHost (RE519). A connector added on an extra host still gets the canonical `resource`, so the how-to says to add `https://<canonical host>/mcp` |
 | `/auth/*` | an OAuth flow in flight must finish on the host it started on (plug's `@pass_through`) |
 | `/attachments/*` | links embedded in card markdown keep loading (plug's `@pass_through`) |
 | the native app's webview | old app builds load LiveViews from the host they signed in on, where their session cookie lives; `HamacaWeb.Plugs.Embed.embedded?/1` (`?embed=1`, the `relay_embed` cookie, or an embedded session) |
 | non-`GET` | a 301 turns a POST into a GET and drops its body (`HEAD` is already `GET` via `Plug.Head`) |
 | `/live`, `/live/longpoll` | the socket never passes the router — open tabs keep their connection |
+
+`GET /oauth/authorize`, the consent screen, **does** redirect: it is in `:browser`, and moving it
+to the canonical host is what we want, because the OAuth issuer and the `/mcp` resource are
+built from `HamacaWeb.Endpoint.url/0` (`HamacaWeb.OAuthMetadata`), so the user signs in and
+consents on the host the tokens are for. Its `POST` (Allow / Cancel) is a non-`GET` and answers
+in place.
 
 Sessions are per host (the `_relay_key` cookie belongs to the host that set it), so a user
 signed in on `relayboard.fly.dev` signs in once more on `hamaca.app`. The 301 is intentionally

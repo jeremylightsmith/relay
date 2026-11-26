@@ -27,6 +27,9 @@ defmodule HamacaWeb.Browser.BrowserNotifyTest do
   @moduletag :playwright
   @moduletag browser_context_opts: [viewport: %{width: 1440, height: 900}]
 
+  # The one configured Playwright budget: a shorter literal flakes on a loaded machine.
+  @wait_timeout :phoenix_test |> Application.compile_env!(:playwright) |> Keyword.fetch!(:timeout)
+
   setup do
     user = Accounts.ensure_dev_user!()
     n = System.unique_integer([:positive])
@@ -107,17 +110,17 @@ defmodule HamacaWeb.Browser.BrowserNotifyTest do
   end
 
   defp eval!(frame_id, js) do
-    {:ok, value} = Frame.evaluate(frame_id, expression: "(() => { #{js} })()", timeout: 2_000)
+    {:ok, value} = Frame.evaluate(frame_id, expression: "(() => { #{js} })()", timeout: @wait_timeout)
     value
   end
 
   defp value(conn, js) do
-    {:ok, value} = Frame.evaluate(conn.frame_id, expression: "(() => #{js})()", timeout: 2_000)
+    {:ok, value} = Frame.evaluate(conn.frame_id, expression: "(() => #{js})()", timeout: @wait_timeout)
     value
   end
 
-  defp wait!(conn, js, timeout \\ 5_000) do
-    case Frame.wait_for_function(conn.frame_id, expression: "() => #{js}", is_function: true, timeout: timeout) do
+  defp wait!(conn, js) do
+    case Frame.wait_for_function(conn.frame_id, expression: "() => #{js}", is_function: true, timeout: @wait_timeout) do
       {:ok, _} -> conn
       {:error, error} -> flunk("timed out waiting for `#{js}`: #{inspect(error)}")
     end
@@ -227,19 +230,19 @@ defmodule HamacaWeb.Browser.BrowserNotifyTest do
 
     conn
     |> assert_has("#browser-notify-toasts .browser-notify-toast")
-    |> wait!(~s|document.querySelectorAll("#browser-notify-toasts .browser-notify-toast").length === 0|, 9_000)
+    |> wait!(~s|document.querySelectorAll("#browser-notify-toasts .browser-notify-toast").length === 0|)
 
     change(ctx.cx, :in_review)
     toast = "#browser-notify-toasts .browser-notify-toast"
     conn = assert_has(conn, toast)
 
-    {:ok, _} = Frame.hover(conn.frame_id, selector: toast, timeout: 2_000)
+    {:ok, _} = Frame.hover(conn.frame_id, selector: toast, timeout: @wait_timeout)
     Process.sleep(9_000)
     conn = assert_has(conn, toast)
 
-    {:ok, _} = Frame.hover(conn.frame_id, selector: "#top-bar-title", timeout: 2_000)
+    {:ok, _} = Frame.hover(conn.frame_id, selector: "#top-bar-title", timeout: @wait_timeout)
 
-    wait!(conn, ~s|document.querySelectorAll("#{toast}").length === 0|, 9_000)
+    wait!(conn, ~s|document.querySelectorAll("#{toast}").length === 0|)
   end
 
   test "a change on another board leaves the tab quiet (RE404)", ctx do

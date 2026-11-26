@@ -188,6 +188,45 @@ defmodule Hamaca.Boards do
   end
 
   @doc """
+  Resolves a human's name for one of `user`'s boards (RE519) — the ONE board-name resolver, used
+  by the MCP tools. Only `list_boards/1`'s boards are considered (member of, not archived), so a
+  foreign board is indistinguishable from a missing one.
+
+  Tiers, stopping at the first with any match: (1) key, case-insensitive — keys are not unique,
+  so this tier can be ambiguous; (2) slug; (3) name, case-insensitive; (4) a case-insensitive
+  substring of the name or slug. One match is `{:ok, board}`, several `{:error, {:ambiguous,
+  matches}}`. No match, or a blank query, is `{:error, {:not_found, all_user_boards}}`.
+  """
+  @spec resolve_board(User.t(), String.t()) ::
+          {:ok, Board.t()} | {:error, {:ambiguous, [Board.t()]}} | {:error, {:not_found, [Board.t()]}}
+  def resolve_board(%User{} = user, query) when is_binary(query) do
+    # board_members has no unique (board_id, user_id) index, so one board can come back twice.
+    boards = user |> list_boards() |> Enum.uniq_by(& &1.id)
+    needle = query |> String.trim() |> String.downcase()
+
+    tiers = [
+      &(String.downcase(&1.key) == needle),
+      &(&1.slug == String.trim(query)),
+      &(String.downcase(&1.name) == needle),
+      &(String.contains?(String.downcase(&1.name), needle) or String.contains?(String.downcase(&1.slug), needle))
+    ]
+
+    matches =
+      if needle == "",
+        do: [],
+        else: Enum.find_value(tiers, [], &non_empty(Enum.filter(boards, &1)))
+
+    case matches do
+      [board] -> {:ok, board}
+      [] -> {:error, {:not_found, boards}}
+      several -> {:error, {:ambiguous, several}}
+    end
+  end
+
+  defp non_empty([]), do: nil
+  defp non_empty(list), do: list
+
+  @doc """
   The user's non-archived boards (same membership/archived filter as `list_boards/1`) in
   **display order** (RE395): starred boards first, then case-insensitive by name, board id as
   the tiebreak. Each row is `%{board: board, starred?: boolean, muted?: boolean}` — `muted?`

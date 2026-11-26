@@ -104,8 +104,10 @@ config :phoenix_test,
   otp_app: :hamaca,
   playwright: [
     browser: :chromium,
-    # LiveView reconnect + first render on a cold CI runner can be slow.
-    timeout: to_timeout(second: 10),
+    # LiveView reconnect + first render can be slow on a cold CI runner, or on a runner box busy
+    # with other agents' suites (RE519: page loads outlasted 10s). It only bounds a failing wait.
+    # A toast over the element being clicked costs ~8s of it before the click lands.
+    timeout: to_timeout(second: 20),
     # Give LiveView processes time to release the sandbox connection on test exit.
     ecto_sandbox_stop_owner_delay: 50
   ]

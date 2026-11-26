@@ -22,6 +22,9 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
 
   @moduletag :playwright
 
+  # The one configured Playwright budget: a shorter literal flakes on a loaded machine.
+  @wait_timeout :phoenix_test |> Application.compile_env!(:playwright) |> Keyword.fetch!(:timeout)
+
   setup do
     user = Accounts.ensure_dev_user!()
     board = Boards.get_or_create_default_board(user)
@@ -53,7 +56,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
     |> assert_has("#card-drawer-move-to-filter")
     |> unwrap(fn %{frame_id: frame_id} ->
       {:ok, _} =
-        Frame.type(frame_id, selector: "#card-drawer-move-to-filter", text: "Tes", timeout: 2_000)
+        Frame.type(frame_id, selector: "#card-drawer-move-to-filter", text: "Tes", timeout: @wait_timeout)
     end)
     # No seeded stage matches "Tes", and the filtered list is server-rendered from @stage_filter,
     # so this only appears once the LiveView has processed all three keystrokes — an ordered
@@ -62,14 +65,14 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
     |> assert_has("#card-drawer-stage-menu")
     |> unwrap(fn %{frame_id: frame_id} ->
       {:ok, value} =
-        Frame.input_value(frame_id, selector: "#card-drawer-move-to-filter", timeout: 2_000)
+        Frame.input_value(frame_id, selector: "#card-drawer-move-to-filter", timeout: @wait_timeout)
 
       assert value == "Tes", "the capital T never landed in the filter (got #{inspect(value)})"
 
       {:ok, focused} =
         Frame.evaluate(frame_id,
           expression: "(() => document.activeElement && document.activeElement.id)()",
-          timeout: 2_000
+          timeout: @wait_timeout
         )
 
       assert focused == "card-drawer-move-to-filter",
@@ -89,7 +92,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
         Frame.type(frame_id,
           selector: "#card-drawer-comment-input",
           text: "The Team should test this",
-          timeout: 5_000
+          timeout: @wait_timeout
         )
     end)
     # Ordered barrier again: this click is handled after every keystroke's `validate_comment`, so
@@ -100,7 +103,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
     |> refute_has("#card-drawer-tab-talk[data-active='true']")
     |> unwrap(fn %{frame_id: frame_id} ->
       {:ok, value} =
-        Frame.input_value(frame_id, selector: "#card-drawer-comment-input", timeout: 2_000)
+        Frame.input_value(frame_id, selector: "#card-drawer-comment-input", timeout: @wait_timeout)
 
       assert value == "The Team should test this",
              "the note lost characters to the hotkey (got #{inspect(value)})"
@@ -115,7 +118,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
     # let it through, and the case-folded phx-key match must still fire the shortcut.
     |> unwrap(fn %{frame_id: frame_id} ->
       {:ok, _} =
-        Frame.press(frame_id, selector: "#card-drawer-tab-detail", key: "Shift+T", timeout: 2_000)
+        Frame.press(frame_id, selector: "#card-drawer-tab-detail", key: "Shift+T", timeout: @wait_timeout)
     end)
     |> assert_has("#card-drawer-tab-talk[data-active='true']")
   end
@@ -130,7 +133,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
         Frame.press(frame_id,
           selector: "#card-drawer-tab-activity",
           key: "Control+t",
-          timeout: 2_000
+          timeout: @wait_timeout
         )
     end)
     # Ordered barrier: the LiveView handles its mailbox in order, so had Ctrl+T pushed
@@ -154,12 +157,12 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
     |> assert_has("#card-drawer-move-to-filter")
     |> unwrap(fn %{frame_id: frame_id} ->
       {:ok, _} =
-        Frame.press(frame_id, selector: "#card-drawer-stage-chip", key: "t", timeout: 2_000)
+        Frame.press(frame_id, selector: "#card-drawer-stage-chip", key: "t", timeout: @wait_timeout)
 
       # Ordered barrier: the LiveView handles its mailbox in order, so a `talk_shortcut` pushed
       # by that keypress is handled BEFORE this filter change. No seeded stage matches "zzzz".
       {:ok, _} =
-        Frame.type(frame_id, selector: "#card-drawer-move-to-filter", text: "zzzz", timeout: 2_000)
+        Frame.type(frame_id, selector: "#card-drawer-move-to-filter", text: "zzzz", timeout: @wait_timeout)
     end)
     |> assert_has("#card-drawer-move-to-none")
     |> assert_has("#card-drawer-stage-menu")
@@ -180,7 +183,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
       # A focusable non-text element inside the drawer. `press` focuses without clicking, so the
       # editor stays open.
       {:ok, _} =
-        Frame.press(frame_id, selector: "#card-drawer-tab-detail", key: "t", timeout: 2_000)
+        Frame.press(frame_id, selector: "#card-drawer-tab-detail", key: "t", timeout: @wait_timeout)
     end)
     # Ordered barrier: this click is handled after the keypress above, so the menu being open
     # proves the tab assertions read a settled state. (Since RE362 the click leaves the
@@ -207,7 +210,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
       {:ok, focused} =
         Frame.evaluate(frame_id,
           expression: "(() => document.activeElement && document.activeElement.id)()",
-          timeout: 2_000
+          timeout: @wait_timeout
         )
 
       assert focused == "card-drawer-move-to-filter",
@@ -215,7 +218,7 @@ defmodule HamacaWeb.Browser.TypingKeyGuardTest do
                "everything typed at the Move-to menu goes to the board instead"
 
       {:ok, _} =
-        Frame.type(frame_id, selector: "#card-drawer-move-to-filter", text: "zzzz", timeout: 2_000)
+        Frame.type(frame_id, selector: "#card-drawer-move-to-filter", text: "zzzz", timeout: @wait_timeout)
     end)
     |> assert_has("#card-drawer-move-to-none")
     |> assert_has("#card-drawer-stage-menu")

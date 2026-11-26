@@ -18,6 +18,7 @@ flowchart LR
         browser["Browser<br/>(LiveView over WebSocket)"]
         mobile["Mobile app (Flutter, iOS-first)<br/>hybrid: native decision layer + embedded LiveView — ADR 0001/0005"]
         agents["Agents & runner<br/>./hamaca · claude sessions"]
+        claude["Claude clients<br/>claude.ai · Desktop · mobile · Claude Code — ADR 0015"]
     end
     subgraph fly["Phoenix app — Fly app 'relayboard'"]
         web["HamacaWeb<br/>LiveViews · REST controllers"]
@@ -34,6 +35,8 @@ flowchart LR
     browser <--> web
     mobile <-- "/api/all + embedded LiveView" --> web
     agents -- "board-key REST /api" --> web
+    claude -- "OAuth 2.1 /oauth/* · /.well-known/*" --> web
+    claude -- "/mcp (OAuth)" --> web
     domain --> pg
     web --> google
     web --> apple
@@ -48,7 +51,9 @@ body, spec/plan, comments, mockups). Around it, ADR 0005 scopes a small native (
 decision layer — sign-in, push, the Needs-you inbox, the review bar, the answer stepper and
 the like — fed by the human-authed `/api/all` + `/api/auth/native` API (ADR 0001, ADR
 0005). Agents drive the same domain through the board-key REST API and the `./hamaca`
-CLI/runner.
+CLI/runner. Claude clients connect over OAuth 2.1 (`/.well-known/*`, `/oauth/*`), then call the
+MCP endpoint `/mcp` with the resulting bearer token, acting as the signed-in human — never as an
+agent and never with a board key (ADR 0015).
 
 ## Pages
 

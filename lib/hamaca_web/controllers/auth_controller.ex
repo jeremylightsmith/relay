@@ -70,10 +70,10 @@ defmodule HamacaWeb.AuthController do
     |> redirect(to: ~p"/")
   end
 
-  def delete(conn, _params) do
+  def delete(conn, params) do
     conn
     |> put_flash(:info, "Signed out.")
-    |> Auth.log_out_user()
+    |> Auth.log_out_user(Auth.local_return_path(params["return_to"]))
   end
 
   # Stashes a validated `return_to` param in the session before Ueberauth takes over.

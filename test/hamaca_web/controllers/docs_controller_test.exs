@@ -118,7 +118,8 @@ defmodule HamacaWeb.DocsControllerTest do
       {"/docs/cli", "relay"},
       {"/docs/api", "REST API reference"},
       {"/docs/runbook-flow-cutover", "Enabling a flow safely"},
-      {"/docs/billing", "Billing &amp; self-hosting"}
+      {"/docs/billing", "Billing &amp; self-hosting"},
+      {"/docs/claude", "Connect Claude"}
     ]
 
     for {path, needle} <- pages do

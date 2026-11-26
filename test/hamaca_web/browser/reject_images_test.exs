@@ -14,6 +14,9 @@ defmodule HamacaWeb.Browser.RejectImagesTest do
   @moduletag :playwright
   @moduletag browser_context_opts: [viewport: %{width: 1440, height: 900}]
 
+  # The one configured Playwright budget: a shorter literal flakes on a loaded machine.
+  @wait_timeout :phoenix_test |> Application.compile_env!(:playwright) |> Keyword.fetch!(:timeout)
+
   @note "#review-request-note"
   @link ~r/^too tall:\n!\[shot\.png\]\(https?:\/\/[^)]+\/attachments\/[0-9a-f-]{36}\)/
 
@@ -42,13 +45,13 @@ defmodule HamacaWeb.Browser.RejectImagesTest do
     |> click("#review-request-changes")
     |> assert_has(@note)
     |> unwrap(fn %{frame_id: frame_id} ->
-      {:ok, _} = Frame.type(frame_id, selector: @note, text: "too tall:", timeout: 2_000)
+      {:ok, _} = Frame.type(frame_id, selector: @note, text: "too tall:", timeout: @wait_timeout)
 
       {:ok, _} =
         Frame.set_input_files(frame_id,
           selector: "#review-reject-images-attach input[type=file]",
           local_paths: [ctx.shot],
-          timeout: 2_000
+          timeout: @wait_timeout
         )
 
       assert eventually_value(frame_id, &(&1 =~ @link)) =~ @link
@@ -62,7 +65,7 @@ defmodule HamacaWeb.Browser.RejectImagesTest do
   # Polls the note's value until `ok?` holds (or ~5s pass) and returns the last value seen, so a
   # failure prints what the textarea actually held.
   defp eventually_value(frame_id, ok?, tries \\ 50) do
-    {:ok, value} = Frame.input_value(frame_id, selector: @note, timeout: 2_000)
+    {:ok, value} = Frame.input_value(frame_id, selector: @note, timeout: @wait_timeout)
 
     if ok?.(value) or tries == 0 do
       value

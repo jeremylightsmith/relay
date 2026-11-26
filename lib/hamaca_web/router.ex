@@ -4,20 +4,11 @@ defmodule HamacaWeb.Router do
   import HamacaWeb.Auth
   import PhoenixStorybook.Router
 
+  alias HamacaWeb.ContentSecurityPolicy
   alias HamacaWeb.Plugs.ApiLogger
   alias HamacaWeb.Plugs.CanonicalHost
   alias HamacaWeb.Plugs.Embed
   alias HamacaWeb.Plugs.UsageTrack
-
-  @content_security_policy "default-src 'self'; " <>
-                             "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; " <>
-                             "style-src 'self' 'unsafe-inline'; " <>
-                             "img-src 'self' data: blob: https://*.googleusercontent.com; " <>
-                             "font-src 'self'; " <>
-                             "connect-src 'self' blob: ws: wss:; " <>
-                             "base-uri 'self'; " <>
-                             "form-action 'self'; " <>
-                             "frame-ancestors 'self';"
 
   pipeline :browser do
     # RE480: first, so a redirect off an extra host never sets a cookie there.
@@ -28,7 +19,7 @@ defmodule HamacaWeb.Router do
     plug :fetch_live_flash
     plug :put_root_layout, html: {HamacaWeb.Layouts, :root}
     plug :protect_from_forgery
-    plug :put_secure_browser_headers, %{"content-security-policy" => @content_security_policy}
+    plug :put_secure_browser_headers, %{"content-security-policy" => ContentSecurityPolicy.header()}
     plug :fetch_current_scope
     plug UsageTrack
   end
@@ -73,6 +64,12 @@ defmodule HamacaWeb.Router do
     plug HamacaWeb.Plugs.RequireApiUser
   end
 
+  # RE519: the MCP endpoint (ADR 0015). No `:accepts` (clients send `application/json,
+  # text/event-stream`) and no ApiLogger (tool arguments would be recorded).
+  pipeline :mcp do
+    plug HamacaWeb.McpAuth
+  end
+
   pipeline :require_authenticated_user do
     plug :require_authenticated
   end
@@ -90,6 +87,11 @@ defmodule HamacaWeb.Router do
     get "/docs", DocsController, :index
     get "/docs/:page", DocsController, :show
     delete "/logout", AuthController, :delete
+
+    # RE519 — the OAuth consent screen. In :browser for the session and CSRF; signed-out
+    # visitors are sent to sign in and come back here (see OAuthController).
+    get "/oauth/authorize", OAuthController, :authorize
+    post "/oauth/authorize", OAuthController, :decide
 
     # In test, HamacaWeb.LiveAcceptance must run first so the auth hook's DB query
     # runs inside the browser test's shared sandbox transaction.
@@ -231,6 +233,32 @@ defmodule HamacaWeb.Router do
   # it carries no secret, curl sends no `Accept: json`, and it answers plain text.
   scope "/", HamacaWeb do
     get "/b/:slug/install", InstallController, :show
+  end
+
+  # RE519: OAuth 2.1 discovery, dynamic registration and the token endpoint for Claude clients
+  # (ADR 0015). Pipeline-free on purpose: no `:accepts` (clients send `*/*`, a form type or
+  # nothing) and no ApiLogger (token params carry codes and refresh tokens). They answer in
+  # place on every host — no CanonicalHost redirect.
+  scope "/", HamacaWeb do
+    get "/.well-known/oauth-protected-resource", WellKnownController, :protected_resource
+    get "/.well-known/oauth-protected-resource/mcp", WellKnownController, :protected_resource
+    get "/.well-known/oauth-authorization-server", WellKnownController, :authorization_server
+    post "/oauth/register", OAuthController, :register
+    post "/oauth/token", OAuthController, :token
+  end
+
+  # RE519: Claude clients' MCP endpoint, as the signed-in user (bearer relaym_…). Like the OAuth
+  # routes above it answers in place on every host — no CanonicalHost redirect.
+  scope "/", HamacaWeb do
+    pipe_through :mcp
+
+    post "/mcp", McpController, :handle
+    get "/mcp", McpController, :method_not_allowed
+    # `match :delete` is exactly `delete`. It is spelled out because Sobelow's Config.CSRFRoute
+    # flags a GET and a DELETE sharing an action, and its line-keyed skips file can't hold a
+    # router finding stably. Here the shared action only answers 405 `allow: POST`: it changes
+    # nothing, and the pipeline is bearer-only with no cookie, so nothing can be reused cross-site.
+    match :delete, "/mcp", McpController, :method_not_allowed
   end
 
   scope "/webhooks", HamacaWeb do

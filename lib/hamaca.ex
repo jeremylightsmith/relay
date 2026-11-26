@@ -33,6 +33,7 @@ defmodule Hamaca do
       Cards,
       Cards.DoneWeeks,
       Config,
+      Connections,
       Events,
       Examples,
       Flows,

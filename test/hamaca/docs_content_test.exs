@@ -9,13 +9,22 @@ defmodule Hamaca.DocsContentTest do
     {"introduction.md", "# Introduction"},
     {"cli.md", "# CLI (`./hamaca`)"},
     {"api.md", "# REST API reference"},
-    {"billing.md", "# Billing & self-hosting"}
+    {"billing.md", "# Billing & self-hosting"},
+    {"claude.md", "# Connect Claude"}
   ]
 
   test "every docs page exists and starts with its expected h1" do
     for {file, h1} <- @expected do
       assert String.starts_with?(read(file), h1), "#{file} should start with #{h1}"
     end
+  end
+
+  test "the Connect Claude page gives the MCP URL, the Claude Code command and the custom connector" do
+    claude = read("claude.md")
+
+    assert claude =~ "/mcp"
+    assert claude =~ "claude mcp add --transport http hamaca"
+    assert claude =~ "custom connector"
   end
 
   test "the introduction explains the baton idea with a callout" do

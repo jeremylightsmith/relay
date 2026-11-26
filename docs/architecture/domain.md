@@ -130,6 +130,13 @@ sharing behavior.
   with none it sends the user to the `/boards` first-run picker, RE470), `Cards.needs_you_feed/1`,
   `Cards.resolve_ref/3` and `AllController.resolve_board/2` depend on it, so starring never
   changes which board `/board` opens.
+  `resolve_board/2` (RE519) is the **one board-name resolver** — the MCP tools turn "relay" into
+  a board with it. It considers only `list_boards/1` (member of, not archived) and tries, stopping
+  at the first tier with a match: key (case-insensitive; keys aren't unique, so this tier can be
+  ambiguous), slug, name (case-insensitive), then a case-insensitive substring of name or slug.
+  One match is `{:ok, board}`, several `{:error, {:ambiguous, matches}}`, none (or a blank query)
+  `{:error, {:not_found, all_user_boards}}` — so a foreign board is indistinguishable from a
+  missing one.
   The **per-board push mute** (RE406) lives beside it (`board_members.muted`, also never cast):
   one flag per member per board, written only by `set_muted/3`, which mirrors `set_starred/3`
   (sets, never toggles; only the caller's own row; `{:error, :not_found}` without a resolved
@@ -559,7 +566,15 @@ sharing behavior.
   and both needs-you counts (`needs_you_count`, the web's three-type sum, and
   `needs_you_two_type`, the mobile count, ADR 0005), plus the user's personal `starred?`
   (RE395) and per-board push `muted?` (RE406) — is `Hamaca.Cards.list_board_summaries/1` (RE376), the one definition both the web
-  boards home (`HamacaWeb.BoardsLive`) and the native board switcher read. Its rows come in
+  boards home (`HamacaWeb.BoardsLive`) and the native board switcher read. Its `ai_active?` calls
+  `Cards.agent_working?/1` (RE519) — `:working` with the agent holding the baton — the **one**
+  "an agent is working this card" predicate, which `board_digest/3` shares.
+  `Cards.board_digest/3` (RE519) is the baton-first digest of one board the MCP `board_status`
+  tool renders: `waiting` (the user's `needs_you_feed/1` rows on the board, oldest
+  `waiting_since/1` first — `blocked_since || updated_at`, the coalesce the feed orders by),
+  `working` (`agent_working?/1` cards with their stage, in board order) and `shipped` (the
+  terminal stage's `list_done_cards/2` within `shipped_window_days/0` = 7 days, newest first;
+  `[]` with no stages). Its rows come in
   `Boards.list_boards_for_display/1` order (starred first, then A–Z), so both surfaces agree
   on order and flag by construction. The app-icon badge, `Cards.needs_you_badge_count/1` (RE496),
   is the sum of `needs_you_two_type` over the user's **unmuted** rows (one per board, duplicate
@@ -641,14 +656,16 @@ sharing behavior.
   `{:board_updated, board}` broadcast) and **solo** (deleted). The person's setup-machine keys are
   revoked (`ApiKeys.revoke/1`), their memberships removed with `{:member_removed, user_id}`
   broadcast on each surviving board, and their card ownerships, user API tokens, device tokens,
-  usage visits and billing account (`Hamaca.Billing.remove_account/1`) deleted — all in one
+  usage visits, Claude connections (`Schemas.OAuthGrant`, codes and tokens cascading) and
+  billing account (`Hamaca.Billing.remove_account/1`) deleted — all in one
   transaction, after the transfers are validated against a fresh preview (re-checked inside;
   `{:error, :invalid_transfers}` writes nothing). The user row is **tombstoned, never deleted**
   (comments, activities and votes cascade on a user delete): `Schemas.User.deletion_changeset/1`
   sets `name: Schemas.User.deleted_name/0` ("Deleted user"), clears `avatar_url` and
   `provider_uid`, sets `email: deleted+<id>@users.invalid` and stamps `deleted_at`; the
   `users_live_provider_uid_present` check keeps `provider_uid` required on live rows. Every
-  lookup — `get_user/1`, the email lookups, `authenticate_user_api_token/1` — skips a tombstone,
+  lookup — `get_user/1`, the email lookups, `authenticate_user_api_token/1`,
+  `Connections.authenticate_access_token/1` and `refresh/1` — skips a tombstone,
   so a lingering session reads as signed out, and the old identity signs up afresh. After commit
   the Stripe customer is deleted best-effort (`Hamaca.Billing.delete_customer/1`; a failure is
   logged, never rolled back). An **Apple** account (`apple_reauth_required`) must pass a fresh
@@ -676,6 +693,68 @@ sharing behavior.
   name: `confirm_required`, `invalid_transfers` and `apple_reauth_required` are 422,
   `apple_mismatch` 403, `apple_revoke_failed` 502. A deleted account's bearer then answers 401,
   and its native session cookie dies with `get_user/1` (`/api/auth/native/me` → 401).
+- **Connections** (`Hamaca.Connections`, RE519) — how a Claude client (claude.ai, Desktop,
+  mobile, Claude Code) connects over OAuth 2.1 and acts as the signed-in user. It owns
+  dynamically registered clients (`register_client/1`: `https://` or loopback
+  `http://localhost|127.0.0.1` redirect URIs with no fragment, payload-capped by
+  `registration_limits/0` because there is no per-IP rate limiter; `redirect_uri_registered?/2`
+  is an exact match), the user × client **grant** (`authorize/3` upserts it — a revoked grant is
+  reconnected in place — and issues a single-use PKCE code that lives `code_ttl_seconds/0`, stored
+  only as its SHA-256), the code exchange (`exchange_code/1`: S256 verifier, exact
+  `redirect_uri`, matching `resource`; a replayed code is refused **and deletes every token of
+  its grant**, and the single-use guard is a conditional `used_at` update inside the
+  transaction), refresh-token rotation (`refresh/1` deletes the presented token), and bearer
+  auth (`authenticate_access_token/1`). Tokens are `relaym_<12-hex prefix>_<64-hex secret>`
+  (`token_sentinel/0`), minted like `Accounts.create_user_api_token/2` — prefix in the clear,
+  secret as a SHA-256 hash, raw value returned once — so they never authenticate as `relayu_…`
+  user tokens or `relay_…` board keys. Access tokens live `access_token_ttl_seconds/0` (1 h),
+  refresh tokens `refresh_token_ttl_seconds/0` (30 d); every mint deletes the grant's expired
+  tokens. Auth bumps `grant.last_used_at`, throttled by `Accounts.last_used_throttle_seconds/0`
+  (the same throttle user tokens use). `list_grants/1` and `revoke_grant/2` back disconnecting.
+  `capabilities/1` is the **one** definition of the consent bullets (what a connection can and
+  can't do). Errors are the OAuth vocabulary: `:invalid_request`, `:invalid_client`,
+  `:invalid_grant`, `:invalid_redirect_uri`, `:invalid_client_metadata`. Depends on Accounts,
+  Repo and Schemas — never the reverse. The web side is the hand-rolled OAuth 2.1 authorization
+  server ([ADR 0015](../adr/0015-mcp-server-for-claude-clients.md)): `GET
+  /.well-known/oauth-protected-resource` (plus its RFC 9728 `/mcp`-suffixed alias) and `GET
+  /.well-known/oauth-authorization-server` (`HamacaWeb.WellKnownController`, documents built by
+  `HamacaWeb.OAuthMetadata` from `HamacaWeb.Endpoint.url/0`); `POST /oauth/register` (dynamic
+  registration → `register_client/1`, 201) and `POST /oauth/token` (`authorization_code` →
+  `exchange_code/1`, `refresh_token` → `refresh/1`, form or JSON, always `cache-control:
+  no-store`, `invalid_client` is 401) — both pipeline-free, so no `:accepts` and no `ApiLogger`
+  recording codes and tokens; and `GET|POST /oauth/authorize` (`HamacaWeb.OAuthController`, in
+  `:browser`), the consent screen. Authorize refuses an unknown client or unregistered
+  `redirect_uri` with a 400 page and never redirects to it; any other bad request redirects back
+  with `error=` and the echoed `state`; a signed-out visitor goes through the normal Google
+  sign-in with the authorize URL as `return_to`. The consent page widens the CSP's `form-action`
+  to the redirect URI's origin and the Google sign-in origin
+  (`HamacaWeb.ContentSecurityPolicy.header/1`, `google_sign_in_origin/0`), because browsers
+  enforce `form-action` on every redirect after a form submit: Allow / Cancel land on the
+  client, while "Not you?" and an expired-session Allow / Cancel go through `/auth/google` to
+  Google. Allow calls `authorize/3` and
+  redirects with `code` and `state`; Cancel redirects with `error=access_denied`. The consent
+  page's "Not you?" signs out back to the authorize URL (`HamacaWeb.Auth.log_out_user/2`).
+  **`POST /mcp`** is the MCP endpoint itself: JSON-RPC 2.0 over streamable HTTP in **stateless
+  JSON mode** (no SSE, no `Mcp-Session-Id`; `GET`/`DELETE /mcp` are 405 `allow: POST`), in its own
+  `:mcp` pipeline — `HamacaWeb.McpAuth` only, no `:accepts`, no `ApiLogger` (tool arguments
+  would be recorded), no CanonicalHost redirect. `McpAuth` refuses a foreign `Origin` 403
+  `forbidden_origin`, then authenticates `Bearer relaym_…` through `authenticate_access_token/1`
+  and assigns `:current_user`, the `{:user, id}` actor and `:oauth_grant`; anything else is 401
+  with `www-authenticate: Bearer resource_metadata="<OAuthMetadata.resource_metadata_url/0>"`
+  (plus `, error="invalid_token"` when a bearer was rejected) — the challenge that starts a
+  client's sign-in. `HamacaWeb.McpController` hands the body to `HamacaWeb.Mcp.Server.handle/2`
+  (`initialize` negotiates one of `protocol_versions/0`, `ping`, `tools/list`, `tools/call`; a
+  notification is 202 with an empty body; an unknown method is `-32601`, an unknown tool
+  `-32602`, and a non-request body — a batch array included — is `-32600` with HTTP 400). The
+  tools are `HamacaWeb.Mcp.Tool` modules listed once in `HamacaWeb.Mcp.Tools.all/0`, and all four
+  are **read-only**: `list_boards` (`Boards.list_boards_for_display/1` + the needs-you feed's
+  per-board count), `board_status` (`Boards.resolve_board/2` → `Cards.board_digest/3`: waiting
+  on you, agents working, shipped this week, at most `BoardStatus.section_limit/0` rows per
+  section), `needs_me` (`Cards.needs_you_feed/1` grouped by board, oldest `waiting_since/1`
+  first) and `get_card` (`Cards.resolve_ref/3` + `Activity.list_timeline/1`). Each replies with
+  markdown whose cards carry their ref and an absolute link (`HamacaWeb.Mcp.Format`); an
+  ambiguous or unknown board is an `isError` sentence the model relays, and a foreign board reads
+  exactly like a missing one.
 - **Billing** (`Hamaca.Billing`, RE460, [ADR 0012](../adr/0012-board-owners-pay-up-front.md) and
   [ADR 0013](../adr/0013-the-free-plan.md)) — every owner is on
   **Free** (RE469: one editable board, every feature) until they pay one monthly price
@@ -1609,6 +1688,10 @@ erDiagram
     Board ||--o{ SetupMachine : "connected machines (RE446)"
     SetupMachine ||--o{ BoardSetupStep : "machine checklist (RE446)"
     User ||--o{ UserApiToken : "mobile bearer"
+    User ||--o{ OAuthGrant : "Claude connections (RE519)"
+    OAuthClient ||--o{ OAuthGrant : "one per user"
+    OAuthGrant ||--o{ OAuthCode : "single-use PKCE codes"
+    OAuthGrant ||--o{ OAuthToken : "access / refresh"
     User ||--o{ DeviceToken : "push"
     User ||--o{ UsageVisit : "visits (RE475)"
     Board |o--o{ UsageVisit : "last board"
@@ -1653,6 +1736,18 @@ rows are unique on `(board_id, step) WHERE machine_id IS NULL`, a machine's on
 (`callout_dismissed_at`, `closed_at`, ISO 8601, RE446). `users.setup_explanations_hidden` (`Hamaca.Accounts.set_setup_explanations_hidden/2`,
 cast only by `Schemas.User.preferences_changeset/2`) is the per-user preference to hide the
 checklist's *what this does* lines.
+
+The four OAuth tables are owned by `Hamaca.Connections` (RE519). An `OAuthClient`
+(`oauth_clients`) is a dynamically registered public client: a random `client_id` (unique),
+an optional `client_name` and its `redirect_uris` (string array). An `OAuthGrant`
+(`oauth_grants`, cascade on user and client delete) is one user's connection to one client,
+unique on `(user_id, oauth_client_id)`, with `connected_at`, the throttled `last_used_at`, and
+`revoked_at`. An `OAuthCode` (`oauth_codes`, cascade on grant delete) is a single-use PKCE code:
+`code_hash` (unique, SHA-256 hex), `code_challenge`, `redirect_uri` and `resource` (`text`),
+`expires_at` and `used_at`. An `OAuthToken` (`oauth_tokens`, cascade on grant delete, indexed
+on `grant_id`) is a hashed `relaym_` bearer: `kind` (`Schemas.OAuthToken.kinds/0` — `access` /
+`refresh`), `token_prefix` (unique), `token_hash` and `expires_at`. Every field except the
+client's validated `client_name` / `redirect_uris` is set programmatically.
 
 A `SetupMachine` (`setup_machines`, owned by `Hamaca.Setup`, RE446) is one person's machine
 connected to a board: `board_id` (cascade on board delete), `user_id` and `api_key_id` (the

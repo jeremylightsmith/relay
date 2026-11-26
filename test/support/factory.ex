@@ -122,6 +122,27 @@ defmodule Hamaca.Factory do
     }
   end
 
+  # A registered OAuth client (RE519) — the shape claude.ai's dynamic registration produces.
+  def oauth_client_factory do
+    %Schemas.OAuthClient{
+      client_id: sequence(:oauth_client_id, &"client-#{&1}"),
+      client_name: "claude.ai",
+      redirect_uris: ["https://claude.ai/api/mcp/auth_callback"]
+    }
+  end
+
+  # A live user × client grant (RE519). Its codes and tokens are minted through
+  # Hamaca.Connections, whose raw values only exist in that call's return.
+  def oauth_grant_factory(attrs) do
+    grant = %Schemas.OAuthGrant{
+      user: build(:user),
+      oauth_client: build(:oauth_client),
+      connected_at: DateTime.truncate(DateTime.utc_now(), :second)
+    }
+
+    grant |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
   def stage_factory do
     %Schemas.Stage{
       name: sequence(:stage_name, &"Stage #{&1}"),

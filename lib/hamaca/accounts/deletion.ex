@@ -9,7 +9,8 @@ defmodule Hamaca.Accounts.Deletion do
   has nobody else (pending invites don't count) and is deleted. On every board that survives,
   the person's runner keys (`Schemas.SetupMachine.api_key_id`) are revoked and their membership
   removed, with `{:member_removed, user_id}` broadcast so open sessions eject. Their card
-  ownerships, user API tokens, device tokens, usage visits and billing account go too.
+  ownerships, user API tokens, device tokens, usage visits, Claude connections (OAuth grants,
+  their codes and tokens cascading) and billing account go too.
 
   The user row is **tombstoned** (`Schemas.User.deletion_changeset/1`), never deleted:
   comments, activities and votes cascade on a user delete, and they stay, shown as
@@ -36,6 +37,7 @@ defmodule Hamaca.Accounts.Deletion do
   alias Schemas.CardOwner
   alias Schemas.DeviceToken
   alias Schemas.Membership
+  alias Schemas.OAuthGrant
   alias Schemas.SetupMachine
   alias Schemas.UsageVisit
   alias Schemas.User
@@ -45,7 +47,7 @@ defmodule Hamaca.Accounts.Deletion do
 
   @errors [:confirm_required, :invalid_transfers, :apple_reauth_required, :apple_mismatch, :apple_revoke_failed]
   @unnamed_runner "unnamed runner"
-  @personal_rows [CardOwner, UserApiToken, DeviceToken, UsageVisit]
+  @personal_rows [CardOwner, UserApiToken, DeviceToken, UsageVisit, OAuthGrant]
 
   @typedoc "Why a deletion was refused — the closed set `errors/0`."
   @type error ::

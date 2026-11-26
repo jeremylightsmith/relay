@@ -1,0 +1,13 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <main id="oauth-error" class="flex flex-col items-center justify-center px-4 py-10">
+    <section class="card w-full max-w-md border border-base-300 bg-base-100 p-6">
+      <h1 class="text-center text-xl font-semibold tracking-tight">
+        This connection link isn't valid
+      </h1>
+      <p class="mt-2 text-center text-sm text-base-content/65">
+        The app that sent you here isn't registered with Hamaca, or it asked to send you
+        somewhere it didn't register. Go back to the app and try connecting again.
+      </p>
+    </section>
+  </main>
+</Layouts.app>

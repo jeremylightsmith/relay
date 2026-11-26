@@ -117,11 +117,15 @@ defmodule HamacaWeb.Auth do
     |> redirect(to: return_to || ~p"/board")
   end
 
-  @doc "Clears the session and redirects to the sign-in page."
-  def log_out_user(conn) do
+  @doc """
+  Clears the session and redirects — to `return_to` when given a validated local path (RE519's
+  consent "Not you?" link, which returns to the authorize page), otherwise to the sign-in page.
+  Callers validate `return_to` with `local_return_path/1` first.
+  """
+  def log_out_user(conn, return_to \\ nil) do
     conn
     |> renew_session()
-    |> redirect(to: ~p"/")
+    |> redirect(to: return_to || ~p"/")
   end
 
   @doc """

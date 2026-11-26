@@ -2127,7 +2127,7 @@ defmodule Hamaca.Cards do
         updated_at: board.updated_at,
         card_count: length(cards),
         stage_count: Enum.count(stages, &is_nil(&1.parent_id)),
-        ai_active?: Enum.any?(cards, &(&1.status == :working and active_owner_type(&1) == :ai)),
+        ai_active?: Enum.any?(cards, &agent_working?/1),
         needs_you_count: rollup.needs_input + rollup.in_review + rollup.awaiting_human + rollup.agent_stalled,
         needs_you_two_type: needs_you_two_type(rollup),
         starred?: starred?,
@@ -2170,13 +2170,77 @@ defmodule Hamaca.Cards do
   @spec badge_changed(User.t() | [User.t()] | Board.t()) :: :ok
   def badge_changed(target), do: Push.badge_changed(target, badge_fun: &needs_you_badge_count/1)
 
+  @doc """
+  True when an agent is working `card` (RE519): it is `:working` and the agent holds the baton
+  (`active_owner_type/1` is `:ai`). The ONE definition — `list_board_summaries/1`'s `ai_active?`
+  and `board_digest/3`'s `working` section both call it. Takes any map with `status` and a loaded
+  `owners` list.
+  """
+  @spec agent_working?(map()) :: boolean()
+  def agent_working?(%{status: status} = card), do: status == :working and active_owner_type(card) == :ai
+
+  @doc """
+  When a card awaiting a human started waiting (RE519): `blocked_since` (stamped for
+  `:needs_input`), else `updated_at` (when an `:in_review` card entered review). The ONE
+  definition of a waiting card's age; `needs_you_feed/1` orders by the same coalesce in SQL.
+  """
+  @spec waiting_since(map()) :: DateTime.t()
+  def waiting_since(%{blocked_since: blocked_since, updated_at: updated_at}), do: blocked_since || updated_at
+
+  @shipped_window_days 7
+
+  @doc "How far back `board_digest/3`'s \"shipped this week\" reaches, in days (RE519)."
+  @spec shipped_window_days() :: pos_integer()
+  def shipped_window_days, do: @shipped_window_days
+
+  @doc """
+  The baton-first digest of one board for `user` (RE519) — what the MCP `board_status` tool
+  renders:
+
+    * `waiting` — `user`'s `needs_you_feed/1` rows on this board, oldest `waiting_since/1` first;
+    * `working` — the board's cards `agent_working?/1`, each with its stage, in board order;
+    * `shipped` — the terminal stage's cards done within `shipped_window_days/0` of `now`,
+      newest first (`[]` when the board has no stages).
+  """
+  @spec board_digest(User.t(), Board.t(), DateTime.t()) :: %{
+          waiting: [map()],
+          working: [%{card: Card.t(), stage: Stage.t()}],
+          shipped: [Card.t()]
+        }
+  def board_digest(%User{} = user, %Board{id: board_id} = board, %DateTime{} = now) do
+    stages = Boards.list_stages(board)
+    stage_index = stages |> Enum.with_index() |> Map.new(fn {stage, index} -> {stage.id, {index, stage}} end)
+
+    waiting =
+      user
+      |> needs_you_feed()
+      |> Enum.filter(&(&1.card.board_id == board_id))
+      |> Enum.sort_by(&waiting_since(&1.card), DateTime)
+
+    working =
+      board
+      |> list_cards()
+      |> Enum.filter(&agent_working?/1)
+      |> Enum.sort_by(&{elem(Map.fetch!(stage_index, &1.stage_id), 0), &1.position, &1.id})
+      |> Enum.map(&%{card: &1, stage: elem(Map.fetch!(stage_index, &1.stage_id), 1)})
+
+    shipped =
+      case Boards.terminal_stage(stages) do
+        nil -> []
+        terminal -> list_done_cards(terminal, DateTime.add(now, -@shipped_window_days, :day))
+      end
+
+    %{waiting: waiting, working: working, shipped: shipped}
+  end
+
   @feed_statuses Card.awaiting_human_statuses()
 
   @doc """
   The signed-in user's cross-board "needs-you" feed (RLY-80): every non-archived card with
   a status in `Schemas.Card.awaiting_human_statuses/0` on any board they are a member of, most-recently-blocked
   first (`blocked_since` is stamped only for `:needs_input`; `:in_review` falls back to
-  `updated_at`, which is when it entered review). Cards come with `:board` and `:stage` preloaded.
+  `updated_at`, which is when it entered review — the coalesce `waiting_since/1` names). Cards
+  come with `:board` and `:stage` preloaded.
 
   This is **deliberately narrower than `needs_you_rollup/1`**: it excludes the
   ready-awaiting-human flavor, so the mobile count diverges from the board's by design (ADR

@@ -11,6 +11,7 @@ defmodule Hamaca.Accounts.DeletionTest do
   alias Schemas.CardOwner
   alias Schemas.DeviceToken
   alias Schemas.Membership
+  alias Schemas.OAuthGrant
   alias Schemas.SetupMachine
   alias Schemas.UsageVisit
   alias Schemas.User
@@ -192,6 +193,7 @@ defmodule Hamaca.Accounts.DeletionTest do
       now = DateTime.truncate(DateTime.utc_now(), :second)
       Repo.insert!(%UsageVisit{user_id: u.id, started_at: now, last_at: now, seconds: 60})
       insert(:billing_account, user: u)
+      insert(:oauth_grant, user: u)
       key = insert(:api_key, board: alpha)
       machine = machine!(alpha, u, api_key_id: key.id, runner_name: "laptop")
 
@@ -211,7 +213,7 @@ defmodule Hamaca.Accounts.DeletionTest do
       assert Repo.preload(Repo.reload!(comment), :user).user.name == "Deleted user"
       assert Repo.reload(vote)
 
-      for schema <- [Membership, CardOwner, UserApiToken, DeviceToken, UsageVisit] do
+      for schema <- [Membership, CardOwner, UserApiToken, DeviceToken, UsageVisit, OAuthGrant] do
         assert count(schema, u.id) == 0, "#{inspect(schema)} rows remain"
       end
 

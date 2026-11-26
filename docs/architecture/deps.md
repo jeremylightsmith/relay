@@ -62,6 +62,8 @@ flowchart LR
     Cards --> Repo
     Cards --> Setup
     Cards --> Votes
+    Connections --> Accounts
+    Connections --> Repo
     Events --> BoardWatch
     Events --> Repo
     Examples --> Boards

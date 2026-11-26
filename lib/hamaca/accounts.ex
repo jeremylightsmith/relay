@@ -285,6 +285,13 @@ defmodule Hamaca.Accounts do
     |> Repo.update()
   end
 
+  @doc """
+  How long (seconds) a bearer's `last_used_at` stamp stays fresh before the next use
+  rewrites it. The one throttle for user tokens here and for `Hamaca.Connections`' grants.
+  """
+  @spec last_used_throttle_seconds() :: pos_integer()
+  def last_used_throttle_seconds, do: @user_token_last_used_throttle_seconds
+
   # Throttled exactly like Hamaca.ApiKeys: a polling client must not write a row per
   # request, so only stamp when never used or older than the threshold.
   defp touch_user_token_last_used(%UserApiToken{last_used_at: last_used_at} = token) do
@@ -300,7 +307,7 @@ defmodule Hamaca.Accounts do
   defp user_token_stale?(nil, _now), do: true
 
   defp user_token_stale?(last_used_at, now) do
-    DateTime.diff(now, last_used_at, :second) >= @user_token_last_used_throttle_seconds
+    DateTime.diff(now, last_used_at, :second) >= last_used_throttle_seconds()
   end
 
   defp generate_user_token do

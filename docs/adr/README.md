@@ -25,6 +25,7 @@ must never contradict each other or the code; if they do, fix whichever is wrong
 | [0012](0012-board-owners-pay-up-front.md) | Board owners pay up front, on their own billing date | Accepted |
 | [0013](0013-the-free-plan.md) | The Free plan | Accepted |
 | [0014](0014-talk-as-a-second-execution-lane.md) | Talk: a person-driven execution lane | Accepted |
+| [0015](0015-mcp-server-for-claude-clients.md) | MCP server for Claude clients | Accepted |
 
 ## Format
 

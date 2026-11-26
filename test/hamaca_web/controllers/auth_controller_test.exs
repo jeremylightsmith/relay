@@ -218,5 +218,25 @@ defmodule HamacaWeb.AuthControllerTest do
       refute get_session(conn, :user_id)
       assert redirected_to(conn) == ~p"/"
     end
+
+    test "redirects to a local return_to after signing out (scenario 19)", %{conn: conn} do
+      conn =
+        conn
+        |> log_in_user(insert(:user))
+        |> delete("/logout?" <> URI.encode_query(%{"return_to" => "/oauth/authorize?client_id=x"}))
+
+      refute get_session(conn, :user_id)
+      assert redirected_to(conn) == "/oauth/authorize?client_id=x"
+    end
+
+    test "ignores an off-site return_to and redirects to the sign-in page (scenario 19)", %{conn: conn} do
+      conn =
+        conn
+        |> log_in_user(insert(:user))
+        |> delete("/logout?" <> URI.encode_query(%{"return_to" => "https://evil.example"}))
+
+      refute get_session(conn, :user_id)
+      assert redirected_to(conn) == ~p"/"
+    end
   end
 end
