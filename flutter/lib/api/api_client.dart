@@ -113,6 +113,20 @@ class ApiClient {
     }
   }
 
+  /// DELETEs [path] with a JSON [body]. Like [postJson]: only transport failures
+  /// throw ([ApiException]); every server answer, 4xx included, comes back as
+  /// an [ApiResponse].
+  Future<ApiResponse> deleteJson(String path, Map<String, dynamic> body) async {
+    try {
+      final resp = await _dio.delete<dynamic>(path, data: body);
+      return ApiResponse(resp.statusCode, resp.data);
+    } on DioException catch (e) {
+      throw ApiException(
+        e.message ?? 'Network error — could not reach Hamaca.',
+      );
+    }
+  }
+
   String? _messageFrom(dynamic body) {
     if (body is Map && body['error'] is Map) {
       return (body['error'] as Map)['message'] as String?;

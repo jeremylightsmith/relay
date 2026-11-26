@@ -335,6 +335,15 @@ class AuthController extends Notifier<AuthState> {
     final token = push.token;
     if (token != null) await push.disable(token);
 
+    await _signOutLocally();
+  }
+
+  /// RE509: the local sign-out after `DELETE /api/all/account` succeeded. It is
+  /// [signOut] minus the push unregister: the server already deleted this
+  /// device's tokens along with the session, so that DELETE would only 401.
+  Future<void> signOutDeletedAccount() => _signOutLocally();
+
+  Future<void> _signOutLocally() async {
     try {
       await _google.signOut();
     } catch (_) {}

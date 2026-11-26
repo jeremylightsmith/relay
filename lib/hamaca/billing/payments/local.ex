@@ -10,7 +10,8 @@ defmodule Hamaca.Billing.Payments.Local do
       `local_<4242|0341|timeout>_<user_id>`;
     * `charge/5` succeeds for `pm_local_4242`, declines `pm_local_0341` for insufficient funds,
       and times out for `pm_local_timeout`;
-    * `find_payment/3` finds any attempt charged, as `pi_local_attempt-<id>`.
+    * `find_payment/3` finds any attempt charged, as `pi_local_attempt-<id>`;
+    * `delete_customer/1` always succeeds.
   """
 
   @behaviour Hamaca.Billing.Payments
@@ -82,4 +83,7 @@ defmodule Hamaca.Billing.Payments.Local do
        receipt_url: @receipts <> "attempt-#{attempt_id}"
      }}
   end
+
+  @impl true
+  def delete_customer(_customer_id), do: :ok
 end

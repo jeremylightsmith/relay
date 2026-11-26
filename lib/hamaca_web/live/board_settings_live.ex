@@ -927,6 +927,14 @@ defmodule HamacaWeb.BoardSettingsLive do
                         YOU
                       </span>
                       <span
+                        :if={owner?(m, @board)}
+                        id={"member-owner-badge-#{m.id}"}
+                        class="font-mono"
+                        style="font-size:10px;font-weight:600;letter-spacing:0.04em;background:color-mix(in oklab, var(--color-base-content) 8%, var(--color-base-100));color:color-mix(in oklab, var(--color-base-content) 70%, transparent);padding:2px 6px;border-radius:5px;"
+                      >
+                        OWNER
+                      </span>
+                      <span
                         :if={is_nil(m.user_id)}
                         class="font-mono"
                         style="font-size:10px;font-weight:600;letter-spacing:0.04em;background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));padding:2px 6px;border-radius:5px;"
@@ -2337,6 +2345,9 @@ defmodule HamacaWeb.BoardSettingsLive do
   end
 
   defp mine?(%Membership{user_id: user_id}, scope), do: user_id == scope.user.id
+
+  defp owner?(%Membership{user_id: nil}, _board), do: false
+  defp owner?(%Membership{user_id: user_id}, board), do: user_id == board.owner_id
 
   defp member_name(%Membership{user: %User{name: name}}) when is_binary(name) and name != "", do: name
 

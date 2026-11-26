@@ -202,11 +202,25 @@ defmodule Hamaca.Billing.Payments.Stripe do
     }
   end
 
+  @impl true
+  def delete_customer(customer_id) do
+    with :ok <- ensure_configured() do
+      case delete("/customers/#{encode(customer_id)}") do
+        {:ok, %{status: status}} when status in [200, 404] -> :ok
+        other -> unexpected(other)
+      end
+    end
+  end
+
   # One path segment, whatever the id holds: `cs/../x y` cannot walk to another endpoint.
   defp encode(id), do: URI.encode(id, &URI.char_unreserved?/1)
 
   defp get(path, params) do
     request(method: :get, url: @api <> path, params: params)
+  end
+
+  defp delete(path) do
+    request(method: :delete, url: @api <> path)
   end
 
   defp post(form, path, opts \\ []) do

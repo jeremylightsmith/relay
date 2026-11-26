@@ -46,6 +46,10 @@ config :hamaca, :apns_req_options, plug: {Req.Test, Hamaca.Push.Delivery.APNS}
 # from an in-process stub instead of real Apple. `:apple_client_ids` is inherited.
 config :hamaca, :apple_keys_req_options, plug: {Req.Test, Hamaca.Accounts.AppleTokenValidator}
 
+# Apple token revoke at account deletion (RE509): a Req.Test plug so AppleRevoker.Apple's
+# /auth/token and /auth/revoke calls hit an in-process stub instead of real Apple.
+config :hamaca, :apple_revoke_req_options, plug: {Req.Test, Hamaca.Accounts.AppleRevoker.Apple}
+
 # Native-auth Google token validator: static dummy client id + a Req.Test plug
 # so GoogleTokenValidator hits an in-process stub instead of real Google.
 config :hamaca, :google_client_id, "test-google-client-id"

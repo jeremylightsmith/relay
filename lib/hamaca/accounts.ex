@@ -9,14 +9,22 @@ defmodule Hamaca.Accounts do
   login bypass. Web/session concerns live in `HamacaWeb.Auth`, not here.
   `create_user_api_token/2` and `authenticate_user_api_token/1` mint and verify
   the bearer tokens the native app uses for its JSON calls.
+
+  **Account deletion** (RE509): `deletion_preview/1` and `delete_account/2` (in the internal
+  `Hamaca.Accounts.Deletion`) hand shared owned boards to a chosen member, delete solo ones,
+  revoke the person's runner keys, remove their personal rows and **tombstone** the user row
+  (`Schemas.User.deletion_changeset/1`); the Stripe customer is deleted best-effort after commit.
+  Every lookup here — `get_user/1`, the email lookups, `authenticate_user_api_token/1` — skips a
+  tombstone, so a lingering session reads as signed out.
   """
 
   use Boundary,
-    deps: [Hamaca.Billing, Hamaca.Config, Hamaca.Repo, Schemas],
+    deps: [Hamaca.ApiKeys, Hamaca.Billing, Hamaca.Config, Hamaca.Events, Hamaca.Repo, Schemas],
     exports: [GoogleTokenValidator, AppleTokenValidator]
 
   import Ecto.Query
 
+  alias Hamaca.Accounts.Deletion
   alias Hamaca.Accounts.GoogleTokenValidator
   alias Hamaca.Billing
   alias Hamaca.Repo
@@ -30,14 +38,29 @@ defmodule Hamaca.Accounts do
   @user_token_last_used_throttle_seconds 60
   @default_user_token_context "mobile"
 
-  @doc "Fetches a user by primary key. Returns nil when not found."
-  def get_user(id), do: Repo.get(User, id)
+  @doc "Fetches a live (not deleted) user by primary key. Returns nil when not found or tombstoned."
+  def get_user(id), do: Repo.one(from u in live_users(), where: u.id == ^id)
 
-  @doc "Fetches a user by email, case-insensitively (RE444). Returns nil when not found."
+  @doc "Fetches a live user by email, case-insensitively (RE444). Returns nil when not found or tombstoned."
   @spec get_user_by_email(String.t()) :: User.t() | nil
   def get_user_by_email(email) when is_binary(email) do
-    Repo.one(from u in User, where: fragment("lower(?)", u.email) == ^String.downcase(email), limit: 1)
+    Repo.one(from u in live_users(), where: fragment("lower(?)", u.email) == ^String.downcase(email), limit: 1)
   end
+
+  # RE509: every lookup skips a deleted account's tombstone.
+  defp live_users, do: from(u in User, where: is_nil(u.deleted_at))
+
+  @doc "What deleting `user`'s account would do — see `Hamaca.Accounts.Deletion.preview/1`."
+  @spec deletion_preview(User.t()) :: Deletion.preview()
+  defdelegate deletion_preview(user), to: Deletion, as: :preview
+
+  @doc "Deletes `user`'s account — see `Hamaca.Accounts.Deletion.delete_account/2`."
+  @spec delete_account(User.t(), keyword()) :: :ok | {:error, Deletion.error()}
+  defdelegate delete_account(user, opts \\ []), to: Deletion
+
+  @doc "The closed set of account-deletion error atoms — see `Hamaca.Accounts.Deletion.errors/0`."
+  @spec deletion_errors() :: [Deletion.error()]
+  defdelegate deletion_errors(), to: Deletion, as: :errors
 
   @doc """
   Upserts a user from normalized provider claims (the provider-agnostic seam).
@@ -106,7 +129,7 @@ defmodule Hamaca.Accounts do
   end
 
   defp find_by_email(nil), do: nil
-  defp find_by_email(email), do: Repo.get_by(User, email: User.normalize_email(email))
+  defp find_by_email(email), do: Repo.get_by(live_users(), email: User.normalize_email(email))
 
   defp refresh_profile(user, claims, fields) do
     profile = claims |> Map.take(fields) |> Map.reject(fn {_field, value} -> is_nil(value) end)
@@ -240,10 +263,11 @@ defmodule Hamaca.Accounts do
   def authenticate_user_api_token(raw_token) when is_binary(raw_token) do
     with ["relayu", prefix, secret] <- String.split(raw_token, "_", parts: 3),
          %UserApiToken{} = token <- Repo.get_by(UserApiToken, token_prefix: prefix),
-         true <- Plug.Crypto.secure_compare(hash_user_token_secret(secret), token.token_hash) do
+         true <- Plug.Crypto.secure_compare(hash_user_token_secret(secret), token.token_hash),
+         %UserApiToken{user: %User{deleted_at: nil} = user} <- Repo.preload(token, :user) do
       touch_user_token_last_used(token)
 
-      {:ok, Repo.preload(token, :user).user}
+      {:ok, user}
     else
       _not_authenticated -> :error
     end

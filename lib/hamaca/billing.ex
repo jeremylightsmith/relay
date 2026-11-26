@@ -168,6 +168,28 @@ defmodule Hamaca.Billing do
   def get_account(user), do: Repo.get_by(BillingAccount, user_id: user_id(user))
 
   @doc """
+  Deletes the user's billing account (RE509, account deletion) — its payment attempts, notices and
+  admin entries cascade — and answers its Stripe customer id, or `{:ok, nil}` when there was no
+  account (or it never reached Stripe). Runs inside the caller's transaction; the Stripe customer
+  itself is removed afterwards with `delete_customer/1`.
+  """
+  @spec remove_account(User.t() | pos_integer()) :: {:ok, String.t() | nil}
+  def remove_account(user) do
+    {_count, customer_ids} =
+      Repo.delete_all(from a in BillingAccount, where: a.user_id == ^user_id(user), select: a.stripe_customer_id)
+
+    {:ok, List.first(customer_ids)}
+  end
+
+  @doc """
+  Deletes a Stripe customer through `Hamaca.Billing.Payments` (RE509). `nil` — no customer — is
+  `:ok` and calls nothing.
+  """
+  @spec delete_customer(String.t() | nil) :: :ok | {:error, term()}
+  def delete_customer(nil), do: :ok
+  def delete_customer(customer_id) when is_binary(customer_id), do: Payments.impl().delete_customer(customer_id)
+
+  @doc """
   Gets or creates the user's account. Concurrency-safe: the insert ignores a conflict on
   `user_id`. Writes no date — every new account stands on Free.
   """
@@ -581,7 +603,7 @@ defmodule Hamaca.Billing do
   def admin_plan(standing, owned_board_count) when is_integer(owned_board_count), do: Standing.kind(standing)
 
   @doc """
-  Every user for the superadmin `/admin/users` table (RE353, RE463), newest first
+  Every live user (deleted tombstones skipped, RE509) for the superadmin `/admin/users` table (RE353, RE463), newest first
   (`inserted_at desc, id desc`), with their billing standing on `today`. `board_count` counts the
   user's memberships; `owned_board_count` the boards they own; `member_count` the distinct people
   on those boards, the owner included (0 when they own none). `plan` is `admin_plan/2`;
@@ -596,6 +618,7 @@ defmodule Hamaca.Billing do
   @spec list_admin_users(Date.t()) :: [admin_user()]
   def list_admin_users(%Date{} = today) do
     from(u in User,
+      where: is_nil(u.deleted_at),
       left_join: bc in subquery(membership_counts()),
       on: bc.user_id == u.id,
       left_join: ob in subquery(owned_board_counts()),

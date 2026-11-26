@@ -12,6 +12,15 @@
 # export GOOGLE_CLIENT_ID=...
 # export GOOGLE_CLIENT_SECRET=...
 
+# Sign in with Apple token revoke at account deletion (RE509). A Sign in with Apple key from
+# the Apple Developer portal (Certificates, Identifiers & Profiles → Keys), used to revoke a
+# person's Apple tokens when they delete their account. Without all three, deleting an Apple
+# account fails closed. In prod, set them with `fly secrets set`.
+# export APPLE_TEAM_ID=...                  # your Apple Developer team id
+# export APPLE_SIGNIN_KEY_ID=...            # the Sign in with Apple key's id
+# export APPLE_SIGNIN_PRIVATE_KEY=...       # the key's .p8 PEM text (literal \n allowed on one line)
+# Optional: APPLE_SIGNIN_CLIENT_ID (defaults to the first APPLE_CLIENT_IDS entry).
+
 # --- Deploy (RE board's Deploy flow; runners inherit these from this direnv shell) ---
 # Restart `relay start` after changing any of them.
 # export FLY_API_TOKEN=…                      # fly tokens create deploy -a relayboard

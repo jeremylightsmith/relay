@@ -295,8 +295,8 @@ defmodule Hamaca.DocsTaxonomyTest do
             String.starts_with?(path, prefix <> "/"),
             do: {verb |> to_string() |> String.upcase(), String.replace_prefix(path, prefix, "")}
 
-      assert length(routes) == 14,
-             "expected the 14 native routes (3 /api/auth/native + 11 /api/all), got #{inspect(routes)}"
+      assert length(routes) == 16,
+             "expected the 16 native routes (3 /api/auth/native + 13 /api/all), got #{inspect(routes)}"
 
       for {verb, path} <- routes do
         assert shipped =~ "#{verb} #{path}",

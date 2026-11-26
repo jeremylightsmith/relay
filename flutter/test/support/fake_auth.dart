@@ -17,6 +17,9 @@ class FakeAuthController extends AuthController {
   int appleSignInCalls = 0;
   int signOutCalls = 0;
 
+  /// RE509: the post-deletion sign-out, counted apart from [signOutCalls].
+  int deletedSignOutCalls = 0;
+
   @override
   AuthState build() => initial;
 
@@ -33,6 +36,12 @@ class FakeAuthController extends AuthController {
   @override
   Future<void> signOut() async {
     signOutCalls++;
+    state = const AuthState(status: AuthStatus.signedOut);
+  }
+
+  @override
+  Future<void> signOutDeletedAccount() async {
+    deletedSignOutCalls++;
     state = const AuthState(status: AuthStatus.signedOut);
   }
 }

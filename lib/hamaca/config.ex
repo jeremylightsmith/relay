@@ -15,8 +15,10 @@ defmodule Hamaca.Config do
   `:git_sha`, billing's `:billing_enabled`, `:billing_payments`, `:billing_price_cents`,
   `:stripe_secret_key` and `:stripe_webhook_secret` (RE460), billing email's
   `:mail_enabled` (RE464) and `:app_url`, the origin its links use (RE480), `:usage_tracker`,
-  the `Hamaca.Usage.Tracker` server touches go to (RE475), and `:extra_hosts`, the hosts
-  `HamacaWeb.Plugs.CanonicalHost` redirects off (RE480).
+  the `Hamaca.Usage.Tracker` server touches go to (RE475), `:extra_hosts`, the hosts
+  `HamacaWeb.Plugs.CanonicalHost` redirects off (RE480), and account deletion's Apple token
+  revoke (RE509): `:apple_revoker`, `:apple_team_id`, `:apple_signin_key_id`,
+  `:apple_signin_private_key` and `:apple_signin_client_id`.
   Boot-time reads stay plain
   `Application.get_env/3`.
 

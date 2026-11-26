@@ -18,6 +18,7 @@ import '../features/needs_you/needs_you_screen.dart';
 import '../features/push/push_onboarding.dart';
 import '../features/push/push_permission_screen.dart';
 import '../features/push/push_service.dart';
+import '../features/settings/delete_account_page.dart';
 import '../features/settings/settings_screen.dart';
 import '../widgets/main_scaffold.dart';
 import 'launch_restorer.dart';
@@ -109,6 +110,12 @@ GoRouter buildRouter({
           cardRef: state.pathParameters['ref']!,
           boardSlug: state.uri.queryParameters['board'] ?? '',
         ),
+      ),
+      // RE509 · SET-03. Full-screen like the reject note: pushed from Settings
+      // over the tab shell, so it is a top-level sibling, not a shell child.
+      GoRoute(
+        path: '/settings/delete-account',
+        builder: (context, state) => const DeleteAccountPage(),
       ),
       ShellRoute(
         builder: (context, state, child) => MainScaffold(child: child),

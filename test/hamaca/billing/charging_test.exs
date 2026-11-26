@@ -21,6 +21,8 @@ defmodule Hamaca.Billing.ChargingTest do
     defdelegate fetch_setup(id), to: Local
     @impl true
     defdelegate find_payment(customer_id, payment_intent_id, attempt), to: Local
+    @impl true
+    defdelegate delete_customer(customer_id), to: Local
 
     @impl true
     def charge(_customer_id, _payment_method_id, _amount_cents, _key, _meta), do: raise("charge/5 must not be called")
@@ -37,6 +39,8 @@ defmodule Hamaca.Billing.ChargingTest do
     defdelegate fetch_setup(id), to: Local
     @impl true
     defdelegate find_payment(customer_id, payment_intent_id, attempt), to: Local
+    @impl true
+    defdelegate delete_customer(customer_id), to: Local
 
     @impl true
     def charge(customer_id, payment_method_id, amount_cents, key, meta) do

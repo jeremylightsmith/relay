@@ -189,6 +189,21 @@ if config_env() == :prod do
     Logger.warning("[push] APNs credentials absent — falling back to the Log delivery adapter")
   end
 
+  # Sign in with Apple token revoke at account deletion (RE509). Each key is set only when its
+  # env var is present; without the three secrets, deleting an Apple account fails closed
+  # (`apple_revoke_failed`). APPLE_SIGNIN_CLIENT_ID is optional — it defaults to the first
+  # `:apple_client_ids` entry. Secrets come from `fly secrets set`.
+  for {env, key} <- [
+        {"APPLE_TEAM_ID", :apple_team_id},
+        {"APPLE_SIGNIN_KEY_ID", :apple_signin_key_id},
+        {"APPLE_SIGNIN_PRIVATE_KEY", :apple_signin_private_key},
+        {"APPLE_SIGNIN_CLIENT_ID", :apple_signin_client_id}
+      ],
+      value = System.get_env(env),
+      value != nil do
+    config :hamaca, key, value
+  end
+
   # RLY-13: attachments go to Tigris (S3-compatible) in prod. `fly storage create`
   # provisions the bucket and sets AWS_* / BUCKET_NAME / AWS_ENDPOINT_URL_S3.
   config :hamaca, Hamaca.Attachments, storage: Hamaca.Attachments.Storage.S3

@@ -18,6 +18,7 @@ defmodule Schemas.User do
     field :provider, :string
     field :provider_uid, :string
     field :setup_explanations_hidden, :boolean, default: false
+    field :deleted_at, :utc_datetime
 
     timestamps(type: :utc_datetime)
   end
@@ -35,6 +36,33 @@ defmodule Schemas.User do
   @doc "True for a dev or seed account (`synthetic_providers/0`)."
   @spec synthetic?(t()) :: boolean()
   def synthetic?(%__MODULE__{provider: provider}), do: provider in @synthetic_providers
+
+  @deleted_name "Deleted user"
+
+  @doc "The display name a deleted account's comments, votes and ideas show — the ONE definition."
+  @spec deleted_name() :: String.t()
+  def deleted_name, do: @deleted_name
+
+  @doc "True for a deleted account's tombstone (`deleted_at` set)."
+  @spec deleted?(t()) :: boolean()
+  def deleted?(%__MODULE__{deleted_at: deleted_at}), do: not is_nil(deleted_at)
+
+  @doc """
+  Tombstones `user` (RE509): the name becomes `deleted_name/0`, the avatar and `provider_uid` are
+  cleared, the email becomes the unique, already-lowercase `deleted+<id>@users.invalid` (so the
+  person can sign up again with the old address), and `deleted_at` is stamped. `provider` is kept.
+  Set programmatically — nothing is cast.
+  """
+  @spec deletion_changeset(t()) :: Ecto.Changeset.t()
+  def deletion_changeset(%__MODULE__{id: id} = user) do
+    change(user,
+      name: @deleted_name,
+      avatar_url: nil,
+      email: "deleted+#{id}@users.invalid",
+      provider_uid: nil,
+      deleted_at: DateTime.truncate(DateTime.utc_now(), :second)
+    )
+  end
 
   @doc """
   Changeset for profile fields coming from the OAuth provider. `:email` is

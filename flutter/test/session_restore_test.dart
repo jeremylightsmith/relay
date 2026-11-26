@@ -12,6 +12,7 @@ import 'package:relay_mobile/app/tabs.dart';
 import 'package:relay_mobile/features/board/board_prefs.dart';
 import 'package:relay_mobile/features/board/last_place.dart';
 import 'package:relay_mobile/features/boards/current_board.dart';
+import 'package:relay_mobile/features/push/push_platform.dart';
 import 'package:relay_mobile/features/push/push_service.dart';
 
 import 'support/fake_push_platform.dart';
@@ -24,6 +25,7 @@ ProviderContainer containerWith({
   required StubAdapter adapter,
   BoardPrefs? boardPrefs,
   LastPlaceStore? lastPlace,
+  PushPlatform? pushPlatform,
 }) {
   final container = ProviderContainer(
     overrides: [
@@ -32,7 +34,9 @@ ProviderContainer containerWith({
       lastPlaceStoreProvider.overrideWithValue(
         lastPlace ?? InMemoryLastPlaceStore(),
       ),
-      pushPlatformProvider.overrideWithValue(FakePushPlatform()),
+      pushPlatformProvider.overrideWithValue(
+        pushPlatform ?? FakePushPlatform(),
+      ),
       // The real dio, minus the socket: same jar + interceptor, stubbed adapter.
       dioProvider.overrideWith(
         (ref) =>
@@ -220,6 +224,42 @@ void main() {
     await container.read(currentBoardProvider.notifier).ready;
 
     expect(container.read(currentBoardProvider).needsChoice, isTrue);
+  });
+
+  group('signOutDeletedAccount (RE509)', () {
+    test(
+      'clears the session like signOut, but never unregisters push',
+      () async {
+        final store = InMemorySessionStore('cookie-value');
+        final boardPrefs = InMemoryBoardPrefs('marketing-site');
+        final adapter = StubAdapter(body: {'success': true, 'user': _user});
+        final container = containerWith(
+          store: store,
+          adapter: adapter,
+          boardPrefs: boardPrefs,
+          pushPlatform: FakePushPlatform(tokenToReturn: 'apns-1'),
+        );
+        await restore(container);
+        await container.read(currentBoardProvider.notifier).ready;
+        expect(await container.read(pushServiceProvider).enable(), isTrue);
+        adapter.requests.clear();
+
+        await container.read(authProvider.notifier).signOutDeletedAccount();
+        await container.read(currentBoardProvider.notifier).ready;
+
+        expect(
+          adapter.requests,
+          isEmpty,
+          reason:
+              'the server already deleted the device tokens and the session; '
+              'DELETE /api/all/devices/:token would only 401',
+        );
+        expect(store.value, isNull);
+        expect(boardPrefs.slug, isNull);
+        expect(container.read(authProvider).status, AuthStatus.signedOut);
+        expect(container.read(currentBoardProvider).needsChoice, isTrue);
+      },
+    );
   });
 
   group('the last place (RE452)', () {

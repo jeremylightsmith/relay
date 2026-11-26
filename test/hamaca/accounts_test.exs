@@ -403,4 +403,41 @@ defmodule Hamaca.AccountsTest do
       assert Scope.for_user(nil) == nil
     end
   end
+
+  describe "tombstoned users (RE509)" do
+    setup do
+      user = insert(:user)
+      {:ok, %{token: raw}} = Accounts.create_user_api_token(user)
+      tombstone = user |> User.deletion_changeset() |> Repo.update!()
+      %{tombstone: tombstone, raw: raw}
+    end
+
+    test "get_user/1 skips a tombstone", %{tombstone: tombstone} do
+      assert Accounts.get_user(tombstone.id) == nil
+    end
+
+    test "get_user_by_email/1 skips a tombstone", %{tombstone: tombstone} do
+      assert Accounts.get_user_by_email(tombstone.email) == nil
+    end
+
+    test "a token minted before tombstoning no longer authenticates", %{raw: raw} do
+      assert Accounts.authenticate_user_api_token(raw) == :error
+    end
+
+    test "only a tombstone may lack a provider_uid" do
+      assert_raise Ecto.ConstraintError, ~r/users_live_provider_uid_present/, fn ->
+        Repo.insert!(%User{email: "no-uid@example.com", provider: "google", provider_uid: nil})
+      end
+    end
+  end
+
+  test "deletion_errors/0 is the closed set of deletion refusals, in order" do
+    assert Accounts.deletion_errors() == [
+             :confirm_required,
+             :invalid_transfers,
+             :apple_reauth_required,
+             :apple_mismatch,
+             :apple_revoke_failed
+           ]
+  end
 end

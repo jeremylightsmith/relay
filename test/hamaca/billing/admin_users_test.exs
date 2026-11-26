@@ -234,4 +234,13 @@ defmodule Hamaca.Billing.AdminUsersTest do
       assert Billing.paying_plans() == [:active, :past_due]
     end
   end
+
+  test "a deleted (tombstoned) user is not listed (RE509)" do
+    normal = insert(:user)
+    tombstone = :user |> insert() |> Schemas.User.deletion_changeset() |> Repo.update!()
+
+    ids = Enum.map(Billing.list_admin_users(Date.utc_today()), & &1.id)
+    assert normal.id in ids
+    refute tombstone.id in ids
+  end
 end

@@ -620,7 +620,7 @@ sharing behavior.
   `{"enabled": false, "standing": null, "through": null}`. A 401/422/500 body has no `billing`. Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
   user up by `provider_uid` first, then by normalized verified email (signing in that existing
   user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
-  nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, the board list, and the board star and mute).
+  nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, the board list, the board star and mute, and account deletion).
   `get_user_by_email/1` is a case-insensitive lookup (the example-board seeders, RE444).
   The superadmin-only `/admin/users` page (RE353) reads `Hamaca.Billing.list_admin_users/1`
   (RE463 moved its row query out of Accounts, which no longer has an admin user list).
@@ -634,6 +634,48 @@ sharing behavior.
   RE462; a refusal is ignored, so sign-up never fails over a code, and a returning user never
   redeems one) — so Accounts depends on Billing, never the reverse.
   `upsert_user_from_google/2` passes `:promo_code` through.
+  **Account deletion (RE509):** `deletion_preview/1` / `delete_account/2` / `deletion_errors/0`,
+  delegated to the internal `Hamaca.Accounts.Deletion` (no own boundary; Accounts adds
+  `Hamaca.ApiKeys` and `Hamaca.Events` to its deps). Owned boards split into **shared** (another
+  resolved, live member — handed to the member the person picks, `transfers: %{slug => user_id}`,
+  `{:board_updated, board}` broadcast) and **solo** (deleted). The person's setup-machine keys are
+  revoked (`ApiKeys.revoke/1`), their memberships removed with `{:member_removed, user_id}`
+  broadcast on each surviving board, and their card ownerships, user API tokens, device tokens,
+  usage visits and billing account (`Hamaca.Billing.remove_account/1`) deleted — all in one
+  transaction, after the transfers are validated against a fresh preview (re-checked inside;
+  `{:error, :invalid_transfers}` writes nothing). The user row is **tombstoned, never deleted**
+  (comments, activities and votes cascade on a user delete): `Schemas.User.deletion_changeset/1`
+  sets `name: Schemas.User.deleted_name/0` ("Deleted user"), clears `avatar_url` and
+  `provider_uid`, sets `email: deleted+<id>@users.invalid` and stamps `deleted_at`; the
+  `users_live_provider_uid_present` check keeps `provider_uid` required on live rows. Every
+  lookup — `get_user/1`, the email lookups, `authenticate_user_api_token/1` — skips a tombstone,
+  so a lingering session reads as signed out, and the old identity signs up afresh. After commit
+  the Stripe customer is deleted best-effort (`Hamaca.Billing.delete_customer/1`; a failure is
+  logged, never rolled back). An **Apple** account (`apple_reauth_required`) must pass a fresh
+  `apple_authorization_code` (none or blank → `:apple_reauth_required`); after the transfers
+  check and **before any write**, the internal `Hamaca.Accounts.AppleRevoker` behaviour
+  (`impl/0` = `:apple_revoker`, default `AppleRevoker.Apple`) exchanges it at Apple's
+  `POST /auth/token` with an ES256 client-secret JWT, requires the `id_token`'s `sub` to be the
+  user's `provider_uid` (else `:apple_mismatch`, nothing revoked), and revokes the refresh (else
+  access) token at `POST /auth/revoke`. Any other Apple failure — including unset
+  `APPLE_TEAM_ID` / `APPLE_SIGNIN_KEY_ID` / `APPLE_SIGNIN_PRIVATE_KEY` (optional
+  `APPLE_SIGNIN_CLIENT_ID`, default the first `:apple_client_ids`) — fails closed as
+  `:apple_revoke_failed` with the account untouched. `allow_without_apple_revoke: true` skips it.
+  The native Settings › Delete account page (ADR 0005) reaches it over the user-bearer
+  `/api/all` scope through `HamacaWeb.Api.AccountController` (its own resource, not
+  `AllController`): **`GET /api/all/account/deletion`** answers the preview as
+  `{data: {shared_boards: [{slug, name, member_count, candidates: [{user_id, name, avatar_url,
+  member_since}]}], solo_boards: [{slug, name}], plan_ends, runners, apple_reauth_required}}`
+  (`member_since` an ISO 8601 date), and **`DELETE /api/all/account`** takes
+  `{confirm: "DELETE", transfers?: {slug: user_id}, apple_authorization_code?}` and answers `204`
+  with an empty body. The controller refuses a `confirm` that isn't exactly `DELETE`
+  (`confirm_required`) and a `transfers` that isn't a map of string → integer
+  (`invalid_transfers` — a string id is never coerced) before calling the context. Every refusal
+  is `{error: {code, message}}`, rendered locally (not through `FallbackController`) from one
+  `status_and_message/1` clause per atom in `deletion_errors/0`, the `code` being the atom's
+  name: `confirm_required`, `invalid_transfers` and `apple_reauth_required` are 422,
+  `apple_mismatch` 403, `apple_revoke_failed` 502. A deleted account's bearer then answers 401,
+  and its native session cookie dies with `get_user/1` (`/api/auth/native/me` → 401).
 - **Billing** (`Hamaca.Billing`, RE460, [ADR 0012](../adr/0012-board-owners-pay-up-front.md) and
   [ADR 0013](../adr/0013-the-free-plan.md)) — every owner is on
   **Free** (RE469: one editable board, every feature) until they pay one monthly price
@@ -708,7 +750,8 @@ sharing behavior.
   recorded even with mail off, so enabling a provider never sends a backlog. Each notice is
   isolated (rescued and logged).
   **Payments seam:** `Hamaca.Billing.Payments` is a behaviour (`create_setup_checkout/3`,
-  `fetch_setup/1`, `charge/5`, `find_payment/3`) resolved by `impl/0` (`:billing_payments` via
+  `fetch_setup/1`, `charge/5`, `find_payment/3`, `delete_customer/1` — RE509, a 404 counts as
+  deleted) resolved by `impl/0` (`:billing_payments` via
   `Hamaca.Config`): `Payments.Stripe` — `Req` against `api.stripe.com/v1`, bearer
   `:stripe_secret_key` read at call time, `{:error, :not_configured}` before any HTTP with no key,
   `:stripe_req_options` merged in (test's `Req.Test` plug), never retried — or `Payments.Local`,
@@ -783,7 +826,7 @@ sharing behavior.
   (`%{enabled, standing: Standing.kind/1, through}`, served on the Accounts native auth body,
   RE466), short-circuiting to `%{enabled: false, standing: nil, through: nil}` with no query while
   disabled.
-  **Admin read model (RE463):** `list_admin_users/1` is every user for `/admin/users`, newest
+  **Admin read model (RE463):** `list_admin_users/1` is every live user (a deleted account's tombstone is skipped, RE509) for `/admin/users`, newest
   first (`inserted_at desc, id desc`), in **one query** — aggregate subqueries for `board_count`
   (memberships), `owned_board_count` and `member_count` (the distinct people on the boards a user
   owns, the owner included, invites excluded), a left-joined account + promo code, and a

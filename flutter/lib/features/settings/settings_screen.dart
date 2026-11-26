@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart' show LaunchMode;
 
 import '../../app/theme.dart';
@@ -12,7 +13,8 @@ import 'plan_status.dart';
 
 /// SET-01 Settings (RLY-90): the identity block, the ACCOUNT section, the
 /// outlined rows card, and the outlined destructive Log out button, as the
-/// artboard draws them.
+/// artboard draws them — then the quiet red "Delete account" text button
+/// (RE509), which pushes `/settings/delete-account`.
 ///
 /// ACCOUNT (RE466) is **status only**: a Plan row naming where the owner's plan
 /// stands and a plain "Manage billing on relay on the web." line. App Store
@@ -112,6 +114,22 @@ class SettingsScreen extends ConsumerWidget {
             ),
             onPressed: () => showLogoutConfirmDialog(context),
             child: const Text('Log out'),
+          ),
+          // RE509 · SET-01: the quiet way out, always built — never inside a
+          // conditional section. Pushes the SET-03 confirm page.
+          const SizedBox(height: 12),
+          TextButton(
+            key: const Key('settings_delete_account'),
+            style: TextButton.styleFrom(
+              foregroundColor: scheme.error.withValues(alpha: 0.8),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              textStyle: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            onPressed: () => context.push('/settings/delete-account'),
+            child: const Text('Delete account'),
           ),
         ],
       ),

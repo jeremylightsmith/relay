@@ -204,7 +204,8 @@ defmodule HamacaWeb.Router do
   # not collide with the board API's payloads (RLY-67). RLY-126 extends this same scoped
   # exception (ADR 0005's native API) with the native New-card sheet's create path, RE376
   # with the board switcher's list (GET /boards), RE396 with the switcher's star
-  # (POST /boards/:slug/star), and RE406 with the switcher's mute (POST /boards/:slug/mute).
+  # (POST /boards/:slug/star), RE406 with the switcher's mute (POST /boards/:slug/mute), and
+  # RE509 with account deletion (GET /account/deletion, DELETE /account).
   scope "/api/all", HamacaWeb.Api do
     pipe_through [:api, :api_user_auth]
 
@@ -217,6 +218,8 @@ defmodule HamacaWeb.Router do
     post "/cards/:ref/approve", AllController, :approve
     post "/cards/:ref/reject", AllController, :reject
     post "/cards/:ref/answer", AllController, :answer
+    get "/account/deletion", AccountController, :deletion
+    delete "/account", AccountController, :delete
   end
 
   # Unauthenticated on purpose (RLY-177): the deployed SHA leaks nothing a deploy does not,

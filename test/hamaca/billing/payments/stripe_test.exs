@@ -252,4 +252,31 @@ defmodule Hamaca.Billing.Payments.StripeTest do
       assert Stripe.find_payment("cus_1", nil, @attempt) == {:ok, :none}
     end
   end
+
+  describe "delete_customer/1" do
+    test "a 200 deletes the customer" do
+      stub(200, %{"id" => "cus_1", "deleted" => true})
+
+      assert Stripe.delete_customer("cus_1") == :ok
+      assert_received {:stripe_request, "DELETE", "/v1/customers/cus_1", _headers, _params}
+    end
+
+    test "a 404 means the customer is already gone" do
+      stub(404, %{"error" => %{"message" => "No such customer"}})
+      assert Stripe.delete_customer("cus_1") == :ok
+    end
+
+    test "a 500 is an unexpected answer" do
+      stub(500, %{"error" => %{"message" => "boom"}})
+      assert {:error, {:stripe, 500, _body}} = Stripe.delete_customer("cus_1")
+    end
+
+    test "with no secret key it is not configured and sends nothing" do
+      Process.put(:stripe_secret_key, "")
+      stub(200, %{})
+
+      assert Stripe.delete_customer("cus_1") == {:error, :not_configured}
+      refute_received {:stripe_request, _method, _path, _headers, _params}
+    end
+  end
 end

@@ -77,6 +77,26 @@ defmodule HamacaWeb.BoardSettingsMembersTest do
     refute has_element?(view, "#remove-member-#{me.id}")
   end
 
+  # RE509 — after an account deletion hands a board off, Board settings must show who owns it.
+  test "the board owner's row shows an OWNER badge; other members' rows do not", %{conn: conn, user: user} do
+    board = board_for(user)
+    other = Hamaca.Factory.insert(:user)
+    {:ok, other_m} = Members.invite(board, other.email)
+    [me] = board |> Members.list_members() |> Enum.filter(&(&1.user_id == user.id))
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    assert has_element?(view, "#member-owner-badge-#{me.id}", "OWNER")
+    refute has_element?(view, "#member-owner-badge-#{other_m.id}")
+
+    # Ownership handed to the other member: the badge follows owner_id, not the viewer.
+    board |> Ecto.Changeset.change(owner_id: other.id) |> Repo.update!()
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")
+
+    assert has_element?(view, "#member-owner-badge-#{other_m.id}", "OWNER")
+    refute has_element?(view, "#member-owner-badge-#{me.id}")
+    assert has_element?(view, "#member-row-#{me.id}", "YOU")
+  end
+
   test "inviting an email adds an INVITED row", %{conn: conn, user: user} do
     board = board_for(user)
     {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=members")

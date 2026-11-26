@@ -556,4 +556,22 @@ defmodule Hamaca.BillingTest do
     assert Billing.standing(insert(:user), ~D[2026-08-12]) == :free
     assert Standing.paused?(Billing.standing(insert(:user), ~D[2026-08-12])) == false
   end
+
+  describe "remove_account/1 (RE509)" do
+    test "deletes the account and answers its Stripe customer id" do
+      user = insert(:user)
+      insert(:billing_account, user: user, stripe_customer_id: "cus_9")
+
+      assert Billing.remove_account(user) == {:ok, "cus_9"}
+      assert Billing.get_account(user) == nil
+    end
+
+    test "answers nil when there is no account" do
+      assert Billing.remove_account(insert(:user)) == {:ok, nil}
+    end
+  end
+
+  test "delete_customer/1 with no customer is :ok" do
+    assert Billing.delete_customer(nil) == :ok
+  end
 end

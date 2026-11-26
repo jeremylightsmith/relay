@@ -30,8 +30,10 @@ verifies it's current).
 flowchart LR
     Markdown
     Presence
+    Accounts --> ApiKeys
     Accounts --> Billing
     Accounts --> Config
+    Accounts --> Events
     Accounts --> Repo
     Activity --> Events
     Activity --> Repo

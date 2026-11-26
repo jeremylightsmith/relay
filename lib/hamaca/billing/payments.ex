@@ -69,6 +69,12 @@ defmodule Hamaca.Billing.Payments do
             ) :: {:ok, found()} | {:ok, :none} | {:error, term()}
 
   @doc """
+  Deletes the Stripe customer (RE509, account deletion), with its saved cards. A customer that is
+  already gone counts as deleted (`:ok`); any other failure is `{:error, term}`.
+  """
+  @callback delete_customer(customer_id :: String.t()) :: :ok | {:error, term()}
+
+  @doc """
   `return_url` with `setup=<setup_id>` appended — `?setup=…` when it has no query, `&setup=…`
   when it already carries one (RE472: `/boards?pending=<token>`). `setup_id` goes in verbatim,
   never percent-encoded, so Stripe's literal `{CHECKOUT_SESSION_ID}` survives for it to fill in.

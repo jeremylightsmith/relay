@@ -47,7 +47,8 @@ ADR fixes what belongs on the phone and which parts of it are native. The design
 - **Layer 1 — Native (Flutter, iOS-first):** push and its onboarding, sign-in (Google and Sign
   in with Apple), the tab bar and navigation, the Needs-you inbox, the review approve/reject bar
   and the reject note, the answer stepper, voice dictation, the new-card sheet, the board
-  switcher (list, star, mute), and settings.
+  switcher (list, star, mute), and settings (including Delete account and its confirm page,
+  RE509).
 - **Layer 2 — Embedded LiveView (chromeless):** the board (moves included), the card body
   (`/cards/:ref`, the drawer alone), spec and plan, comments, and mockups. These are never
   re-implemented natively.
@@ -115,6 +116,8 @@ rest):
 - `POST /cards/:ref/approve`
 - `POST /cards/:ref/reject`
 - `POST /cards/:ref/answer`
+- `GET /account/deletion`
+- `DELETE /account`
 
 ## Consequences
 
