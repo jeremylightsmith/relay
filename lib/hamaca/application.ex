@@ -49,6 +49,9 @@ defmodule Hamaca.Application do
         # Billing emails run off the billing clock's process, so a tick never waits on (or fails
         # because of) the mail provider (RE464).
         {Task.Supervisor, name: Hamaca.Billing.TaskSupervisor},
+        # The operator's new-report emails run off the reporter's process, so a report never
+        # waits on (or fails because of) the mail provider (RE510).
+        {Task.Supervisor, name: Hamaca.Moderation.TaskSupervisor},
         # APNs requires HTTP/2. Req's shared default Finch pool is HTTP/1-first, so
         # push gets its own h2 pool (RLY-81).
         {Finch, name: Hamaca.Push.APNSFinch, pools: %{default: [protocols: [:http2], count: 1]}}

@@ -1,5 +1,6 @@
 // RE397: the Settings "Suggest an idea" row opens Hamaca's public roadmap in the
-// system browser, and only when the server sent a `feedback_url`.
+// system browser, and only when the server sent a `feedback_url`. The rows card
+// itself is always built (RE510): it always holds the "Support & safety" row.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -69,6 +70,7 @@ Future<void> pumpSettings(
 
 const _rowsCard = Key('settings_rows_card');
 const _row = Key('settings_suggest_idea');
+const _supportRow = Key('settings_support_safety');
 const _logOut = Key('settings_log_out');
 const _failure = "Couldn't open the link";
 
@@ -85,7 +87,13 @@ void main() {
       findsOneWidget,
     );
     expect(find.byIcon(Icons.lightbulb_outline), findsOneWidget);
-    expect(find.byIcon(Icons.open_in_new), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(_row),
+        matching: find.byIcon(Icons.open_in_new),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(_logOut), findsOneWidget);
   });
 
@@ -155,21 +163,53 @@ void main() {
     expect(find.text(_failure), findsOneWidget);
   });
 
-  testWidgets('no feedback URL renders today\'s screen — no rows card', (
-    tester,
-  ) async {
+  testWidgets('no feedback URL leaves the rows card holding only the support '
+      'row', (tester) async {
     await pumpSettings(tester, feedbackUrl: null);
 
-    expect(find.byKey(_rowsCard), findsNothing);
     expect(find.byKey(_row), findsNothing);
     expect(find.text('Suggest an idea'), findsNothing);
+    expect(find.byKey(_rowsCard), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(_rowsCard),
+        matching: find.byType(ListTile),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(_rowsCard),
+        matching: find.byKey(_supportRow),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(_logOut), findsOneWidget);
   });
 
-  testWidgets('a blank feedback URL also hides the rows card', (tester) async {
+  testWidgets('a blank feedback URL also hides the Suggest an idea row', (
+    tester,
+  ) async {
     await pumpSettings(tester, feedbackUrl: '');
 
-    expect(find.byKey(_rowsCard), findsNothing);
+    expect(find.byKey(_row), findsNothing);
+    expect(find.byKey(_rowsCard), findsOneWidget);
     expect(find.byKey(_logOut), findsOneWidget);
+  });
+
+  testWidgets('with a feedback URL, Suggest an idea comes first and the '
+      'support row second, both in the rows card', (tester) async {
+    await pumpSettings(tester);
+
+    for (final key in [_row, _supportRow]) {
+      expect(
+        find.descendant(of: find.byKey(_rowsCard), matching: find.byKey(key)),
+        findsOneWidget,
+      );
+    }
+    expect(
+      tester.getTopLeft(find.byKey(_row)).dy,
+      lessThan(tester.getTopLeft(find.byKey(_supportRow)).dy),
+    );
   });
 }

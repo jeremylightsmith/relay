@@ -142,7 +142,9 @@ void main() {
     expect(inSection(find.byType(Divider)), findsNWidgets(2));
   });
 
-  testWidgets('the section sits between the identity block and Log out', (
+  // The rows card is always built (RE510), so it sits between ACCOUNT and Log
+  // out, 24 below each.
+  testWidgets('the section sits between the identity block and the rows card', (
     tester,
   ) async {
     await pumpSettings(
@@ -156,9 +158,15 @@ void main() {
       const Key('settings_email'),
     ].map((k) => tester.getBottomLeft(find.byKey(k)).dy).reduce(max);
     expect(top - identityBottom, 24);
+    const rowsCard = Key('settings_rows_card');
+    expect(
+      tester.getTopLeft(find.byKey(rowsCard)).dy -
+          tester.getBottomLeft(find.byKey(_section)).dy,
+      24,
+    );
     expect(
       tester.getTopLeft(find.byKey(const Key('settings_log_out'))).dy -
-          tester.getBottomLeft(find.byKey(_section)).dy,
+          tester.getBottomLeft(find.byKey(rowsCard)).dy,
       24,
     );
   });

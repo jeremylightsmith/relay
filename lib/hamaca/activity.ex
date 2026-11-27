@@ -218,6 +218,20 @@ defmodule Hamaca.Activity do
   end
 
   @doc """
+  One comment of the card's conversation, preloaded exactly like `list_conversation/1`, or `nil`
+  when `id` isn't a comment on that card (RE510: the card drawer re-streams a reported comment, and
+  authorizes a Report, through this).
+  """
+  @spec get_conversation_comment(Card.t(), integer()) :: Comment.t() | nil
+  def get_conversation_comment(%Card{id: card_id}, id) when is_integer(id) do
+    Repo.one(
+      from c in Comment,
+        where: c.card_id == ^card_id and c.id == ^id,
+        preload: [:user, :images]
+    )
+  end
+
+  @doc """
   The card's activity log: its activity entries only, descending by `inserted_at`
   (ties break by id), so the newest sits at the top. Each entry has its `:user`
   preloaded (`nil` for the agent).

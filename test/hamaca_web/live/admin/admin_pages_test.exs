@@ -12,7 +12,8 @@ defmodule HamacaWeb.Admin.AdminPagesTest do
     "/admin/users/usage",
     "/admin/users/promo-codes",
     "/admin/users/renewals",
-    "/admin/onboarding"
+    "/admin/onboarding",
+    "/admin/reports"
   ]
 
   defp log_in_superadmin(%{conn: conn}) do
@@ -51,6 +52,18 @@ defmodule HamacaWeb.Admin.AdminPagesTest do
       assert has_element?(view, ~s(#admin-page-onboarding[href="/admin/onboarding"]), "Onboarding")
       assert has_element?(view, ~s(#admin-page-users[href="/admin/users"]), "Users")
       assert has_element?(view, ~s(#admin-page-api[href="/admin/api"]), "API log")
+    end
+
+    test "links to the Reports queue with its response promise", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/admin")
+
+      assert has_element?(view, ~s(#admin-page-reports[href="/admin/reports"]), "Reports")
+
+      assert has_element?(
+               view,
+               "#admin-page-reports",
+               "Reported ideas and comments: respond within #{Hamaca.Moderation.response_sla_hours()} hours."
+             )
     end
   end
 

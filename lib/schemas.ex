@@ -24,6 +24,7 @@ defmodule Schemas do
       CardOwner,
       CardRejection,
       Comment,
+      ContentReport,
       DeviceToken,
       Runner,
       Flow,

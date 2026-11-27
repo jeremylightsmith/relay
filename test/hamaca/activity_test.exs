@@ -339,6 +339,26 @@ defmodule Hamaca.ActivityTest do
     end
   end
 
+  describe "get_conversation_comment/2" do
+    test "answers the card's comment with its user and images loaded", %{card: card, user: user} do
+      {:ok, image} =
+        Hamaca.Attachments.create_attachment(card, %{filename: "a.png", content_type: "image/png", bytes: "png a"})
+
+      {:ok, cb} = Activity.add_comment(card, %{actor: {:user, user.id}, body: "mine", image_ids: [image.id]})
+
+      assert %Comment{} = found = Activity.get_conversation_comment(card, cb.id)
+      assert found.id == cb.id
+      assert found.user.name == "Ada Lovelace"
+      assert Enum.map(found.images, & &1.id) == [image.id]
+    end
+
+    test "answers nil for another card's comment", %{card: card} do
+      other = insert(:comment, card: insert(:card))
+
+      assert Activity.get_conversation_comment(card, other.id) == nil
+    end
+  end
+
   describe "list_activity/1" do
     test "returns only activity entries, newest first, with users preloaded", %{card: card, user: user} do
       a1 = insert(:activity, card: card, type: :created, meta: %{}, inserted_at: ~U[2026-07-07 10:00:00Z])

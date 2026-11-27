@@ -4,7 +4,17 @@ defmodule Hamaca.Boards do
   Cards arrive in MMF 03 (`Hamaca.Cards`).
   """
 
-  use Boundary, deps: [Hamaca.Activity, Hamaca.Agents, Hamaca.Events, Hamaca.Flows, Hamaca.Repo, Hamaca.Setup, Schemas]
+  use Boundary,
+    deps: [
+      Hamaca.Activity,
+      Hamaca.Agents,
+      Hamaca.Events,
+      Hamaca.Flows,
+      Hamaca.Moderation,
+      Hamaca.Repo,
+      Hamaca.Setup,
+      Schemas
+    ]
 
   import Ecto.Query
 
@@ -13,6 +23,7 @@ defmodule Hamaca.Boards do
   alias Hamaca.Boards.Templates
   alias Hamaca.Events
   alias Hamaca.Flows
+  alias Hamaca.Moderation
   alias Hamaca.Repo
   alias Hamaca.Setup
   alias Schemas.Board
@@ -138,18 +149,21 @@ defmodule Hamaca.Boards do
   `Stage.public_categories/0` (i.e. not Done/Complete), stage preloaded, ordered
   newest-first as a stable base. `HamacaWeb.PublicBoardLive` groups these by category
   and re-sorts each column by live vote count (so the sort lives with the counts, not
-  here — keeps this query independent of `Hamaca.Votes`).
+  here — keeps this query independent of `Hamaca.Votes`). Content moderation removed for
+  everyone is left out (`Hamaca.Moderation.exclude_hidden_cards/1`, RE510): hidden cards and
+  cards posted by a suspended user.
   """
   def list_public_cards(%Board{id: board_id}) do
     categories = Stage.public_categories()
 
-    Repo.all(
-      from c in Card,
-        join: s in assoc(c, :stage),
-        where: c.board_id == ^board_id and is_nil(c.archived_at) and s.category in ^categories,
-        order_by: [desc: c.inserted_at, desc: c.id],
-        preload: [stage: s]
+    from(c in Card,
+      join: s in assoc(c, :stage),
+      where: c.board_id == ^board_id and is_nil(c.archived_at) and s.category in ^categories,
+      order_by: [desc: c.inserted_at, desc: c.id],
+      preload: [stage: s]
     )
+    |> Moderation.exclude_hidden_cards()
+    |> Repo.all()
   end
 
   @doc """

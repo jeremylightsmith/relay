@@ -24,6 +24,9 @@ what each term *means*; the sections below say what each value *does*.
 | Billing promo refusal | `already_redeemed` · `unknown` · `disabled` · `expired` · `full` | `Hamaca.Billing.promo_refusals/0` |
 | Billing standing kind | `free` · `active` · `past_due` · `cancelled` · `comped` · `paused` | `Hamaca.Billing.Standing.kinds/0` |
 | Card status | `ready` · `working` · `needs_input` · `in_review` · `queued` · `failed` | `Schemas.Card.statuses/0` |
+| Content report reason | `spam` · `harassment` · `sexual_violent` · `other` | `Schemas.ContentReport.reasons/0` |
+| Content report resolution | `dismissed` · `hidden` · `suspended` | `Schemas.ContentReport.resolutions/0` |
+| Moderation hidden reason | `auto_reports` · `admin` | `Schemas.ContentReport.hidden_reasons/0` |
 | Node outcome | `succeeded` · `failed` · `partial` · `needs_input` · `blocked` | `Schemas.NodeExecution.outcomes/0` |
 | Node-job kind | `node` · `talk` | `Schemas.NodeJob.kinds/0` |
 | Node-job state | `queued` · `claimed` · `done` · `revoked` | `Schemas.NodeJob.states/0` |

@@ -244,7 +244,8 @@ defmodule HamacaWeb.Layouts do
   signed-out visitor; here it only decides the sign-in-button-vs-avatar swap. The Sign
   in button `phx-click`s `"open_signin"` on the parent LiveView (`PublicBoardLive`)
   rather than linking straight to OAuth, so it opens the sign-in modal with the
-  "browse" reason copy instead of bypassing it.
+  "browse" reason copy instead of bypassing it. Every public board ends with the support footer
+  (RE510): "Powered by", plus "Report a problem" and "Contact support" links into `/support`.
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
   attr :current_scope, :map, default: nil
@@ -289,6 +290,20 @@ defmodule HamacaWeb.Layouts do
       <main class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {render_slot(@inner_block)}
       </main>
+
+      <footer id="public-board-footer" class="mt-10 border-t border-base-300 bg-base-100">
+        <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs text-base-content/55">
+          <span>Powered by {Hamaca.Brand.name()}</span>
+          <span class="flex gap-4">
+            <a id="public-footer-report" href={~p"/support" <> "#reporting"} class="link link-hover">
+              Report a problem
+            </a>
+            <a id="public-footer-contact" href={~p"/support" <> "#contact"} class="link link-hover">
+              Contact support
+            </a>
+          </span>
+        </div>
+      </footer>
 
       <.flash_group flash={@flash} />
     </div>

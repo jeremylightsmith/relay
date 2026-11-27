@@ -227,8 +227,8 @@ defmodule Hamaca.Connections do
   @doc """
   Rotates a refresh token (string-keyed `"refresh_token"`, `"client_id"`): the presented
   token is deleted and a fresh access + refresh pair is returned. An unknown client is
-  `:invalid_client`; an unknown, access-kind, expired, foreign or revoked token
-  `:invalid_grant`.
+  `:invalid_client`; an unknown, access-kind, expired, foreign or revoked token, or one whose
+  user is deleted or suspended (RE510), is `:invalid_grant`.
   """
   @spec refresh(map()) :: {:ok, token_response()} | {:error, :invalid_grant | :invalid_client | :invalid_request}
   def refresh(params) when is_map(params) do
@@ -254,7 +254,8 @@ defmodule Hamaca.Connections do
 
   @doc """
   Authenticates a raw `relaym_<prefix>_<secret>` access token: prefix lookup, constant-time
-  hash compare, then `kind == :access`, unexpired, and a live grant. Bumps the grant's
+  hash compare, then `kind == :access`, unexpired, a live grant, and a user who is neither
+  deleted nor suspended (RE510; the token works again once the suspension is undone). Bumps the grant's
   `last_used_at` (throttled by `Hamaca.Accounts.last_used_throttle_seconds/0`). Anything
   else — including `relayu_…` user tokens, `relay_…` board keys and non-binaries — is
   `:error`.
@@ -277,13 +278,15 @@ defmodule Hamaca.Connections do
 
   # The checks every presented token must pass regardless of kind: shape, a known prefix, the
   # constant-time hash compare, not expired, a grant that hasn't been revoked, and a user who
-  # isn't a deleted account's tombstone (RE509).
+  # isn't a deleted account's tombstone (RE509) or suspended (RE510). Suspension is checked at
+  # read time and revokes nothing, so undoing it restores the same grant.
   defp verify_token(raw_token, now) do
     with [@token_sentinel, prefix, secret] <- String.split(raw_token, "_", parts: 3),
          %OAuthToken{} = token <- get_token_by_prefix(prefix),
          true <- Plug.Crypto.secure_compare(sha256_hex(secret), token.token_hash),
          true <- future?(token.expires_at, now),
-         nil <- token.grant.revoked_at do
+         nil <- token.grant.revoked_at,
+         false <- User.suspended?(token.grant.user) do
       {:ok, token}
     else
       _invalid -> :error

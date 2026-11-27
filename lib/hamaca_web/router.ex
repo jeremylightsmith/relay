@@ -84,6 +84,7 @@ defmodule HamacaWeb.Router do
     get "/", PageController, :home
     get "/privacy", PageController, :privacy
     get "/terms", PageController, :terms
+    get "/support", PageController, :support
     get "/docs", DocsController, :index
     get "/docs/:page", DocsController, :show
     delete "/logout", AuthController, :delete
@@ -172,6 +173,7 @@ defmodule HamacaWeb.Router do
       live "/users/promo-codes", PromoCodesLive
       live "/users/renewals", RenewalsLive
       live "/api", ApiLive
+      live "/reports", ReportsLive
     end
   end
 

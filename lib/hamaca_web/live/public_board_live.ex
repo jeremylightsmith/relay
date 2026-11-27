@@ -44,6 +44,13 @@ defmodule HamacaWeb.PublicBoardLive do
   normal column reload. A pending post is **not** replayed across the OAuth
   round trip (YAGNI, matching the vote flow) — a signed-out visitor returns
   signed in and clicks "Post an idea" again.
+
+  Reporting (RE510): each idea the visitor didn't post carries a ⋯ menu with "Report this idea",
+  which opens the shared report modal through `HamacaWeb.ReportFlow` (signed out, it opens the
+  sign-in modal with the `:report` reason instead). An idea the visitor reported collapses for
+  them into `reported_placeholder/1` until they choose "Show anyway" (this session only); one
+  hidden for everyone is already left out by `Boards.list_public_cards/1`. `?idea=<id>` opens
+  that idea's detail modal when it is one of the board's current public cards.
   """
 
   use HamacaWeb, :live_view
@@ -52,6 +59,7 @@ defmodule HamacaWeb.PublicBoardLive do
   alias Hamaca.Cards
   alias Hamaca.Events
   alias Hamaca.Votes
+  alias HamacaWeb.ReportFlow
   alias Schemas.Board
   alias Schemas.Stage
 
@@ -126,86 +134,122 @@ defmodule HamacaWeb.PublicBoardLive do
               :for={card <- column.cards}
               id={"public-card-#{card.id}"}
               class={[
-                "rounded-[11px] border border-base-300 bg-base-100 p-3",
+                !ReportFlow.collapsed?(assigns, card.id) &&
+                  "rounded-[11px] border border-base-300 bg-base-100 p-3",
                 card.id == @new_card_id && "pb-new"
               ]}
             >
-              <div
-                id={"public-card-open-#{card.id}"}
-                phx-click="open_card"
-                phx-value-id={card.id}
-                class="cursor-pointer"
-              >
-                <p class="text-sm font-medium">{card.title}</p>
-                <p :if={card.public_description} class="mt-1 text-xs text-base-content/65">
-                  {card.public_description}
-                </p>
-                <div class="mt-2 flex items-center gap-2">
-                  <span class="text-[11px] text-base-content/40">
-                    {relative_age(card.inserted_at)}
-                  </span>
-                  <span
-                    :if={MapSet.member?(@voted_ids, card.id)}
-                    class="text-[10px] font-semibold text-primary"
+              <%= if ReportFlow.collapsed?(assigns, card.id) do %>
+                <.reported_placeholder
+                  id={"public-card-reported-#{card.id}"}
+                  kind={:idea}
+                  target_id={card.id}
+                />
+              <% else %>
+                <div class="flex items-start gap-2">
+                  <p
+                    id={"public-card-open-#{card.id}"}
+                    phx-click="open_card"
+                    phx-value-id={card.id}
+                    class="flex-1 cursor-pointer text-sm font-medium"
                   >
-                    YOU VOTED
-                  </span>
-                  <span
-                    :if={own_card?(@current_user, card)}
-                    class="your-idea-badge font-mono text-[9.5px] font-semibold tracking-wider text-secondary uppercase"
+                    {card.title}
+                  </p>
+                  <.overflow_menu
+                    :if={!own_card?(@current_user, card)}
+                    id={"public-card-menu-#{card.id}"}
                   >
-                    YOUR IDEA
-                  </span>
-                </div>
-              </div>
-              <.support_badge
-                id={"public-vote-#{card.id}"}
-                count={Map.get(@vote_counts, card.id, 0)}
-                voted={MapSet.member?(@voted_ids, card.id)}
-                phx-click="vote"
-                phx-value-id={card.id}
-                data-vote-count={Map.get(@vote_counts, card.id, 0)}
-                class="mt-2"
-              />
-
-              <%= if own_card?(@current_user, card) && is_nil(card.public_description) do %>
-                <%= if @editing_desc_id == card.id do %>
-                  <.form
-                    for={to_form(%{"description" => ""}, as: :desc)}
-                    id={"desc-form-#{card.id}"}
-                    phx-submit="save_desc"
-                    class="mt-2"
-                  >
-                    <input type="hidden" name="card-id" value={card.id} />
-                    <textarea
-                      id={"desc-editor-#{card.id}"}
-                      name="desc[description]"
-                      placeholder="Describe this idea for the public — one or two lines."
-                      class="textarea textarea-bordered w-full min-h-[62px] text-xs"
-                    ></textarea>
-                    <div class="mt-2 flex gap-2 action-group">
-                      <.button type="submit" class="btn btn-primary btn-xs" pending="Saving…">
-                        Save
-                      </.button>
+                    <li>
                       <button
+                        id={"public-card-report-#{card.id}"}
                         type="button"
-                        class="btn btn-ghost btn-xs"
-                        phx-click="cancel_add_desc"
+                        role="menuitem"
+                        phx-click="open_report"
+                        phx-value-kind="card"
+                        phx-value-id={card.id}
+                        class="gap-2"
                       >
-                        Cancel
+                        <span aria-hidden="true">⚑</span>Report this idea
                       </button>
-                    </div>
-                  </.form>
-                <% else %>
-                  <button
-                    id={"add-desc-#{card.id}"}
-                    type="button"
-                    phx-click="start_add_desc"
-                    phx-value-card-id={card.id}
-                    class="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-secondary"
-                  >
-                    ＋ Add a public description
-                  </button>
+                    </li>
+                  </.overflow_menu>
+                </div>
+                <div
+                  id={"public-card-body-#{card.id}"}
+                  phx-click="open_card"
+                  phx-value-id={card.id}
+                  class="cursor-pointer"
+                >
+                  <p :if={card.public_description} class="mt-1 text-xs text-base-content/65">
+                    {card.public_description}
+                  </p>
+                  <div class="mt-2 flex items-center gap-2">
+                    <span class="text-[11px] text-base-content/40">
+                      {relative_age(card.inserted_at)}
+                    </span>
+                    <span
+                      :if={MapSet.member?(@voted_ids, card.id)}
+                      class="text-[10px] font-semibold text-primary"
+                    >
+                      YOU VOTED
+                    </span>
+                    <span
+                      :if={own_card?(@current_user, card)}
+                      class="your-idea-badge font-mono text-[9.5px] font-semibold tracking-wider text-secondary uppercase"
+                    >
+                      YOUR IDEA
+                    </span>
+                  </div>
+                </div>
+                <.support_badge
+                  id={"public-vote-#{card.id}"}
+                  count={Map.get(@vote_counts, card.id, 0)}
+                  voted={MapSet.member?(@voted_ids, card.id)}
+                  phx-click="vote"
+                  phx-value-id={card.id}
+                  data-vote-count={Map.get(@vote_counts, card.id, 0)}
+                  class="mt-2"
+                />
+
+                <%= if own_card?(@current_user, card) && is_nil(card.public_description) do %>
+                  <%= if @editing_desc_id == card.id do %>
+                    <.form
+                      for={to_form(%{"description" => ""}, as: :desc)}
+                      id={"desc-form-#{card.id}"}
+                      phx-submit="save_desc"
+                      class="mt-2"
+                    >
+                      <input type="hidden" name="card-id" value={card.id} />
+                      <textarea
+                        id={"desc-editor-#{card.id}"}
+                        name="desc[description]"
+                        placeholder="Describe this idea for the public — one or two lines."
+                        class="textarea textarea-bordered w-full min-h-[62px] text-xs"
+                      ></textarea>
+                      <div class="mt-2 flex gap-2 action-group">
+                        <.button type="submit" class="btn btn-primary btn-xs" pending="Saving…">
+                          Save
+                        </.button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-xs"
+                          phx-click="cancel_add_desc"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </.form>
+                  <% else %>
+                    <button
+                      id={"add-desc-#{card.id}"}
+                      type="button"
+                      phx-click="start_add_desc"
+                      phx-value-card-id={card.id}
+                      class="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-secondary"
+                    >
+                      ＋ Add a public description
+                    </button>
+                  <% end %>
                 <% end %>
               <% end %>
             </div>
@@ -295,6 +339,14 @@ defmodule HamacaWeb.PublicBoardLive do
         </div>
         <label class="modal-backdrop" phx-click="close_card">Close</label>
       </div>
+
+      <.report_modal
+        :if={@report_target}
+        target={@report_target}
+        step={@report_step}
+        form={@report_form}
+        sla_hours={@report_sla_hours}
+      />
 
       <div
         :if={@sign_in_open}
@@ -414,6 +466,7 @@ defmodule HamacaWeb.PublicBoardLive do
           |> assign(:composer_cta, composer_cta(current_user))
           |> assign(:composer_form, blank_composer_form())
           |> assign(:editing_desc_id, nil)
+          |> ReportFlow.init(:card)
           |> assign_cards()
 
         {:ok, socket}
@@ -423,19 +476,23 @@ defmodule HamacaWeb.PublicBoardLive do
     end
   end
 
+  # `?idea=<id>` (RE510) opens that idea's detail modal, the same as clicking it. Only an id among
+  # the board's current public cards opens anything; an unknown, hidden or non-integer one is
+  # ignored.
+  @impl true
+  def handle_params(params, _uri, socket) do
+    with value when is_binary(value) <- params["idea"],
+         {card_id, ""} <- Integer.parse(value),
+         %{} <- find_card(socket.assigns.cards, card_id) do
+      {:noreply, open_card(socket, card_id)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_event("open_card", %{"id" => id}, socket) do
-    card_id = String.to_integer(id)
-    card = find_card(socket.assigns.cards, card_id)
-
-    {supporters, total} =
-      load_supporters(card, socket.assigns.current_scope, socket.assigns.vote_counts)
-
-    {:noreply,
-     socket
-     |> assign(:open_card_id, card_id)
-     |> assign(:open_card_supporters, supporters)
-     |> assign(:open_card_supporters_total, total)}
+    {:noreply, open_card(socket, String.to_integer(id))}
   end
 
   def handle_event("close_card", _params, socket) do
@@ -558,6 +615,43 @@ defmodule HamacaWeb.PublicBoardLive do
     end
   end
 
+  # The report flow (RE510), shared with the card drawer through `HamacaWeb.ReportFlow`. This board
+  # reports only ideas (`"card"`), and only one it rendered that the visitor didn't post; signed
+  # out, Report opens the sign-in modal instead.
+  def handle_event("open_report", %{"kind" => kind, "id" => id}, socket) do
+    case {current_user(socket), ReportFlow.kind_param(kind), reportable_card(socket, id)} do
+      {nil, _kind, _card} -> {:noreply, open_signin(socket, :report)}
+      {_user, :card, %{} = card} -> {:noreply, ReportFlow.open(socket, %{kind: :card, id: card.id, quote: card.title})}
+      _forged -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("change_report", %{"report" => params}, socket) do
+    {:noreply, ReportFlow.change(socket, params)}
+  end
+
+  def handle_event("submit_report", %{"report" => params}, socket) do
+    case current_user(socket) do
+      nil ->
+        {:noreply, socket |> ReportFlow.close() |> open_signin(:report)}
+
+      user ->
+        {_ok_or_error, socket} = ReportFlow.submit(socket, user, params)
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("close_report", _params, socket) do
+    {:noreply, ReportFlow.close(socket)}
+  end
+
+  def handle_event("show_reported", %{"id" => id}, socket) do
+    case Integer.parse(id) do
+      {card_id, ""} -> {:noreply, ReportFlow.show_anyway(socket, card_id)}
+      _ -> {:noreply, socket}
+    end
+  end
+
   # PublicBoardLive subscribes to the FULL `board:<id>` topic (see
   # `Hamaca.Events`), so it must tolerate every event on it — an unmatched
   # `handle_info` crashes the LiveView. Card lifecycle events and votes refresh
@@ -607,6 +701,31 @@ defmodule HamacaWeb.PublicBoardLive do
   end
 
   defp find_card(cards, id), do: Enum.find(cards, &(&1.id == id))
+
+  # Opens the detail modal for a card already in `cards` — the `"open_card"` event and `?idea=`.
+  defp open_card(socket, card_id) do
+    card = find_card(socket.assigns.cards, card_id)
+
+    {supporters, total} =
+      load_supporters(card, socket.assigns.current_scope, socket.assigns.vote_counts)
+
+    socket
+    |> assign(:open_card_id, card_id)
+    |> assign(:open_card_supporters, supporters)
+    |> assign(:open_card_supporters_total, total)
+  end
+
+  # Authorization for `"open_report"`: a card this board rendered (so a forged id for another
+  # board is never found) that the visitor didn't post. `Hamaca.Moderation.report/3` re-checks.
+  defp reportable_card(socket, id) do
+    with {card_id, ""} <- Integer.parse(to_string(id)),
+         %{} = card <- find_card(socket.assigns.cards, card_id),
+         false <- own_card?(socket.assigns.current_user, card) do
+      card
+    else
+      _ -> nil
+    end
+  end
 
   # True when `card` was posted by the signed-in `user` — the single source of
   # truth the YOUR IDEA badge and the inline description editor's affordance
@@ -676,10 +795,12 @@ defmodule HamacaWeb.PublicBoardLive do
 
   # The sign-in modal's title varies by why it opened (RLY-69 spec review):
   # vote-triggered opens read "Sign in to vote"; the post-an-idea gate
-  # (RLY-225) reads "Sign in to post"; every other entry point (the header's
+  # (RLY-225) reads "Sign in to post"; the report gate (RE510) reads "Sign in to
+  # report"; every other entry point (the header's
   # Sign in button) reads "Sign in to Hamaca".
   defp signin_title(:vote), do: "Sign in to vote"
   defp signin_title(:post), do: "Sign in to post"
+  defp signin_title(:report), do: "Sign in to report"
   defp signin_title(:browse), do: "Sign in to " <> Hamaca.Brand.name()
 
   # Moves the signed-in viewer's own supporter entry (if present on this preview

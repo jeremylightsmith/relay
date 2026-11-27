@@ -55,7 +55,10 @@ defmodule Mix.Tasks.Hamaca.GenVocab do
     {"Billing attempt status", {Schemas.BillingPaymentAttempt, :statuses}},
     {"Billing attempt kind", {Schemas.BillingPaymentAttempt, :kinds}},
     {"Billing attempt source", {Schemas.BillingPaymentAttempt, :sources}},
-    {"Billing notice kind", {Schemas.BillingNotice, :kinds}}
+    {"Billing notice kind", {Schemas.BillingNotice, :kinds}},
+    {"Content report reason", {Schemas.ContentReport, :reasons}},
+    {"Content report resolution", {Schemas.ContentReport, :resolutions}},
+    {"Moderation hidden reason", {Schemas.ContentReport, :hidden_reasons}}
   ]
 
   @impl Mix.Task

@@ -256,6 +256,25 @@ defmodule Hamaca.Factory do
     comment |> merge_attributes(attrs) |> evaluate_lazy_attributes()
   end
 
+  # Full-control factory (RE510): `reporter` and `card` / `comment` (when overridden) must be
+  # persisted. Targets a fresh card unless a `comment` is given.
+  def content_report_factory(attrs) do
+    {reporter, attrs} = Map.pop_lazy(attrs, :reporter, fn -> insert(:user) end)
+    {comment, attrs} = Map.pop(attrs, :comment)
+
+    {card, attrs} =
+      Map.pop_lazy(attrs, :card, fn -> if comment, do: nil, else: insert(:card) end)
+
+    report = %Schemas.ContentReport{
+      reporter_id: reporter.id,
+      card_id: card && card.id,
+      comment_id: comment && comment.id,
+      reason: :spam
+    }
+
+    report |> merge_attributes(attrs) |> evaluate_lazy_attributes()
+  end
+
   # Full-control factory: `card` (when overridden) must be a persisted card.
   # With a `user`, a human actor; without, the agent. Defaults to a :moved
   # entry with a sample string-keyed meta.

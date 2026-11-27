@@ -5,6 +5,9 @@ defmodule Schemas.User do
   verified `email` (see `Hamaca.Accounts.upsert_user_from_provider/2`).
   `provider` and `provider_uid` record the first provider the user signed in
   with; they are set programmatically, never cast from input.
+
+  `suspended_at` / `suspended_by_id` (RE510) record a Hamaca-wide suspension; never cast —
+  written only by `Hamaca.Moderation`, read through `suspended?/1`.
   """
 
   use Ecto.Schema
@@ -19,6 +22,10 @@ defmodule Schemas.User do
     field :provider_uid, :string
     field :setup_explanations_hidden, :boolean, default: false
     field :deleted_at, :utc_datetime
+    # RE510 — a Hamaca-wide suspension. Never cast — written only by Hamaca.Moderation.
+    field :suspended_at, :utc_datetime
+
+    belongs_to :suspended_by, Schemas.User
 
     timestamps(type: :utc_datetime)
   end
@@ -36,6 +43,11 @@ defmodule Schemas.User do
   @doc "True for a dev or seed account (`synthetic_providers/0`)."
   @spec synthetic?(t()) :: boolean()
   def synthetic?(%__MODULE__{provider: provider}), do: provider in @synthetic_providers
+
+  @doc "True iff the account is suspended (`suspended_at` set) — the ONE suspended predicate."
+  @spec suspended?(t() | nil) :: boolean()
+  def suspended?(%__MODULE__{suspended_at: suspended_at}), do: not is_nil(suspended_at)
+  def suspended?(nil), do: false
 
   @deleted_name "Deleted user"
 

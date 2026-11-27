@@ -60,6 +60,33 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
         }
       },
       %Variation{
+        id: :comment_report_and_moderation,
+        description:
+          "RE510 — another member's comment gets ⋯ → Report comment; a comment you reported collapses " <>
+            "for you with Show anyway; one hidden by moderation (or by a suspended author) shows only " <>
+            "\"Hidden by Hamaca moderation.\"",
+        attributes: %{
+          id: "story-drawer-moderation",
+          ref: "RLY-7",
+          board_slug: "storybook-board",
+          card: story_card(),
+          stage_name: "Code",
+          stage_owner: :ai,
+          active_owner: :ai,
+          current_user_id: 1,
+          health: :live,
+          close_patch: "/storybook/core_components/card_drawer",
+          title_form: Phoenix.Component.to_form(%{"title" => "Draft the onboarding spec"}, as: :card),
+          stages: story_stages(),
+          stage_marks: %{4 => :all},
+          conversation: moderation_conversation(),
+          note_count: length(moderation_conversation()),
+          reported_comment_ids: MapSet.new([22]),
+          activity: story_activity(),
+          comment_form: Phoenix.Component.to_form(%{"body" => ""}, as: :comment)
+        }
+      },
+      %Variation{
         id: :stage_menu_open,
         attributes: %{
           id: "story-drawer-stage-menu",
@@ -706,6 +733,33 @@ defmodule Storybook.Components.CoreComponents.CardDrawer do
          body: "Should the export include archived cards?",
          inserted_at: ~U[2026-07-06 16:05:00Z]
        }}
+    ]
+  end
+
+  # RE510 — another member's reportable note, one the viewer (user 1) reported, and one hidden by
+  # moderation.
+  defp moderation_conversation do
+    morgan = %Schemas.User{id: 2, name: "Morgan Keys", email: "morgan@example.com"}
+
+    note = fn id, body, extra ->
+      {"timeline-comment-#{id}",
+       struct!(
+         %Schemas.Comment{
+           id: id,
+           actor_type: :user,
+           user_id: 2,
+           user: morgan,
+           body: body,
+           inserted_at: ~U[2026-07-06 15:30:00Z]
+         },
+         extra
+       )}
+    end
+
+    [
+      note.(21, "Agreed, let's pick this up after the theme tokens land.", []),
+      note.(22, "This whole board is a joke, honestly.", []),
+      note.(23, "Never rendered: hidden by moderation.", hidden_at: ~U[2026-07-06 16:00:00Z], hidden_reason: :admin)
     ]
   end
 

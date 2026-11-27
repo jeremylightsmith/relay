@@ -29,6 +29,8 @@ defmodule Schemas.Card do
   mockup list — nullable, never cast here; written via `Hamaca.Cards.set_mockups/2`.
   `done_at` (RE504) records when the card entered its board's terminal stage; nullable, never
   cast — written only from `done_at_after_stage_change/4` by the stage-writing paths.
+  `hidden_at` / `hidden_reason` (RE510) hide the card for everyone once it is moderated; nullable,
+  never cast — written only by `Hamaca.Moderation`.
 
   `story_activity_id` / `story_step_id` / `release_id` (RE265) place the card on the story
   map — all three nilable, all three cast **only** through `story_map_changeset/2`, kept
@@ -77,6 +79,10 @@ defmodule Schemas.Card do
     # validates every url is an HTML or image attachment on this card and REPLACES the whole list.
     field :mockups, {:array, :map}
     field :public_description, :string
+    # RE510 — hidden for everyone (one of Schemas.ContentReport.hidden_reasons/0). Never cast —
+    # written only by Hamaca.Moderation.
+    field :hidden_at, :utc_datetime
+    field :hidden_reason, Ecto.Enum, values: Schemas.ContentReport.hidden_reasons()
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage

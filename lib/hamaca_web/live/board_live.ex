@@ -174,6 +174,7 @@ defmodule HamacaWeb.BoardLive do
   alias Hamaca.Events
   alias Hamaca.Flows
   alias Hamaca.Members
+  alias Hamaca.Moderation
   alias Hamaca.Presence
   alias Hamaca.Runs
   alias Hamaca.Setup
@@ -187,6 +188,7 @@ defmodule HamacaWeb.BoardLive do
   alias HamacaWeb.FlowShapeComponents
   alias HamacaWeb.FreeBoardComponents
   alias HamacaWeb.NativeCardNav
+  alias HamacaWeb.ReportFlow
   alias HamacaWeb.RunComponents
   alias HamacaWeb.SetupComponents
   alias HamacaWeb.StagePickerComponents
@@ -799,6 +801,8 @@ defmodule HamacaWeb.BoardLive do
         stage_menu_open={@stage_menu_open}
         stage_filter={@stage_filter}
         conversation={@streams.conversation}
+        reported_comment_ids={@reported_ids}
+        shown_comment_ids={@shown_reported_ids}
         note_count={MapSet.size(@note_ids)}
         activity={@streams.activity}
         comment_form={@comment_form}
@@ -856,6 +860,13 @@ defmodule HamacaWeb.BoardLive do
         editing_public_desc={@editing_public_desc}
         public_desc_form={@public_desc_form}
         restored_drafts={MapSet.to_list(@restored_drafts)}
+      />
+      <.report_modal
+        :if={@report_target}
+        target={@report_target}
+        step={@report_step}
+        form={@report_form}
+        sla_hours={@report_sla_hours}
       />
       <.card_mockup_viewer
         :if={viewer_open?(assigns)}
@@ -1671,6 +1682,9 @@ defmodule HamacaWeb.BoardLive do
       |> assign_run_diagnostics(board, run_summaries)
       |> assign(:note_ids, MapSet.new())
       |> assign(:note_image_comments, [])
+      # RE510 — the drawer's comment Report: the viewer's reported comment ids, set before the
+      # first stream_notes/2 so a comment they reported earlier streams in collapsed.
+      |> ReportFlow.init(:comment)
       |> allow_image_upload(:note_images)
       |> allow_image_upload(:reject_images)
       |> allow_image_upload(:answer_images)
@@ -1973,7 +1987,14 @@ defmodule HamacaWeb.BoardLive do
   defp viewer_items(%{selected_card: card, attachment_types: types}, :screenshots),
     do: CardMedia.screenshot_items(card.ai_result, types)
 
-  defp viewer_items(%{note_image_comments: comments}, :images), do: CardMedia.note_image_items(comments)
+  # RE510 — a comment hidden for everyone (admin-hidden or suspended author), or one the viewer
+  # reported and hasn't revealed with Show anyway, contributes no image: not to the items, the
+  # `Images · N` count, prev/next, nor a viewer URL keyed to its attachment.
+  defp viewer_items(%{note_image_comments: comments} = assigns, :images) do
+    comments
+    |> Enum.reject(&(Moderation.hidden_for_everyone?(&1) or ReportFlow.collapsed?(assigns, &1.id)))
+    |> CardMedia.note_image_items()
+  end
 
   defp viewer_label(:mockups), do: "Mockups"
   defp viewer_label(:screenshots), do: "Screenshots"
@@ -3725,6 +3746,39 @@ defmodule HamacaWeb.BoardLive do
   end
 
   def handle_event("post_comment", _params, socket), do: {:noreply, socket}
+
+  # RE510 — comment Report. The drawer reports only comments, and only one on the open card that
+  # `ReportFlow.reportable_comment?/2` allows (so a forged id for another card, your own comment or
+  # an agent's opens nothing); `Hamaca.Moderation.report/3` re-checks. The state lives in
+  # `HamacaWeb.ReportFlow`. Notes are a stream, which never re-renders on an assign change, so a
+  # report or a Show anyway re-inserts that one comment.
+  def handle_event("open_report", %{"kind" => kind, "id" => id}, socket) do
+    case {ReportFlow.kind_param(kind), reportable_comment(socket, id)} do
+      {:comment, %Comment{} = comment} ->
+        {:noreply, ReportFlow.open(socket, %{kind: :comment, id: comment.id, quote: Moderation.excerpt(comment.body)})}
+
+      _forged ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("change_report", %{"report" => params}, socket), do: {:noreply, ReportFlow.change(socket, params)}
+
+  def handle_event("submit_report", %{"report" => params}, socket) do
+    case ReportFlow.submit(socket, socket.assigns.current_scope.user, params) do
+      {:ok, socket} -> {:noreply, restream_comment(socket, socket.assigns.report_target.id)}
+      {:error, socket} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("close_report", _params, socket), do: {:noreply, ReportFlow.close(socket)}
+
+  def handle_event("show_reported", %{"id" => id}, socket) do
+    case Integer.parse(to_string(id)) do
+      {comment_id, ""} -> {:noreply, socket |> ReportFlow.show_anyway(comment_id) |> restream_comment(comment_id)}
+      _ -> {:noreply, socket}
+    end
+  end
 
   # RE358 — the Notes composer's Note | ↪ Steer now toggle.
   def handle_event("note_mode", %{"mode" => "steer"}, socket), do: {:noreply, set_note_mode(socket, :steer)}
@@ -7316,6 +7370,29 @@ defmodule HamacaWeb.BoardLive do
     |> assign(:note_ids, MapSet.new(comments, & &1.id))
     |> assign(:note_image_comments, Enum.filter(comments, &note_images?/1))
   end
+
+  # RE510 — the open card's comment `id` when the viewer may report it, else nil.
+  defp reportable_comment(%{assigns: %{selected_card: %Card{} = card}} = socket, id) do
+    with {comment_id, ""} <- Integer.parse(to_string(id)),
+         %Comment{} = comment <- Activity.get_conversation_comment(card, comment_id),
+         true <- ReportFlow.reportable_comment?(comment, socket.assigns.current_scope.user.id) do
+      comment
+    else
+      _ -> nil
+    end
+  end
+
+  defp reportable_comment(_socket, _id), do: nil
+
+  # RE510 — re-renders one note after its reported / shown state changed.
+  defp restream_comment(%{assigns: %{selected_card: %Card{} = card}} = socket, id) do
+    case Activity.get_conversation_comment(card, id) do
+      %Comment{} = comment -> insert_note(socket, comment)
+      nil -> socket
+    end
+  end
+
+  defp restream_comment(socket, _id), do: socket
 
   defp insert_note(socket, comment) do
     socket

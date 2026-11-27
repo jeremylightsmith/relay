@@ -7434,4 +7434,141 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert search_doc() |> LazyHTML.query(".input-bordered") |> Enum.count() == 0
     end
   end
+
+  describe "overflow_menu/1 (RE510)" do
+    test "renders a focus dropdown with a labelled ⋯ trigger and the items in a menu" do
+      html =
+        render_component(&CoreComponents.overflow_menu/1,
+          id: "m1",
+          inner_block: [%{__slot__: :inner_block, inner_block: fn _, _ -> "Report this idea" end}]
+        )
+
+      doc = LazyHTML.from_fragment(html)
+
+      assert doc |> LazyHTML.query("div#m1.dropdown.dropdown-end") |> Enum.count() == 1
+
+      trigger = LazyHTML.query(doc, "#m1 button#m1-trigger")
+      assert LazyHTML.attribute(trigger, "aria-label") == ["More actions"]
+      assert LazyHTML.attribute(trigger, "aria-haspopup") == ["menu"]
+      assert LazyHTML.attribute(trigger, "type") == ["button"]
+      assert LazyHTML.text(trigger) =~ "⋯"
+      assert [class] = LazyHTML.attribute(trigger, "class")
+      assert class =~ "btn btn-ghost btn-xs btn-square text-base-content/40"
+
+      menu = LazyHTML.query(doc, "#m1 ul.dropdown-content.menu.menu-sm")
+      assert Enum.count(menu) == 1
+      assert LazyHTML.attribute(menu, "role") == ["menu"]
+      assert [menu_class] = LazyHTML.attribute(menu, "class")
+      assert menu_class =~ "w-52 rounded-box border border-base-300 bg-base-100 p-1 shadow-lg"
+      assert LazyHTML.text(menu) =~ "Report this idea"
+    end
+  end
+
+  describe "report_modal/1 (RE510)" do
+    alias Schemas.ContentReport
+
+    defp report_form(params \\ %{}),
+      do: Phoenix.Component.to_form(Map.merge(%{"reason" => "", "note" => ""}, params), as: :report)
+
+    defp render_report_modal(attrs) do
+      defaults = [
+        target: %{kind: :card, id: 1, quote: "Dark mode"},
+        step: :form,
+        form: report_form(),
+        sla_hours: 24
+      ]
+
+      render_component(&CoreComponents.report_modal/1, Keyword.merge(defaults, attrs))
+    end
+
+    test "the form step titles a card report, quotes it, lists the four reasons and disables submit" do
+      doc = [] |> render_report_modal() |> LazyHTML.from_fragment()
+
+      modal = LazyHTML.query(doc, "#report-modal.modal.modal-open")
+      assert Enum.count(modal) == 1
+      assert LazyHTML.attribute(modal, "role") == ["dialog"]
+      assert doc |> LazyHTML.query("#report-modal h3") |> LazyHTML.text() =~ "Report this idea"
+      assert doc |> LazyHTML.query("#report-modal .modal-box") |> LazyHTML.text() =~ "“Dark mode”"
+
+      form = LazyHTML.query(doc, "form#report-form")
+      assert LazyHTML.attribute(form, "phx-change") == ["change_report"]
+      assert LazyHTML.attribute(form, "phx-submit") == ["submit_report"]
+
+      for reason <- [:spam, :harassment, :sexual_violent, :other] do
+        radio = LazyHTML.query(doc, "input#report-reason-#{reason}[type=radio]")
+        assert LazyHTML.attribute(radio, "name") == ["report[reason]"]
+        assert LazyHTML.attribute(radio, "value") == [Atom.to_string(reason)]
+
+        assert doc |> LazyHTML.query("label:has(#report-reason-#{reason})") |> LazyHTML.text() =~
+                 ContentReport.reason_label(reason)
+      end
+
+      assert ContentReport.reasons() == [:spam, :harassment, :sexual_violent, :other]
+
+      note = LazyHTML.query(doc, "textarea#report-note")
+      assert LazyHTML.attribute(note, "name") == ["report[note]"]
+      assert LazyHTML.attribute(note, "maxlength") == [Integer.to_string(ContentReport.note_max_length())]
+
+      assert LazyHTML.attribute(LazyHTML.query(doc, "#report-cancel"), "phx-click") == ["close_report"]
+      assert LazyHTML.attribute(LazyHTML.query(doc, "#report-submit"), "disabled") == [""]
+    end
+
+    test "a chosen reason enables submit and highlights its label" do
+      doc = [form: report_form(%{"reason" => "spam"})] |> render_report_modal() |> LazyHTML.from_fragment()
+
+      assert LazyHTML.attribute(LazyHTML.query(doc, "#report-submit"), "disabled") == []
+      assert [spam_class] = doc |> LazyHTML.query("label:has(#report-reason-spam)") |> LazyHTML.attribute("class")
+      assert spam_class =~ "border-primary"
+      assert spam_class =~ "bg-primary/5"
+      assert LazyHTML.attribute(LazyHTML.query(doc, "#report-reason-spam"), "checked") != []
+
+      assert [other_class] = doc |> LazyHTML.query("label:has(#report-reason-other)") |> LazyHTML.attribute("class")
+      refute other_class =~ "border-primary"
+    end
+
+    test "a comment report is titled Report comment" do
+      doc =
+        [target: %{kind: :comment, id: 2, quote: "rude"}] |> render_report_modal() |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("#report-modal h3") |> LazyHTML.text() =~ "Report comment"
+    end
+
+    test "the sent step thanks the reporter with the SLA from the attr and offers Done" do
+      doc = [step: :sent, sla_hours: 24] |> render_report_modal() |> LazyHTML.from_fragment()
+
+      sent = doc |> LazyHTML.query("#report-sent") |> LazyHTML.text()
+      assert sent =~ "Thanks, we got your report"
+      assert sent =~ "within 24 hours"
+      assert sent =~ "The idea is hidden for you in the meantime."
+      assert LazyHTML.attribute(LazyHTML.query(doc, "#report-done"), "phx-click") == ["close_report"]
+      assert doc |> LazyHTML.query("#report-form") |> Enum.count() == 0
+
+      other = [step: :sent, sla_hours: 7] |> render_report_modal() |> LazyHTML.from_fragment()
+      assert other |> LazyHTML.query("#report-sent") |> LazyHTML.text() =~ "within 7 hours"
+    end
+  end
+
+  describe "reported_placeholder/1 (RE510)" do
+    test "an idea collapses with the hidden-for-you copy and a Show anyway button" do
+      html = render_component(&CoreComponents.reported_placeholder/1, id: "p", kind: :idea, target_id: 5)
+      doc = LazyHTML.from_fragment(html)
+
+      box = LazyHTML.query(doc, "#p")
+      assert LazyHTML.text(box) =~ "You reported this idea. It's hidden for you while we review it."
+      assert [class] = LazyHTML.attribute(box, "class")
+      assert class =~ "rounded-[11px] border border-dashed border-base-300 bg-base-100/60 p-3"
+
+      show = LazyHTML.query(doc, "button#p-show")
+      assert LazyHTML.attribute(show, "phx-click") == ["show_reported"]
+      assert LazyHTML.attribute(show, "phx-value-id") == ["5"]
+      assert LazyHTML.text(show) =~ "Show anyway"
+    end
+
+    test "a comment reads You reported this comment." do
+      html = render_component(&CoreComponents.reported_placeholder/1, id: "c", kind: :comment, target_id: 9)
+
+      assert html |> LazyHTML.from_fragment() |> LazyHTML.query("#c") |> LazyHTML.text() =~
+               "You reported this comment. It's hidden for you while we review it."
+    end
+  end
 end

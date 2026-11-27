@@ -158,4 +158,19 @@ defmodule Hamaca.UserApiTokensTest do
       assert {:ok, _} = Accounts.authenticate_user_api_token(their_token)
     end
   end
+
+  test "a suspended user's token stops authenticating, and works again once unsuspended (RE510)" do
+    user = insert(:user)
+    {:ok, %{token: token}} = Accounts.create_user_api_token(user)
+
+    suspended =
+      user |> Ecto.Changeset.change(suspended_at: DateTime.truncate(DateTime.utc_now(), :second)) |> Repo.update!()
+
+    assert :error = Accounts.authenticate_user_api_token(token)
+
+    suspended |> Ecto.Changeset.change(suspended_at: nil) |> Repo.update!()
+
+    assert {:ok, %Schemas.User{id: id}} = Accounts.authenticate_user_api_token(token)
+    assert id == user.id
+  end
 end

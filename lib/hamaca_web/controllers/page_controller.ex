@@ -1,6 +1,7 @@
 defmodule HamacaWeb.PageController do
   @moduledoc """
-  Public landing page. Signed-in users are sent straight to the board.
+  Public landing page (signed-in users are sent straight to the board) and the public
+  `/privacy`, `/terms` and `/support` pages.
 
   A signed-out `/?code=RELAYCONF` (a promo sign-up link, RE462) stashes the code in the
   session as `:signup_promo_code` — trimmed, and dropped when blank or over
@@ -46,4 +47,14 @@ defmodule HamacaWeb.PageController do
   def privacy(conn, _params), do: render(conn, :privacy, page_title: "Privacy Policy")
 
   def terms(conn, _params), do: render(conn, :terms, page_title: "Terms of Service")
+
+  # RE510 — the public contact + moderation-policy page. Public and flash-aware: a suspended
+  # user's refused sign-in lands here with an `:error` flash.
+  def support(conn, _params) do
+    render(conn, :support,
+      page_title: "Support & safety",
+      support_email: Hamaca.Brand.support_email(),
+      sla_hours: Hamaca.Moderation.response_sla_hours()
+    )
+  end
 end

@@ -58,5 +58,22 @@ defmodule Hamaca.BoardsPublicTest do
       # magic-value guard: the query filters on exactly the shared source list
       assert Stage.public_categories() == [:unstarted, :planning, :in_progress]
     end
+
+    test "drops hidden cards and cards by a suspended poster, until the suspension lifts" do
+      board = insert(:board, public_enabled: true)
+      unstarted = insert(:stage, board: board, category: :unstarted)
+      suspended = insert(:user, suspended_at: ~U[2026-01-01 00:00:00Z])
+
+      _hidden = insert(:card, stage: unstarted, hidden_at: ~U[2026-01-01 00:00:00Z], hidden_reason: :admin)
+      by_suspended = insert(:card, stage: unstarted, posted_by_user_id: suspended.id)
+      normal = insert(:card, stage: unstarted)
+
+      assert Enum.map(Boards.list_public_cards(board), & &1.id) == [normal.id]
+
+      suspended |> Ecto.Changeset.change(suspended_at: nil) |> Repo.update!()
+
+      assert board |> Boards.list_public_cards() |> Enum.map(& &1.id) |> Enum.sort() ==
+               Enum.sort([normal.id, by_suspended.id])
+    end
   end
 end

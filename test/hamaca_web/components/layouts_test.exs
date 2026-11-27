@@ -160,6 +160,23 @@ defmodule HamacaWeb.LayoutsTest do
     refute html =~ "oklch("
   end
 
+  test "every public board carries the support footer (RE510)" do
+    doc = %{inner_block: inner_block_slot()} |> render_public_board() |> LazyHTML.from_fragment()
+
+    footer = LazyHTML.query(doc, "footer#public-board-footer")
+    assert LazyHTML.text(footer) =~ "Powered by " <> Hamaca.Brand.name()
+    assert [class] = LazyHTML.attribute(footer, "class")
+    assert class =~ "mt-10 border-t border-base-300 bg-base-100"
+
+    report = LazyHTML.query(footer, "a#public-footer-report")
+    assert LazyHTML.attribute(report, "href") == ["/support#reporting"]
+    assert LazyHTML.text(report) =~ "Report a problem"
+
+    contact = LazyHTML.query(footer, "a#public-footer-contact")
+    assert LazyHTML.attribute(contact, "href") == ["/support#contact"]
+    assert LazyHTML.text(contact) =~ "Contact support"
+  end
+
   describe "crumbs (RE334)" do
     @boards_crumb %{
       label: "Boards",

@@ -514,4 +514,52 @@ defmodule HamacaWeb.NativeAuthControllerTest do
       refute Map.has_key?(body, "billing")
     end
   end
+
+  describe "a suspended user (RE510)" do
+    defp suspended_body do
+      %{"success" => false, "error" => "account_suspended", "message" => HamacaWeb.Auth.suspended_message()}
+    end
+
+    defp now, do: DateTime.truncate(DateTime.utc_now(), :second)
+
+    test "POST /google answers 403 account_suspended, mints no token and sets no session", %{conn: conn} do
+      user = insert(:user, provider_uid: "google-sub-1", email: "ada@example.com", suspended_at: now())
+      stub_google(@tokeninfo)
+
+      conn = post(conn, ~p"/api/auth/native/google", %{"id_token" => "x"})
+
+      assert json_response(conn, 403) == suspended_body()
+      refute Repo.get_by(Schemas.UserApiToken, user_id: user.id)
+      refute get_session(conn, :user_id)
+    end
+
+    test "POST /apple answers 403 account_suspended", %{conn: conn} do
+      key = signing_key()
+      stub_jwks(key, "test-kid")
+
+      user =
+        insert(:user, provider: "apple", provider_uid: "apple-sub-1", email: "alice@example.com", suspended_at: now())
+
+      conn =
+        post(conn, ~p"/api/auth/native/apple", %{
+          identity_token: apple_token(key, "test-kid", %{}),
+          nonce: "raw-nonce-1"
+        })
+
+      assert json_response(conn, 403) == suspended_body()
+      refute Repo.get_by(Schemas.UserApiToken, user_id: user.id)
+      refute get_session(conn, :user_id)
+    end
+
+    test "GET /me for a session whose user was then suspended answers 403 and mints no token", %{conn: conn} do
+      user = insert(:user)
+      conn = log_in_user(conn, user)
+      user |> Ecto.Changeset.change(suspended_at: now()) |> Repo.update!()
+
+      conn = get(conn, ~p"/api/auth/native/me")
+
+      assert json_response(conn, 403) == suspended_body()
+      refute Repo.get_by(Schemas.UserApiToken, user_id: user.id)
+    end
+  end
 end

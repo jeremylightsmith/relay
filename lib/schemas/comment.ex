@@ -18,6 +18,9 @@ defmodule Schemas.Comment do
   `delivered_execution_id` is a steer's receipt: the node execution whose agent job was claimed
   carrying it (set by `Hamaca.Runs` at claim time, first delivery wins). Only a `:steer` comment
   ever has it set; programmatic, never cast.
+
+  RE510 — `hidden_at` / `hidden_reason` hide the comment for everyone once it is moderated;
+  programmatic (`Hamaca.Moderation`), never cast.
   """
 
   use Ecto.Schema
@@ -36,6 +39,10 @@ defmodule Schemas.Comment do
     field :kind, Ecto.Enum, values: [:comment, :question, :changes_requested, :steer], default: :comment
     field :origin, Ecto.Enum, values: @origins
     field :origin_question, :integer
+    # RE510 — hidden for everyone (one of Schemas.ContentReport.hidden_reasons/0). Never cast —
+    # written only by Hamaca.Moderation.
+    field :hidden_at, :utc_datetime
+    field :hidden_reason, Ecto.Enum, values: Schemas.ContentReport.hidden_reasons()
 
     belongs_to :card, Schemas.Card
     belongs_to :user, Schemas.User

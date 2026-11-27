@@ -37,6 +37,7 @@ defmodule HamacaWeb.CoreComponents do
   alias HamacaWeb.StagePickerComponents
   alias HamacaWeb.TalkComponents
   alias HamacaWeb.TimeAgo
+  alias Phoenix.HTML.Form
   alias Phoenix.HTML.FormField
   alias Phoenix.LiveView.JS
   alias Schemas.Activity
@@ -255,7 +256,7 @@ defmodule HamacaWeb.CoreComponents do
   def input(%{type: "checkbox"} = assigns) do
     assigns =
       assign_new(assigns, :checked, fn ->
-        Phoenix.HTML.Form.normalize_value("checkbox", assigns[:value])
+        Form.normalize_value("checkbox", assigns[:value])
       end)
 
     ~H"""
@@ -832,6 +833,204 @@ defmodule HamacaWeb.CoreComponents do
 
     "display:inline-flex;align-items:center;font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;flex:0 0 auto;" <>
       base <> dims
+  end
+
+  @doc """
+  The ⋯ overflow menu (RE510): a daisyUI focus dropdown whose items are the slot's `<li>`s. It
+  opens and closes on the client only, with no server state, so it works inside streams and
+  lists. A focus dropdown stays open after an item click until focus moves, which a modal
+  opening does.
+  """
+  attr :id, :string, required: true
+  attr :label, :string, default: "More actions"
+  attr :class, :any, default: nil, doc: "extra classes on the dropdown root, e.g. `ml-auto`"
+  slot :inner_block, required: true, doc: "the menu's `<li>` items"
+
+  def overflow_menu(assigns) do
+    ~H"""
+    <div id={@id} class={["dropdown dropdown-end", @class]}>
+      <button
+        id={"#{@id}-trigger"}
+        type="button"
+        tabindex="0"
+        aria-label={@label}
+        aria-haspopup="menu"
+        class="btn btn-ghost btn-xs btn-square text-base-content/40"
+      >
+        ⋯
+      </button>
+      <ul
+        tabindex="0"
+        role="menu"
+        class="dropdown-content menu menu-sm z-10 w-52 rounded-box border border-base-300 bg-base-100 p-1 shadow-lg"
+      >
+        {render_slot(@inner_block)}
+      </ul>
+    </div>
+    """
+  end
+
+  @doc """
+  The report modal (RE510), shared by the public board and the card drawer and driven by
+  `HamacaWeb.ReportFlow`. `step: :form` asks for a reason (from `Schemas.ContentReport.reasons/0`)
+  and an optional note; Send stays disabled while no reason is chosen. `step: :sent` is the
+  confirmation, quoting the response promise from `sla_hours`.
+  """
+  attr :target, :map, required: true, doc: "%{kind: :card | :comment, id: integer, quote: String.t()}"
+  attr :step, :atom, values: [:form, :sent], required: true
+  attr :form, Form, required: true, doc: "the `report` form"
+  attr :sla_hours, :integer, required: true
+
+  def report_modal(assigns) do
+    assigns =
+      assigns
+      |> assign(:reason, to_string(assigns.form[:reason].value))
+      |> assign(:noun, report_noun(assigns.target.kind))
+
+    ~H"""
+    <div
+      id="report-modal"
+      class="modal modal-open"
+      role="dialog"
+      aria-label={report_title(@target.kind)}
+    >
+      <div class="modal-box max-w-md p-6">
+        <%= if @step == :sent do %>
+          <div id="report-sent">
+            <div class="grid size-10 place-items-center rounded-full bg-success/15 text-success text-lg">
+              ✓
+            </div>
+            <h3 class="mt-3 text-lg font-semibold">Thanks, we got your report</h3>
+            <p class="mt-1 text-sm text-base-content/70">
+              The {Hamaca.Brand.name()} team reviews every report within {@sla_hours} hours. The {@noun} is hidden for you in the meantime.
+            </p>
+            <div class="mt-5 flex justify-end">
+              <button
+                id="report-done"
+                type="button"
+                phx-click="close_report"
+                class="btn btn-primary btn-sm"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        <% else %>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">{report_title(@target.kind)}</h3>
+            <button
+              type="button"
+              phx-click="close_report"
+              class="btn btn-sm btn-circle btn-ghost"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+          <p class="mt-1 text-sm text-base-content/65">“{@target.quote}”</p>
+
+          <.form for={@form} id="report-form" phx-change="change_report" phx-submit="submit_report">
+            <fieldset class="mt-4 flex flex-col gap-2">
+              <legend class="mb-2 text-xs font-semibold text-base-content/80">
+                What's wrong with it?
+              </legend>
+              <label
+                :for={reason <- Schemas.ContentReport.reasons()}
+                class={[
+                  "flex items-center gap-3 rounded-lg border px-3 py-2 text-sm",
+                  if(selected_reason?(@reason, reason),
+                    do: "border-primary bg-primary/5",
+                    else: "border-base-300"
+                  )
+                ]}
+              >
+                <input
+                  type="radio"
+                  id={"report-reason-#{reason}"}
+                  name={@form[:reason].name}
+                  value={reason}
+                  checked={selected_reason?(@reason, reason)}
+                  class={["radio radio-sm", selected_reason?(@reason, reason) && "radio-primary"]}
+                />
+                {Schemas.ContentReport.reason_label(reason)}
+              </label>
+            </fieldset>
+            <.error :for={msg <- Enum.map(@form[:reason].errors, &translate_error/1)}>{msg}</.error>
+
+            <label for="report-note" class="mt-4 block text-xs font-semibold text-base-content/80">
+              Anything we should know?
+              <span class="font-normal text-base-content/50">(optional)</span>
+            </label>
+            <textarea
+              id="report-note"
+              name={@form[:note].name}
+              rows="2"
+              maxlength={Schemas.ContentReport.note_max_length()}
+              placeholder="Add context for the reviewer"
+              class="textarea textarea-bordered mt-1 w-full text-sm"
+            >{Phoenix.HTML.Form.normalize_value("textarea", @form[:note].value)}</textarea>
+            <.error :for={msg <- Enum.map(@form[:note].errors, &translate_error/1)}>{msg}</.error>
+
+            <div class="mt-4 flex justify-end gap-2">
+              <button
+                id="report-cancel"
+                type="button"
+                phx-click="close_report"
+                class="btn btn-ghost btn-sm"
+              >
+                Cancel
+              </button>
+              <button
+                id="report-submit"
+                type="submit"
+                disabled={@reason == ""}
+                class="btn btn-primary btn-sm"
+              >
+                Send report
+              </button>
+            </div>
+          </.form>
+        <% end %>
+      </div>
+      <label class="modal-backdrop" phx-click="close_report">Close</label>
+    </div>
+    """
+  end
+
+  defp report_title(:card), do: "Report this idea"
+  defp report_title(:comment), do: "Report comment"
+
+  defp report_noun(:card), do: "idea"
+  defp report_noun(:comment), do: "comment"
+
+  defp selected_reason?(value, reason), do: value == Atom.to_string(reason)
+
+  @doc """
+  The collapsed stand-in for an idea or comment the viewer reported (RE510): it stays hidden for
+  them while it is reviewed, with a "Show anyway" button (`show_reported`) that reveals it for the
+  rest of this LiveView session only.
+  """
+  attr :id, :string, required: true
+  attr :kind, :atom, values: [:idea, :comment], required: true
+  attr :target_id, :integer, required: true
+
+  def reported_placeholder(assigns) do
+    ~H"""
+    <div id={@id} class="rounded-[11px] border border-dashed border-base-300 bg-base-100/60 p-3">
+      <p class="text-xs text-base-content/55">
+        You reported this {@kind}. It's hidden for you while we review it.
+      </p>
+      <button
+        id={"#{@id}-show"}
+        type="button"
+        phx-click="show_reported"
+        phx-value-id={@target_id}
+        class="mt-1 text-xs font-semibold text-base-content/65 underline"
+      >
+        Show anyway
+      </button>
+    </div>
+    """
   end
 
   @doc """
@@ -4936,6 +5135,14 @@ defmodule HamacaWeb.CoreComponents do
     required: true,
     doc: "the :conversation LiveView stream — the card's comments, oldest first"
 
+  attr :reported_comment_ids, :any,
+    default: MapSet.new(),
+    doc: "RE510: the comment ids the viewer reported (a MapSet) — collapsed for them into `reported_placeholder/1`"
+
+  attr :shown_comment_ids, :any,
+    default: MapSet.new(),
+    doc: "RE510: reported comment ids the viewer chose to \"Show anyway\" this LiveView session (a MapSet)"
+
   attr :note_count, :integer,
     default: 0,
     doc:
@@ -5999,92 +6206,133 @@ defmodule HamacaWeb.CoreComponents do
                         class="timeline-entry flex items-start gap-[10px]"
                         data-actor-type={comment.actor_type}
                       >
-                        <.avatar
-                          class="timeline-avatar mt-px shrink-0"
-                          size={22}
-                          tint={:role}
-                          actor={if(comment.actor_type == :agent, do: :ai, else: :human)}
-                          src={comment.user && comment.user.avatar_url}
-                          name={comment.user && comment.user.name}
-                          email={comment.user && comment.user.email}
-                        />
-                        <div class="min-w-0 flex-1 space-y-[3px]">
-                          <div class="flex items-center gap-2">
-                            <span class="timeline-author text-[12px] font-semibold">
-                              {CardMedia.author(comment)}
-                            </span>
-                            <time
-                              class="timeline-time font-mono text-[10px] text-base-content/45"
-                              datetime={DateTime.to_iso8601(comment.inserted_at)}
-                              title={Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}
+                        <%!-- RE510 — precedence: hidden for everyone (moderation, or a suspended
+                              author) renders ONLY the placeholder, so the body, images and tags
+                              never reach the client; then the viewer's own report collapses it;
+                              then the normal note, with ⋯ → Report on another human's comment. --%>
+                        <%= case note_display(comment, assigns) do %>
+                          <% :moderated -> %>
+                            <p
+                              id={"#{dom_id}-moderated"}
+                              class="flex-1 rounded-lg border border-dashed border-base-300 px-3 py-2 text-xs text-base-content/55"
                             >
-                              {TimeAgo.ago(comment.inserted_at)}
-                            </time>
-                            <.note_origin_tag
-                              id={"#{dom_id}-origin"}
-                              origin={comment.origin}
-                              question={comment.origin_question}
+                              Hidden by {Hamaca.Brand.name()} moderation.
+                            </p>
+                          <% :reported -> %>
+                            <div class="flex-1">
+                              <.reported_placeholder
+                                id={"#{dom_id}-reported"}
+                                kind={:comment}
+                                target_id={comment.id}
+                              />
+                            </div>
+                          <% display -> %>
+                            <.avatar
+                              class="timeline-avatar mt-px shrink-0"
+                              size={22}
+                              tint={:role}
+                              actor={if(comment.actor_type == :agent, do: :ai, else: :human)}
+                              src={comment.user && comment.user.avatar_url}
+                              name={comment.user && comment.user.name}
+                              email={comment.user && comment.user.email}
                             />
-                            <span
-                              :if={comment.kind in [:question, :changes_requested]}
-                              class="font-mono"
-                              style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));padding:1px 6px;border-radius:4px;"}
-                            >
-                              {comment_tag_label(comment.kind)}
-                            </span>
-                            <%!-- RE358 — a steer is primary (blue), never the amber treatment. --%>
-                            <span
-                              :if={comment.kind == :steer}
-                              id={"#{dom_id}-steer-tag"}
-                              class="font-mono"
-                              style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(:steer)};background:color-mix(in oklab, var(--color-primary) 13%, var(--color-base-100));padding:1px 6px;border-radius:4px;"}
-                            >
-                              {comment_tag_label(:steer)}
-                            </span>
-                            <span
-                              :if={
-                                comment.kind == :steer and
-                                  not Map.has_key?(@steer_receipts, comment.id)
-                              }
-                              id={"#{dom_id}-sending"}
-                              class="inline-flex items-center gap-1 font-mono text-[10px] text-base-content/55"
-                            >
-                              <span class="loading loading-spinner loading-sm"></span> sending…
-                            </span>
-                          </div>
-                          <%!-- No bubble: `.md` already renders the artboard's 13px / 20.15px /
+                            <div class="min-w-0 flex-1 space-y-[3px]">
+                              <div class="flex items-center gap-2">
+                                <span class="timeline-author text-[12px] font-semibold">
+                                  {CardMedia.author(comment)}
+                                </span>
+                                <time
+                                  class="timeline-time font-mono text-[10px] text-base-content/45"
+                                  datetime={DateTime.to_iso8601(comment.inserted_at)}
+                                  title={Calendar.strftime(comment.inserted_at, "%b %d, %H:%M")}
+                                >
+                                  {TimeAgo.ago(comment.inserted_at)}
+                                </time>
+                                <.note_origin_tag
+                                  id={"#{dom_id}-origin"}
+                                  origin={comment.origin}
+                                  question={comment.origin_question}
+                                />
+                                <span
+                                  :if={comment.kind in [:question, :changes_requested]}
+                                  class="font-mono"
+                                  style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(comment.kind)};background:color-mix(in oklab, var(--color-warning) 15%, var(--color-base-100));padding:1px 6px;border-radius:4px;"}
+                                >
+                                  {comment_tag_label(comment.kind)}
+                                </span>
+                                <%!-- RE358 — a steer is primary (blue), never the amber treatment. --%>
+                                <span
+                                  :if={comment.kind == :steer}
+                                  id={"#{dom_id}-steer-tag"}
+                                  class="font-mono"
+                                  style={"font-size:9.5px;font-weight:600;letter-spacing:0.04em;color:#{comment_tag_color(:steer)};background:color-mix(in oklab, var(--color-primary) 13%, var(--color-base-100));padding:1px 6px;border-radius:4px;"}
+                                >
+                                  {comment_tag_label(:steer)}
+                                </span>
+                                <span
+                                  :if={
+                                    comment.kind == :steer and
+                                      not Map.has_key?(@steer_receipts, comment.id)
+                                  }
+                                  id={"#{dom_id}-sending"}
+                                  class="inline-flex items-center gap-1 font-mono text-[10px] text-base-content/55"
+                                >
+                                  <span class="loading loading-spinner loading-sm"></span> sending…
+                                </span>
+                                <.overflow_menu
+                                  :if={display == :reportable}
+                                  id={"#{dom_id}-menu"}
+                                  class="ml-auto"
+                                >
+                                  <li>
+                                    <button
+                                      id={"#{dom_id}-report"}
+                                      type="button"
+                                      role="menuitem"
+                                      phx-click="open_report"
+                                      phx-value-kind="comment"
+                                      phx-value-id={comment.id}
+                                      class="gap-2"
+                                    >
+                                      <span aria-hidden="true">⚑</span>Report comment
+                                    </button>
+                                  </li>
+                                </.overflow_menu>
+                              </div>
+                              <%!-- No bubble: `.md` already renders the artboard's 13px / 20.15px /
                                 base-content 85% prose (assets/css/app.css). Only the amber
                                 question / changes-requested treatment keeps a box. --%>
-                          <div
-                            :if={String.trim(comment.body || "") != ""}
-                            class={
-                              # RE277 — a literal string head followed by a dynamic falsy tail in a
-                              # HEEx `class={[...]}` leaves a stray trailing space (the compiler
-                              # splits head/tail and always joins with a literal space); pipe
-                              # through Enum.reject so this is one dynamic expression instead.
-                              [
-                                "timeline-comment-body md",
-                                comment_box_style(comment.kind) && "rounded-lg px-3 py-2"
-                              ]
-                              |> Enum.reject(&(&1 in [nil, false]))
-                            }
-                            style={comment_box_style(comment.kind)}
-                          >
-                            {Hamaca.Markdown.to_html(comment.body)}
-                          </div>
-                          <%!-- RE427 — outside the `.md` body: the markdown lightbox must not
+                              <div
+                                :if={String.trim(comment.body || "") != ""}
+                                class={
+                                  # RE277 — a literal string head followed by a dynamic falsy tail in a
+                                  # HEEx `class={[...]}` leaves a stray trailing space (the compiler
+                                  # splits head/tail and always joins with a literal space); pipe
+                                  # through Enum.reject so this is one dynamic expression instead.
+                                  [
+                                    "timeline-comment-body md",
+                                    comment_box_style(comment.kind) && "rounded-lg px-3 py-2"
+                                  ]
+                                  |> Enum.reject(&(&1 in [nil, false]))
+                                }
+                                style={comment_box_style(comment.kind)}
+                              >
+                                {Hamaca.Markdown.to_html(comment.body)}
+                              </div>
+                              <%!-- RE427 — outside the `.md` body: the markdown lightbox must not
                           claim a thumbnail click (it patches to the viewer instead). --%>
-                          <.note_image_row
-                            id={"#{dom_id}-images"}
-                            images={note_images(comment)}
-                            image_href={@image_href}
-                          />
-                          <.steer_receipt
-                            :if={comment.kind == :steer}
-                            id={"#{dom_id}-receipt"}
-                            receipt={@steer_receipts[comment.id]}
-                          />
-                        </div>
+                              <.note_image_row
+                                id={"#{dom_id}-images"}
+                                images={note_images(comment)}
+                                image_href={@image_href}
+                              />
+                              <.steer_receipt
+                                :if={comment.kind == :steer}
+                                id={"#{dom_id}-receipt"}
+                                receipt={@steer_receipts[comment.id]}
+                              />
+                            </div>
+                        <% end %>
                       </li>
                     </ol>
                     <.form
@@ -8132,6 +8380,25 @@ defmodule HamacaWeb.CoreComponents do
       "background:color-mix(in oklab, var(--color-primary) 8%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-100));"
 
   defp comment_box_style(_kind), do: nil
+
+  # RE510 — how the card drawer renders one note, in precedence order (see the Notes list).
+  # `:reportable` is the normal note plus ⋯ → Report (`HamacaWeb.ReportFlow.reportable_comment?/2`).
+  defp note_display(comment, assigns) do
+    cond do
+      Hamaca.Moderation.hidden_for_everyone?(comment) ->
+        :moderated
+
+      MapSet.member?(assigns.reported_comment_ids, comment.id) and
+          not MapSet.member?(assigns.shown_comment_ids, comment.id) ->
+        :reported
+
+      HamacaWeb.ReportFlow.reportable_comment?(comment, assigns.current_user_id) ->
+        :reportable
+
+      true ->
+        :note
+    end
+  end
 
   defp note_count_label(1), do: "1 note"
   defp note_count_label(count), do: "#{count} notes"

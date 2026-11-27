@@ -8,7 +8,9 @@ sharing behavior.
 ## Contexts
 
 - **Brand** — the one source for the user-facing names (RE477): `name/0` (`"Hamaca"`) and
-  `agent_name/0` (`"Hamaca AI"`). A leaf with no deps; every code-level use of either name calls it.
+  `agent_name/0` (`"Hamaca AI"`), plus `support_email/0`, the one support address (RE510), read by
+  `/privacy`, `/terms` and the public `/support` page. A leaf with no deps; every code-level use of
+  any of them calls it.
 - **Boards** — boards and their stage tree (stages, sub-lanes, review gates, WIP limits;
   AI-enabled is derived — `Hamaca.Flows.ai_stage_ids/1`: a stage some flow works in); renaming a main stage cascades to its sub-lane names (`"<name>:Review"` /
   `"<name>:Done"`, one transaction in `update_stage/2` — RE385), the sub-lane vocabulary and
@@ -605,6 +607,46 @@ sharing behavior.
   listing exactly as it was**), `./hamaca search`, and the board header's results popover.
 - **Members** — board membership; who can see and act on a board. `member_user_id?/2` is the
   one membership query (also the card-owner rule `Hamaca.Cards` enforces).
+- **Moderation** (`Hamaca.Moderation`, RE510) — content reports, auto-hide, the operator's admin
+  actions and Hamaca-wide suspension (Apple Guideline 1.2). `report/3` records a signed-in
+  user's report of a live public-board idea (`{:card, id}`, not their own) or another human's
+  comment on a board they belong to (`{:comment, id}`); a repeat by the same person answers the
+  existing row. Inside one transaction that locks the target row (`FOR UPDATE`), once
+  `auto_hide_threshold/0` (2) distinct people hold **open** reports on an item that isn't hidden,
+  it is hidden for everyone (`hidden_reason: :auto_reports`); a newly recorded report then emails
+  the operator after commit (`Hamaca.Moderation.Notifier`, to `Schemas.Scope.superadmin_emails/0`,
+  dispatched under `Hamaca.Moderation.TaskSupervisor`). Reported items are hidden for their
+  reporter at once (`hidden_for_reporter_ids/2`). The admin queue reads `list_open/0` (one row
+  per item with open reports) and `list_resolved/0` (one row per resolved batch, newest first,
+  at most `resolved_limit/0`); `dismiss/2` (clears an `:auto_reports` hide only; an `:admin` hide stays, and its Undo restores only an auto-hide it cleared), `hide/2` (`:admin`) and `suspend/2` (stamp
+  the poster's `suspended_at`, hide the item; never a superadmin) resolve every open report on an
+  item as one batch sharing `resolved_at`, recording `prior_hidden_reason` and, when that action
+  suspended someone, `suspended_user_id`; `undo/2` reverses a batch from any member report.
+  **Suspension is derived at read time**: `hidden_for_everyone?/1` and the composable
+  `exclude_hidden_cards/1` (which `Boards.list_public_cards/1` pipes through) treat a suspended
+  author's content as hidden, so no rows are mass-updated. The policy numbers —
+  `auto_hide_threshold/0`, `response_sla_hours/0` (24), `due_soon_hours/0` (6) — and the 140-char
+  `excerpt/1` live only here. It reads `Schemas.*` directly and may not depend on `Hamaca.Boards`
+  (Boards depends on it) nor `Hamaca.Billing`.
+  The operator works the queue at **`/admin/reports`** (`HamacaWeb.Admin.ReportsLive`, in the
+  `:admin` live_session): an Open tab (`list_open/0`, with a due-in countdown against
+  `response_sla_hours/0`, warning-styled within `due_soon_hours/0`) and a Resolved tab
+  (`?tab=resolved`, `list_resolved/0`) with Dismiss · Hide content · Suspend · Undo. A Suspend
+  also calls `HamacaWeb.Auth.disconnect_user/1` on the returned poster. No stream and no PubSub:
+  both lists reload after every action, and new reports appear on refresh.
+  **Web:** one shared report UI — `CoreComponents.overflow_menu/1` (the ⋯), `report_modal/1` and
+  `reported_placeholder/1` — driven by `HamacaWeb.ReportFlow`, a plain module of socket functions
+  the LiveViews delegate the `open_report` / `change_report` / `submit_report` / `close_report` /
+  `show_reported` events to. `PublicBoardLive` reports ideas (`:card`): ⋯ → "Report this idea" on
+  any idea the visitor didn't post (signed out, the sign-in modal titled "Sign in to report"); a
+  reported idea collapses for its reporter, with a per-session "Show anyway". `?idea=<id>` opens
+  an idea's detail modal, and every public board (`Layouts.public_board/1`) ends with a support
+  footer linking `/support#reporting` and `/support#contact`. `BoardLive`'s card drawer (the web
+  board and the native `/cards/:ref` host alike) reports comments (`:comment`): ⋯ → "Report
+  comment" on another human's comment (`ReportFlow.reportable_comment?/2`, the one rule for the
+  menu and the `open_report` check, fetched through `Activity.get_conversation_comment/2`), which
+  then collapses for the reporter the same way; a comment `hidden_for_everyone?/1` renders only
+  "Hidden by Hamaca moderation.", its body and images never sent to the client.
 - **Presence** (`Hamaca.Presence`) — who is looking at a board's **story map** right now, and
   where their pointer is (RE257); the app's first `Phoenix.Presence` context, supervised
   directly after `Phoenix.PubSub`. Two board-scoped topics it owns outright:
@@ -632,7 +674,11 @@ sharing behavior.
   `access_until` once cancelled, and `null` on Free, comped or paused. An app build older than
   RE469 doesn't know `"free"`, parses it to null and hides the Plan row — no server shim
   ([ADR 0013](../adr/0013-the-free-plan.md)). Billing disabled sends
-  `{"enabled": false, "standing": null, "through": null}`. A 401/422/500 body has no `billing`. Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
+  `{"enabled": false, "standing": null, "through": null}`. A 401/422/500 body has no `billing`.
+  A **suspended** user (RE510) gets **403** `{"success": false, "error": "account_suspended",
+  "message": "This account is suspended. Contact support."}` (the message is
+  `HamacaWeb.Auth.suspended_message/0`) from all three endpoints. The check runs after the user is
+  resolved and before any bearer is minted or session cookie written. Every provider sign-in goes through `upsert_user_from_provider/2`, which looks the
   user up by `provider_uid` first, then by normalized verified email (signing in that existing
   user and keeping its `provider`/`provider_uid`), and inserts only when neither matches; a
   nil profile claim never overwrites a stored value. User API tokens for `/api/all` (the native feed, card actions, card create, the board list, the board star and mute, and account deletion).
@@ -666,7 +712,11 @@ sharing behavior.
   `users_live_provider_uid_present` check keeps `provider_uid` required on live rows. Every
   lookup — `get_user/1`, the email lookups, `authenticate_user_api_token/1`,
   `Connections.authenticate_access_token/1` and `refresh/1` — skips a tombstone,
-  so a lingering session reads as signed out, and the old identity signs up afresh. After commit
+  so a lingering session reads as signed out, and the old identity signs up afresh.
+  `authenticate_user_api_token/1` also refuses a **suspended** user's token (`:error` → 401 via
+  `HamacaWeb.ApiUserAuth`, RE510), and so do `Connections.authenticate_access_token/1` (401 on
+  `POST /mcp`) and `refresh/1` (`:invalid_grant`) for a suspended user's `relaym_…` tokens; each
+  authenticates again once the suspension is undone (nothing is revoked). After commit
   the Stripe customer is deleted best-effort (`Hamaca.Billing.delete_customer/1`; a failure is
   logged, never rolled back). An **Apple** account (`apple_reauth_required`) must pass a fresh
   `apple_authorization_code` (none or blank → `:apple_reauth_required`); after the transfers
@@ -704,7 +754,8 @@ sharing behavior.
   `redirect_uri`, matching `resource`; a replayed code is refused **and deletes every token of
   its grant**, and the single-use guard is a conditional `used_at` update inside the
   transaction), refresh-token rotation (`refresh/1` deletes the presented token), and bearer
-  auth (`authenticate_access_token/1`). Tokens are `relaym_<12-hex prefix>_<64-hex secret>`
+  auth (`authenticate_access_token/1`; it and `refresh/1` refuse a deleted or suspended user's
+  token, read at request time, RE510). Tokens are `relaym_<12-hex prefix>_<64-hex secret>`
   (`token_sentinel/0`), minted like `Accounts.create_user_api_token/2` — prefix in the clear,
   secret as a SHA-256 hash, raw value returned once — so they never authenticate as `relayu_…`
   user tokens or `relay_…` board keys. Access tokens live `access_token_ttl_seconds/0` (1 h),
@@ -1634,7 +1685,7 @@ sharing behavior.
   `HamacaWeb.AdminComponents.usage_strip/1` and `stacked_bars/1`.
 - **Mailer** (`Hamaca.Mailer`, RE464) — the Swoosh mailer, a leaf boundary: Local adapter in dev
   (`/dev/mailbox`), Test in test, Resend in prod once `RESEND_API_KEY` + `MAIL_FROM` are set.
-  Called only through `Hamaca.Billing.Notifier.deliver/1`.
+  Called only through `Hamaca.Billing.Notifier.deliver/1` and `Hamaca.Moderation.Notifier.deliver/1`.
 - **Markdown**, **Repo**, **Config** — rendering, Ecto plumbing, and
   `Hamaca.Config`: the `ProcessTree` seam (`cache: false`) through which the values tests vary
   (`:apple_client_ids`, `:runs_auto_start`, `GIT_SHA`, and billing's `:billing_enabled`,
@@ -1706,6 +1757,9 @@ erDiagram
     TalkSession ||--o{ TalkTurn : "one per human message"
     TalkTurn ||--o{ TalkEvent : "transcript lines"
     TalkTurn |o--o| NodeJob : "kind: talk (no run)"
+    User ||--o{ ContentReport : "reports (RE510)"
+    Card ||--o{ ContentReport : "reported idea"
+    Comment ||--o{ ContentReport : "reported comment"
 ```
 
 A `Harness` is an agent CLI (command template + closed `models` list) and an `Agent` is a named
@@ -1726,6 +1780,21 @@ called: `status` / `kind` / `source` (`Ecto.Enum`s owned by `statuses/0`, `kinds
 account delete, RE464) is one billing email sent: `kind` (`Schemas.BillingNotice.kinds/0`) and
 `period_key`, unique per account by the index `billing_notices_once`, inserted before the email
 goes out so each is sent at most once per period.
+
+A `ContentReport` (`content_reports`, owned by `Hamaca.Moderation`, RE510) is one person's
+report of one item: `reporter_id` (cascade on user delete) and exactly one of `card_id` /
+`comment_id` (each cascade; the check constraint `content_reports_one_target`), `reason`
+(`Schemas.ContentReport.reasons/0`) and an optional trimmed `note` (at most
+`note_max_length/0`, 1000) — the only two cast fields. A person reports an item once: partial
+unique indexes `content_reports_reporter_card` / `content_reports_reporter_comment`. The
+resolution fields are written only by the admin actions: `resolution`
+(`resolutions/0`, null while open), `resolved_by_id` and `suspended_user_id` (both nilified),
+`resolved_at` (the batch stamp; partial index on `resolved_at IS NULL` for the open queue) and
+`prior_hidden_reason` (the item's `hidden_reason` just before, so Undo can restore it).
+`cards` and `comments` each carry `hidden_at` + `hidden_reason` (typed by
+`ContentReport.hidden_reasons/0`: `:auto_reports` / `:admin`), and `users` carries
+`suspended_at` + `suspended_by_id` (nilified), read only through `Schemas.User.suspended?/1`.
+None of them is ever cast.
 
 A `BoardSetupStep` (`board_setup_steps`, owned by `Hamaca.Setup`, RE443) is one step of a board's
 setup checklist — or, with `machine_id` set (RE446), of one connected machine's: the board's own

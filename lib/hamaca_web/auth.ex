@@ -14,17 +14,52 @@ defmodule HamacaWeb.Auth do
   alias Hamaca.Members
   alias HamacaWeb.SessionPolicy
   alias Schemas.Scope
+  alias Schemas.User
+
+  @suspended_message "This account is suspended. Contact support."
+
+  @doc """
+  What a suspended user is told (RE510) — the ONE copy, used by the web OAuth flash and the
+  native 403 body.
+  """
+  @spec suspended_message() :: String.t()
+  def suspended_message, do: @suspended_message
+
+  @doc """
+  The id every LiveView socket a signed-in tab opens is registered under (written into the
+  session by `put_user_session/2`). Phoenix disconnects those sockets on a `"disconnect"`
+  broadcast to this topic — see `disconnect_user/1`.
+  """
+  @spec live_socket_id(User.t()) :: String.t()
+  def live_socket_id(%User{id: id}), do: "users_sessions:#{id}"
+
+  @doc """
+  Force-disconnects every open LiveView socket of `user` (RE510: called right after a
+  suspension). The client reconnects over HTTP, where `fetch_current_scope/2` drops the
+  suspended session. Only sessions created after RE510 carry a `live_socket_id`; older ones are
+  caught on their next request or mount.
+  """
+  @spec disconnect_user(User.t()) :: :ok
+  def disconnect_user(%User{} = user) do
+    HamacaWeb.Endpoint.broadcast(live_socket_id(user), "disconnect", %{})
+  end
 
   @doc """
   Plug: assigns `:current_scope` from the session (nil when logged out), and
   enforces the 7-day session window on the way through — expiring a session past
-  the window and sliding one that is merely stale (RLY-127).
+  the window and sliding one that is merely stale (RLY-127). A suspended user (RE510)
+  is treated as signed out and their session is renewed (dropped).
   """
   def fetch_current_scope(conn, _opts) do
     conn = enforce_session_window(conn)
     user_id = get_session(conn, :user_id)
     user = user_id && Accounts.get_user(user_id)
-    assign(conn, :current_scope, Scope.for_user(user))
+
+    if User.suspended?(user) do
+      conn |> renew_session() |> assign(:current_scope, Scope.for_user(nil))
+    else
+      assign(conn, :current_scope, Scope.for_user(user))
+    end
   end
 
   @doc """
@@ -93,7 +128,8 @@ defmodule HamacaWeb.Auth do
 
   @doc """
   Establishes a signed-in session for `user`: resolves any pending invites,
-  renews the session, and stores `:user_id`. Does **not** redirect — the web
+  renews the session, and stores `:user_id` and `:live_socket_id` (so `disconnect_user/1`
+  reaches this session's LiveView sockets). Does **not** redirect — the web
   flow (`log_in_user/2`) adds the redirect; the native JSON flow renders the
   response carrying the `Set-Cookie: _hamaca_key=…` header instead.
   """
@@ -103,6 +139,7 @@ defmodule HamacaWeb.Auth do
     conn
     |> renew_session()
     |> put_session(:user_id, user.id)
+    |> put_session(:live_socket_id, live_socket_id(user))
     |> refresh_session()
   end
 
@@ -190,7 +227,8 @@ defmodule HamacaWeb.Auth do
 
   # Expiry only, no re-stamp: a LiveView mount has no `conn` and cannot write a
   # cookie. Checking here closes the hole where a stale cookie mounts a LiveView on
-  # socket reconnect without ever passing through the plug pipeline.
+  # socket reconnect without ever passing through the plug pipeline. A suspended user
+  # (RE510) mounts as signed out; the plug drops their cookie on the next HTTP request.
   defp mount_current_scope(socket, session) do
     Phoenix.Component.assign_new(socket, :current_scope, fn ->
       user =
@@ -200,7 +238,7 @@ defmodule HamacaWeb.Auth do
           session["user_id"] && Accounts.get_user(session["user_id"])
         end
 
-      Scope.for_user(user)
+      if User.suspended?(user), do: Scope.for_user(nil), else: Scope.for_user(user)
     end)
   end
 

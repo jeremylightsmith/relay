@@ -71,7 +71,11 @@ void main() {
       greaterThan(tester.getTopLeft(_key('settings_log_out')).dy),
     );
     expect(_key('settings_account_section'), findsNothing);
-    expect(_key('settings_rows_card'), findsNothing);
+    // The rows card is always built (RE510); the button is never inside it.
+    expect(
+      find.descendant(of: _key('settings_rows_card'), matching: button),
+      findsNothing,
+    );
   });
 
   testWidgets('the button is a borderless, full-width red TextButton', (

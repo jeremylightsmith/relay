@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart' show LaunchMode;
 
 import '../../app/theme.dart';
+import '../../config.dart';
 import '../../widgets/relay_avatar.dart';
 import '../auth/auth_controller.dart';
 import '../boards/board_switcher.dart';
@@ -25,10 +26,11 @@ import 'plan_status.dart';
 /// row, which stays cut: "add logout to the settings page and get rid of
 /// account".)
 ///
-/// The rows card holds one row today — "Suggest an idea" (RE397), which opens
-/// the server's `feedback_url` in the system browser and is shown only when the
-/// server sends one; with no URL the card is not built at all. Notifications /
-/// Voice replies (SET-03 / RLY-99) can join the card later. The auth gate makes
+/// The rows card is always built. It holds "Suggest an idea" (RE397), which
+/// opens the server's `feedback_url` in the system browser and is shown only
+/// when the server sends one, then "Support & safety" (RE510), which is always
+/// there and opens the server's public `/support` page in the in-app browser.
+/// Notifications / Voice replies (SET-03 / RLY-99) can join the card later. The auth gate makes
 /// signed-out unreachable here; the null-tolerant reads below are for the
 /// ungated shell test, not a real state.
 class SettingsScreen extends ConsumerWidget {
@@ -93,10 +95,13 @@ class SettingsScreen extends ConsumerWidget {
             _AccountSection(billing: billing),
             const SizedBox(height: 24),
           ],
-          if (hasFeedback) ...[
-            _RowsCard(children: [_SuggestIdeaRow(url: feedbackUrl)]),
-            const SizedBox(height: 24),
-          ],
+          _RowsCard(
+            children: [
+              if (hasFeedback) _SuggestIdeaRow(url: feedbackUrl),
+              const _SupportRow(),
+            ],
+          ),
+          const SizedBox(height: 24),
           // SET-01's outlined destructive Log out (artboard line ~571).
           OutlinedButton(
             key: const Key('settings_log_out'),
@@ -312,6 +317,59 @@ class _SuggestIdeaRow extends ConsumerWidget {
       subtitle: Text(
         "Share or upvote ideas on Hamaca's public roadmap",
         style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+      ),
+      trailing: Icon(
+        Icons.open_in_new,
+        size: 16,
+        color: scheme.onSurfaceVariant,
+      ),
+      onTap: () => _open(context, ref),
+    );
+  }
+}
+
+/// "Support & safety" (RE510): opens the server's public `/support` page —
+/// contact, reporting and moderation policy — in the in-app browser
+/// ([LaunchMode.inAppBrowserView], SFSafariViewController), so dismissing lands
+/// back on Settings. A link to the LiveView page, never a native copy of it.
+class _SupportRow extends ConsumerWidget {
+  const _SupportRow();
+
+  Future<void> _open(BuildContext context, WidgetRef ref) async {
+    final launch = ref.read(externalUrlLauncherProvider);
+    var opened = false;
+    try {
+      opened = await launch(
+        Uri.parse('${AppConfig.baseUrl}/support'),
+        LaunchMode.inAppBrowserView,
+      );
+    } on Exception {
+      // A thrown PlatformException is the same user-visible failure as false.
+    }
+    if (opened || !context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Couldn't open the link")));
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListTile(
+      key: const Key('settings_support_safety'),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      leading: Icon(
+        Icons.shield_outlined,
+        size: 18,
+        color: scheme.onSurfaceVariant,
+      ),
+      title: Text(
+        'Support & safety',
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: scheme.onSurface,
+        ),
       ),
       trailing: Icon(
         Icons.open_in_new,

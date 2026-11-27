@@ -5,6 +5,8 @@ import Config
 # `Swoosh.TestAssertions` see deliveries. A test silences mail with `Process.put(:mail_enabled, false)`.
 config :hamaca, Hamaca.Billing.Notifier, async: false
 config :hamaca, Hamaca.Mailer, adapter: Swoosh.Adapters.Test
+# The operator's new-report emails (RE510) dispatch inline the same way.
+config :hamaca, Hamaca.Moderation.Notifier, async: false
 
 # Push (RLY-81): the Test adapter messages the caller, and `async: false` runs
 # dispatch inline in the test process — so deliveries land in the test's mailbox

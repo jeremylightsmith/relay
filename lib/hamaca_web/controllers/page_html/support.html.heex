@@ -1,0 +1,50 @@
+<Layouts.flash_group flash={@flash} />
+<main class="min-h-screen px-4 py-12">
+  <article id="support-page" class="mx-auto max-w-2xl">
+    <p class="text-sm text-base-content/65">
+      <.link navigate={~p"/"} class="link link-hover">← Back to sign in</.link>
+    </p>
+    <h1 class="mt-4 text-2xl font-semibold">Support &amp; safety</h1>
+    <p class="mt-2 text-sm text-base-content/70">
+      Questions, problems, or something on a board that shouldn't be there? We're here.
+    </p>
+
+    <section id="contact" class="mt-5 rounded-xl border border-base-300 p-4">
+      <div class="text-xs font-semibold uppercase tracking-wider text-base-content/55">
+        Contact
+      </div>
+      <a
+        id="support-email"
+        href={"mailto:" <> @support_email}
+        class="mt-1 block text-base font-semibold text-primary"
+      >
+        {@support_email}
+      </a>
+      <p class="text-xs text-base-content/60">We reply within one business day.</p>
+    </section>
+
+    <section id="reporting">
+      <h2 class="mt-6 text-sm font-semibold">Reporting content</h2>
+      <p class="mt-1 text-sm text-base-content/70">
+        Every idea and comment has a ⋯ menu with <span class="font-medium">Report</span>.
+        We review every report within {@sla_hours} hours and remove content that breaks these
+        rules: no spam, harassment, hate, or sexual or violent content.
+      </p>
+    </section>
+
+    <section id="blocking">
+      <h2 class="mt-4 text-sm font-semibold">Blocking</h2>
+      <p class="mt-1 text-sm text-base-content/70">
+        Board owners can block anyone from posting or voting on their public board. Their past
+        posts are hidden.
+      </p>
+    </section>
+
+    <section id="repeat-abuse">
+      <h2 class="mt-4 text-sm font-semibold">Repeat abuse</h2>
+      <p class="mt-1 text-sm text-base-content/70">
+        Accounts that keep breaking these rules are suspended across {Hamaca.Brand.name()}.
+      </p>
+    </section>
+  </article>
+</main>

@@ -5,6 +5,9 @@ defmodule HamacaWeb.NativeAuthController do
   header the native shell injects into its embedded webviews. This IS the login,
   so it is unauthenticated (runs under the `:native_auth` pipeline, which fetches
   the session so the cookie can be written).
+
+  A suspended account (RE510) gets `403 {"success": false, "error": "account_suspended",
+  "message": …}` from sign-in and from `me/2`: no bearer is minted and no cookie is written.
   """
 
   use HamacaWeb, :controller
@@ -15,6 +18,7 @@ defmodule HamacaWeb.NativeAuthController do
   alias Hamaca.Billing
   alias HamacaWeb.Auth
   alias HamacaWeb.Feedback
+  alias Schemas.User
 
   def google(conn, %{"id_token" => id_token}) do
     sign_in(conn, GoogleTokenValidator.validate_token(id_token), [])
@@ -49,12 +53,16 @@ defmodule HamacaWeb.NativeAuthController do
   defp sign_in(conn, validated, upsert_opts) do
     with {:ok, claims} <- validated,
          {:ok, user} <- Accounts.upsert_user_from_provider(claims, upsert_opts),
+         :ok <- check_not_suspended(user),
          {:ok, token} <- mint_token(user) do
       conn
       |> Auth.put_user_session(user)
       |> put_status(:ok)
       |> json(success_json(conn, user, token))
     else
+      {:error, :account_suspended} ->
+        suspended(conn)
+
       {:error, %Ecto.Changeset{} = changeset} ->
         conn
         |> put_status(:unprocessable_entity)
@@ -93,6 +101,7 @@ defmodule HamacaWeb.NativeAuthController do
     # clean-sign-out 401 path as a missing/gone session.
     with true <- fresh_session?(session),
          user when not is_nil(user) <- fetch_user(session["user_id"]),
+         :ok <- check_not_suspended(user),
          {:ok, token} <- mint_token(user) do
       # The native shell's launch-time verify is its only touch point, so this is
       # where its 7-day window slides forward (RLY-127). Without it a native
@@ -102,6 +111,9 @@ defmodule HamacaWeb.NativeAuthController do
       |> Auth.refresh_session()
       |> json(success_json(conn, user, token))
     else
+      {:error, :account_suspended} ->
+        suspended(conn)
+
       {:error, _} ->
         conn |> put_status(:internal_server_error) |> json(%{success: false, error: "Could not mint a token"})
 
@@ -111,6 +123,16 @@ defmodule HamacaWeb.NativeAuthController do
   end
 
   defp fresh_session?(session), do: not Auth.session_expired?(session)
+
+  # RE510: checked after the user is resolved and BEFORE `mint_token/1` or the session
+  # write, so a suspended user gets no bearer and no cookie.
+  defp check_not_suspended(user), do: if(User.suspended?(user), do: {:error, :account_suspended}, else: :ok)
+
+  defp suspended(conn) do
+    conn
+    |> put_status(:forbidden)
+    |> json(%{success: false, error: "account_suspended", message: Auth.suspended_message()})
+  end
 
   defp fetch_user(nil), do: nil
   defp fetch_user(user_id), do: Accounts.get_user(user_id)

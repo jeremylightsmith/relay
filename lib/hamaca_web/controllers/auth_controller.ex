@@ -3,7 +3,8 @@ defmodule HamacaWeb.AuthController do
   Google OAuth via Ueberauth: `request` redirects to Google (handled by
   the Ueberauth plug), `callback` upserts the user and starts the
   session, refusing a Google account whose email isn't verified (RE343:
-  invites bind by email), `delete` logs out.
+  invites bind by email) and sending a suspended account to `/support` without a
+  session (RE510), `delete` logs out.
 
   `return_to` (RLY-69): a caller (e.g. the public board's sign-in link) may add
   `?return_to=<path>` to the request-phase URL. `put_return_to/2` runs before the
@@ -22,6 +23,7 @@ defmodule HamacaWeb.AuthController do
 
   alias Hamaca.Accounts
   alias HamacaWeb.Auth
+  alias Schemas.User
 
   plug :put_return_to
   plug Ueberauth
@@ -45,9 +47,16 @@ defmodule HamacaWeb.AuthController do
 
     case Accounts.upsert_user_from_google(auth, promo_code: promo_code) do
       {:ok, user} ->
-        conn
-        |> put_flash(:info, "Signed in as #{user.email}")
-        |> Auth.log_in_user(user, return_to)
+        if User.suspended?(user) do
+          # RE510: a suspended account gets no session — only the suspended flash on /support.
+          conn
+          |> put_flash(:error, Auth.suspended_message())
+          |> redirect(to: ~p"/support")
+        else
+          conn
+          |> put_flash(:info, "Signed in as #{user.email}")
+          |> Auth.log_in_user(user, return_to)
+        end
 
       {:error, :email_unverified} ->
         conn

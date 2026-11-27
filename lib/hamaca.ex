@@ -42,6 +42,7 @@ defmodule Hamaca do
       Mailer,
       Markdown,
       Members,
+      Moderation,
       Presence,
       Push,
       Runs,

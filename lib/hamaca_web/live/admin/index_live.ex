@@ -6,6 +6,8 @@ defmodule HamacaWeb.Admin.IndexLive do
   """
   use HamacaWeb, :live_view
 
+  alias Hamaca.Moderation
+
   @impl true
   def mount(_params, _session, socket) do
     pages = [
@@ -32,6 +34,12 @@ defmodule HamacaWeb.Admin.IndexLive do
         label: "API log",
         path: ~p"/admin/api",
         description: "Live view of the last 200 inbound API requests."
+      },
+      %{
+        id: "admin-page-reports",
+        label: "Reports",
+        path: ~p"/admin/reports",
+        description: "Reported ideas and comments: respond within #{Moderation.response_sla_hours()} hours."
       }
     ]
 

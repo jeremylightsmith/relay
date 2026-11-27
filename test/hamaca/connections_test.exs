@@ -364,6 +364,28 @@ defmodule Hamaca.ConnectionsTest do
                {:error, :invalid_grant}
     end
 
+    # RE510: suspension is checked at read time, so Undo (clearing suspended_at) restores the
+    # same grant without the user re-authorizing.
+    test "refuses both tokens of a suspended user, and accepts them again once unsuspended" do
+      %{user: user, client: client, tokens: %{access_token: access, refresh_token: refresh}} = connect!()
+
+      suspended =
+        user |> Ecto.Changeset.change(suspended_at: DateTime.truncate(DateTime.utc_now(), :second)) |> Repo.update!()
+
+      assert Connections.authenticate_access_token(access) == :error
+
+      assert Connections.refresh(%{"refresh_token" => refresh, "client_id" => client.client_id}) ==
+               {:error, :invalid_grant}
+
+      suspended |> Ecto.Changeset.change(suspended_at: nil) |> Repo.update!()
+
+      assert {:ok, %User{id: user_id}, _grant} = Connections.authenticate_access_token(access)
+      assert user_id == user.id
+
+      assert {:ok, %{access_token: _, refresh_token: _}} =
+               Connections.refresh(%{"refresh_token" => refresh, "client_id" => client.client_id})
+    end
+
     # Scenario 14
     test "authenticates the user and touches last_used_at, throttled" do
       %{user: user, grant: grant, tokens: %{access_token: access}} = connect!()

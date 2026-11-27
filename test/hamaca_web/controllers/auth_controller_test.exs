@@ -239,4 +239,23 @@ defmodule HamacaWeb.AuthControllerTest do
       assert redirected_to(conn) == ~p"/"
     end
   end
+
+  describe "GET /auth/google/callback for a suspended user (RE510)" do
+    test "creates no session and redirects to /support with the suspended flash", %{conn: conn} do
+      insert(:user,
+        provider_uid: "google-uid-123",
+        email: "ada@example.com",
+        suspended_at: DateTime.truncate(DateTime.utc_now(), :second)
+      )
+
+      conn =
+        conn
+        |> assign(:ueberauth_auth, google_auth())
+        |> get(~p"/auth/google/callback")
+
+      assert redirected_to(conn) == ~p"/support"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == HamacaWeb.Auth.suspended_message()
+      assert get_session(conn, :user_id) == nil
+    end
+  end
 end

@@ -257,14 +257,16 @@ defmodule Hamaca.Accounts do
   @doc """
   Authenticates a raw `relayu_<prefix>_<secret>` token: prefix lookup, constant-time
   hash compare, throttled `last_used_at` bump, returning `{:ok, user}`. Any malformed,
-  unknown, or revoked token — including a board key — returns `:error`. This is what
-  `HamacaWeb.ApiUserAuth` calls.
+  unknown, or revoked token — including a board key — returns `:error`, as does a token
+  whose user is suspended (RE510; it works again once the suspension is undone). This is
+  what `HamacaWeb.ApiUserAuth` calls.
   """
   def authenticate_user_api_token(raw_token) when is_binary(raw_token) do
     with ["relayu", prefix, secret] <- String.split(raw_token, "_", parts: 3),
          %UserApiToken{} = token <- Repo.get_by(UserApiToken, token_prefix: prefix),
          true <- Plug.Crypto.secure_compare(hash_user_token_secret(secret), token.token_hash),
-         %UserApiToken{user: %User{deleted_at: nil} = user} <- Repo.preload(token, :user) do
+         %UserApiToken{user: %User{deleted_at: nil} = user} <- Repo.preload(token, :user),
+         false <- User.suspended?(user) do
       touch_user_token_last_used(token)
 
       {:ok, user}

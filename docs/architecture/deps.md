@@ -50,6 +50,7 @@ flowchart LR
     Boards --> Agents
     Boards --> Events
     Boards --> Flows
+    Boards --> Moderation
     Boards --> Repo
     Boards --> Setup
     Cards --> Activity
@@ -74,6 +75,10 @@ flowchart LR
     Flows --> Setup
     Members --> Events
     Members --> Repo
+    Moderation --> Brand
+    Moderation --> Config
+    Moderation --> Mailer
+    Moderation --> Repo
     Push --> Members
     Push --> Repo
     Runs --> Activity

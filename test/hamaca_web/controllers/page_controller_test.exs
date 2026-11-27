@@ -1149,4 +1149,74 @@ defmodule HamacaWeb.PageControllerTest do
       assert html =~ ~p"/docs"
     end
   end
+
+  # RE510 Task 2 — the public /support page and the one support address.
+  describe "GET /support" do
+    defp support_doc(conn), do: conn |> get(~p"/support") |> html_response(200) |> LazyHTML.from_document()
+
+    defp squished(node), do: node |> LazyHTML.text() |> String.replace(~r/\s+/, " ") |> String.trim()
+
+    test "renders the page heading and the support email mailto link", %{conn: conn} do
+      doc = support_doc(conn)
+      email = Hamaca.Brand.support_email()
+
+      assert doc |> LazyHTML.query("#support-page h1") |> squished() == "Support & safety"
+
+      link = LazyHTML.query(doc, "#support-email")
+      assert LazyHTML.attribute(link, "href") == ["mailto:" <> email]
+      assert squished(link) == email
+    end
+
+    test "has the contact, reporting, blocking and repeat-abuse sections", %{conn: conn} do
+      doc = support_doc(conn)
+
+      for id <- ~w(contact reporting blocking repeat-abuse) do
+        assert doc |> LazyHTML.query("##{id}") |> Enum.count() == 1, "missing ##{id}"
+      end
+
+      assert doc |> LazyHTML.query("#reporting") |> squished() =~
+               "within #{Hamaca.Moderation.response_sla_hours()} hours"
+
+      assert doc |> LazyHTML.query("#contact") |> squished() =~ "We reply within one business day."
+    end
+
+    test "matches the mockup's typography and contact box", %{conn: conn} do
+      doc = support_doc(conn)
+      classes = fn selector -> doc |> LazyHTML.query(selector) |> LazyHTML.attribute("class") end
+
+      assert classes.("#support-page h1") == ["mt-4 text-2xl font-semibold"]
+      assert classes.("#contact") == ["mt-5 rounded-xl border border-base-300 p-4"]
+      assert classes.("#support-email") == ["mt-1 block text-base font-semibold text-primary"]
+
+      assert doc |> LazyHTML.query("#repeat-abuse") |> squished() =~
+               "suspended across #{Hamaca.Brand.name()}."
+    end
+
+    test "renders an error flash (the suspended sign-in redirect target)", %{conn: conn} do
+      html =
+        conn
+        |> init_test_session(%{})
+        |> fetch_flash()
+        |> put_flash(:error, "Some error")
+        |> get(~p"/support")
+        |> html_response(200)
+
+      assert html =~ "Some error"
+    end
+
+    test "/privacy and /terms show the one support address", %{conn: conn} do
+      mailto = "mailto:" <> Hamaca.Brand.support_email()
+
+      assert conn |> get(~p"/privacy") |> html_response(200) =~ mailto
+      assert build_conn() |> get(~p"/terms") |> html_response(200) =~ mailto
+    end
+  end
+
+  describe "GET /support when signed in" do
+    setup :register_and_log_in_user
+
+    test "is public to a signed-in user too (no redirect)", %{conn: conn} do
+      assert conn |> get(~p"/support") |> html_response(200) =~ "Support &amp; safety"
+    end
+  end
 end

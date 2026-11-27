@@ -43,7 +43,7 @@ defmodule Mix.Tasks.Hamaca.GenVocabTest do
       end
     end
 
-    test "the registry covers all twenty-two closed sets" do
+    test "the registry covers all twenty-six closed sets" do
       labels = GenVocab.vocabularies() |> Enum.map(&elem(&1, 0)) |> Enum.sort()
 
       assert labels == [
@@ -58,6 +58,9 @@ defmodule Mix.Tasks.Hamaca.GenVocabTest do
                "Billing promo refusal",
                "Billing standing kind",
                "Card status",
+               "Content report reason",
+               "Content report resolution",
+               "Moderation hidden reason",
                "Node outcome",
                "Node-job kind",
                "Node-job state",

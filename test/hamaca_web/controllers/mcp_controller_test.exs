@@ -119,6 +119,23 @@ defmodule HamacaWeb.McpControllerTest do
       end
     end
 
+    test "a suspended user's token is 401, and works again once unsuspended (RE510)", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      suspended =
+        user |> Ecto.Changeset.change(suspended_at: DateTime.truncate(DateTime.utc_now(), :second)) |> Repo.update!()
+
+      refused = conn |> bearer(token) |> rpc("ping")
+      assert json_response(refused, 401) == %{"error" => "unauthorized"}
+
+      suspended |> Ecto.Changeset.change(suspended_at: nil) |> Repo.update!()
+
+      ok = build_conn() |> bearer(token) |> rpc("ping", %{}, 3)
+      assert json_response(ok, 200) == %{"jsonrpc" => "2.0", "id" => 3, "result" => %{}}
+    end
+
     # Scenario 10
     test "a foreign Origin is 403", %{authed: authed} do
       conn = authed |> put_req_header("origin", "https://evil.example") |> rpc("ping")
