@@ -15,6 +15,9 @@ defmodule Schemas.Board do
   `default_agent_id` (RE433) is the board's default LLM, written only by `Hamaca.Agents`.
   `example_template` (RE444) marks the board as a template's public example, written only via
   `example_changeset/2`.
+  `target_branch` (RE458) is the board's default target branch (`"main"`), cast by
+  `changeset/2` — trimmed, required non-blank, and checked by the one branch-name validator,
+  `Schemas.Card.validate_branch_name/2`.
   """
 
   use Ecto.Schema
@@ -29,6 +32,9 @@ defmodule Schemas.Board do
     field :archived_at, :utc_datetime
     field :public_enabled, :boolean, default: false
     field :story_map_view, :map, default: %{}
+    # RE458: the branch a card on this board targets unless it overrides it. Cast and validated
+    # by `changeset/2`; resolved only by `Hamaca.Cards.effective_target/2`.
+    field :target_branch, :string, default: "main"
     # RE444: the template slug this board is the public example of. Written only by
     # `Hamaca.Boards.mark_example/2` via `example_changeset/2`, never cast by `changeset/2`.
     field :example_template, :string
@@ -52,10 +58,12 @@ defmodule Schemas.Board do
     # substituting a blank/whitespace param with the field's schema default
     # (`name`'s default is "My board") — without this, submitting a blank
     # name would reset it to "My board" instead of failing validation below.
-    |> cast(attrs, [:name, :slug, :key], empty_values: [])
+    |> cast(attrs, [:name, :slug, :key, :target_branch], empty_values: [])
     |> update_change(:name, &String.trim/1)
     |> update_change(:key, &normalize_key/1)
-    |> validate_required([:name, :slug, :key])
+    |> update_change(:target_branch, &blank_to_nil/1)
+    |> validate_required([:name, :slug, :key, :target_branch])
+    |> Schemas.Card.validate_branch_name(:target_branch)
     |> validate_length(:name, min: 1, max: name_max_length())
     |> validate_format(:key, key_format(), message: "must be exactly 2 letters")
     |> validate_format(:slug, slug_format(), message: "must be lowercase letters, numbers, and hyphens")
@@ -81,6 +89,17 @@ defmodule Schemas.Board do
   """
   @spec key_from_name(String.t() | nil) :: String.t()
   def key_from_name(name), do: name |> letters_only() |> String.slice(0, 2)
+
+  # A trimmed target branch, with a blank one as nil: `validate_required/2` honours this
+  # changeset's `empty_values: []`, so a "" would otherwise pass as present (RE458).
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp blank_to_nil(value), do: value
 
   # Upcase, then keep only A–Z. `validate_format/3` above enforces the "exactly 2" rule on the
   # normalized value, so "rl" -> "RL", "R1" -> "R" (rejected), "abc" -> "ABC" (rejected).

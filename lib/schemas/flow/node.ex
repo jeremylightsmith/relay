@@ -2,8 +2,9 @@ defmodule Schemas.Flow.Node do
   @moduledoc """
   One node of a flow's embedded graph (ADR 0006). `type` is the closed
   behavior set; `run` is the node's command/prompt (skill invocation, shell
-  line, or agent prompt — `{ref}`/`{branch}`/`{relay}` placeholders are the
-  runner's to expand). `llm` (RE433) names one of the board's agents
+  line, or agent prompt — `{ref}`/`{branch}`/`{target}`/`{relay}` placeholders are the
+  runner's to expand; `{target}` (RE458) is the run's frozen target branch, `vars.target`).
+  `llm` (RE433) names one of the board's agents
   (`Schemas.Agent`, a harness + model) and nil means inherit the board's
   default agent; `effort` nil means inherit the harness default. `human` carries no
   type-specific attrs yet.

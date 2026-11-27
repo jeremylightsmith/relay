@@ -52,13 +52,13 @@
     {
       "key": "checkout",
       "max_retries": 1,
-      "run": "{relay} git-fetch && git checkout -B {branch} origin/main",
+      "run": "{relay} git-fetch && git checkout -B {branch} origin/{target}",
       "type": "shell"
     },
     {
       "key": "fly",
       "max_retries": 1,
-      "run": "bin/deploy_fly.sh",
+      "run": "bin/deploy_fly.sh {ref}",
       "type": "shell"
     },
     {

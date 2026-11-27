@@ -31,6 +31,11 @@ defmodule Schemas.Card do
   cast — written only from `done_at_after_stage_change/4` by the stage-writing paths.
   `hidden_at` / `hidden_reason` (RE510) hide the card for everyone once it is moderated; nullable,
   never cast — written only by `Hamaca.Moderation`.
+  `target_branch` (RE458) is the card's target-branch override (nil = inherit the board's) and
+  `target_inherited_from_id` the spawner it was copied from; neither is cast by `changeset/2` —
+  the override is written through `target_changeset/2`, both are put on a spawned card's insert
+  by `Hamaca.Cards.create_card/3`. `validate_branch_name/2` is the ONE branch-name validator,
+  shared with `Schemas.Board`.
 
   `story_activity_id` / `story_step_id` / `release_id` (RE265) place the card on the story
   map — all three nilable, all three cast **only** through `story_map_changeset/2`, kept
@@ -83,6 +88,10 @@ defmodule Schemas.Card do
     # written only by Hamaca.Moderation.
     field :hidden_at, :utc_datetime
     field :hidden_reason, Ecto.Enum, values: Schemas.ContentReport.hidden_reasons()
+    # RE458 — the card's target-branch override; nil = inherit the board's `target_branch`.
+    # Never cast by changeset/2 — written only through target_changeset/2 (Hamaca.Cards.
+    # set_target_branch/3) or put on the insert by Hamaca.Cards.create_card/3's spawn inheritance.
+    field :target_branch, :string
 
     belongs_to :board, Schemas.Board
     belongs_to :stage, Schemas.Stage
@@ -91,6 +100,9 @@ defmodule Schemas.Card do
     belongs_to :story_activity, Schemas.StoryActivity
     belongs_to :story_step, Schemas.StoryStep
     belongs_to :release, Schemas.Release
+    # RE458 — the card this card's override was copied from when it was spawned; nil when it
+    # set its own or inherits the board's. Never cast; nilified when that card is deleted.
+    belongs_to :target_inherited_from, Schemas.Card
     has_many :owners, Schemas.CardOwner
     has_many :sub_tasks, Schemas.SubTask
     # RE93 — the cards this card is BLOCKED BY. Deliberately absent from changeset/2 and from
@@ -147,6 +159,64 @@ defmodule Schemas.Card do
         normalized = value |> String.trim() |> String.replace_prefix("#", "") |> String.trim()
         put_change(changeset, :tag, if(normalized == "", do: nil, else: normalized))
     end
+  end
+
+  @doc """
+  Changeset for the card's target-branch override (RE458): casts `:target_branch` only, trims it,
+  turns a blank value into `nil` (inherit the board's), validates it with
+  `validate_branch_name/2`, and clears `target_inherited_from_id` — an override set by hand is
+  the card's own, not a copy. Mirrors `normalize_tag/1`'s trim-then-empty-to-nil rule.
+  """
+  @spec target_changeset(t(), map()) :: Ecto.Changeset.t()
+  def target_changeset(card, attrs) do
+    card
+    |> cast(attrs, [:target_branch], empty_values: [])
+    |> normalize_target_branch()
+    |> validate_branch_name(:target_branch)
+    |> put_change(:target_inherited_from_id, nil)
+  end
+
+  defp normalize_target_branch(changeset) do
+    case get_change(changeset, :target_branch) do
+      value when is_binary(value) ->
+        trimmed = String.trim(value)
+        put_change(changeset, :target_branch, if(trimmed == "", do: nil, else: trimmed))
+
+      _nil_or_unchanged ->
+        changeset
+    end
+  end
+
+  @doc "The longest target branch name a board or card accepts (RE458)."
+  @spec target_branch_max_length() :: pos_integer()
+  def target_branch_max_length, do: 200
+
+  @doc """
+  Whether `name` is a usable git branch name (RE458) — git's ref-name rules: no whitespace or
+  ASCII control characters, none of `~ ^ : ? * [ \\`, no `..` or `@{`, no leading `-` or `/`, no
+  trailing `/`, `.` or `.lock`, and no `//`. A blank name is not a branch name.
+  """
+  @spec valid_branch_name?(String.t()) :: boolean()
+  def valid_branch_name?(name) when is_binary(name) do
+    name != "" and
+      not String.match?(name, ~r/[\s\x00-\x1f\x7f~^:?*\[\\]/u) and
+      not String.contains?(name, ["..", "@{", "//"]) and
+      not String.starts_with?(name, ["-", "/"]) and
+      not String.ends_with?(name, ["/", ".", ".lock"])
+  end
+
+  @doc """
+  Validates a non-nil `field` as a git branch name (`valid_branch_name?/1`) no longer than
+  `target_branch_max_length/0` (RE458). The ONE branch-name validator: `target_changeset/2` and
+  `Schemas.Board.changeset/2` both call it.
+  """
+  @spec validate_branch_name(Ecto.Changeset.t(), atom()) :: Ecto.Changeset.t()
+  def validate_branch_name(changeset, field) do
+    changeset
+    |> validate_change(field, fn ^field, value ->
+      if valid_branch_name?(value), do: [], else: [{field, "is not a valid git branch name"}]
+    end)
+    |> validate_length(field, max: target_branch_max_length())
   end
 
   @doc """

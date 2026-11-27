@@ -155,6 +155,22 @@ defmodule Storybook.Components.CoreComponents.BoxedField do
         template: """
         <div style="padding-bottom:56px"><.psb-variation/></div>
         """
+      },
+      %Variation{
+        id: :prefix_icon,
+        description: "RE458 — an icon prefix instead of text (Settings › General Target branch)",
+        attributes: %{
+          id: "bf-target",
+          commit: :self,
+          field: :target_branch,
+          form: Phoenix.Component.to_form(%{"target_branch" => "main"}, as: :board),
+          prefix_icon: "hero-share",
+          save_event: "save",
+          cancel_event: "cancel"
+        },
+        template: """
+        <div style="padding-bottom:56px"><.psb-variation/></div>
+        """
       }
     ]
   end

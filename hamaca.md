@@ -48,7 +48,8 @@ or `@path`.
 | `./hamaca search "words"` | Find a card by ref or title |
 | `./hamaca why RLY-12` | **Why isn't this card moving?** |
 | `./hamaca runs RLY-12` · `./hamaca runners` · `./hamaca version` | Run detail · connected runners · deployed SHA |
-| `./hamaca create "Fix login" --stage Backlog [--depends-on RE12,RE13]` | Create a card |
+| `./hamaca create "Fix login" --stage Backlog [--depends-on RE12,RE13]` | Create a card. Inside a node it sends `spawned_from` = `$HAMACA_REF`, so the new card inherits that card's target branch (`--spawned-from REF` / `--no-spawned-from` override) |
+| `./hamaca target RLY-12 [exp/flows \| --clear]` | Show / set / clear the card's target branch (refused while a run is active) |
 | `./hamaca move RLY-12 Code` · `./hamaca title RLY-12 "…"` | Move to a stage · retitle |
 | `./hamaca archive RLY-12` · `./hamaca unarchive RLY-12` | Take off the board / restore (`cancel` a live run first) |
 | `./hamaca status RLY-12 working` | Set status |

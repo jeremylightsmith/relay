@@ -3436,6 +3436,55 @@ defmodule HamacaWeb.CoreComponentsTest do
       assert html =~ ~s(id="bf-slug-input")
     end
 
+    # RE458 — the Target branch field: an icon prefix instead of a text one.
+    test ":self always-editable with a prefix_icon renders an icon-prefixed box" do
+      doc =
+        (&CoreComponents.boxed_field/1)
+        |> render_component(
+          id: "bf-target",
+          field: :target_branch,
+          form: Phoenix.Component.to_form(%{"target_branch" => "main"}, as: :board),
+          prefix_icon: "hero-share",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+        |> LazyHTML.from_fragment()
+
+      assert doc
+             |> LazyHTML.query(".commit-field-prefixed span.text-base-content\\/55 .hero-share.size-3\\.5")
+             |> Enum.count() == 1
+
+      assert doc
+             |> LazyHTML.query(".commit-field-prefixed input#bf-target-input.commit-field-bare.font-mono.text-sm")
+             |> Enum.count() == 1
+
+      assert doc |> LazyHTML.query(".commit-field-prefix") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#bf-target-error") |> Enum.count() == 0
+    end
+
+    test ":self prefix_icon renders the field's error line" do
+      form =
+        {%{}, %{target_branch: :string}}
+        |> Ecto.Changeset.cast(%{"target_branch" => "bad name..x"}, [:target_branch])
+        |> Ecto.Changeset.add_error(:target_branch, "is not a valid git branch name")
+        |> Map.put(:action, :update)
+        |> Phoenix.Component.to_form(as: :board)
+
+      doc =
+        (&CoreComponents.boxed_field/1)
+        |> render_component(
+          id: "bf-target",
+          field: :target_branch,
+          form: form,
+          prefix_icon: "hero-share",
+          save_event: "save",
+          cancel_event: "cancel"
+        )
+        |> LazyHTML.from_fragment()
+
+      assert doc |> LazyHTML.query("p#bf-target-error") |> LazyHTML.text() =~ "is not a valid git branch name"
+    end
+
     test ":self always-editable renders the :hidden slot inside its form" do
       assigns = %{form: Phoenix.Component.to_form(%{"name" => "Laptop"}, as: :api_key)}
 

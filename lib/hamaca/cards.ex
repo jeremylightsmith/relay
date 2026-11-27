@@ -94,6 +94,9 @@ defmodule Hamaca.Cards do
     :posted_by_user_id,
     # RE500 — the requester. Without it the created_by_user preload has nothing to join.
     :created_by_user_id,
+    # RE458 — the target-branch override and its spawner; the board tile's chip reads them.
+    :target_branch,
+    :target_inherited_from_id,
     :rejection,
     :inserted_at,
     :updated_at
@@ -111,25 +114,149 @@ defmodule Hamaca.Cards do
   creates. The card is inserted at the top of the stage (RLY-1 item 5). A
   successful create logs a `:created` activity entry (MMF 07) attributed to
   `actor`.
+
+  `attrs` may carry `"spawned_from"` / `:spawned_from` (RE458): the ref of a card on the same
+  board this one was spawned from. When that card's target (its active run's snapshot, else
+  `effective_target/2`) differs from the board default, the child copies it as its override and
+  points `target_inherited_from_id` at it; a spawner on the default records nothing. An unknown ref is `{:error, {:unknown_spawned_from, ref}}`, checked before a ref
+  number is allocated.
   """
   def create_card(%Stage{} = stage, attrs, actor \\ :agent) do
-    result =
-      Repo.transaction(fn ->
-        ref_number = allocate_ref_number(stage.board_id)
+    # RE458 — resolved BEFORE the transaction, so an unknown spawner never allocates a ref.
+    with {:ok, inherited} <- spawn_inheritance(stage, attrs) do
+      result = Repo.transaction(fn -> create_card_in_transaction(stage, attrs, inherited, actor) end)
 
-        case insert_card(stage, ref_number, attrs, actor) do
-          {:ok, card} ->
-            {:ok, _entry} = Activity.log(card, %{type: :created, actor: actor})
-            preload_owners(card)
+      # After the commit: a card that never landed must never tick setup step 5.8.
+      with {:ok, card} <- result, do: :ok = Setup.observe_card_created(card)
+      broadcast_upserted(result)
+    end
+  end
 
-          {:error, changeset} ->
-            Repo.rollback(changeset)
+  defp create_card_in_transaction(stage, attrs, inherited, actor) do
+    ref_number = allocate_ref_number(stage.board_id)
+
+    case insert_card(stage, ref_number, attrs, inherited, actor) do
+      {:ok, card} ->
+        {:ok, _entry} = Activity.log(card, %{type: :created, actor: actor})
+        preload_owners(card)
+
+      {:error, changeset} ->
+        Repo.rollback(changeset)
+    end
+  end
+
+  # RE458 — the target a card spawned from another inherits: the spawner's target — its active
+  # run's snapshot when it has one, else effective_target/2 — copied only when it differs from
+  # the board's current default (a target equal to the default adds nothing, and copying it would
+  # pin every card a node spawns to today's default). Copied ONCE — a later change to the spawner does not follow.
+  # Returns the fields to put on the insert, never cast.
+  defp spawn_inheritance(%Stage{} = stage, attrs) do
+    case Map.get(attrs, "spawned_from", Map.get(attrs, :spawned_from)) do
+      nil ->
+        {:ok, %{}}
+
+      ref ->
+        board = Repo.get!(Board, stage.board_id)
+
+        case spawner(board, ref) do
+          nil -> {:error, {:unknown_spawned_from, ref}}
+          %Card{} = spawner -> {:ok, inherited_target(board, spawner)}
         end
-      end)
+    end
+  end
 
-    # After the commit: a card that never landed must never tick setup step 5.8.
-    with {:ok, card} <- result, do: :ok = Setup.observe_card_created(card)
-    broadcast_upserted(result)
+  defp spawner(%Board{} = board, ref) when is_binary(ref) do
+    case parse_ref_number(board, ref) do
+      {:ok, ref_number} -> Repo.get_by(Card, board_id: board.id, ref_number: ref_number)
+      :error -> nil
+    end
+  end
+
+  defp spawner(%Board{}, _ref), do: nil
+
+  defp inherited_target(%Board{} = board, %Card{} = spawner) do
+    target = active_run_target(spawner) || effective_target(board, spawner)
+
+    if target == board.target_branch,
+      do: %{},
+      else: %{target_branch: target, target_inherited_from_id: spawner.id}
+  end
+
+  defp active_run_target(%Card{} = spawner) do
+    case active_run_context(spawner) do
+      %{"target" => target} when is_binary(target) -> target
+      _no_snapshot -> nil
+    end
+  end
+
+  # The context of the card's active (`:running`/`:parked`) run, or nil when it has none.
+  # Boundary: like stranded_run/2, Cards reads Schemas.Run directly — Runs depends on Cards.
+  defp active_run_context(%Card{id: card_id}) do
+    Repo.one(from r in Run, where: r.card_id == ^card_id and r.status in ^Run.active_statuses(), select: r.context)
+  end
+
+  defp active_run?(%Card{id: card_id}) do
+    Repo.exists?(from r in Run, where: r.card_id == ^card_id and r.status in ^Run.active_statuses())
+  end
+
+  @doc """
+  The branch `card`'s work targets (RE458): its own `target_branch` override, else `board`'s
+  default. The ONLY place that resolution is made — the run snapshot, the API and the UI all
+  call it.
+  """
+  @spec effective_target(Board.t(), Card.t()) :: String.t()
+  def effective_target(%Board{target_branch: default}, %Card{target_branch: override}), do: override || default
+
+  @doc """
+  Sets (a string) or clears (`nil` / blank — inherit the board default) `card`'s target-branch
+  override (RE458), attributed to `actor`. The name is validated first
+  (`Schemas.Card.target_changeset/2`, `{:error, changeset}`); then a card with an active
+  (`:running`/`:parked`) run is refused with `{:error, :run_active}` — its run already froze its
+  target. A real change clears `target_inherited_from_id`, logs a `:target_changed` activity
+  (`%{"from" => old, "to" => new}`) and broadcasts `{:card_upserted, card}`; a no-op re-set
+  writes, logs and broadcasts nothing.
+  """
+  @spec set_target_branch(Card.t(), String.t() | nil, actor()) ::
+          {:ok, Card.t()} | {:error, :run_active} | {:error, Ecto.Changeset.t()}
+  def set_target_branch(%Card{} = card, target_branch, actor) do
+    changeset = Card.target_changeset(card, %{target_branch: target_branch})
+
+    cond do
+      not changeset.valid? ->
+        {:error, %{changeset | action: :update}}
+
+      active_run?(card) ->
+        {:error, :run_active}
+
+      changeset.changes == %{} ->
+        {:ok, preload_owners(card)}
+
+      true ->
+        fn ->
+          updated = Repo.update!(changeset)
+          meta = %{"from" => card.target_branch, "to" => updated.target_branch}
+          {:ok, _entry} = Activity.log(updated, %{type: :target_changed, actor: actor, meta: meta})
+          preload_owners(updated)
+        end
+        |> Repo.transaction()
+        |> broadcast_upserted()
+    end
+  end
+
+  @doc """
+  The ref of the card `card`'s target override was copied from when it was spawned (RE458), or
+  `nil` when it was not (or that card is gone, or is not on `board`).
+  """
+  @spec target_inherited_from_ref(Board.t(), Card.t()) :: String.t() | nil
+  def target_inherited_from_ref(%Board{}, %Card{target_inherited_from_id: nil}), do: nil
+
+  def target_inherited_from_ref(%Board{} = board, %Card{target_inherited_from_id: spawner_id}) do
+    from(c in Card, where: c.id == ^spawner_id and c.board_id == ^board.id, select: c.ref_number)
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      ref_number -> Card.format_ref(board.key, ref_number)
+    end
   end
 
   @doc """
@@ -3524,7 +3651,8 @@ defmodule Hamaca.Cards do
     Card |> Repo.get!(card.id) |> Repo.preload(card_preloads())
   end
 
-  defp insert_card(%Stage{} = stage, ref_number, attrs, actor) do
+  # `inherited` is spawn_inheritance/2's target fields — put on the struct, never cast.
+  defp insert_card(%Stage{} = stage, ref_number, attrs, inherited, actor) do
     # ADR 0003 — a card is born with the arrival status for its stage (RE375): a review lane
     # can't hold the schema default :ready. Set on the struct (status is never cast), so create
     # stays one insert with no :status_changed entry or push.
@@ -3535,15 +3663,18 @@ defmodule Hamaca.Cards do
 
     changeset =
       Card.changeset(
-        %Card{
-          board_id: stage.board_id,
-          stage_id: stage.id,
-          position: 0,
-          ref_number: ref_number,
-          status: status,
-          done_at: done_at,
-          created_by_user_id: requester_id(actor)
-        },
+        struct!(
+          %Card{
+            board_id: stage.board_id,
+            stage_id: stage.id,
+            position: 0,
+            ref_number: ref_number,
+            status: status,
+            done_at: done_at,
+            created_by_user_id: requester_id(actor)
+          },
+          inherited
+        ),
         attrs
       )
 

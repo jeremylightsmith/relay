@@ -1387,6 +1387,23 @@ defmodule HamacaWeb.BoardLiveTest do
       refute_push_event(view, "native-back", _)
     end
 
+    test "the timeline phrases a target-branch change and its reset (RE458)", %{conn: conn, user: user, card: card} do
+      {:ok, card} = Cards.set_target_branch(card, "exp/flows", {:user, user.id})
+      {:ok, _card} = Cards.set_target_branch(card, nil, {:user, user.id})
+      board = Boards.get_or_create_default_board(user)
+
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}?card=MY1")
+      render_async(view)
+
+      assert has_element?(view, "#card-drawer-activity .timeline-activity-phrase", "set the target branch to exp/flows")
+
+      assert has_element?(
+               view,
+               "#card-drawer-activity .timeline-activity-phrase",
+               "reset the target branch to the board default"
+             )
+    end
+
     test "opening an archived card by URL shows the banner + Restore, hides edit actions, and logs the phrase",
          %{conn: conn, user: user, card: card} do
       {:ok, _archived} = Cards.archive_card(card, {:user, user.id})

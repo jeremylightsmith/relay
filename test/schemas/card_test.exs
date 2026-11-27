@@ -271,4 +271,61 @@ defmodule Schemas.CardTest do
       assert Card.done_time(card) == ~U[2026-10-01 00:00:00Z]
     end
   end
+
+  describe "valid_branch_name?/1 (RE458)" do
+    test "accepts ordinary branch names" do
+      for name <- ["main", "exp/flows", "feature/x-1.2"] do
+        assert Card.valid_branch_name?(name), "expected #{inspect(name)} to be valid"
+      end
+    end
+
+    test "refuses names git's ref-name rules reject" do
+      for name <- [
+            "a b",
+            "a..b",
+            "a~b",
+            "a^b",
+            "a:b",
+            "a?b",
+            "a*b",
+            "a[b",
+            "a\\b",
+            "a@{b",
+            "-a",
+            "/a",
+            "a/",
+            "a.",
+            "a.lock",
+            "a//b",
+            "a\tb"
+          ] do
+        refute Card.valid_branch_name?(name), "expected #{inspect(name)} to be invalid"
+      end
+    end
+  end
+
+  describe "target_changeset/2 (RE458)" do
+    test "trims the name and clears the inherited-from pointer" do
+      changeset = Card.target_changeset(%Card{target_inherited_from_id: 42}, %{"target_branch" => "  exp/flows  "})
+
+      assert changeset.valid?
+      assert get_change(changeset, :target_branch) == "exp/flows"
+      assert fetch_change(changeset, :target_inherited_from_id) == {:ok, nil}
+    end
+
+    test "a whitespace-only name clears the override to nil" do
+      changeset = Card.target_changeset(%Card{target_branch: "exp/flows"}, %{"target_branch" => "   "})
+
+      assert changeset.valid?
+      assert fetch_change(changeset, :target_branch) == {:ok, nil}
+    end
+
+    test "a name longer than the max length is an error" do
+      changeset = Card.target_changeset(%Card{}, %{"target_branch" => String.duplicate("a", 201)})
+
+      refute changeset.valid?
+      assert errors_on(changeset).target_branch != []
+      assert Card.target_branch_max_length() == 200
+    end
+  end
 end

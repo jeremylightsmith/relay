@@ -48,6 +48,9 @@ the install script calls before you have one.
 | 422 | `invalid_target` | reject `to` a stage the card can't go back to |
 | 422 | `unknown_refs` | `depends_on` names a card this board doesn't have; nothing is written |
 | 422 | `dependency_cycle` | `depends_on` would make cards wait on each other in a loop; the message names them |
+| 422 | `invalid` | `target_branch` isn't a usable git branch name |
+| 422 | `unknown_spawned_from` | `spawned_from` names a card this board doesn't have; nothing is created |
+| 409 | `run_active` | `target_branch` on a card that has a run going; nothing is written |
 
 ## What a card looks like
 
@@ -84,6 +87,9 @@ A single card (`GET /api/cards/:ref`, and every write that returns a card) adds 
   "spec": "…markdown…",
   "depends_on": [{ "ref": "RLY-13", "title": "Ship the migration", "satisfied": false }],
   "blocks": [{ "ref": "RLY-20", "title": "Backfill the index" }],
+  "target_branch": null,
+  "effective_target": "main",
+  "target_inherited_from": null,
   "timeline": [
     { "kind": "comment", "body": "on it", "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" },
     { "kind": "activity", "type": "moved", "meta": { "from_stage": "Spec", "to_stage": "Code" }, "author": { "type": "agent", "name": "Hamaca AI" }, "inserted_at": "…" }
@@ -94,6 +100,12 @@ A single card (`GET /api/cards/:ref`, and every write that returns a card) adds 
 `depends_on` lists the cards this one waits for; `satisfied` turns true when that card reaches
 Done. `blocks` lists the cards waiting for this one. A flow won't pick up a card while it's
 waiting, but a run that's already going carries on.
+
+`effective_target` is the branch the card's work is based on and shipped to. It's the card's own
+`target_branch` when it has one, and the board's target branch (`main` unless you change it in
+Settings) when `target_branch` is `null`. `target_inherited_from` is the ref of the card this
+one copied its target from when it was created, or `null`. A run keeps the target it started
+with, so a change reaches the card's next run.
 
 ## What a stage looks like
 
@@ -163,6 +175,10 @@ it out), `description`, `acceptance_criteria`, `spec`, `tag`, `branch`, `plan`, 
 `depends_on` (a list of refs). Returns `201` and the card. If `depends_on` names a card that
 doesn't exist, nothing is created.
 
+`spawned_from` is the ref of the card this one was made from. The new card copies that card's
+target branch. If it names a card that doesn't exist, you get `422 unknown_spawned_from` and
+nothing is created.
+
 ```
 curl -X POST -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \
   -d '{"title":"New card","stage":5}' https://hamaca.app/api/cards
@@ -180,8 +196,12 @@ curl -H "Authorization: Bearer $HAMACA_API_KEY" https://hamaca.app/api/cards/RLY
 
 Change a card. Send any of `title`, `description`, `acceptance_criteria`, `spec`, `tag`,
 `branch`, `plan`, `pr_url`, `status` (with an optional `progress`), `owners` (a list of
-`"agent"` or `"user:<id>"`) and `depends_on`. `depends_on` replaces the whole list; `[]` clears
-it. Returns the card.
+`"agent"` or `"user:<id>"`), `depends_on` and `target_branch`. `depends_on` replaces the whole
+list; `[]` clears it. Returns the card.
+
+`target_branch` sets the card's own target branch. `null` or `""` clears it, so the card follows
+the board's target again. While the card has a run going it's refused with `409 run_active`, and
+a name git wouldn't accept is `422 invalid`. Either way, nothing else in the request is written.
 
 ```
 curl -X PATCH -H "Authorization: Bearer $HAMACA_API_KEY" -H "Content-Type: application/json" \

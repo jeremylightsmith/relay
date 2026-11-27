@@ -2435,4 +2435,53 @@ defmodule Hamaca.RunsTest do
       assert %NodeJob{state: :claimed} = Repo.get(NodeJob, job.id)
     end
   end
+
+  describe "the run's target snapshot (RE458)" do
+    test "a new run snapshots the board default as context target, and its first job carries it", %{board: board} do
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+
+      assert {:ok, run} = Runs.start_run(card, flow)
+      assert run.context["target"] == "main"
+      assert Repo.reload!(run).context["target"] == "main"
+
+      assert [%NodeJob{} = job] = Runs.active_jobs(run)
+      assert job.payload["vars"]["target"] == "main"
+    end
+
+    test "the snapshot is frozen: a later board default change does not reach the run's next job", %{board: board} do
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+      {:ok, run} = Runs.start_run(card, flow)
+
+      {:ok, _board} = Hamaca.Boards.update_board(board, %{"target_branch" => "exp/flows"})
+
+      payload = Runs.build_payload(Repo.reload!(run), flow, "brainstorm", [])
+      assert payload["vars"]["target"] == "main"
+    end
+
+    test "a card with an override snapshots the override", %{board: board} do
+      flow = enabled_spec_flow(board)
+      {:ok, _board} = Hamaca.Boards.update_board(board, %{"target_branch" => "exp/flows"})
+      card = card_in(board, "Next up", "Overridden")
+      {:ok, card} = Hamaca.Cards.set_target_branch(card, "exp/card", :agent)
+
+      assert {:ok, run} = Runs.start_run(card, flow)
+      assert run.context["target"] == "exp/card"
+    end
+
+    test "a run with no target in its context (pre-migration) falls back to the effective target",
+         %{board: board} do
+      flow = enabled_spec_flow(board)
+      card = card_in(board, "Next up")
+      {:ok, run} = Runs.start_run(card, flow)
+
+      legacy = run |> Ecto.Changeset.change(context: Map.delete(run.context, "target")) |> Repo.update!()
+      {:ok, board} = Hamaca.Boards.update_board(board, %{"target_branch" => "exp/flows"})
+
+      payload = Runs.build_payload(legacy, flow, "brainstorm", [])
+      assert payload["vars"]["target"] == Hamaca.Cards.effective_target(board, Repo.reload!(card))
+      assert payload["vars"]["target"] == "exp/flows"
+    end
+  end
 end

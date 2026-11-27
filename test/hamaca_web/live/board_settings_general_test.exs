@@ -218,6 +218,117 @@ defmodule HamacaWeb.BoardSettingsGeneralTest do
       assert view |> element("#board-key-input") |> render() =~ board.key
       assert Boards.get_or_create_default_board(user).key == board.key
     end
+
+    # RE458 — the board's default target branch, after Card key.
+    test "the General pane shows the Target branch field after Card key with its help lines", %{
+      conn: conn,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      assert has_element?(view, "#board-target-form #board-target-input[value='main']")
+      assert has_element?(view, "#board-target-input.font-mono")
+
+      assert view |> element("#board-target-help") |> render() =~
+               "Cards branch from, rebase onto and ship to this branch."
+
+      assert view |> element("#board-target-warning") |> render() =~ "applies to each card&#39;s next run"
+
+      {key_at, _} = :binary.match(html, ~s(id="board-key-warning"))
+      {target_at, _} = :binary.match(html, ~s(id="board-target-form"))
+      assert target_at > key_at
+    end
+
+    test "saving a valid Target branch persists it, flashes success, and reflects it in the field", %{
+      conn: conn,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      html =
+        view
+        |> form("#board-target-form", board: %{target_branch: "exp/flows"})
+        |> render_submit()
+
+      assert html =~ "Target branch saved."
+      assert Boards.get_or_create_default_board(user).target_branch == "exp/flows"
+      assert has_element?(view, "#board-target-input[value='exp/flows']")
+    end
+
+    test "an invalid Target branch shows the inline error and keeps the stored value", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      view
+      |> form("#board-target-form", board: %{target_branch: "bad name..x"})
+      |> render_submit()
+
+      assert view |> element("#board-target-error") |> render() =~ "is not a valid git branch name"
+      assert Boards.get_or_create_default_board(user).target_branch == "main"
+    end
+
+    test "a blank Target branch shows can't be blank and keeps the stored value", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      view
+      |> form("#board-target-form", board: %{target_branch: "   "})
+      |> render_submit()
+
+      assert view |> element("#board-target-error") |> render() =~ "can&#39;t be blank"
+      assert Boards.get_or_create_default_board(user).target_branch == "main"
+    end
+
+    test "cancelling after an invalid Target branch restores the stored value and clears the error", %{
+      conn: conn,
+      user: user
+    } do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      view
+      |> form("#board-target-form", board: %{target_branch: "bad name..x"})
+      |> render_submit()
+
+      assert has_element?(view, "#board-target-error")
+
+      view |> element("#board-target-cancel") |> render_click()
+
+      assert has_element?(view, "#board-target-input[value='main']")
+      refute has_element?(view, "#board-target-error")
+    end
+
+    test "an archived board shows the target read-only and refuses save_board_target", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, _archived} = Boards.archive_board(board)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      refute has_element?(view, "#board-target-form")
+      assert has_element?(view, "#general-pane span.font-mono", "main")
+
+      html = render_click(view, "save_board_target", %{"board" => %{"target_branch" => "exp/flows"}})
+
+      assert html =~ "This board is archived (read-only)."
+      assert Boards.get_board(user, board.slug).target_branch == "main"
+    end
+
+    test "the intro names the branch its cards build on", %{conn: conn, user: user} do
+      board = Boards.get_or_create_default_board(user)
+      {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}/settings?section=general")
+
+      intro =
+        view
+        |> element("#general-intro")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.text()
+        |> String.trim()
+
+      assert intro ==
+               "The board's display name, its URL slug (relay.app/<slug>), its card key, and the branch its cards build on."
+    end
   end
 
   # RE460 — a held (paused) owner's board has no Board settings: the route redirects back to the board.

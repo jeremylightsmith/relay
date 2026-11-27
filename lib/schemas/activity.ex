@@ -25,6 +25,10 @@ defmodule Schemas.Activity do
   `:dependencies_changed` (RE93) records a replacement of the card's blocker set, with
   `meta: %{"added" => [ref], "removed" => [ref]}`; a no-op re-set logs nothing.
 
+  `:target_changed` (RE458) records a change to the card's target-branch override, with
+  `meta: %{"from" => branch | nil, "to" => branch | nil}` — `nil` meaning "inherit the board
+  default"; a no-op re-set logs nothing.
+
   `:action` (RLY-112) is one runner log line, with the line in `text` and the AI
   session that emitted it in `run_id`; `:failure` (RLY-112) is the agent erroring.
   Both are written in bulk by `Hamaca.Activity.LogSink` via `insert_all`, which
@@ -59,7 +63,10 @@ defmodule Schemas.Activity do
     :failure,
     # RE93 — the card's blocker set was replaced. meta: %{"added" => [ref], "removed" => [ref]},
     # written only when the set actually changed.
-    :dependencies_changed
+    :dependencies_changed,
+    # RE458 — the card's target-branch override changed. meta: %{"from" => branch | nil,
+    # "to" => branch | nil}; nil = inherit the board default.
+    :target_changed
   ]
 
   schema "activities" do

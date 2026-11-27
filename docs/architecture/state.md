@@ -267,6 +267,16 @@ a guarded `UPDATE` that refuses (and logs) a transition from an unexpected state
 | `running` | `parked` | park (reason: `needs_input` \| `claimed` \| `runner_gone`) |
 <!-- END generated: run-transitions -->
 
+**A run freezes its target branch (RE458).** When `Hamaca.Runs` inserts a run it writes
+`"target" => Hamaca.Cards.effective_target(board, card)` (the card's `target_branch` override,
+else the board's default) into `run.context`; that snapshot wins over any caller-supplied
+`"target"`. `build_payload/4` merges `run.context` into every job's `vars`, so each job carries
+`vars.target` — the runner's `{target}` placeholder — for the run's whole life: a later change to
+the board default or the card's override reaches only the **next** run. While a run is active
+(`running`/`parked`), `Cards.set_target_branch/3` refuses with `:run_active` (409 over the API).
+A run started before the snapshot existed has no `"target"` key; `build_payload/4` falls back to
+the card's current effective target (`Map.put_new`).
+
 `parked_reason` says *why* a parked run is waiting:
 
 | `parked_reason` | Waiting on |

@@ -61,8 +61,8 @@ USAGE = None   # the running `hamaca start`'s HarnessUsageBook (RE436); None out
 # not merely past the merge-base's — and paste the new fingerprint below. bin/test_hamaca.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 102
-RUNNER_FINGERPRINT = "d3dc3c20ece00e956454e0a20362e1dbf54a4653af99441834224acafc9c95b6"
+RUNNER_VERSION = 103
+RUNNER_FINGERPRINT = "2877aac97cd7a3ff4820d32bd813bbee948cd3995b159efadfdcb3310f296de8"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
@@ -165,7 +165,7 @@ RETIRED_ENV_PREFIX = "RELAY_"   # read only by retired_env_guard and the migrati
 ENV_READ = ("URL", "API_KEY", "STATE_DIR", "RUNNER_LOCK_DIR", "UPDATED_FROM", "UPDATE_ATTEMPTS",
             "NODE_OUTCOME")
 ENV_EXPORTED = ("NODE_SCRATCH", "NODE_OUTCOME", "PLAN", "REF", "BRANCH", "BASE", "WORKTREE",
-                "CACHE_DIR")
+                "CACHE_DIR", "TARGET")
 
 
 def getenv(suffix):
@@ -419,7 +419,8 @@ def _request(method, path, body=None, soft_404=False, soft_conflict=False, timeo
                     msg = json.loads(raw)["error"]["message"]
                 except Exception:
                     msg = f"HTTP {e.code}"
-                die(f"API {e.code}: {msg}")
+                code = _error_code(raw)
+                die(f"API {e.code}: {msg}" + (f" ({code})" if code else ""))
         except urllib.error.URLError as e:
             if retries.again(attempt, e, f"request failed ({e.reason})"):
                 continue
@@ -947,6 +948,23 @@ def set_branch(ref, name):
     return api("PATCH", f"/api/cards/{ref}", {"branch": name})["data"]
 
 
+def set_target(ref, name):
+    """Override the card's target branch, or clear it back to the board default with None
+    (RE458). Refused 409 `run_active` while a run is active, 422 `invalid` for a bad name."""
+    return api("PATCH", f"/api/cards/{ref}", {"target_branch": name})["data"]
+
+
+def target_line(card):
+    """`<REF> target: <effective> (board default | override | override, inherited from X)`."""
+    if card.get("target_branch") is None:
+        source = "board default"
+    elif card.get("target_inherited_from"):
+        source = f"override, inherited from {card['target_inherited_from']}"
+    else:
+        source = "override"
+    return f"{card['ref']} target: {card['effective_target']} ({source})"
+
+
 def set_pr_url(ref, url):
     return api("PATCH", f"/api/cards/{ref}", {"pr_url": url})["data"]
 
@@ -1066,7 +1084,8 @@ def unarchive_card(ref):
     return api("POST", f"/api/cards/{ref}/unarchive", {})["data"]
 
 
-def create_card(title, stage_name=None, description=None, tag=None, depends_on=None):
+def create_card(title, stage_name=None, description=None, tag=None, depends_on=None,
+                spawned_from=None):
     body = {"title": title}
     if stage_name is not None:
         body["stage"] = resolve_stage_id(stage_name)
@@ -1076,6 +1095,8 @@ def create_card(title, stage_name=None, description=None, tag=None, depends_on=N
         body["tag"] = tag
     if depends_on is not None:
         body["depends_on"] = depends_on
+    if spawned_from is not None:
+        body["spawned_from"] = spawned_from
     return api("POST", "/api/cards", body)["data"]
 
 
@@ -1922,8 +1943,29 @@ def cmd_create(args):
         description=read_arg(args.description) if args.description is not None else None,
         tag=args.tag,
         depends_on=split_refs(args.depends_on) if args.depends_on else None,
+        spawned_from=create_spawned_from(args),
     )
     emit(args, card, lambda: print_card(card))
+
+
+def create_spawned_from(args):
+    """The card a new card is spawned from (RE458): `--spawned-from`, nothing under
+    `--no-spawned-from`, else HAMACA_REF — the runner exports it to every node job, so a card an
+    agent files mid-run inherits that card's target branch without anyone asking."""
+    if args.no_spawned_from:
+        return None
+    return args.spawned_from or getenv("REF")
+
+
+def cmd_target(args):
+    """hamaca target REF [BRANCH] [--clear] — show, set or clear a card's target branch."""
+    if args.clear:
+        card = set_target(args.ref, None)
+    elif args.branch is not None:
+        card = set_target(args.ref, args.branch)
+    else:
+        card = get_card(args.ref)
+    emit(args, card, target_line(card))
 
 
 def cmd_depends(args):
@@ -2717,6 +2759,31 @@ def cmd_git_fetch(args):
         sys.exit(1)
 
 
+def remote_of(base):
+    """The remote half of a `<remote>/<branch>` base ref (RE458): `origin/main` -> `origin`. A
+    job's base is this remote plus its card's target, so a fork whose pool base is
+    `upstream/trunk` targets `upstream/<target>`."""
+    return base.split("/", 1)[0]
+
+
+def _remote_ref_exists(base_ref):
+    return subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{base_ref}"],
+                          cwd=ROOT, capture_output=True, text=True).returncode == 0
+
+
+def verify_base_ref(base_ref):
+    """None when `refs/remotes/<base_ref>` exists, fetching once if it is not there locally yet;
+    otherwise the failure detail a job reports (RE458). A card whose target branch was never
+    pushed must fail before any worktree work, naming the branch — not deep inside a
+    `git worktree add` or `git rebase` with git's own words."""
+    if _remote_ref_exists(base_ref):
+        return None
+    git_fetch_with_retry(ROOT)
+    if _remote_ref_exists(base_ref):
+        return None
+    return f"{base_ref} does not exist; push it first"
+
+
 def ensure_worktree(name, base):
     """Create <WORKTREES_DIR>/<name> as a DETACHED checkout at `base` if missing,
     so it never holds a branch and cannot collide with ROOT's checked-out branch."""
@@ -2862,6 +2929,11 @@ HOOK_FILES = {"prepare": "prepare-worktree.sh", "cleanup": "cleanup-worktree.sh"
 # not configurable; the removal goes ahead either way.
 CLEANUP_HOOK_TIMEOUT = 120
 
+# RE458: seconds an IDLE per-target clean tree (`<ns>-clean-<slug>-<hash>`) survives before
+# refresh_idle_shared() removes it. Until then it is reset to its base on every pass, so a burst
+# of Spec/Plan work against one experiment branch reuses one warm tree. The ONE definition.
+CLEAN_TREE_IDLE_GRACE_S = 3600
+
 
 def _sanitize_ref(ref):
     """A filesystem/git-safe worktree suffix from a card ref. Refs are normally already
@@ -2874,8 +2946,12 @@ class RunnerPool:
     watcher's work pool so both runners run at once.
 
       shared_clean -> one shared worktree `<ns>-clean`, up to `capacity.shared_clean` concurrent
-                      jobs, REUSED (never reset per-job); fast-forwarded to base only when every
-                      shared slot is idle (the watcher's scan() discipline). UNCHANGED (RLY-231).
+                      jobs, REUSED (never reset per-job); fast-forwarded to base only when it is
+                      idle (the watcher's scan() discipline). A job whose card targets another
+                      branch (RE458) runs in a per-target `<ns>-clean-<slug>-<hash>` tree
+                      instead (`self.clean_trees`), created on first use, reset while idle,
+                      removed after CLEAN_TREE_IDLE_GRACE_S idle. Every clean tree shares the ONE
+                      `capacity.shared_clean` via `shared_used`.
       exclusive    -> ONE worktree PER CARD, `<ns>-<ref>`, created on the card's first job and
                       torn down when the run terminates (RLY-231). Never reused across cards.
                       Identity is the card's branch, so cross-contamination is impossible by
@@ -2904,6 +2980,10 @@ class RunnerPool:
         self.max_retained_failed = cfg.get("max_retained_failed", 3)
         self.shared_name = f"{self.ns}-clean"
         self.shared_used = 0
+        # RE458: per-target clean trees for shared_clean work off the pool base. name ->
+        # {"target", "base", "live": int (in-flight jobs), "created": bool (prepared OK),
+        #  "idle_since": float|None (self.clock() when `live` last reached 0)}.
+        self.clean_trees = {}
         # name -> {"ref", "run_id", "state": "active"|"retained", "live": int (in-flight node
         #          jobs, RE437), "partition": str|None, "teardown_failed": bool (RE336, optional)}
         self.wts = {}
@@ -2921,6 +3001,23 @@ class RunnerPool:
     # ---- names ----------------------------------------------------------
     def wt_name(self, ref):
         return f"{self.ns}-{_sanitize_ref(ref)}"
+
+    def base_for(self, job):
+        """The ref `job`'s worktree is based on (RE458): `<remote of the pool base>/<target>`
+        when the job carries its card's target, else the pool base (talk turns, old servers)."""
+        target = (job.get("vars") or {}).get("target")
+        return f"{remote_of(self.base)}/{target}" if target else self.base
+
+    def clean_tree_name(self, target):
+        """The per-target clean tree for `target` (RE458). The hash keeps targets that sanitize
+        alike (`exp/flows`, `exp-flows`) in different trees."""
+        digest = hashlib.sha256(target.encode("utf-8")).hexdigest()[:8]
+        return f"{self.shared_name}-{_sanitize_ref(target)}-{digest}"
+
+    def _clean_tree_dir(self, name):
+        """True for a `<ns>-clean-<slug>-<hash>` tree name (RE458): shared scratch, never a
+        per-card worktree for recover() to adopt."""
+        return re.fullmatch(rf"{re.escape(self.shared_name)}-.+-[0-9a-f]{{8}}", name) is not None
 
     def _ref_of(self, slot):
         """The card ref a per-card slot belongs to, for log attribution: the record's own ref,
@@ -3036,7 +3133,10 @@ class RunnerPool:
                 if self.shared_used >= self.cap_shared:
                     return None
                 self.shared_used += 1
-                return self.shared_name, False
+                base = self.base_for(job)
+                if base == self.base:
+                    return self.shared_name, False
+                return self._place_clean_locked(job["vars"]["target"], base)
 
             name = self.wt_name(job["vars"]["ref"])
             rec = self.wts.get(name)
@@ -3104,6 +3204,21 @@ class RunnerPool:
             # live worktree; `cmd_start`'s bounded placement retry covers the deferred window.
             return None
 
+    def _place_clean_locked(self, target, base):
+        """Place one shared_clean job in `target`'s clean tree (RE458). The first placement into
+        a tree not yet created is the reset one (it creates and prepares it); a concurrent one
+        waits on that preparation through `self.preps`, exactly like a fan_out sibling. Caller
+        holds self.lock and has already counted the job into `shared_used`."""
+        name = self.clean_tree_name(target)
+        tree = self.clean_trees.setdefault(name, {"target": target, "base": base, "live": 0,
+                                                  "created": False, "idle_since": None})
+        tree["live"] += 1
+        tree["idle_since"] = None
+        reset = not tree["created"] and name not in self.preps
+        if reset:
+            self.preps[name] = {"done": threading.Event(), "detail": None}
+        return name, reset
+
     def _place_locked(self, name, rec, reset):
         """Count one more node job into `rec` and return assign()'s (slot, reset). A reset
         placement opens the slot's preparation; its siblings wait on it in execute_one (RE437).
@@ -3114,11 +3229,22 @@ class RunnerPool:
         return name, reset
 
     # ---- first-job preparation (RE437) ------------------------------------
-    def prepared(self, slot, detail=None):
+    def prepared(self, slot, detail=None, never_built=False):
         """The reset job finished preparing `slot`: None on success, else the failure detail
-        every waiting sibling reports instead of running."""
+        every waiting sibling reports instead of running.
+
+        `never_built` (RE458) says the reset job gave up before touching the tree (its target
+        branch is missing): a per-card record whose directory does not exist is then dropped
+        when its last job releases, rather than retained or kept bound to a tree that was never
+        made."""
         with self.lock:
             prep = self.preps.get(slot)
+            tree = self.clean_trees.get(slot)
+            if tree is not None and detail is None:
+                tree["created"] = True
+            rec = self.wts.get(slot)
+            if never_built and rec is not None and not os.path.isdir(worktree_path(slot)):
+                rec["never_built"] = True
         if prep is not None:
             prep["detail"] = detail
             prep["done"].set()
@@ -3255,6 +3381,7 @@ class RunnerPool:
         if job["isolation"] == "shared_clean":
             with self.lock:
                 self.shared_used = max(0, self.shared_used - 1)
+                self._release_clean_locked(slot)
             return
         with self.lock:
             rec = self.wts.get(slot)
@@ -3264,12 +3391,35 @@ class RunnerPool:
             if rec["live"] > 0:
                 return                  # sibling jobs still run here: the last one out decides
             self.preps.pop(slot, None)
+            if (rec.pop("never_built", False) and not rec.get("talk_users", 0)
+                    and not os.path.isdir(worktree_path(slot))):
+                # RE458: nothing was ever created, so there is nothing to retain or tear down,
+                # and the run's next job must create the tree afresh.
+                self._release_partition(rec)
+                self.wts.pop(slot, None)
+                return
             if run_state is None or run_state in ACTIVE_RUN_STATES:
                 return                                  # revoke or still-live: keep active+bound
             if rec.get("talk_users", 0) > 0:
                 rec["pending_finish"] = run_state
                 return
             self._finish_locked(slot, rec, run_state)
+
+    def _release_clean_locked(self, slot):
+        """One job left a per-target clean tree (RE458). At `live` 0 its preparation is done
+        with; a tree that was never created and is not on disk is forgotten, any other one is
+        stamped idle for refresh_idle_shared(). Caller holds self.lock."""
+        tree = self.clean_trees.get(slot)
+        if tree is None:
+            return
+        tree["live"] = max(0, tree["live"] - 1)
+        if tree["live"] > 0:
+            return
+        self.preps.pop(slot, None)
+        if not tree["created"] and not os.path.isdir(worktree_path(slot)):
+            self.clean_trees.pop(slot, None)
+        else:
+            tree["idle_since"] = self.clock()
 
     def release_held(self, ref, status=None):
         """Recovery path: the heartbeat named this card's worktree releasable (every run on the
@@ -3378,8 +3528,9 @@ class RunnerPool:
                 self.wts.pop(name, None)
 
     # ---- git plumbing (worktree lifecycle) ------------------------------
-    def create_or_rebaseline(self, slot):
-        """Make `slot` a clean worktree at base. Missing -> `git worktree add --detach`; an
+    def create_or_rebaseline(self, slot, base=None):
+        """Make `slot` a clean worktree at `base` (default: the pool base; RE458 passes the job's
+        `base_for`). Missing -> `git worktree add --detach`; an
         existing (reclaimed retained) one -> hard reset + clean to base (salvaging dirty edits via
         stash, per reset_worktree) and clear its retained marker. It is fine to sit DETACHED at
         base here: the flow's first node (`branch`) runs `git checkout -B {branch} origin/main`,
@@ -3403,14 +3554,15 @@ class RunnerPool:
                 shutil.rmtree(path, ignore_errors=True)
             if os.path.isdir(path):
                 die(f"half-deleted worktree {slot} could not be cleared: {path}")
+        base = base or self.base
         if os.path.isdir(path):
-            reset_worktree(path, self.base)
+            reset_worktree(path, base)
             _clear_retained_marker(path)
             return
         if not git_fetch_with_retry(ROOT):
             die("git fetch failed while creating a per-card worktree")
         git_worktree_with_retry(["prune"])
-        if not git_worktree_with_retry(["add", "--detach", path, self.base]):
+        if not git_worktree_with_retry(["add", "--detach", path, base]):
             die(f"git worktree add failed for {slot}")
 
     def _teardown(self, slot, retain):
@@ -3485,24 +3637,25 @@ class RunnerPool:
             return hook_abs
         return None
 
-    def _run_hook(self, hook_abs, slot_path, ref, branch, timeout=None):
+    def _run_hook(self, hook_abs, slot_path, ref, branch, timeout=None, base=None):
         """Run one lifecycle hook with the contract every hook shares (§4, RE339): argv
         `[worktree, ref, branch, base, cache_dir]`, the same five as `HAMACA_WORKTREE`/
         `HAMACA_REF`/`HAMACA_BRANCH`/`HAMACA_BASE`/`HAMACA_CACHE_DIR` in env — cwd = the
-        worktree. Returns the CompletedProcess. Past
-        `timeout` subprocess.run kills the hook and raises TimeoutExpired."""
+        worktree. `base` defaults to the pool base (RE458 passes the job's). Returns the
+        CompletedProcess. Past `timeout` subprocess.run kills the hook and raises TimeoutExpired."""
+        base = base or self.base
         cache_dir = os.path.expanduser(self.cfg.get("cache_dir") or "")
         hook_env = dict(os.environ)
         for suffix, value in (("WORKTREE", slot_path), ("REF", str(ref)),
-                              ("BRANCH", str(branch or "")), ("BASE", self.base),
+                              ("BRANCH", str(branch or "")), ("BASE", base),
                               ("CACHE_DIR", cache_dir)):
             export_env(hook_env, suffix, value)
         return subprocess.run([hook_abs, slot_path, str(ref), str(branch or ""),
-                               self.base, cache_dir],
+                               base, cache_dir],
                               cwd=slot_path, env=hook_env, capture_output=True, text=True,
                               timeout=timeout)
 
-    def run_prepare_hook(self, slot_path, ref, branch):
+    def run_prepare_hook(self, slot_path, ref, branch, base=None):
         """Warm a freshly created/re-baselined worktree via the project's prepare hook (§4),
         located by `_hook_path("prepare")`; no hook is a SKIP (a cold build is correct, not an
         error). Returns None on success/skip, or captured stderr on nonzero exit — a failing
@@ -3510,7 +3663,7 @@ class RunnerPool:
         hook_abs = self._hook_path("prepare")
         if hook_abs is None:
             return None
-        proc = self._run_hook(hook_abs, slot_path, ref, branch)
+        proc = self._run_hook(hook_abs, slot_path, ref, branch, base=base)
         if proc.returncode == 0:
             return None
         return (proc.stderr or proc.stdout or f"prepare hook exited {proc.returncode}").strip()
@@ -3569,7 +3722,8 @@ class RunnerPool:
         RETIRED fixed pool (RLY-231). The forced version-floor bump makes this upgrade in place,
         so recover() reclaims those stale slots (remove+prune) instead of adopting them; otherwise
         each would masquerade as a phantom active worktree with run_id None, permanently consuming
-        an exclusive partition that nothing can ever free."""
+        an exclusive partition that nothing can ever free. A per-target `<ns>-clean-<slug>-<hash>`
+        tree (RE458) is removed the same way: it is shared scratch, re-created on demand."""
         with self.lock:
             for path in _list_worktree_paths():
                 name = os.path.basename(path)
@@ -3577,12 +3731,8 @@ class RunnerPool:
                     continue
                 if name in self.wts:
                     continue
-                if self._retired_pool_slot(name):
-                    # A retired slot belongs to no card, so the hook gets an empty ref (RE339).
-                    if _worktree_link_intact(path):
-                        self._cleanup_before_removal(path, "")
-                    git_worktree_with_retry(["remove", "--force", path])
-                    git_worktree_with_retry(["prune"])
+                if self._retired_pool_slot(name) or self._clean_tree_dir(name):
+                    self._remove_unowned_tree(path)
                     continue
                 ref = name[len(self.ns) + 1:]
                 if _is_retained_worktree(path):
@@ -3593,10 +3743,41 @@ class RunnerPool:
                                       "live": 0, "partition": self._take_partition()}
             self._evict_retained_over_cap_locked()
 
+    def _remove_unowned_tree(self, path):
+        """Remove a tree that belongs to no card — a retired `<ns>-work-N` slot or a per-target
+        clean tree — so the cleanup hook gets an empty ref (RE339). True once it is gone."""
+        if _worktree_link_intact(path):
+            self._cleanup_before_removal(path, "")
+        git_worktree_with_retry(["remove", "--force", path])
+        git_worktree_with_retry(["prune"])
+        return not os.path.isdir(path)
+
     def refresh_idle_shared(self):
+        """Once per claim-loop pass: fast-forward `<ns>-clean` when its OWN occupancy is 0,
+        reset every idle per-target clean tree to its base, and remove one idle for at least
+        CLEAN_TREE_IDLE_GRACE_S (RE458). At most one fetch per pass: refresh_worktree fetches,
+        and the per-target resets fetch only when it did not run."""
         with self.lock:
-            if self.shared_used == 0:
+            fetched = False
+            off_default_live = sum(t["live"] for t in self.clean_trees.values())
+            if self.shared_used - off_default_live == 0:
                 refresh_worktree(self.shared_name, self.base)
+                fetched = True
+            now = self.clock()
+            for name, tree in list(self.clean_trees.items()):
+                if tree["live"] > 0:
+                    continue
+                path = worktree_path(name)
+                idle_since = tree["idle_since"] if tree["idle_since"] is not None else now
+                if now - idle_since >= CLEAN_TREE_IDLE_GRACE_S:
+                    if self._remove_unowned_tree(path):
+                        self.clean_trees.pop(name, None)
+                    continue
+                if os.path.isdir(path):
+                    if not fetched:
+                        git_fetch_with_retry(ROOT)
+                        fetched = True
+                    reset_worktree(path, tree["base"])
 
 
 def _git_worktree_attempts(args):
@@ -4158,7 +4339,7 @@ def _print_claude_event(ev, tag="", mirror=True):
             forward("claude", line, ref)
 
 
-def _apply_node_env(child_env, partition, scratch, plan):
+def _apply_node_env(child_env, partition, scratch, plan, ref=None, target=None):
     """Set-or-CLEAR the per-node env on a child (RLY-216).
 
     `partition`/`scratch`/`plan` are per-job (RLY-213/214/223): a job that has one exports it, a
@@ -4167,8 +4348,12 @@ def _apply_node_env(child_env, partition, scratch, plan):
     HAMACA_PLAN exported, so when such a node itself runs `./hamaca` (the precommit gate runs
     `bin/test_hamaca.py`, whose own tests spawn env-less child steps) the value leaked in, and the
     gate failed for every Code run. Pop when None so the child's env reflects the JOB's config,
-    not whatever the runner process happened to carry. The two node vars go through export_env,
+    not whatever the runner process happened to carry. The node vars go through export_env,
     so each HAMACA_ name is set or popped and a stale RELAY_ twin never survives (RE482).
+
+    `ref`/`target` (RE458) are the node job's card and its frozen target branch: a node's
+    `./hamaca create` reads HAMACA_REF as the card it spawned from, and bin scripts read
+    HAMACA_TARGET for where the card ships. A talk turn passes neither, so both are cleared.
     """
     if partition is None:
         child_env.pop("MIX_TEST_PARTITION", None)
@@ -4176,6 +4361,8 @@ def _apply_node_env(child_env, partition, scratch, plan):
         child_env["MIX_TEST_PARTITION"] = partition
     export_env(child_env, "NODE_SCRATCH", scratch)
     export_env(child_env, "PLAN", plan)
+    export_env(child_env, "REF", ref)
+    export_env(child_env, "TARGET", target)
 
 
 # A failing gate's detail is the only thing the fix node gets, and a test runner prints each
@@ -4197,7 +4384,8 @@ SHELL_HIGHLIGHT_MAX = 40      # total highlight lines kept, so a mass failure ca
 SHELL_TAIL = 12
 
 
-def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None):
+def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None,
+                  ref=None, target=None):
     """Run a shell step with a live, tag-prefixed feed. Returns True on success.
 
     On failure the tail of the output is appended to `sink` so the card can carry the
@@ -4219,9 +4407,10 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scr
     `scratch_path(slot, ref, node)` so a gate step can write findings there too.
 
     `plan`, if given, is exported as HAMACA_PLAN (RLY-223) — the caller supplies
-    `plan_path(slot, ref)` so the branch node writes/probes the per-ref plan there."""
+    `plan_path(slot, ref)` so the branch node writes/probes the per-ref plan there.
+    `ref`/`target` (RE458) are exported as HAMACA_REF/HAMACA_TARGET, set or cleared."""
     child_env = dict(os.environ)
-    _apply_node_env(child_env, partition, scratch, plan)
+    _apply_node_env(child_env, partition, scratch, plan, ref=ref, target=target)
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, text=True, bufsize=1, env=child_env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=on_proc is not None)
@@ -5006,7 +5195,7 @@ def classify_claude_failure(report):
 
 def _stream_agent_job(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None,
                       partition=None, scratch=None, plan=None, on_event=None, mirror=True,
-                      usage=None, on_session=None, cost_path=None):
+                      usage=None, on_session=None, cost_path=None, ref=None, target=None):
     """Run one agent CLI invocation — `argv`, already expanded from a harness command template
     (RE433) — and stream its JSON events. The session id is read from each event at
     `session_id_path` (a dot path, `.session_id` for Claude Code, `.thread_id` for a CLI that
@@ -5027,7 +5216,8 @@ def _stream_agent_job(argv, cwd, tag="", session_id_path=None, outcome_path=None
     reads so the session survives a revoke. `cost_path` (RE516) is the harness's dot path to the
     session's cumulative USD cost (`.total_cost_usd` for Claude Code); each event is read with
     `read_number` and the latest number wins onto `report.cost` — a non-number never overwrites
-    one already captured, and no path captures nothing (a talk turn passes none).
+    one already captured, and no path captures nothing (a talk turn passes none). `ref`/`target`
+    (RE458) are exported as HAMACA_REF/HAMACA_TARGET, set or cleared (a talk turn passes none).
 
     stdin is DEVNULL: an agent CLI reading a non-TTY stdin (`codex exec` does) would otherwise
     hang on, or append junk from, the runner's own stdin.
@@ -5043,7 +5233,7 @@ def _stream_agent_job(argv, cwd, tag="", session_id_path=None, outcome_path=None
     child_env.setdefault("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
     if outcome_path:
         export_env(child_env, "NODE_OUTCOME", outcome_path)
-    _apply_node_env(child_env, partition, scratch, plan)
+    _apply_node_env(child_env, partition, scratch, plan, ref=ref, target=target)
     # Every caller is a runner node-job, which passes on_proc (a JobControl.register)
     # and so gets its own process group (start_new_session), since only a JobControl can
     # kill that group.
@@ -5516,6 +5706,10 @@ def run_node_job(job, slot_path, control, partition=None):
     raw_vars.setdefault("url", configured_relay_url())
     vars = {k: v for k, v in raw_vars.items() if v is not None}
     cmd = render(job["run"], vars)
+    # RE458: the SERVER's ref and target only, never the job-id fallback above: HAMACA_REF is
+    # what a node's `./hamaca create` sends as `spawned_from`.
+    node_env = {"ref": (job.get("vars") or {}).get("ref"),
+                "target": (job.get("vars") or {}).get("target")}
 
     scratch = scratch_path(slot_path, ref, job["node_id"])
     plan = plan_path(slot_path, ref)
@@ -5548,7 +5742,7 @@ def run_node_job(job, slot_path, control, partition=None):
                 argv, cwd=slot_path, tag=tag, session_id_path=session_path,
                 cost_path=cost_path, outcome_path=outcome_path, on_proc=control.register,
                 partition=partition, scratch=scratch, plan=plan, usage=usage,
-                on_session=control.note_session)
+                on_session=control.note_session, **node_env)
             outcome, detail, no_changes = determine_agent_outcome(job, ok, outcome_path, cwd=slot_path,
                                                                   report=report)
             resume_at = blocked_resume_at(outcome, report)
@@ -5559,7 +5753,7 @@ def run_node_job(job, slot_path, control, partition=None):
         tail = []
         ok = _stream_shell(compose_node_prompt(job, cmd, vars), slot_path, tag, sink=tail,
                            on_proc=control.register, partition=partition, scratch=scratch,
-                           plan=plan)
+                           plan=plan, **node_env)
         outcome = "succeeded" if ok else "failed"
         detail = "" if ok else "\n".join(tail).strip()
         # A shell/gate node's exit code is its whole verdict — it has nothing to assert.
@@ -5961,9 +6155,11 @@ def _prepare_slot(job, slot, slot_path, pool):
     detail = None
     try:
         if not DRY:
-            pool.create_or_rebaseline(slot)
+            base = pool.base_for(job)       # RE458: the card's target, on the pool's remote
+            pool.create_or_rebaseline(slot, base=base)
             ref = (job.get("vars") or {}).get("ref")
-            hook_err = pool.run_prepare_hook(slot_path, ref, (job.get("vars") or {}).get("branch"))
+            hook_err = pool.run_prepare_hook(slot_path, ref, (job.get("vars") or {}).get("branch"),
+                                             base=base)
             if hook_err:
                 detail = f"prepare hook failed: {hook_err}"
                 log(f"  ⚠ {ref}: {detail}", ref=ref, kind="error")
@@ -5973,6 +6169,29 @@ def _prepare_slot(job, slot, slot_path, pool):
         raise
     finally:
         pool.prepared(slot, detail)
+
+
+def _missing_target(job, slot, reset, pool):
+    """The failure detail when `job`'s target branch is not on the remote, else None (RE458).
+
+    Checked before any worktree work, for every node job whose base differs from the pool's
+    own: the pool base is what `<ns>-clean` was created from at startup, so it is known to
+    exist. One check covers the `branch` node, shared_clean nodes and Deploy. On a reset
+    placement it finishes the slot's preparation with the detail (`never_built`), so fan_out
+    siblings fail the same way and the pool forgets a tree that was never made."""
+    base = pool.base_for(job)
+    if DRY or base == pool.base:
+        return None
+    detail = None
+    try:
+        detail = verify_base_ref(base)
+        return detail
+    except BaseException as e:
+        detail = f"target branch check crashed: {e}"
+        raise
+    finally:
+        if reset and detail is not None:
+            pool.prepared(slot, detail, never_built=True)
 
 
 def execute_one(job, slot, reset, control, pool):
@@ -5994,11 +6213,19 @@ def execute_one(job, slot, reset, control, pool):
     completed_outcome = None
     unreported_crash = False   # crash whose own failure-report also failed (§ finally, below)
     try:
-        prep_failure = _prepare_slot(job, slot, slot_path, pool) if reset else pool.wait_prepared(slot)
+        prep_failure = _missing_target(job, slot, reset, pool)
+        if prep_failure:
+            ref = (job.get("vars") or {}).get("ref")
+            log(f"  ⚠ {ref}: {prep_failure}", ref=ref, kind="error")
+        elif reset:
+            prep_failure = _prepare_slot(job, slot, slot_path, pool)
+        else:
+            prep_failure = pool.wait_prepared(slot)
         if prep_failure:
             # A nonzero prepare hook FAILS the run fail-fast (RLY-231 decision 2) — report failed
             # and skip the node so the run's worktree is retained for inspection (the finally
-            # releases with `failed`). A sibling that waited on it fails the same way (RE437).
+            # releases with `failed`). A sibling that waited on it fails the same way (RE437). A
+            # missing target branch (RE458) fails the same way, before any tree exists.
             completed_outcome = "failed"
             run_state = report_outcome(job["id"], "failed", prep_failure,
                                        git_head_sha(slot_path), None)
@@ -7986,6 +8213,7 @@ COMMANDS = (
     ("Cards", "tasks", "list or add a card's tasks"),
     ("Cards", "task", "show, update or remove one of a card's tasks"),
     ("Cards", "branch", "record a card's git branch"),
+    ("Cards", "target", "show or set a card's target branch"),
     ("Cards", "pr", "record a card's pull-request URL"),
     ("Cards", "result", "set a card's AI result"),
     ("Cards", "tag", "set a card's tag (omit VALUE to clear it)"),
@@ -8169,6 +8397,12 @@ def build_parser():
     c.add_argument("--tag", help="the card's tag")
     c.add_argument("--depends-on", metavar="REF[,REF...]",
                    help="blocker refs this card waits on (full replace)")
+    spawner = c.add_mutually_exclusive_group()
+    spawner.add_argument("--spawned-from", metavar="REF",
+                         help="the card this one is spawned from: it inherits that card's target "
+                              "branch (default: $HAMACA_REF, set inside a node)")
+    spawner.add_argument("--no-spawned-from", action="store_true",
+                         help="do not record a spawner, even inside a node")
     add("move", _simple(lambda a: move(a.ref, a.stage)), "ref", "stage", json_flag=True)
     add("title", _simple(lambda a: set_title(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     add("archive", _simple(lambda a: archive_card(a.ref), line=archived_line), "ref", json_flag=True)
@@ -8195,6 +8429,11 @@ def build_parser():
     tu.add_argument("--body", help='the new body, "-" for stdin, or @path')
     verb(one, "rm", cmd_task_rm, "remove a task (later tasks move up one)", ref_arg, id_arg)
     add("branch", _simple(lambda a: set_branch(a.ref, a.name)), "ref", "name", json_flag=True)
+    tb = add("target", cmd_target, "ref", json_flag=True)
+    tb_value = tb.add_mutually_exclusive_group()
+    tb_value.add_argument("branch", nargs="?", help="the target branch to set (omit to show it)")
+    tb_value.add_argument("--clear", action="store_true",
+                          help="clear the override: the card follows the board default again")
     add("pr", _simple(lambda a: set_pr_url(a.ref, a.url)), "ref", "url", json_flag=True)
     add("result", _simple(lambda a: set_result(a.ref, read_arg(a.text))), "ref", "text", json_flag=True)
     tg = add("tag", _simple(lambda a: set_tag(a.ref, a.value)), "ref", json_flag=True)

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Ship a card's Flutter change to Google Play's internal track. The Deploy flow's Android step.
 #
-#   bin/deploy_android.sh <REF>        (run from the repo root, on origin/main)
+#   bin/deploy_android.sh <REF>        (run from the repo root, on origin/<target>)
 #   bin/deploy_android.sh --head       (by hand, via `prod deploy_android`: ship the checkout as-is)
 #
+# 0. Skips (exit 0, no card comment — deploy_fly.sh posts the one "Not deployed") when the card
+#    targets a branch other than main (RE458; HAMACA_TARGET via target_lib.sh): only main ships.
 # 1. Skips (exit 0) when the card's commit on main didn't touch flutter/.
 # 2. Skips (exit 0) while the Android credentials don't exist yet (RLY-103): any one unset or
 #    empty in the environment means "not yet".
@@ -15,6 +17,7 @@
 # retry: the flow node's max_retries does that.
 
 set -euo pipefail
+. "$(dirname "$0")/target_lib.sh"
 
 say() { echo "deploy_android: $*"; }
 fail() {
@@ -26,6 +29,12 @@ ref="${1:-}"
 if [ -z "$ref" ]; then
   echo "usage: bin/deploy_android.sh <REF> | --head" >&2
   exit 2
+fi
+
+# --head is a by-hand ship of the checkout as-is: there is no card, so no card target to honour.
+if [ "$ref" != --head ] && ! target_is_deploy_branch; then
+  say "skipped — $ref targets $TARGET, not $DEPLOY_BRANCH"
+  exit 0
 fi
 
 touched=0

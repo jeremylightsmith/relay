@@ -31,7 +31,7 @@ Hamaca AI. Every command takes `--json`, and `./hamaca <command> -h` lists its o
 
 | Command | What it does |
 | --- | --- |
-| `./hamaca create "Fix login"` | Create a card. `--stage Backlog` puts it in a stage; also takes `--description`, `--tag` and `--depends-on RLY-3,RLY-4` |
+| `./hamaca create "Fix login"` | Create a card. `--stage Backlog` puts it in a stage; also takes `--description`, `--tag` and `--depends-on RLY-3,RLY-4`. Run inside a flow step, the new card records the card being worked as the one it was spawned from, and works against the same target branch. `--spawned-from RLY-9` names a different card; `--no-spawned-from` records none |
 | `./hamaca move RLY-12 Code` | Move a card to a stage |
 | `./hamaca title RLY-12 "…"` | Rename a card |
 | `./hamaca tag RLY-12 bug` | Set a card's tag. Leave the tag off to clear it |
@@ -56,6 +56,7 @@ Hamaca AI. Every command takes `--json`, and `./hamaca <command> -h` lists its o
 | `./hamaca uncheck RLY-12 42` | Untick it |
 | `./hamaca sub-tasks RLY-12 @tasks.md` | Replace the whole task list at once. Older; use `tasks add` |
 | `./hamaca branch RLY-12 rly-12-…` | Record the card's git branch |
+| `./hamaca target RLY-12` | Show the branch the card's work is based on and ships to: the board default, or an override. `./hamaca target RLY-12 exp/flows` sets an override; `--clear` goes back to the board default. It can't change while a run is going |
 | `./hamaca pr RLY-12 <url>` | Record the card's pull request |
 | `./hamaca comment RLY-12 "…"` | Comment on a card |
 | `./hamaca attach RLY-12 shot.png` | Upload a file and print markdown that shows it |

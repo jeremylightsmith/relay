@@ -192,9 +192,50 @@ defmodule Hamaca.Flows.ReBoardFlowDocumentsTest do
   test "the deploy nodes run their scripts directly, reading secrets from the runner's environment" do
     runs = Map.new(doc(@deploy_path)["nodes"], &{&1["key"], &1["run"]})
 
-    assert runs["fly"] == "bin/deploy_fly.sh"
+    assert runs["fly"] == "bin/deploy_fly.sh {ref}"
     assert runs["ios"] == "bin/deploy_ios.sh {ref}"
     assert runs["android"] == "bin/deploy_android.sh {ref}"
+  end
+
+  # RE458: a card ships to its own target branch, so no node may hard-code main.
+  describe "the target branch" do
+    defp runs(path), do: Map.new(doc(path)["nodes"], &{&1["key"], &1["run"]})
+
+    test "no node in either document runs against origin/main" do
+      for path <- [@code_path, @deploy_path], {key, run} <- runs(path) do
+        refute run =~ "origin/main", "#{Path.basename(path)} node #{key} still names origin/main"
+      end
+    end
+
+    test "sync and resync rebase onto the card's target" do
+      code = runs(@code_path)
+
+      for key <- ["sync", "resync"] do
+        assert code[key] == "{relay} git-fetch && { git rebase origin/{target} || { git rebase --abort; exit 1; }; }"
+      end
+    end
+
+    test "branch bases a new branch on the target" do
+      assert runs(@code_path)["branch"] =~ "else base=origin/{target}; fi"
+    end
+
+    test "the rebase fixers bring the branch onto the target" do
+      code = runs(@code_path)
+
+      for key <- ["sync_fix", "resync_fix"] do
+        assert code[key] =~ "Bring this branch onto current origin/{target} "
+      end
+    end
+
+    test "github_fix names the card's target branch and starts from it" do
+      github_fix = runs(@code_path)["github_fix"]
+      assert github_fix =~ "target branch"
+      assert github_fix =~ "starting from origin/{target}"
+    end
+
+    test "deploy checks out the target" do
+      assert runs(@deploy_path)["checkout"] == "{relay} git-fetch && git checkout -B {branch} origin/{target}"
+    end
   end
 
   test "neither document carries a top-level version" do

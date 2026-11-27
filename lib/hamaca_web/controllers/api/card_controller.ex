@@ -20,6 +20,7 @@ defmodule HamacaWeb.Api.CardController do
     board = conn.assigns.current_board
 
     with {:ok, stage} <- resolve_create_stage(board, params["stage"]),
+         :ok <- check_spawned_from(params),
          :ok <- check_dependencies(board, params),
          {:ok, card} <- Cards.create_card(stage, params, :agent),
          {:ok, card} <- update_dependencies(board, card, params) do
@@ -57,6 +58,9 @@ defmodule HamacaWeb.Api.CardController do
     with %Schemas.Card{} = card <- Cards.get_card_by_ref(board, ref),
          {:ok, owners} <- owner_actors(params),
          :ok <- check_owners(card, owners),
+         # RE458 — the FIRST write, so a run_active (409) or bad name (422) leaves the rest of
+         # the PATCH unapplied.
+         {:ok, card} <- update_target(card, params),
          {:ok, card} <- update_fields(card, params),
          {:ok, card} <- update_status(card, params),
          {:ok, card} <- update_owners(card, owners),
@@ -135,6 +139,24 @@ defmodule HamacaWeb.Api.CardController do
       fields -> Cards.update_card(card, fields)
     end
   end
+
+  # RE458 — a string sets the override, null or "" clears it (inherit the board default), the
+  # key absent leaves it untouched, anything else is an invalid request. A bad name is wrapped
+  # as {:invalid, changeset} so it answers 422, not the bare-changeset clause's 400.
+  defp update_target(card, %{"target_branch" => target}) when is_binary(target) or is_nil(target) do
+    case Cards.set_target_branch(card, target, :agent) do
+      {:error, %Ecto.Changeset{} = changeset} -> {:error, {:invalid, changeset}}
+      result -> result
+    end
+  end
+
+  defp update_target(_card, %{"target_branch" => _}), do: :error
+  defp update_target(card, _params), do: {:ok, card}
+
+  # RE458 — "spawned_from" names a card ref; Hamaca.Cards.create_card/3 resolves it and refuses
+  # an unknown one. A non-string never reaches it.
+  defp check_spawned_from(%{"spawned_from" => ref}) when not is_binary(ref), do: {:error, :invalid_request}
+  defp check_spawned_from(_params), do: :ok
 
   defp update_ai_result(card, %{"ai_result" => ai_result}) when is_map(ai_result) do
     Cards.update_ai_result(card, ai_result)

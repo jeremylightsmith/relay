@@ -464,6 +464,23 @@ sharing behavior.
   still holds), and returns `%{moved: [...], skipped: [...]}` — a card gone, archived, on
   another board, or refused by `move_card/4` is skipped; one already in the stage is in
   neither list.
+  **Target branch (RE458).** `Cards.effective_target/2` is the ONLY resolution of a card's
+  target branch: its `target_branch` override, else the board's `target_branch`.
+  `Cards.set_target_branch/3` sets (a string) or clears (`nil`/blank) the override through
+  `Schemas.Card.target_changeset/2`: it validates the name first (`{:error, changeset}`), then
+  refuses with `{:error, :run_active}` while the card has an active run (read straight from
+  `Schemas.Run`, like `stranded_run/2`), clears `target_inherited_from_id`, logs a
+  `:target_changed` activity (`%{"from", "to"}`, nil = inherit) and broadcasts
+  `{:card_upserted, card}`; a no-op re-set does nothing. **Spawn inheritance:**
+  `Cards.create_card/3` accepts `"spawned_from"`/`:spawned_from`, a card ref on the same board,
+  resolved before the transaction so an unknown ref (`{:error, {:unknown_spawned_from, ref}}`)
+  never allocates a ref number. The spawner's target is its active run's snapshot, else its
+  `Cards.effective_target/2`; when that differs from the board's current default the child copies
+  it as its override and points `target_inherited_from_id` at the spawner (a spawner on the
+  default records nothing) (`Cards.target_inherited_from_ref/2` reads it
+  back as a ref). The copy is made once; a later change to the spawner does not follow. Each run
+  freezes the effective target into `run.context["target"]` (see
+  [state.md § Run status](state.md#run-status)).
   A card's `mockups` (RE370) is a nullable `{:array, :map}` column of
   `%{"url", "caption"}` entries, written only through `Hamaca.Cards.set_mockups/2` (a full
   REPLACE — `PATCH /api/cards/:ref {"mockups": …}`), `append_mockups/2`
@@ -1852,6 +1869,17 @@ earliest `:created` activity row. `created_by_user` is part of `Cards`' one card
 every card read and `{:card_upserted, …}` payload carries it. `posted_by_user_id` alone means
 "came from the public board", read only through `Schemas.Card.public?/1`; a public card's
 requester is its poster.
+
+A `Board` carries `target_branch` (RE458): the branch its cards' work targets by default —
+`:string`, not null, default `"main"` (the migration backfilled every existing board). It is cast
+by `Board.changeset/2` (trimmed, required non-blank, validated) and saved through
+`Boards.update_board/2`. A `Card` carries a nullable `target_branch` override (`nil` = inherit the
+board's) and a nullable self-FK `target_inherited_from_id` (indexed, `on_delete: :nilify_all`) —
+the card its override was copied from when it was spawned. Neither card field is cast by
+`Card.changeset/2`: the override is written through `Card.target_changeset/2`, and both are put
+on a spawned card's insert by `Cards.create_card/3`. Both are in `Cards`' `@list_card_fields`.
+The ONE branch-name validator is `Schemas.Card.validate_branch_name/2` (git ref-name rules via
+`valid_branch_name?/1`, at most `target_branch_max_length/0` = 200), shared by both schemas.
 
 A `Card` also carries `done_at` (RE504): **when it entered its board's terminal stage**
 (`Hamaca.Boards.terminal_stage/1`, the last top-level stage by position; read from the DB by

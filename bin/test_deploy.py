@@ -16,6 +16,7 @@ import stat
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.path.join(REPO_ROOT, "bin")
@@ -29,6 +30,11 @@ LISTING_PATHSPECS = ("flutter/ios/fastlane/metadata", "flutter/ios/fastlane/scre
 TITLE = "let’s move Deploying off of CI"
 TRAILER = "Co-Authored-By: Claude <noreply@anthropic.com>"
 NOTHING_TO_SHIP = "ship_to_main: nothing to ship — origin/main..HEAD is empty"
+
+# RE458: a card can target a branch other than main. The runner exports its target and ref to
+# every node (precommit included), so the test process may inherit them from the card being built.
+TARGET = "exp/flows"
+TARGET_LIB = os.path.join(BIN, "target_lib.sh")
 
 
 def git(cwd, *args):
@@ -92,9 +98,18 @@ def deploy_env_names():
             "TESTFLIGHT_EXTERNAL", *IOS_VARS, *ANDROID_VARS}
 
 
+def target_env_names():
+    """The card target and ref the runner exports to a node (RE458). The precommit gate of a card
+    that targets another branch runs this suite with them set, so they are scrubbed too: a
+    main-path test must see main unless it asks for a target."""
+    return {"HAMACA_TARGET", "RELAY_TARGET", "HAMACA_REF", "RELAY_REF"}
+
+
 def run_script(script, args, cwd, env_overrides=None):
-    """Run a repo bin/ script by absolute path, stubs first on PATH, deploy secrets scrubbed."""
-    env = {k: v for k, v in os.environ.items() if k not in deploy_env_names()}
+    """Run a repo bin/ script by absolute path, stubs first on PATH, deploy secrets and the
+    runner's card target/ref scrubbed (a test opts back in through `env_overrides`)."""
+    scrubbed = deploy_env_names() | target_env_names()
+    env = {k: v for k, v in os.environ.items() if k not in scrubbed}
     overrides = dict(env_overrides or {})
     stubs = overrides.pop("STUBS", None)
     if stubs:
@@ -127,13 +142,24 @@ class ScriptCase(unittest.TestCase):
             self.tmp, "hamaca", RELAY_STUB.format(log=self.relay_log, title=TITLE)
         )
 
-    def run_in_work(self, script, *args):
-        return run_script(
-            script,
-            list(args),
-            self.work,
-            {"HAMACA": self.relay, "STUBS": os.path.dirname(self.relay)},
-        )
+    def run_in_work(self, script, *args, **env):
+        overrides = {"HAMACA": self.relay, "STUBS": os.path.dirname(self.relay)}
+        overrides.update(env)
+        return run_script(script, list(args), self.work, overrides)
+
+    def push_target(self, files=None, subject="exp change"):
+        """Branch `exp/flows` off the clone's HEAD, optionally commit `files` on it, push it to
+        origin and fetch, so origin carries both main and the target. Leaves exp/flows checked out
+        and returns its sha."""
+        git(self.work, "checkout", "-q", "-b", TARGET)
+        if files:
+            commit(self.work, files, subject)
+        git(self.work, "push", "-q", "origin", TARGET)
+        git(self.work, "fetch", "-q", "origin")
+        return git(self.work, "rev-parse", "HEAD")
+
+    def remote_target(self):
+        return git(self.origin, "rev-parse", TARGET)
 
     def relay_calls(self):
         if not os.path.exists(self.relay_log):
@@ -146,6 +172,84 @@ class ScriptCase(unittest.TestCase):
 
     def remote_main(self):
         return git(self.origin, "rev-parse", "main")
+
+
+ENV_PROBE = """#!/usr/bin/env bash
+echo "HAMACA_TARGET=${HAMACA_TARGET-unset} RELAY_TARGET=${RELAY_TARGET-unset} \
+HAMACA_REF=${HAMACA_REF-unset} RELAY_REF=${RELAY_REF-unset}"
+"""
+
+
+class RunScriptScrubbingTest(unittest.TestCase):
+    """RE458 scenario 10: the runner exports the card's target and ref to the precommit gate, so
+    this suite can inherit HAMACA_TARGET=<some branch>. run_script must hide them, or every
+    main-path test fails whenever the card being built targets another branch."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.probe = stub_bin(self._tmp.name, "probe", ENV_PROBE)
+
+    def test_the_runners_target_and_ref_do_not_reach_the_script(self):
+        leaked = {"HAMACA_TARGET": "exp/x", "RELAY_TARGET": "exp/x",
+                  "HAMACA_REF": "RE99", "RELAY_REF": "RE99"}
+        with unittest.mock.patch.dict(os.environ, leaked):
+            result = run_script(self.probe, [], self._tmp.name)
+        self.assertEqual(
+            result.stdout.strip(),
+            "HAMACA_TARGET=unset RELAY_TARGET=unset HAMACA_REF=unset RELAY_REF=unset",
+        )
+
+    def test_a_test_can_still_set_the_target_explicitly(self):
+        with unittest.mock.patch.dict(os.environ, {"HAMACA_TARGET": "exp/x"}):
+            result = run_script(self.probe, [], self._tmp.name, {"HAMACA_TARGET": TARGET})
+        self.assertIn(f"HAMACA_TARGET={TARGET} ", result.stdout)
+
+
+TARGET_LIB_PROBE = """#!/usr/bin/env bash
+set -euo pipefail
+. "{lib}"
+if target_is_deploy_branch; then deploy=yes; else deploy=no; fi
+echo "DEPLOY_BRANCH=$DEPLOY_BRANCH TARGET=$TARGET deploy=$deploy"
+"""
+
+
+class TargetLibTest(unittest.TestCase):
+    """bin/target_lib.sh is the ONE place this repo names its deploy/CI branch (main) and reads
+    the card's target; every RE board script sources it under `set -euo pipefail`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.probe = stub_bin(self._tmp.name, "probe", TARGET_LIB_PROBE.format(lib=TARGET_LIB))
+
+    def probe_with(self, **env):
+        result = run_script(self.probe, [], self._tmp.name, env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.strip()
+
+    def test_no_target_means_main(self):
+        self.assertEqual(self.probe_with(), "DEPLOY_BRANCH=main TARGET=main deploy=yes")
+
+    def test_hamaca_target_wins(self):
+        self.assertEqual(self.probe_with(HAMACA_TARGET=TARGET, RELAY_TARGET="other"),
+                         f"DEPLOY_BRANCH=main TARGET={TARGET} deploy=no")
+
+    def test_relay_target_is_the_fallback(self):
+        self.assertEqual(self.probe_with(RELAY_TARGET=TARGET),
+                         f"DEPLOY_BRANCH=main TARGET={TARGET} deploy=no")
+
+    def test_main_as_an_explicit_target_is_the_deploy_branch(self):
+        self.assertEqual(self.probe_with(HAMACA_TARGET="main"),
+                         "DEPLOY_BRANCH=main TARGET=main deploy=yes")
+
+    def test_deploy_branch_main_is_defined_only_in_target_lib(self):
+        for name in sorted(os.listdir(BIN)):
+            path = os.path.join(BIN, name)
+            if name == "target_lib.sh" or not name.endswith(".sh"):
+                continue
+            with open(path, encoding="utf-8") as f:
+                self.assertNotIn("DEPLOY_BRANCH=", f.read(), name)
 
 
 class ShipToMainTest(ScriptCase):
@@ -265,6 +369,52 @@ class ShipToMainTest(ScriptCase):
         with open(SHIP, encoding="utf-8") as f:
             self.assertIn('"${HAMACA:-./hamaca}"', f.read())
 
+    # RE458: a card targeting another branch ships there, never to main.
+
+    def test_a_non_main_target_gets_the_squashed_commit_and_main_is_untouched(self):
+        main_before = self.remote_main()
+        target_before = self.push_target({"lib/exp.ex": "exp\n"})
+        git(self.work, "checkout", "-q", "-b", "card")
+        commit(self.work, {"lib/x.ex": "one\n"}, "a1")
+        commit(self.work, {"lib/x.ex": "two\n"}, "a2")
+
+        result = self.run_in_work(SHIP, "RE7", HAMACA_TARGET=TARGET)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+        self.assertEqual(git(self.origin, "log", TARGET, "-1", "--format=%s"), f"RE7 {TITLE}")
+        self.assertEqual(git(self.origin, "rev-parse", f"{TARGET}^"), target_before)
+        self.assertEqual(git(self.origin, "rev-list", "--count", f"{target_before}..{TARGET}"), "1")
+        self.assertEqual(self.remote_main(), main_before)
+        short = git(self.work, "rev-parse", "--short", "HEAD")
+        self.assertEqual(self.comment_calls(), [f"comment RE7 Shipped to {TARGET} as {short}"])
+        self.assertIn(f"ship_to_main: pushing {short} to {TARGET}", result.stderr)
+
+    def test_nothing_ahead_of_a_non_main_target_is_a_no_op(self):
+        self.push_target({"lib/exp.ex": "exp\n"})
+        result = self.run_in_work(SHIP, "RE7", HAMACA_TARGET=TARGET)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(
+            f"ship_to_main: nothing to ship — origin/{TARGET}..HEAD is empty", result.stderr
+        )
+        self.assertEqual(self.comment_calls(), [])
+
+    def test_a_moved_non_main_target_rejects_the_push(self):
+        self.push_target()
+        git(self.work, "checkout", "-q", "-b", "card")
+        commit(self.work, {"lib/x.ex": "card\n"}, "card change")
+
+        other = os.path.join(self.tmp, "other")
+        subprocess.run(["git", "clone", "-q", "-b", TARGET, self.origin, other],
+                       check=True, capture_output=True)
+        _configure(other)
+        theirs = commit(other, {"lib/y.ex": "theirs\n"}, "someone else")
+        git(other, "push", "-q", "origin", TARGET)
+
+        result = self.run_in_work(SHIP, "RE7", HAMACA_TARGET=TARGET)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.remote_target(), theirs)
+        self.assertEqual(self.comment_calls(), [])
+
 
 class CardTouchedFlutterTest(ScriptCase):
     """The Deploy flow ships to TestFlight / Play only when the card's own commit on main touched
@@ -353,6 +503,17 @@ class CardTouchedFlutterTest(ScriptCase):
         result = self.run_in_work(TOUCHED)
         self.assertEqual(result.returncode, 2)
         self.assertIn("usage:", result.stdout + result.stderr)
+
+    def test_a_card_commit_on_the_target_branch_counts(self):
+        self.push_target({"flutter/lib/main.dart": "void main() {}\n"}, "RE7 flutter thing")
+        result = self.run_in_work(TOUCHED, "RE7", HAMACA_TARGET=TARGET)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_a_card_commit_only_on_the_target_branch_is_not_on_main(self):
+        self.push_target({"flutter/lib/main.dart": "void main() {}\n"}, "RE7 flutter thing")
+        result = self.run_in_work(TOUCHED, "RE7")
+        self.assertEqual(result.returncode, 1, result.stderr + result.stdout)
+        self.assertIn("no commit for RE7 on origin/main", result.stderr)
 
 
 
@@ -551,6 +712,22 @@ class AwaitMainCiTest(ScriptCase):
         self.assertIn(f"await_main_ci: FAILED: main CI run for {self.head} was cancelled: {RUN_URL}",
                       result.stderr)
 
+    def test_a_non_main_target_skips_without_asking_github(self):
+        self.runs(run_row("completed", "success"))
+        result = self.await_ci(HAMACA_TARGET=TARGET)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            f"await_main_ci: skipped — {TARGET} is not main; CI only runs on main", result.stderr
+        )
+        self.assertFalse(os.path.exists(self.gh_log) and os.path.getsize(self.gh_log) > 0)
+
+    def test_main_as_an_explicit_target_still_waits_for_main_ci(self):
+        self.runs(run_row("completed", "success"))
+        result = self.await_ci(HAMACA_TARGET="main")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"await_main_ci: main CI passed for {self.head}: {RUN_URL}", result.stderr)
+        self.assertIn("--branch main --event push", self.gh_calls("gh run list")[0])
+
     def test_gives_up_after_the_timeout(self):
         self.runs(run_row("in_progress"))
         result = self.await_ci(AWAIT_TIMEOUT_SECONDS="0")
@@ -709,6 +886,34 @@ class DeployFlyTest(DeployCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertEqual(self.version_calls(), ["version --field sha"])  # the pre-check only
 
+    # RE458: only a card targeting main is deployed.
+
+    def test_a_non_main_target_is_not_deployed_and_needs_no_token(self):
+        result = self.run_deploy(DEPLOY_FLY, ["RE7"], {"HAMACA_TARGET": TARGET})
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(self.comment_calls(), [f"comment RE7 Not deployed: RE7 targets {TARGET}"])
+        self.assertEqual(self.commands(), [])
+
+    def test_a_non_main_target_without_a_ref_fails_with_usage(self):
+        result = self.run_deploy(DEPLOY_FLY, [], {"HAMACA_TARGET": TARGET})
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("usage: bin/deploy_fly.sh", result.stderr)
+        self.assertEqual(self.commands(), [])
+        self.assertEqual(self.comment_calls(), [])
+
+    def test_main_as_the_target_deploys_with_a_ref(self):
+        for env in ({"HAMACA_TARGET": "main"}, {}):
+            with self.subTest(env=env):
+                open(self.relay_log, "w").close()
+                open(self.log, "w").close()
+                self.relay_versions("0000000", self.head)
+                result = self.run_deploy(DEPLOY_FLY, ["RE7"], dict(env, FLY_API_TOKEN="x"))
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertEqual(len(self.commands()), 1)
+                self.assertTrue(self.commands()[0].startswith("flyctl deploy --remote-only"))
+                self.assertFalse(any("Not deployed" in c for c in self.relay_calls()))
+                self.assertIn(f"deploy_fly: live at {self.head}", result.stdout)
+
 
 class DeployIosTest(DeployCase):
     """deploy_ios.sh: skip web-only cards before looking at secrets, fail fast naming every
@@ -850,6 +1055,20 @@ class DeployIosTest(DeployCase):
         self.assertLess(commands.index("fastlane deploy"),
                         commands.index("fastlane ios upload_listing"))
 
+    def test_a_non_main_target_skips_ios_before_any_check(self):
+        self.push_target({"flutter/lib/a.dart": "void a() {}\n"}, "RE7 the card")
+        result = self.run_deploy(DEPLOY_IOS, ["RE7"], {"HAMACA_TARGET": TARGET})
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(f"deploy_ios: skipped — RE7 targets {TARGET}, not main",
+                      result.stdout + result.stderr)
+        self.assertEqual(self.comment_calls(), [])
+        self.assertEqual(self.commands(), [])
+
+    def test_head_ships_the_checkout_whatever_the_target(self):
+        result = self.run_deploy(DEPLOY_IOS, ["--head"], self.full_env(HAMACA_TARGET=TARGET))
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("fastlane deploy", self.commands())
+
     def test_head_uploads_the_listing_last(self):
         self.ship_card(flutter=False)
         result = self.run_deploy(DEPLOY_IOS, ["--head"], self.full_env())
@@ -887,6 +1106,21 @@ class DeployAndroidTest(DeployCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn(ANDROID_NO_CREDS, result.stdout.splitlines())
         self.assertEqual(self.commands(), [])
+
+    def test_a_non_main_target_skips_android_before_any_check(self):
+        self.push_target({"flutter/lib/a.dart": "void a() {}\n"}, "RE7 the card")
+        result = self.run_deploy(DEPLOY_ANDROID, ["RE7"], dict(ANDROID_VARS, HAMACA_TARGET=TARGET))
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(f"deploy_android: skipped — RE7 targets {TARGET}, not main",
+                      result.stdout + result.stderr)
+        self.assertEqual(self.comment_calls(), [])
+        self.assertEqual(self.commands(), [])
+
+    def test_head_ships_the_checkout_whatever_the_target(self):
+        result = self.run_deploy(DEPLOY_ANDROID, ["--head"],
+                                 dict(ANDROID_VARS, STUB_BUILD_NUMBER="17", HAMACA_TARGET=TARGET))
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("fastlane deploy", self.commands())
 
     def test_builds_and_uploads_with_temporary_signing_files(self):
         self.ship_card(flutter=True)
@@ -1024,6 +1258,37 @@ class FlutterGateTest(DeployCase):
         git(self.work, "commit", "-q", "-m", "RE424 regenerate assets")
         result = self.gate()
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(self.commands(), VALIDATION)
+
+    def target_with_flutter_then_lib_commit(self):
+        """origin/exp/flows already carries a flutter/ change; HEAD is one lib/-only commit
+        ahead of it."""
+        self.push_target({"flutter/lib/exp.dart": "void exp() {}\n"}, "exp flutter change")
+        git(self.work, "checkout", "-q", "-b", "card-on-target")
+        commit(self.work, {"lib/a.ex": "a\n"}, "RE7 the card")
+
+    def test_the_merge_base_is_with_the_target_branch(self):
+        self.target_with_flutter_then_lib_commit()
+        result = self.gate(HAMACA_TARGET=TARGET)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(self.SKIP, result.stdout)
+        self.assertEqual(self.commands(), [])
+
+    def test_the_same_tree_against_main_validates(self):
+        self.target_with_flutter_then_lib_commit()
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(self.VALIDATING, result.stdout)
+        self.assertEqual(self.commands(), VALIDATION)
+
+    def test_a_missing_target_branch_validates_anyway_naming_it(self):
+        self.card_commit(flutter=False)
+        result = self.gate(HAMACA_TARGET=TARGET)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn(
+            f"flutter_gate: could not compute merge-base with origin/{TARGET} — validating anyway",
+            result.stderr,
+        )
         self.assertEqual(self.commands(), VALIDATION)
 
     def test_the_script_never_fetches_checks_out_or_pipes_to_grep(self):

@@ -12,8 +12,12 @@
 # A failed run is re-run ONCE (failed jobs only) before giving up: the browser suite flakes, and
 # one flake shouldn't send the card to the ci-fixer. Exits nonzero with
 # `await_main_ci: FAILED: <reason>` on stderr — the line the ci-fixer agent reads.
+#
+# A card whose target branch (RE458; HAMACA_TARGET via target_lib.sh) is not main skips with
+# exit 0 before asking GitHub anything: CI only runs on main, so there is no run to wait for.
 
 set -euo pipefail
+. "$(dirname "$0")/target_lib.sh"
 
 sha="${1:-$(git rev-parse HEAD)}"
 workflow="${AWAIT_CI_WORKFLOW:-ci.yml}"
@@ -30,11 +34,16 @@ tick() {
   sleep "$poll"
 }
 
+if ! target_is_deploy_branch; then
+  say "skipped — $TARGET is not $DEPLOY_BRANCH; CI only runs on $DEPLOY_BRANCH"
+  exit 0
+fi
+
 while :; do
   id="" status="" conclusion="" attempt="" url=""
   # `none` stands in for a null conclusion so the tab-separated fields never collapse.
   IFS=$'\t' read -r id status conclusion attempt url < <(gh run list --workflow "$workflow" \
-    --branch main --event push --commit "$sha" --limit 1 \
+    --branch "$DEPLOY_BRANCH" --event push --commit "$sha" --limit 1 \
     --json databaseId,status,conclusion,attempt,url \
     -q '.[0] // empty | [.databaseId, .status, (.conclusion // "" | if . == "" then "none" else . end), .attempt, .url] | @tsv') || true
 

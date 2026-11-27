@@ -253,7 +253,7 @@
       "reads": [
         "plan"
       ],
-      "run": "{relay} git-fetch && open=$(gh pr list --head {branch} --state open --json number -q length) && if [ \"$open\" -gt 0 ]; then base=origin/{branch}; else base=origin/main; fi && git checkout -B {branch} \"$base\" && {relay} card {ref} --json | jq -r '.plan // empty' > \"$HAMACA_PLAN\" && test -s \"$HAMACA_PLAN\" && {relay} branch {ref} {branch}",
+      "run": "{relay} git-fetch && open=$(gh pr list --head {branch} --state open --json number -q length) && if [ \"$open\" -gt 0 ]; then base=origin/{branch}; else base=origin/{target}; fi && git checkout -B {branch} \"$base\" && {relay} card {ref} --json | jq -r '.plan // empty' > \"$HAMACA_PLAN\" && test -s \"$HAMACA_PLAN\" && {relay} branch {ref} {branch}",
       "type": "shell",
       "writes": [
         "branch"
@@ -295,14 +295,14 @@
     },
     {
       "key": "sync",
-      "run": "{relay} git-fetch && { git rebase origin/main || { git rebase --abort; exit 1; }; }",
+      "run": "{relay} git-fetch && { git rebase origin/{target} || { git rebase --abort; exit 1; }; }",
       "type": "shell"
     },
     {
       "agent": "rebaser",
       "key": "sync_fix",
       "llm": "Claude Sonnet",
-      "run": "Bring this branch onto current origin/main with `mix precommit` green: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement.",
+      "run": "Bring this branch onto current origin/{target} with `mix precommit` green: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement.",
       "type": "agent"
     },
     {
@@ -351,14 +351,14 @@
     },
     {
       "key": "resync",
-      "run": "{relay} git-fetch && { git rebase origin/main || { git rebase --abort; exit 1; }; }",
+      "run": "{relay} git-fetch && { git rebase origin/{target} || { git rebase --abort; exit 1; }; }",
       "type": "shell"
     },
     {
       "agent": "rebaser",
       "key": "resync_fix",
       "llm": "Claude Sonnet",
-      "run": "Bring this branch onto current origin/main with both branch gates green — `mix precommit` and `mix test.browser`: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement.",
+      "run": "Bring this branch onto current origin/{target} with both branch gates green — `mix precommit` and `mix test.browser`: resolve any rebase conflict preserving both intents, and fix breakage the rebase caused. Escalate with needs-input rather than guessing when the resolution needs human judgement.",
       "type": "agent"
     },
     {
@@ -385,7 +385,7 @@
       "agent": "ci-fixer",
       "key": "github_fix",
       "llm": "Claude Opus",
-      "run": "The await_ci node failed: main's CI did not pass on the commit card {ref} just shipped (bin/ship_to_main.sh pushed it straight to main; there is no PR). Its output is in the message; the decisive line reads `await_main_ci: FAILED: <reason>`. Work out which case it is, then leave the right commits on branch {branch}, starting from origin/main. The flow then goes back through resync, the gates and merge (which ships your fix to main as a new commit) and waits for CI again.",
+      "run": "The await_ci node failed: CI did not pass on the commit card {ref} just shipped (bin/ship_to_main.sh pushed it straight to the card's target branch, {target}; there is no PR). Its output is in the message; the decisive line reads `await_main_ci: FAILED: <reason>`. Work out which case it is, then leave the right commits on branch {branch}, starting from origin/{target}. The flow then goes back through resync, the gates and merge (which ships your fix to the card's target branch as a new commit) and waits for CI again.",
       "type": "agent"
     },
     {

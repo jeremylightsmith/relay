@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Did a card's commit on main touch flutter/? Shared by the Deploy flow's mobile deploy steps.
+# Did a card's commit on its target branch touch flutter/? Shared by the Deploy flow's mobile
+# deploy steps. The target is the card's (RE458; HAMACA_TARGET via target_lib.sh), main by
+# default.
 #
 #   bin/card_touched_flutter.sh <REF> [PATHSPEC ...]
 #
 # PATHSPEC defaults to flutter/; deploy_ios.sh passes the App Store listing paths to ask whether
 # the card changed the listing.
 #
-# Exit 0: the card's NEWEST origin/main commit (subject `<REF> …`) changes a path under any
+# Exit 0: the card's NEWEST origin/<target> commit (subject `<REF> …`) changes a path under any
 #         PATHSPEC.
-# Exit 1: it doesn't, or no such commit exists on origin/main.
+# Exit 1: it doesn't, or no such commit exists on origin/<target>.
 # Exit 2: usage error (no ref).
 #
 # The subject match carries a trailing space so RE40 never matches `RE408 …`, and only the
@@ -20,9 +22,10 @@
 # pathspec answers the question without a pipe.
 #
 # Read-only: never updates remote refs and never moves HEAD — the Deploy flow has already
-# checked out origin/main.
+# checked out origin/<target>.
 
 set -euo pipefail
+. "$(dirname "$0")/target_lib.sh"
 
 say() { echo "card_touched_flutter: $*" >&2; }
 
@@ -42,9 +45,9 @@ while IFS=$'\t' read -r candidate subject; do
       break
       ;;
   esac
-done < <(git log origin/main --format=$'%H\t%s' --grep="^$ref ")
+done < <(git log "origin/$TARGET" --format=$'%H\t%s' --grep="^$ref ")
 if [ -z "$sha" ]; then
-  say "no commit for $ref on origin/main — treating as no flutter/ change"
+  say "no commit for $ref on origin/$TARGET — treating as no flutter/ change"
   exit 1
 fi
 

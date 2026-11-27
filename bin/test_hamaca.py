@@ -272,7 +272,8 @@ class ClaimContractKeysTest(unittest.TestCase):
 
     TOP_LEVEL = {"id", "kind", "run_id", "ref", "node_id", "node_type", "agent", "run",
                  "isolation", "resume_session", "vars", "harness", "model", "effort"}
-    VARS = {"ref", "branch", "prior_detail", "findings", "guidance", "task", "task_id"}
+    # `target` (RE458) is the run's frozen target branch, the `{target}` placeholder.
+    VARS = {"ref", "branch", "prior_detail", "findings", "guidance", "task", "task_id", "target"}
 
     def test_every_claim_case_has_exactly_the_keys_the_runner_reads(self):
         for case, payload in CONTRACT["claim"].items():
@@ -5664,7 +5665,7 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_a_detached_head_fails_the_node_without_running_it(self):
         ran = []
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: ran.append(cmd) or True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: ran.append(cmd) or True
         self._git_head("", returncode=1)  # detached: symbolic-ref exits non-zero
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"}, run="true")
@@ -5676,7 +5677,7 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_a_head_on_the_wrong_branch_fails(self):
         ran = []
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: ran.append(cmd) or True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: ran.append(cmd) or True
         self._git_head("refs/heads/some-other-branch\n")
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"}, run="true")
@@ -5690,7 +5691,7 @@ class RunNodeJobTest(unittest.TestCase):
         # The `branch` node is what ATTACHES HEAD, so it is the one node that must be allowed
         # to start detached — otherwise no run could ever begin.
         ran = []
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: ran.append(cmd) or True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: ran.append(cmd) or True
         self._git_head("", returncode=1)
 
         j = job("exclusive_shell", vars={"ref": "RLY-1", "branch": "feature-x"},
@@ -5709,7 +5710,7 @@ class RunNodeJobTest(unittest.TestCase):
         broken guard shipped green and refused every Spec/Plan node on the live board.
         """
         ran = []
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: ran.append(cmd) or True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: ran.append(cmd) or True
         self._git_head("", returncode=1)
 
         j = job("shared_clean_agent", node_type="shell", run="true")
@@ -5720,13 +5721,13 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertEqual(len(ran), 1)
 
     def test_shell_job_reports_succeeded_with_git_sha(self):
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: True
         j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
         outcome, detail, sha, session, _no_changes, _resume_at, _cost = relay.run_node_job(j, "/tmp/wt", self.control)
         self.assertEqual((outcome, sha, session), ("succeeded", "deadbeef", None))
 
     def test_shell_job_failure_carries_the_output_tail(self):
-        def fail(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None):
+        def fail(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None):
             if sink is not None:
                 sink.extend(["boom line"])
             return False
@@ -5738,7 +5739,7 @@ class RunNodeJobTest(unittest.TestCase):
 
     def test_agent_job_captures_session_and_uses_the_contract(self):
         relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
-            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None: (True, "sess-9", relay.ClaudeRunReport())
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None, ref=None, target=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "", False)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -5749,7 +5750,7 @@ class RunNodeJobTest(unittest.TestCase):
         """RE310: determine_agent_outcome's third element (the --no-changes assertion) must
         reach run_node_job's caller unchanged — that boolean is the entire point of this wire."""
         relay._stream_agent_job = lambda argv, cwd, tag="", session_id_path=None, \
-            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None: (True, "sess-9", relay.ClaudeRunReport())
+            outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None, ref=None, target=None: (True, "sess-9", relay.ClaudeRunReport())
         relay.determine_agent_outcome = lambda job, ok, path, cwd=None, report=None: ("succeeded", "already committed", True)
         j = job(node_type="agent", run="Implement…", id="nj-2", run_id="r1",
                 vars={"ref": "RLY-2"})
@@ -5833,7 +5834,7 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertEqual(result[6], 0.07)
 
     def test_a_shell_job_has_no_cost(self):
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: True
         result = relay.run_node_job(job(node_type="shell", run="true", vars={"ref": "RLY-1"}),
                                     "/tmp/wt", self.control)
         self.assertEqual(len(result), 7)
@@ -5860,7 +5861,7 @@ class RunNodeJobTest(unittest.TestCase):
         would otherwise leave the next job's reset_worktree() logging a spurious salvage."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None, ref=None, target=None):
             seen["stream_path"] = outcome_path
             self.assertTrue(os.path.exists(os.path.dirname(outcome_path)))
             return True, "sess-9", relay.ClaudeRunReport()
@@ -5887,7 +5888,7 @@ class RunNodeJobTest(unittest.TestCase):
         self.assertEqual(seen["determine_cwd"], "/tmp/wt")
 
     def test_git_sha_is_none_when_rev_parse_fails(self):
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: True
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: True
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "", "returncode": 128})()
         j = job(node_type="shell", run="true", id="nj-5", run_id="r1", vars={"ref": "RLY-5"})
@@ -5900,7 +5901,7 @@ class RunNodeJobTest(unittest.TestCase):
         are not server-sent vars at all, so run_node_job must supply them itself, the same
         way work()'s vars dict does for `relay watch`."""
         seen = {}
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: (
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: (
             seen.__setitem__("cmd", cmd) or True)
         old_url = os.environ.get("HAMACA_URL")
         os.environ["HAMACA_URL"] = "https://relay.example"
@@ -5922,7 +5923,7 @@ class RunNodeJobTest(unittest.TestCase):
         when absent; render()'s str(v) would splice the literal string "None" into the
         command if those keys weren't filtered out first."""
         seen = {}
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: (
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: (
             seen.__setitem__("cmd", cmd) or True)
         j = job(node_type="shell", run="echo {ref}", id="nj-7", run_id="r1",
                 vars={"ref": "RLY-7", "prior_detail": None, "findings": None})
@@ -5933,7 +5934,7 @@ class RunNodeJobTest(unittest.TestCase):
     def test_agent_job_expands_placeholders_in_the_prompt(self):
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None, ref=None, target=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -5951,11 +5952,11 @@ class RunNodeJobTest(unittest.TestCase):
         their exit code IS an unambiguous verdict."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None, ref=None, target=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
-        def fake_shell(cmd, cwd, tag, sink=None, on_proc=None, partition=None, scratch=None, plan=None):
+        def fake_shell(cmd, cwd, tag, sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None):
             seen["cmd"] = cmd
             return True
 
@@ -5990,7 +5991,7 @@ class RunNodeJobTest(unittest.TestCase):
         """The composition helper is only worth anything if run_node_job actually uses it."""
         seen = {}
 
-        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
+        def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None, on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None, ref=None, target=None):
             seen["prompt"] = argv[2]
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -7400,9 +7401,11 @@ class ExecuteOnePrepareHookTest(unittest.TestCase):
             def __init__(self):
                 self.created = []
                 self.released = []
-            def create_or_rebaseline(self, slot):
+            def base_for(self, job):
+                return self.base
+            def create_or_rebaseline(self, slot, base=None):
                 self.created.append(slot)
-            def run_prepare_hook(self, slot_path, ref, branch):
+            def run_prepare_hook(self, slot_path, ref, branch, base=None):
                 return hook_err
             def partition_for(self, slot):
                 return "1"
@@ -7482,7 +7485,7 @@ class ConcurrentPrepWaitTest(unittest.TestCase):
         self.pool._teardown = lambda slot, retain: None
         self.gate, self.creating = threading.Event(), threading.Event()
 
-        def create(slot):
+        def create(slot, base=None):
             self.creating.set()
             self.gate.wait(5)
             record("create")
@@ -7490,7 +7493,8 @@ class ConcurrentPrepWaitTest(unittest.TestCase):
         self.pool.create_or_rebaseline = create
 
     def hook(self, err):
-        self.pool.run_prepare_hook = lambda slot_path, ref, branch: self.record("prepare") or err
+        self.pool.run_prepare_hook = lambda slot_path, ref, branch, base=None: (
+            self.record("prepare") or err)
 
     def run_both(self):
         jobs = [{"id": f"nj-{i}", "isolation": "exclusive", "run_id": "r1",
@@ -7556,8 +7560,9 @@ class ExecuteOneTest(unittest.TestCase):
         # RLY-231: execute_one now drives per-card worktree git through the pool. Record the
         # create/prepare/teardown calls instead of running real git.
         self.created, self.prepared, self.torn = [], [], []
-        self.pool.create_or_rebaseline = lambda slot: self.created.append(slot)
-        self.pool.run_prepare_hook = lambda slot_path, ref, branch: self.prepared.append(ref) or None
+        self.pool.create_or_rebaseline = lambda slot, base=None: self.created.append(slot)
+        self.pool.run_prepare_hook = lambda slot_path, ref, branch, base=None: (
+            self.prepared.append(ref) or None)
         self.pool._teardown = lambda slot, retain: self.torn.append((slot, retain))
 
     def test_first_exclusive_job_creates_warms_then_runs_and_reports(self):
@@ -10618,7 +10623,8 @@ class PlanPausedRequestTest(unittest.TestCase):
         with contextlib.redirect_stderr(err):
             with self.assertRaises(relay.Died) as cm:
                 relay.api("GET", "/api/board")
-        self.assertEqual(cm.exception.msg, "API 402: Pay up")
+        # RE458: the generic error names the server's code after its message.
+        self.assertEqual(cm.exception.msg, "API 402: Pay up (something_else)")
 
 
 class ClaimPlanPausedTest(unittest.TestCase):
@@ -13449,7 +13455,7 @@ class TestPartitionTest(unittest.TestCase):
         seen = {}
         _saved = {k: getattr(relay, k) for k in ("_stream_shell",)}
         _run = relay.subprocess.run
-        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: (
+        relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: (
             seen.__setitem__("partition", partition) or True)
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
@@ -13469,7 +13475,7 @@ class TestPartitionTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None, ref=None, target=None):
             seen["partition"] = partition
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -13502,8 +13508,8 @@ class TestPartitionTest(unittest.TestCase):
                 {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 1}})
             # RLY-231: execute_one drives per-card worktree git through the pool now; stub it
             # out so this test exercises the partition threading, not real git worktree ops.
-            pool.create_or_rebaseline = lambda slot: None
-            pool.run_prepare_hook = lambda slot_path, ref, branch: None
+            pool.create_or_rebaseline = lambda slot, base=None: None
+            pool.run_prepare_hook = lambda slot_path, ref, branch, base=None: None
             j = job("exclusive_shell", run="x", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
             slot, reset = pool.assign(j)
             relay.execute_one(j, slot, reset, relay.JobControl(), pool)
@@ -13623,7 +13629,7 @@ class ScratchPathTest(unittest.TestCase):
         _saved = {k: getattr(relay, k) for k in ("_stream_shell",)}
         _run = relay.subprocess.run
         relay._stream_shell = (
-            lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: (
+            lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: (
                 seen.__setitem__("scratch", scratch) or True))
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
@@ -13646,7 +13652,7 @@ class ScratchPathTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None, ref=None, target=None):
             seen["scratch"] = scratch
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -13742,7 +13748,7 @@ class PlanPathTest(unittest.TestCase):
         _saved = {k: getattr(relay, k) for k in ("_stream_shell",)}
         _run = relay.subprocess.run
         relay._stream_shell = (
-            lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: (
+            lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None, ref=None, target=None: (
                 seen.__setitem__("plan", plan) or True))
         relay.subprocess.run = lambda *a, **k: type(
             "R", (), {"stdout": "deadbeef\n", "returncode": 0})()
@@ -13763,7 +13769,7 @@ class PlanPathTest(unittest.TestCase):
         _run = relay.subprocess.run
 
         def fake_stream(argv, cwd, tag="", session_id_path=None, outcome_path=None,
-                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None):
+                        on_proc=None, partition=None, scratch=None, plan=None, usage=None, on_session=None, cost_path=None, ref=None, target=None):
             seen["plan"] = plan
             return True, "sess-1", relay.ClaudeRunReport()
 
@@ -14991,6 +14997,566 @@ class PreMigrationNoteRetiredTest(unittest.TestCase):
         self.assertEqual(ran, [""])
         self.assertEqual(err.getvalue(), "")
 
+
+
+# ============================ RE458: target branch (runner side) ============================
+
+
+class TargetNodeEnvTest(unittest.TestCase):
+    """RE458: every node job's child env carries the card's frozen target and its ref, set-or-
+    CLEAR (RLY-216) so a node never inherits either from the runner. RE482 closed the RELAY_
+    window, so only the HAMACA_ names are exported and a stale RELAY_ twin is popped."""
+
+    # Scenario 1
+    def test_target_and_ref_are_exported_then_cleared(self):
+        child = {"HAMACA_TARGET": "stale", "RELAY_REF": "stale"}
+        relay._apply_node_env(child, None, "/s", None, ref="RE7", target="exp/flows")
+        self.assertEqual(child["HAMACA_TARGET"], "exp/flows")
+        self.assertEqual(child["HAMACA_REF"], "RE7")
+        self.assertNotIn("RELAY_TARGET", child)
+        self.assertNotIn("RELAY_REF", child)
+
+        relay._apply_node_env(child, None, "/s", None, ref=None, target=None)
+        for name in ("HAMACA_TARGET", "RELAY_TARGET", "HAMACA_REF", "RELAY_REF"):
+            self.assertNotIn(name, child)
+
+    def test_existing_positional_callers_clear_both(self):
+        child = {"HAMACA_TARGET": "stale", "HAMACA_REF": "stale"}
+        relay._apply_node_env(child, None, "/s", None)
+        self.assertNotIn("HAMACA_TARGET", child)
+        self.assertNotIn("HAMACA_REF", child)
+
+    # Scenario 2
+    def test_target_is_an_exported_suffix_pinned_by_the_contract(self):
+        self.assertEqual(relay.ENV_EXPORTED, tuple(CONTRACT["env"]["exported"]))
+        self.assertIn("TARGET", relay.ENV_EXPORTED)
+
+    def test_run_node_job_passes_the_jobs_ref_and_target_to_the_shell(self):
+        seen = {}
+        self.addCleanup(setattr, relay, "_stream_shell", relay._stream_shell)
+        self.addCleanup(setattr, relay, "git_head_sha", relay.git_head_sha)
+        relay.git_head_sha = lambda path: "sha"
+
+        def shell(cmd, cwd, tag="", sink=None, on_proc=None, **kw):
+            seen.update(kw)
+            return True
+
+        relay._stream_shell = shell
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        j = job("exclusive_shell", run="true", vars={"ref": "RE7", "target": "exp/flows"},
+                isolation="shared_clean")
+        with contextlib.redirect_stdout(io.StringIO()):
+            relay.run_node_job(j, tmp, relay.JobControl())
+        self.assertEqual((seen["ref"], seen["target"]), ("RE7", "exp/flows"))
+
+
+class TargetBaseTest(unittest.TestCase):
+    """RE458: a job's base ref is `<remote of the pool base>/<its target>`; every exclusive
+    re-baseline and prepare hook reads it."""
+
+    CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
+           "base": "origin/main"}
+
+    def setUp(self):
+        for name in ("reset_worktree", "git_fetch_with_retry", "git_worktree_with_retry",
+                     "worktree_path", "_worktree_link_intact"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        self.calls = []
+        relay.reset_worktree = lambda path, base: self.calls.append(("reset", path, base))
+        relay.git_fetch_with_retry = lambda cwd: True
+        relay.git_worktree_with_retry = lambda args: self.calls.append(("wt", *args)) or True
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        relay.worktree_path = lambda name: os.path.join(self.tmp, name)
+        relay._worktree_link_intact = lambda path: True
+
+    # Scenario 3
+    def test_remote_of_is_the_part_before_the_first_slash(self):
+        self.assertEqual(relay.remote_of("origin/main"), "origin")
+        self.assertEqual(relay.remote_of("upstream/trunk"), "upstream")
+
+    # Scenario 3
+    def test_base_for_reads_the_jobs_target(self):
+        p = relay.RunnerPool(self.CFG)
+        self.assertEqual(p.base_for({"vars": {"target": "exp/flows"}}), "origin/exp/flows")
+        self.assertEqual(p.base_for({"vars": {}}), "origin/main")
+        self.assertEqual(p.base_for({"vars": {"target": None}}), "origin/main")
+
+    # Scenario 7
+    def test_an_existing_tree_is_reset_to_the_given_base(self):
+        os.makedirs(relay.worktree_path("exec-RE1"))
+        relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RE1", base="origin/exp/flows")
+        self.assertIn(("reset", relay.worktree_path("exec-RE1"), "origin/exp/flows"), self.calls)
+
+    # Scenario 7
+    def test_a_missing_tree_is_added_at_the_given_base(self):
+        relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RE1", base="origin/exp/flows")
+        self.assertIn(("wt", "add", "--detach", relay.worktree_path("exec-RE1"),
+                       "origin/exp/flows"), self.calls)
+
+    # Scenario 7
+    def test_an_omitted_base_is_the_pool_base(self):
+        relay.RunnerPool(self.CFG).create_or_rebaseline("exec-RE1")
+        self.assertIn(("wt", "add", "--detach", relay.worktree_path("exec-RE1"), "origin/main"),
+                      self.calls)
+
+    # Scenario 8
+    def test_the_prepare_hook_is_told_the_given_base(self):
+        hook = os.path.join(self.tmp, "hook.sh")
+        out = os.path.join(self.tmp, "seen")
+        _write(hook, f'#!/bin/sh\nprintf "%s %s" "$4" "$HAMACA_BASE" > {out}\n')
+        os.chmod(hook, 0o755)
+        p = relay.RunnerPool({**self.CFG, "prepare": hook})
+        self.assertIsNone(p.run_prepare_hook(self.tmp, "RE1", "re-1-x", base="origin/exp/flows"))
+        with open(out) as f:
+            self.assertEqual(f.read(), "origin/exp/flows origin/exp/flows")
+
+
+class VerifyBaseRefTest(unittest.TestCase):
+    """RE458 scenario 4: a target branch that is not on the remote fails fast, after one fetch."""
+
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="relay-verify-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.bare = os.path.join(self.tmp, "origin.git")
+        seed = os.path.join(self.tmp, "seed")
+        self.clone = os.path.join(self.tmp, "clone")
+        _git(self.tmp, "init", "-q", "--bare", "-b", "main", self.bare)
+        _git(self.tmp, "init", "-q", "-b", "main", seed)
+        _git(seed, "commit", "-q", "--allow-empty", "-m", "init")
+        _git(seed, "push", "-q", self.bare, "main")
+        _git(self.tmp, "clone", "-q", self.bare, self.clone)
+        self.addCleanup(setattr, relay, "ROOT", relay.ROOT)
+        relay.ROOT = self.clone
+
+    def test_a_missing_branch_is_named_then_found_once_pushed(self):
+        self.assertEqual(relay.verify_base_ref("origin/exp/missing"),
+                         "origin/exp/missing does not exist; push it first")
+        _git(self.tmp, "--git-dir", self.bare, "branch", "exp/missing", "main")
+        self.assertIsNone(relay.verify_base_ref("origin/exp/missing"))
+
+    def test_an_existing_branch_needs_no_fetch(self):
+        self.addCleanup(setattr, relay, "git_fetch_with_retry", relay.git_fetch_with_retry)
+        fetched = []
+        relay.git_fetch_with_retry = lambda cwd: fetched.append(cwd) or True
+        self.assertIsNone(relay.verify_base_ref("origin/main"))
+        self.assertEqual(fetched, [])
+
+
+class MissingTargetBranchTest(unittest.TestCase):
+    """RE458 scenarios 5-6: a job whose target branch does not exist fails before any worktree
+    work, finishes its preparation with the same detail for its siblings, and leaves neither a
+    worktree nor a pool record behind."""
+
+    DETAIL = "origin/exp/missing does not exist; push it first"
+
+    def setUp(self):
+        self._saved = {k: getattr(relay, k) for k in
+                       ("run_node_job", "report_outcome", "worktree_path", "git_head_sha",
+                        "verify_base_ref", "git_worktree_with_retry", "DRY", "log")}
+        self.addCleanup(lambda: [setattr(relay, k, v) for k, v in self._saved.items()])
+        relay.DRY = False
+        relay.log = lambda *a, **k: None
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        relay.worktree_path = lambda name: os.path.join(self.tmp, name)   # never created
+        relay.git_head_sha = lambda path: ""
+        self.verified = []
+        relay.verify_base_ref = lambda base: self.verified.append(base) or self.DETAIL
+        self.wt = []
+        relay.git_worktree_with_retry = lambda args: self.wt.append(args) or True
+        self.ran = []
+        relay.run_node_job = lambda *a, **k: self.ran.append(a) or (
+            "succeeded", "", "s", None, False, None, None)
+        self.reported = []
+        relay.report_outcome = lambda jid, o, d, *rest, **kw: (
+            self.reported.append((o, d)) or "failed")
+        self.pool = relay.RunnerPool(
+            {"namespace": "exec", "capacity": {"shared_clean": 2, "exclusive": 2},
+             "base": "origin/main"})
+        self.created, self.hooks, self.preps = [], [], []
+        self.pool.create_or_rebaseline = lambda slot, base=None: self.created.append(slot)
+        self.pool.run_prepare_hook = lambda *a, **k: self.hooks.append(a) or None
+        real_prepared = self.pool.prepared
+
+        def prepared(slot, detail=None, **kw):
+            self.preps.append((slot, detail))
+            return real_prepared(slot, detail, **kw)
+
+        self.pool.prepared = prepared
+
+    # Scenario 5
+    def test_an_exclusive_job_fails_without_creating_or_holding_a_tree(self):
+        j = job("exclusive_shell", run="x", id="nj-1", run_id="r1",
+                vars={"ref": "RLY-1", "target": "exp/missing"})
+        slot, reset = self.pool.assign(j)
+        self.assertTrue(reset)
+        relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.reported, [("failed", self.DETAIL)])
+        self.assertEqual(self.verified, ["origin/exp/missing"])
+        self.assertEqual(self.created, [])
+        self.assertEqual(self.hooks, [])
+        self.assertEqual(self.ran, [])
+        self.assertIn((slot, self.DETAIL), self.preps)
+        self.assertNotIn(slot, self.pool.wts)
+        self.assertEqual(self.pool.capacity()["exclusive"], 2)
+
+    def test_the_record_is_dropped_even_when_the_run_carries_on(self):
+        """The failed edge may route to a fix node (run_state running): the next job must
+        place as a brand-new tree and create it, not run in a directory that never existed."""
+        relay.report_outcome = lambda *a, **k: "running"
+        j = job("exclusive_shell", run="x", id="nj-1", run_id="r1",
+                vars={"ref": "RLY-1", "target": "exp/missing"})
+        slot, reset = self.pool.assign(j)
+        relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
+        self.assertNotIn(slot, self.pool.wts)
+        self.assertEqual(self.pool.assign(dict(j, id="nj-2")), (slot, True))
+
+    def test_a_job_on_the_pool_base_is_not_checked(self):
+        j = job("exclusive_shell", run="x", id="nj-1", run_id="r1",
+                vars={"ref": "RLY-1", "target": "main"})
+        slot, reset = self.pool.assign(j)
+        relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.verified, [])
+        self.assertEqual(self.created, [slot])
+
+    # Scenario 6
+    def test_a_shared_clean_job_fails_without_adding_a_tree(self):
+        j = job("shared_clean_agent", id="nj-1", run_id="r1",
+                vars={"ref": "RLY-1", "target": "exp/missing"})
+        slot, reset = self.pool.assign(j)
+        self.assertEqual((slot, reset), (self.pool.clean_tree_name("exp/missing"), True))
+        relay.execute_one(j, slot, reset, relay.JobControl(), self.pool)
+        self.assertEqual(self.reported, [("failed", self.DETAIL)])
+        self.assertFalse([a for a in self.wt if a[:1] == ["add"]])
+        self.assertEqual(self.created, [])
+        self.assertEqual(self.pool.clean_trees, {})
+        self.assertEqual(self.pool.shared_used, 0)
+
+
+class CleanTreePlacementTest(unittest.TestCase):
+    """RE458 scenarios 9-11: shared_clean work off the pool base runs in a per-target
+    `<ns>-clean-<slug>-<hash>` tree, and every clean tree shares the one capacity."""
+
+    def pool(self, cap):
+        return relay.RunnerPool({"namespace": "exec",
+                                 "capacity": {"shared_clean": cap, "exclusive": 1},
+                                 "base": "origin/main"})
+
+    def shared(self, run_id, target=None):
+        v = {"ref": run_id.upper()}
+        if target is not None:
+            v["target"] = target
+        return {"isolation": "shared_clean", "run_id": run_id, "vars": v}
+
+    # Scenario 9
+    def test_capacity_is_shared_across_every_clean_tree(self):
+        p = self.pool(2)
+        self.assertEqual(p.assign(self.shared("r1")), ("exec-clean", False))
+        self.assertEqual(p.assign(self.shared("r2", "exp/flows")),
+                         (p.clean_tree_name("exp/flows"), True))
+        self.assertIsNone(p.assign(self.shared("r3", "exp/flows")))
+        self.assertEqual(p.capacity()["shared_clean"], 0)
+
+    def test_a_target_equal_to_the_pool_base_uses_the_default_tree(self):
+        p = self.pool(2)
+        self.assertEqual(p.assign(self.shared("r1", "main")), ("exec-clean", False))
+        self.assertEqual(p.clean_trees, {})
+
+    # Scenario 10
+    def test_a_concurrent_placement_waits_for_the_first_preparation(self):
+        p = self.pool(3)
+        name, reset = p.assign(self.shared("r1", "exp/flows"))
+        self.assertTrue(reset)
+        self.assertEqual(p.assign(self.shared("r2", "exp/flows")), (name, False))
+        result = []
+        t = threading.Thread(target=lambda: result.append(p.wait_prepared(name)))
+        t.start()
+        time.sleep(0.1)
+        self.assertEqual(result, [])                       # still waiting
+        p.prepared(name, None)
+        t.join(5)
+        self.assertEqual(result, [None])
+
+    def test_a_concurrent_placement_gets_a_failed_preparations_detail(self):
+        p = self.pool(3)
+        name, _ = p.assign(self.shared("r1", "exp/flows"))
+        p.assign(self.shared("r2", "exp/flows"))
+        p.prepared(name, "prepare hook failed: boom")
+        self.assertEqual(p.wait_prepared(name), "prepare hook failed: boom")
+
+    def test_a_created_tree_is_reused_without_reset(self):
+        p = self.pool(3)
+        name, _ = p.assign(self.shared("r1", "exp/flows"))
+        p.prepared(name, None)
+        p.release(self.shared("r1", "exp/flows"), name, "running")
+        self.assertEqual(p.assign(self.shared("r2", "exp/flows")), (name, False))
+
+    def test_release_frees_capacity_and_stamps_idle(self):
+        p = self.pool(2)
+        p.clock = lambda: 42.0
+        name, _ = p.assign(self.shared("r1", "exp/flows"))
+        p.prepared(name, None)
+        p.release(self.shared("r1", "exp/flows"), name, "running")
+        self.assertEqual(p.shared_used, 0)
+        self.assertEqual(p.clean_trees[name]["live"], 0)
+        self.assertEqual(p.clean_trees[name]["idle_since"], 42.0)
+
+    # Scenario 11
+    def test_clean_tree_names_are_distinct_and_stable(self):
+        p = self.pool(1)
+        a, b = p.clean_tree_name("exp/flows"), p.clean_tree_name("exp-flows")
+        self.assertTrue(a.startswith("exec-clean-exp-flows-"))
+        self.assertTrue(b.startswith("exec-clean-exp-flows-"))
+        self.assertNotEqual(a, b)
+        self.assertEqual(a, p.clean_tree_name("exp/flows"))
+        self.assertEqual(b, p.clean_tree_name("exp-flows"))
+        self.assertEqual(a, "exec-clean-exp-flows-"
+                         + hashlib.sha256(b"exp/flows").hexdigest()[:8])
+
+
+class CleanTreeRefreshTest(unittest.TestCase):
+    """RE458 scenarios 12-13: idle per-target clean trees are reset to their base on every
+    pass and evicted once idle for CLEAN_TREE_IDLE_GRACE_S; a busy one is never touched."""
+
+    def setUp(self):
+        for name in ("reset_worktree", "refresh_worktree", "git_fetch_with_retry",
+                     "git_worktree_with_retry", "_git_worktree_attempts", "worktree_path",
+                     "_worktree_link_intact", "_stop_processes_in"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        relay.worktree_path = lambda name: os.path.join(self.tmp, name)
+        relay._worktree_link_intact = lambda path: True
+        relay._stop_processes_in = lambda path, ref=None: []
+        self.calls = []
+        relay.reset_worktree = lambda path, base: self.calls.append(("reset", path, base))
+        relay.refresh_worktree = lambda name, base: self.calls.append(("refresh", name, base))
+        relay.git_fetch_with_retry = lambda cwd: self.calls.append(("fetch",)) or True
+
+        def wt(args):
+            self.calls.append(("wt", *args))
+            if args[:2] == ["remove", "--force"]:
+                shutil.rmtree(args[2], ignore_errors=True)
+            return True, ""
+
+        relay._git_worktree_attempts = wt
+        relay.git_worktree_with_retry = lambda args: wt(args)[0]
+        self.now = 0.0
+        self.pool = relay.RunnerPool({"namespace": "exec",
+                                      "capacity": {"shared_clean": 2, "exclusive": 1},
+                                      "base": "origin/main"})
+        self.pool.clock = lambda: self.now
+        self.pool.run_cleanup_hook = lambda path, ref: self.calls.append(("cleanup", path)) or None
+        self.job = {"isolation": "shared_clean", "run_id": "r1",
+                    "vars": {"ref": "RE1", "target": "exp/flows"}}
+        self.name, _ = self.pool.assign(self.job)
+        self.path = relay.worktree_path(self.name)
+        os.makedirs(self.path)
+        self.pool.prepared(self.name, None)
+
+    # Scenario 12
+    def test_an_idle_tree_is_reset_then_evicted_after_the_grace(self):
+        self.pool.release(self.job, self.name, "running")          # idle at t=0
+        self.now = 10.0
+        self.pool.refresh_idle_shared()
+        self.assertIn(("reset", self.path, "origin/exp/flows"), self.calls)
+        self.assertIn(self.name, self.pool.clean_trees)
+
+        self.calls.clear()
+        self.now = float(relay.CLEAN_TREE_IDLE_GRACE_S)
+        self.pool.refresh_idle_shared()
+        self.assertIn(("wt", "remove", "--force", self.path), self.calls)
+        self.assertLess(self.calls.index(("cleanup", self.path)),
+                        self.calls.index(("wt", "remove", "--force", self.path)))
+        self.assertIn(("wt", "prune"), self.calls)
+        self.assertNotIn(self.name, self.pool.clean_trees)
+
+    # Scenario 12
+    def test_the_default_tree_refreshes_while_an_off_default_tree_is_busy(self):
+        self.pool.refresh_idle_shared()
+        self.assertIn(("refresh", "exec-clean", "origin/main"), self.calls)
+
+    def test_one_fetch_per_pass(self):
+        self.pool.release(self.job, self.name, "running")
+        self.now = 10.0
+        relay.refresh_worktree = lambda name, base: (self.calls.append(("fetch",)),
+                                                     self.calls.append(("refresh", name, base)))
+        self.pool.refresh_idle_shared()
+        self.assertEqual(self.calls.count(("fetch",)), 1)
+
+    # Scenario 13
+    def test_a_busy_tree_is_neither_reset_nor_removed(self):
+        self.now = float(relay.CLEAN_TREE_IDLE_GRACE_S) * 2
+        self.pool.refresh_idle_shared()
+        self.assertFalse([c for c in self.calls if c[0] == "reset"])
+        self.assertFalse([c for c in self.calls if c[:2] == ("wt", "remove")])
+        self.assertIn(self.name, self.pool.clean_trees)
+
+
+class RecoverCleanTreeTest(unittest.TestCase):
+    """RE458 scenario 14: a per-target clean tree left on disk by a previous process is removed
+    on recover(), never adopted as a phantom per-card worktree."""
+
+    def setUp(self):
+        for name in ("_list_worktree_paths", "_is_retained_worktree", "git_worktree_with_retry",
+                     "_worktree_link_intact"):
+            self.addCleanup(setattr, relay, name, getattr(relay, name))
+        self.calls = []
+        relay.git_worktree_with_retry = lambda args: self.calls.append(("wt", *args)) or True
+        relay._worktree_link_intact = lambda path: True
+        relay._is_retained_worktree = lambda path: False
+        relay._list_worktree_paths = lambda: [relay.worktree_path("exec-clean"),
+                                              relay.worktree_path("exec-clean-exp-flows-1a2b3c4d"),
+                                              relay.worktree_path("exec-RE5")]
+
+    # Scenario 14
+    def test_a_leftover_clean_tree_is_removed_not_adopted(self):
+        p = relay.RunnerPool({"namespace": "exec",
+                              "capacity": {"shared_clean": 1, "exclusive": 2}})
+        p.run_cleanup_hook = lambda path, ref: self.calls.append(("cleanup", path, ref)) or None
+        p.recover()
+        leftover = relay.worktree_path("exec-clean-exp-flows-1a2b3c4d")
+        self.assertEqual(p.wts["exec-RE5"]["state"], "active")
+        self.assertNotIn("exec-clean-exp-flows-1a2b3c4d", p.wts)
+        self.assertEqual(self.calls, [("cleanup", leftover, ""),
+                                      ("wt", "remove", "--force", leftover), ("wt", "prune")])
+        self.assertNotIn("exec-clean", p.wts)
+        self.assertEqual(p.capacity()["exclusive"], 1)
+
+
+class CreateSpawnedFromTest(unittest.TestCase):
+    """RE458 scenario 15: inside a node, `./hamaca create` records the card it was spawned from."""
+
+    def setUp(self):
+        _scrub_env(self, "HAMACA_REF", "RELAY_REF")
+        self.addCleanup(setattr, relay, "api", relay.api)
+        self.sent = []
+        relay.api = lambda method, path, body=None, **k: (
+            self.sent.append((method, path, body)) or {"data": {"ref": "RE8", "title": "child"}})
+
+    def run_create(self, *argv):
+        args = relay.build_parser().parse_args(["create", "child", "--json", *argv])
+        capture(relay.cmd_create, args)
+        return self.sent[-1][2]
+
+    def test_the_node_ref_is_sent_as_spawned_from(self):
+        os.environ["HAMACA_REF"] = "RE7"
+        self.assertEqual(self.run_create(), {"title": "child", "spawned_from": "RE7"})
+
+    def test_no_spawned_from_opts_out(self):
+        os.environ["HAMACA_REF"] = "RE7"
+        self.assertEqual(self.run_create("--no-spawned-from"), {"title": "child"})
+
+    def test_an_explicit_spawner_wins(self):
+        os.environ["HAMACA_REF"] = "RE7"
+        self.assertEqual(self.run_create("--spawned-from", "RE9"),
+                         {"title": "child", "spawned_from": "RE9"})
+
+    def test_outside_a_node_there_is_no_spawner(self):
+        self.assertEqual(self.run_create(), {"title": "child"})
+
+    def test_a_stale_relay_ref_is_not_a_spawner(self):
+        os.environ["RELAY_REF"] = "RE7"
+        self.assertEqual(self.run_create(), {"title": "child"})
+
+    def test_both_flags_are_a_usage_error(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            relay.build_parser().parse_args(
+                ["create", "child", "--spawned-from", "RE9", "--no-spawned-from"])
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertEqual(self.sent, [])
+
+
+class TargetCommandTest(unittest.TestCase):
+    """RE458 scenarios 16-18: `./hamaca target <ref> [<branch>] [--clear]`."""
+
+    CARD = {"ref": "RE7", "title": "t", "target_branch": None, "effective_target": "main",
+            "target_inherited_from": None}
+
+    def setUp(self):
+        self.real_api = relay.api
+        self.addCleanup(setattr, relay, "api", relay.api)
+        self.sent = []
+        self.card = dict(self.CARD)
+        relay.api = lambda method, path, body=None, **k: (
+            self.sent.append((method, path, body)) or {"data": self.card})
+
+    def run_target(self, *argv):
+        args = relay.build_parser().parse_args(["target", *argv])
+        return capture(args.func, args)
+
+    # Scenario 16
+    def test_shows_a_board_default_target(self):
+        self.assertEqual(self.run_target("RE7"), "RE7 target: main (board default)\n")
+        self.assertEqual(self.sent, [("GET", "/api/cards/RE7", None)])
+
+    # Scenario 16
+    def test_shows_an_inherited_override(self):
+        self.card.update(target_branch="exp/flows", effective_target="exp/flows",
+                         target_inherited_from="RE3")
+        self.assertEqual(self.run_target("RE7"),
+                         "RE7 target: exp/flows (override, inherited from RE3)\n")
+
+    def test_shows_a_plain_override(self):
+        self.card.update(target_branch="exp/flows", effective_target="exp/flows")
+        self.assertEqual(self.run_target("RE7"), "RE7 target: exp/flows (override)\n")
+
+    def test_json_prints_the_card(self):
+        self.assertEqual(json.loads(self.run_target("RE7", "--json")), self.card)
+
+    # Scenario 17
+    def test_a_branch_is_patched(self):
+        self.card.update(target_branch="exp/flows", effective_target="exp/flows")
+        out = self.run_target("RE7", "exp/flows")
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RE7", {"target_branch": "exp/flows"})])
+        self.assertEqual(out, "RE7 target: exp/flows (override)\n")
+
+    # Scenario 17
+    def test_clear_patches_null(self):
+        self.run_target("RE7", "--clear")
+        self.assertEqual(self.sent, [("PATCH", "/api/cards/RE7", {"target_branch": None})])
+
+    # Scenario 17
+    def test_a_branch_with_clear_is_a_usage_error(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            self.run_target("RE7", "exp/flows", "--clear")
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertEqual(self.sent, [])
+
+    def refused(self, code, body):
+        relay.api = self.real_api
+        import urllib.request
+        self.addCleanup(setattr, urllib.request, "urlopen", urllib.request.urlopen)
+
+        def refuse(*a, **k):
+            raise _http_error(code, json.dumps(body).encode())
+
+        urllib.request.urlopen = refuse
+        patcher = unittest.mock.patch.dict(os.environ, {"HAMACA_URL": "http://x",
+                                                        "HAMACA_API_KEY": "k"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    # Scenario 18
+    def test_a_run_active_refusal_names_the_code(self):
+        self.refused(409, {"error": {"code": "run_active", "message": "a run is active"}})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            self.run_target("RE7", "exp/other")
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("run_active", err.getvalue())
+
+    # Scenario 18
+    def test_an_invalid_name_shows_the_servers_message(self):
+        self.refused(422, {"error": {"code": "invalid",
+                                     "message": "target_branch is not a valid git branch name"}})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            self.run_target("RE7", "a b")
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("is not a valid git branch name", err.getvalue())
 
 if __name__ == "__main__":
     # buffer=True captures each test's stdout/stderr and replays it only if that test fails.

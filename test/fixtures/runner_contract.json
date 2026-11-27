@@ -20,6 +20,7 @@
         "guidance": null,
         "prior_detail": null,
         "ref": "CB1",
+        "target": "main",
         "task": null,
         "task_id": null
       }
@@ -50,6 +51,7 @@
         "guidance": null,
         "prior_detail": null,
         "ref": "CA1",
+        "target": "main",
         "task": null,
         "task_id": null
       }
@@ -80,6 +82,7 @@
         "guidance": null,
         "prior_detail": null,
         "ref": "CA1",
+        "target": "main",
         "task": null,
         "task_id": null
       }
@@ -114,7 +117,7 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 102
+      "version": 103
     },
     "running": []
   },
@@ -127,7 +130,8 @@
       "BRANCH",
       "BASE",
       "WORKTREE",
-      "CACHE_DIR"
+      "CACHE_DIR",
+      "TARGET"
     ],
     "prefix": "HAMACA_",
     "read": [
@@ -242,7 +246,7 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 102
+        "version": 103
       },
       "running": [],
       "sessions": {
@@ -253,7 +257,7 @@
       "harnesses_digest": "<harnesses-digest>",
       "latest_runner_version": "<latest-runner-version>",
       "release_held": [],
-      "required_version": 102,
+      "required_version": 103,
       "revoked": [],
       "runner_outdated": false,
       "want_capabilities": false

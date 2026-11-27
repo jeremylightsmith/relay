@@ -25,6 +25,18 @@ defmodule Hamaca.RunsRunnerVersionTest do
     test "a runner above the minimum is not outdated" do
       refute Runs.runner_outdated?(%Schemas.Runner{version: Runs.min_runner_version() + 1})
     end
+
+    # RE458: an older runner leaves the flows' `{target}` unexpanded, so the floor rose to the
+    # RUNNER_VERSION that first expands it.
+    test "the floor equals the RUNNER_VERSION ./hamaca declares" do
+      [_, declared] = Regex.run(~r/^RUNNER_VERSION\s*=\s*(\d+)/m, File.read!("hamaca"))
+
+      assert Runs.min_runner_version() == String.to_integer(declared)
+    end
+
+    test "a pre-RE458 runner is outdated" do
+      assert Runs.runner_outdated?(%Schemas.Runner{version: 102})
+    end
   end
 
   describe "upsert_runner/2" do

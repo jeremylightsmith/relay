@@ -60,15 +60,15 @@ defmodule Hamaca.Boards do
   end
 
   @doc """
-  Updates a board's user-editable `name`, `slug`, and card `key` — never `owner_id`,
-  whatever the caller passes. Validates slug format/uniqueness and the 2-letter key rule
+  Updates a board's user-editable `name`, `slug`, card `key` and default `target_branch`
+  (RE458) — never `owner_id`, whatever the caller passes. Validates slug format/uniqueness and the 2-letter key rule
   (in `Schemas.Board.changeset/2`). On success broadcasts `{:board_updated, board}` (MMF 18)
   so every open board retitles/redirects and re-renders its refs live. Returns
   `{:ok, board} | {:error, changeset}`.
   """
   def update_board(%Board{} = board, attrs) do
     board
-    |> Board.changeset(Map.take(attrs, [:name, "name", :slug, "slug", :key, "key"]))
+    |> Board.changeset(Map.take(attrs, [:name, "name", :slug, "slug", :key, "key", :target_branch, "target_branch"]))
     |> Repo.update()
     |> broadcast_board_updated(board.id)
   end

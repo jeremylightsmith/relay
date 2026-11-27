@@ -8461,6 +8461,13 @@ defmodule HamacaWeb.CoreComponents do
     |> Enum.join(", ")
   end
 
+  # RE458 — a target_changed entry's meta is %{"from" => branch | nil, "to" => branch | nil};
+  # a nil "to" means the override was cleared back to the board default.
+  defp activity_phrase(%Activity{type: :target_changed, meta: %{"to" => to}}) when is_binary(to),
+    do: "set the target branch to #{to}"
+
+  defp activity_phrase(%Activity{type: :target_changed}), do: "reset the target branch to the board default"
+
   # The one-line hint under READY FOR YOUR REVIEW (MMF 15): a gated stage
   # offers the approve/send-back pair; an ungated one has no drawer decision
   # button (RLY-37) — move it forward by drag or Move to… when ready. Embedded
@@ -9716,6 +9723,11 @@ defmodule HamacaWeb.CoreComponents do
 
   attr :edit_attrs, :map, default: %{}
   attr :prefix, :string, default: nil
+
+  attr :prefix_icon, :string,
+    default: nil,
+    doc: "RE458 — a hero icon name (e.g. \"hero-share\") rendered as the prefix instead of `prefix` text"
+
   attr :input_class, :any, default: nil
   attr :label, :string, default: nil, doc: "eyebrow header text; when set the field renders its own header row"
 
@@ -9896,8 +9908,11 @@ defmodule HamacaWeb.CoreComponents do
     ~H"""
     <.form for={@form} id={"#{@id}-form"} phx-submit={@save_event} class="commit-field-form">
       {render_slot(@hidden)}
-      <div :if={@prefix} class="commit-field-prefixed">
-        <span class="commit-field-prefix font-mono">{@prefix}</span>
+      <div :if={@prefix || @prefix_icon} class="commit-field-prefixed">
+        <span :if={@prefix_icon} class="flex items-center pl-[11px] text-base-content/55">
+          <.icon name={@prefix_icon} class="size-3.5" />
+        </span>
+        <span :if={!@prefix_icon} class="commit-field-prefix font-mono">{@prefix}</span>
         <input
           type="text"
           id={"#{@id}-input"}
@@ -9908,11 +9923,12 @@ defmodule HamacaWeb.CoreComponents do
           data-commit="enter"
           data-dirty-pill="true"
           data-cancel-id={"#{@id}-cancel"}
-          class={["commit-field-bare font-mono", @input_class]}
+          class={["commit-field-bare font-mono", @prefix_icon && "text-sm", @input_class]}
+          style={@prefix_icon && "padding-left:8px"}
         />
       </div>
       <.input
-        :if={!@prefix}
+        :if={!@prefix && !@prefix_icon}
         field={@form[@field]}
         type={if(@multiline, do: "textarea", else: "text")}
         id={"#{@id}-input"}
@@ -9927,7 +9943,7 @@ defmodule HamacaWeb.CoreComponents do
       />
       <p
         :for={msg <- Enum.map(@form[@field].errors, &translate_error/1)}
-        :if={@prefix}
+        :if={@prefix || @prefix_icon}
         id={"#{@id}-error"}
         class="mt-1 text-sm text-error"
       >

@@ -1504,14 +1504,19 @@ defmodule Hamaca.Runs do
     working
   end
 
+  # RE458 — the run freezes its target branch here: `context["target"]` is the card's
+  # effective target at start, and it wins over any caller-supplied "target". build_payload/4
+  # merges the context into every job's vars, so `vars.target` holds for the run's whole life.
   defp insert_run(card, flow, start_target, context) do
+    board = Repo.get!(Board, card.board_id)
+
     %Run{
       card_id: card.id,
       flow_id: flow.id,
       flow_key: flow.key,
       status: :running,
       current_node: start_target,
-      context: context,
+      context: Map.put(context, "target", Cards.effective_target(board, card)),
       started_at: now()
     }
     |> Run.changeset()
@@ -2051,7 +2056,11 @@ defmodule Hamaca.Runs do
   # refuses every `./relay` install at claim — with a message naming the board's install one-liner
   # (`pre_rename_runner?/1`). It also forces v94..101 `./hamaca` runners to update, which their
   # auto-update already does. Equals the RUNNER_VERSION `./hamaca` declared when it shipped.
-  @min_runner_version 102
+  # RE458 raised this to 103: an older runner leaves `{target}` unexpanded, so every Code run
+  # breaks once the flows are pushed (it would run `git rebase origin/{target}`), and it bases
+  # every worktree on the pool base whatever the card's target branch. Equals the RUNNER_VERSION
+  # `./hamaca` declared when it shipped.
+  @min_runner_version 103
 
   @doc "The minimum RUNNER_VERSION this server will claim jobs to."
   def min_runner_version, do: @min_runner_version
@@ -5495,7 +5504,7 @@ defmodule Hamaca.Runs do
   end
 
   # Builds a job payload: the runner's whole contract. Placeholder
-  # expansion ({ref}/{branch}/{relay}) stays runner-side per
+  # expansion ({ref}/{branch}/{target}/{relay}) stays runner-side per
   # Schemas.Flow.Node; the engine only supplies the vars. `branch` follows
   # today's runner convention: the card's stored branch, else
   # <key>-<n>-<title-slug> (mirrors ./hamaca's slug()).
@@ -5508,7 +5517,8 @@ defmodule Hamaca.Runs do
     ref = Cards.ref(board, card)
 
     vars =
-      Map.merge(run.context, %{
+      run.context
+      |> Map.merge(%{
         "ref" => ref,
         "branch" => card.branch || default_branch(board, card),
         "prior_detail" => opts[:prior_detail],
@@ -5517,6 +5527,9 @@ defmodule Hamaca.Runs do
         "task" => sub_task_title(opts[:sub_task_id]),
         "task_id" => opts[:sub_task_id]
       })
+      # RE458 — a run started before the target snapshot existed has no "target" in its
+      # context; resolve it now rather than hand the runner an unexpanded {target}.
+      |> Map.put_new("target", Cards.effective_target(board, card))
 
     Map.merge(
       %{

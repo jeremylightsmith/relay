@@ -90,6 +90,14 @@ defmodule HamacaWeb.Api.FallbackController do
     |> render(:error, code: "unknown_refs", message: Cards.dependency_error_message({:unknown_refs, refs}))
   end
 
+  # RE458 — POST /api/cards' "spawned_from" named no card on this board.
+  def call(conn, {:error, {:unknown_spawned_from, ref}}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: ErrorJSON)
+    |> render(:error, code: "unknown_spawned_from", message: "spawned_from names no card on this board: #{ref}")
+  end
+
   def call(conn, {:error, {:dependency_cycle, path}}) do
     conn
     |> put_status(:unprocessable_entity)
@@ -258,6 +266,17 @@ defmodule HamacaWeb.Api.FallbackController do
     |> render(:error,
       code: "would_strand_run",
       message: "This card has a live run — cancel the run before moving it out of its work lane"
+    )
+  end
+
+  # RE458 — a card's target branch can't change under an active run: the run froze its target.
+  def call(conn, {:error, :run_active}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: ErrorJSON)
+    |> render(:error,
+      code: "run_active",
+      message: "This card has an active run; its target branch can't change until the run ends."
     )
   end
 

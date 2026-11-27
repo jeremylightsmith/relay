@@ -148,7 +148,8 @@ defmodule Hamaca.Runs.ListenerTest do
     refute run2.id == run1.id
     # RE358: the note is no longer frozen into the run's context — it reaches the agent as live
     # guidance, derived from the `:changes_requested` comment the reject posted.
-    assert run2.context == %{}
+    # RE458: the target-branch snapshot is the only thing a run's context holds.
+    assert run2.context == %{"target" => "main"}
     assert_receive {:dispatched, %NodeJob{node_key: "brainstorm"} = fresh}
     refute Map.has_key?(fresh.payload["vars"], "changes_requested")
     assert fresh.payload["vars"]["guidance"] =~ "· CHANGES REQUESTED\nneeds more detail"
@@ -265,7 +266,7 @@ defmodule Hamaca.Runs.ListenerTest do
     # RE358: the note reaches the re-entry run as live guidance, not as frozen run context.
     assert_receive {:dispatched, %NodeJob{} = rerun_job}
     assert rerun_job.payload["vars"]["guidance"] =~ "try once more"
-    assert Runs.get_run!(rerun_job.run_id).context == %{}
+    assert Runs.get_run!(rerun_job.run_id).context == %{"target" => "main"}
   end
 
   test "no re-entry when the card's latest run failed — a human must intervene",
@@ -508,7 +509,7 @@ defmodule Hamaca.Runs.ListenerTest do
     Hamaca.Events.broadcast(board.id, {:card_upserted, Hamaca.Repo.get!(Card, live.id)})
 
     assert_receive {:run_started, %Run{card_id: card_id, context: context}}
-    assert context == %{}
+    assert context == %{"target" => "main"}
     assert card_id == live.id
   end
 

@@ -92,6 +92,11 @@ defmodule HamacaWeb.Api.CardJSON do
         |> Map.put(:ai_result, card.ai_result)
         # RE370 — the card's HTML mockups; [] rather than null so a reader can always iterate.
         |> Map.put(:mockups, card.mockups || [])
+        # RE458 — the override (null = inherit), what it resolves to, and the spawner it was
+        # copied from. Single-card only: target_inherited_from is a lookup, N+1 on the index.
+        |> Map.put(:target_branch, card.target_branch)
+        |> Map.put(:effective_target, Cards.effective_target(board, card))
+        |> Map.put(:target_inherited_from, Cards.target_inherited_from_ref(board, card))
         |> Map.put(:sub_tasks, Enum.map(card.sub_tasks, &TaskJSON.task/1))
         # RE93 — both directions, single-card only. data/3 (the index/summary shape) is
         # deliberately NOT extended: it would be an N+1 per card and no consumer needs it there.

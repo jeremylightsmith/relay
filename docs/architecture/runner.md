@@ -72,30 +72,39 @@ own board) overrides two flows, checked in at
 flowchart LR
     rebrowser["… rebrowser"] -- succeeded --> merge["shell: bin/ship_to_main.sh<br/>(squash, fast-forward push)"]
     merge -- failed --> resync["resync"]
-    merge -- succeeded --> await_ci["shell: bin/await_main_ci.sh<br/>(main's CI on that commit)"]
+    merge -- succeeded --> await_ci["shell: bin/await_main_ci.sh<br/>(main's CI on that commit;<br/>skipped off main)"]
     await_ci -- succeeded --> post["agent: post checklist"]
     await_ci -- failed --> github_fix["agent: ci-fixer"]
     github_fix -- succeeded --> resync
     post -- succeeded --> codedone[["Code:Done"]]
-    codedone --> checkout["shell: checkout -B {branch} origin/main"]
-    checkout -- succeeded --> fly["shell: deploy_fly.sh"]
+    codedone --> checkout["shell: checkout -B {branch} origin/{target}"]
+    checkout -- succeeded --> fly["shell: deploy_fly.sh {ref}"]
     fly -- succeeded --> ios["shell: deploy_ios.sh"]
     ios -- succeeded --> android["shell: deploy_android.sh"]
     android -- succeeded --> review[["Review"]]
     checkout & fly & ios & android -- failed --> human{{"needs_input"}}
 ```
 
+- **Target branch** (RE458). Every run freezes its card's effective target branch as
+  `{target}` (and `HAMACA_TARGET` in each node's env); it is `main` unless the card or its board
+  says otherwise. Both flows read it instead of `main`: `branch` bases a new branch on
+  `origin/{target}`, `sync` / `resync` rebase onto it, and Deploy's `checkout` checks it out.
+  The bin scripts read it through `bin/target_lib.sh`, which is the one place this repo names
+  its deploy/CI branch (`DEPLOY_BRANCH=main`) and defines `target_is_deploy_branch`. With no
+  `HAMACA_TARGET` set (an old runner, or a script run by hand) the target is `main`.
 - **Code** (`Plan:Done → Code → Code:Done`) opens no PR. `merge` is `bin/ship_to_main.sh {ref}`:
-  it squashes `origin/main..HEAD` into one `<REF> <card title>` commit and pushes it to `main`
-  as a plain fast-forward, never with force. A rejected push fails into `resync` (max 2 loops).
+  it squashes `origin/{target}..HEAD` into one `<REF> <card title>` commit and pushes it to the
+  target as a plain fast-forward, never with force, then comments `Shipped to <target> as
+  <short-sha>`. A rejected push fails into `resync` (max 2 loops).
   `await_ci` (`bin/await_main_ci.sh`) then waits for `ci.yml`'s push run on that exact commit,
   re-running failed jobs once for flakes. Only a green run moves on to `post` and `Code:Done`, so
   the Deploy flow never picks up a commit CI hasn't passed. A red one goes to `github_fix`, the
-  `ci-fixer` agent (max 2 loops). It commits a fix on top of `origin/main`, and the flow loops
+  `ci-fixer` agent (max 2 loops). It commits a fix on top of `origin/{target}`, and the flow loops
   back through `resync` and the gates to ship that fix as a new commit. The PR-era `deploy` node
-  is gone.
+  is gone. CI only runs on `main`, so for any other target `await_ci` exits 0 at once with
+  `await_main_ci: skipped — <target> is not main; CI only runs on main`, without asking GitHub.
 - **Flutter gate** (RE424). The Code flow's `flutter` gate (`bin/flutter_gate.sh`) runs between
-  `precommit` and `browser`. It diffs `flutter/` against `git merge-base origin/main HEAD` and
+  `precommit` and `browser`. It diffs `flutter/` against `git merge-base origin/{target} HEAD` and
   exits 0 immediately when the branch didn't touch it; otherwise it runs
   `bin/flutter_validate.sh` (`flutter pub get`, `flutter analyze`, a non-mutating `dart format`
   check, `flutter test`), and a failure goes to `final_fix` (max 2 loops), which re-enters at
@@ -104,25 +113,37 @@ flowchart LR
   `flutter/`, and the Deploy flow's `ios` / `android` still validate before any store upload.
   The board runs the *pushed* flow, so a change to the file takes effect only after
   `./hamaca flow-push code .hamaca/flows/code.json` (then `/hamaca-doctor`, interactively).
+- **Rollout order for the target branch.** The flows name `{target}`, which only a server that
+  freezes `vars.target` and a runner that expands it (RE458) understand; an older runner would
+  run `git rebase origin/{target}` literally. So deploy the server and runner first, then
+  `./hamaca flow-push` both flows, then run `/hamaca-doctor` interactively (never from a flow).
 - **Deploy** (`deploy` flow, `Code:Done → Deploy → Review`, `exclusive`, stage WIP 1) only deploys
   what is already on `main`. Its four shell nodes (`max_retries: 1`, each parking on
   `needs_input` when it fails, with no AI fixer) run on our own runners:
-  - `checkout`: `{relay} git-fetch && git checkout -B {branch} origin/main`.
-  - `fly`: `bin/deploy_fly.sh`. This deploy always runs, and it bakes `GIT_SHA` / `BUILT_AT` into the image.
+  - `checkout`: `{relay} git-fetch && git checkout -B {branch} origin/{target}`.
+  - `fly`: `bin/deploy_fly.sh {ref}`. On `main` this deploy always runs, and it bakes
+    `GIT_SHA` / `BUILT_AT` into the image.
   - `ios`: `bin/deploy_ios.sh {ref}`, which goes to TestFlight. When the card changed the App
     Store listing (`flutter/ios/fastlane/metadata` or `…/screenshots`), it then runs `fastlane ios
     upload_listing`, which uploads only metadata and screenshots and never submits for review.
   - `android`: `bin/deploy_android.sh {ref}`, which goes to Google Play.
 
   `ios` and `android` skip with exit 0 when the card's commit didn't touch `flutter/`
-  (`bin/card_touched_flutter.sh`), and Android also skips until its credentials exist (RLY-103).
+  (`bin/card_touched_flutter.sh`, which looks on `origin/{target}`), and Android also skips
+  until its credentials exist (RLY-103).
+
+  **Off `main`, nothing deploys.** A card whose target is not `main` still walks Deploy and
+  reaches Review, but every node no-ops with exit 0 before reading a secret or calling a tool:
+  `deploy_fly.sh` posts the card's one comment, `Not deployed: <REF> targets <target>`, and
+  `deploy_ios.sh` / `deploy_android.sh` log `skipped — <REF> targets <target>, not main` and
+  post nothing. (`--head`, a by-hand ship of the checkout, ignores the target.)
 - **Secrets** come from the runner's own environment, which shell nodes inherit. On the RE board
   that is `.envrc.local`, loaded by direnv in the shell that ran `hamaca start`. Each deploy
   script fails fast naming any secret it's missing.
 - **Why `checkout -B` and not `--detach`.** On an `exclusive` flow the runner re-attaches the
   card's branch before every node, and it refuses a detached HEAD unless the command contains
-  `checkout -B`. Pointing the card's branch at `origin/main` keeps that guard happy and runs every
-  deploy on exactly what is on `main`. This is harmless, since the branch's work already shipped
+  `checkout -B`. Pointing the card's branch at `origin/{target}` keeps that guard happy and runs
+  every deploy on exactly what is on `main` (or, off `main`, no-ops on what is on the target). This is harmless, since the branch's work already shipped
   as the squash.
 
 CI still runs the tests on pushes to `main` and on PRs. Its deploy jobs (`ci.yml`'s `deploy` and
@@ -1291,7 +1312,7 @@ RE482 closed it.
   `HAMACA_<X>`) for `ENV_READ` = `URL`, `API_KEY`, `STATE_DIR`, `RUNNER_LOCK_DIR`,
   `UPDATED_FROM`, `UPDATE_ATTEMPTS`, `NODE_OUTCOME`, and exports only `HAMACA_<X>` for every one
   of `ENV_EXPORTED` = `NODE_SCRATCH`, `NODE_OUTCOME`, `PLAN`, `REF`, `BRANCH`, `BASE`,
-  `WORKTREE`, `CACHE_DIR` to nodes and hooks (`export_env/3` — set it, or pop it when the job has
+  `WORKTREE`, `CACHE_DIR`, `TARGET` to nodes and hooks (`export_env/3` — set it, or pop it when the job has
   no value, so it never leaks from the runner into a child; a stale `RELAY_<X>` in the child env
   is always popped). The auto-update handshake (`UPDATED_FROM`/`UPDATE_ATTEMPTS`) is set and
   cleared as `HAMACA_` only; a `RELAY_UPDATED_FROM` is not a previous version. **Stale-env
@@ -1703,6 +1724,63 @@ silently billed to the paid API.
   count** (the update took, so nothing before it was thrash); same or older, and auto-update is
   disabled for that process, leaving RLY-184's fail-stop as the behaviour. Three failed attempts
   disable it the same way. Opt out with `"auto_update": false`.
+
+### Target branch (RE458)
+
+A card's work is based on its **target branch**, not a hard-coded `origin/main`. The server
+freezes each run's effective target (`Hamaca.Cards.effective_target/2`) into `run.context`, so
+every node job carries `vars.target` — a talk turn and an older server carry none. The runner
+side, all in `./hamaca`:
+
+- **`{target}` placeholder + node env.** `render()` expands `{target}` like any var. Every node
+  job's child env gets `HAMACA_TARGET` = `vars.target` and `HAMACA_REF` = `vars.ref`
+  (`_apply_node_env(..., ref=, target=)` through `export_env`: set, or popped when the job has
+  none, so a talk turn clears both). `TARGET` is in `ENV_EXPORTED`, pinned by the contract
+  fixture's `env.exported`. Inside a node, `./hamaca create` sends `spawned_from` =
+  `HAMACA_REF` (opt out with `--no-spawned-from`), so a card an agent files inherits the
+  spawning card's target.
+- **Per-job base.** `RunnerPool.base_for(job)` is `<remote_of(pool base)>/<vars.target>`
+  (`origin/main` → `origin/exp/flows`), else the pool base. `_prepare_slot` passes it to
+  `create_or_rebaseline(slot, base=)` (worktree add / reset) and `run_prepare_hook(..., base=)`
+  (argv[3] and `HAMACA_BASE`). The flow's `branch` node still does the real `checkout -B`.
+- **Missing-branch check.** Before any worktree work, `execute_one` runs
+  `verify_base_ref(base_for(job))` for every node job whose base differs from the pool base (the
+  pool base is what `<ns>-clean` was created from, so it is known to exist). It looks for
+  `refs/remotes/<base>`, fetching once (`git_fetch_with_retry`) if it is missing, and otherwise
+  fails the job with `<base> does not exist; push it first` — covering the `branch` node,
+  shared_clean nodes and Deploy in one place. On a reset placement it finishes the slot's
+  preparation with that detail (`prepared(slot, detail, never_built=True)`), so fan_out siblings
+  fail the same way, and the pool forgets the never-created tree: an exclusive record whose
+  directory does not exist is dropped when its last job releases (whatever the run_state, so a
+  fix node routed off the failure creates the tree afresh), and an uncreated clean tree is
+  forgotten.
+- **Per-target clean trees.** A `shared_clean` job whose base is the pool base uses `<ns>-clean`
+  as before. Any other runs in `clean_tree_name(target)` =
+  `<ns>-clean-<sanitized target>-<sha256(target)[:8]>` (the hash keeps `exp/flows` and
+  `exp-flows` apart), tracked in `RunnerPool.clean_trees` (name → `target`, `base`, `live`,
+  `created`, `idle_since`). **Capacity is shared, not per tree:** every clean placement counts
+  against the one `capacity.shared_clean` via `shared_used`. The first placement into an
+  uncreated tree is the reset one (`git worktree add --detach <path> <base>` + prepare hook); a
+  concurrent one waits on it through `preps`, like a fan_out sibling. `release()` decrements
+  `live` and stamps `idle_since` at 0.
+- **Idle refresh + eviction.** `refresh_idle_shared()` (every claim-loop pass) fast-forwards
+  `<ns>-clean` when *its own* occupancy (`shared_used` minus the per-target `live`s) is 0,
+  resets every idle per-target tree to its base, and removes one idle for at least
+  `CLEAN_TREE_IDLE_GRACE_S` (3600 s, the one definition): cleanup hook with an empty ref, then
+  `git worktree remove --force` + `prune`. At most one fetch per pass.
+- **Recover.** `recover()` never adopts a `<ns>-clean-<slug>-<hash>` directory as a per-card
+  worktree; it removes it like a retired `<ns>-work-N` slot (`_remove_unowned_tree`), and it is
+  re-created on demand.
+- **Talk turns** carry no target: a shared turn stays on `<ns>-clean`, an exclusive one uses the
+  pool base.
+- **`./hamaca target <ref> [<branch>] [--clear] [--json]`** shows (`<REF> target: <effective>
+  (board default | override | override, inherited from <SPAWNER>)`), sets or clears a card's
+  override through `PATCH /api/cards/:ref {"target_branch": …}`; a 409 `run_active` or 422
+  `invalid` exits non-zero through `api()`'s die, which names the server's error code after its
+  message (`API 409: … (run_active)`).
+- **Rollout order.** `@min_runner_version` is 103 (RE458): an older runner would leave `{target}`
+  unexpanded and run `git rebase origin/{target}`. Deploy the server and runner first, then
+  `./hamaca flow-push` the flows that use `origin/{target}`.
 
 ### Usage limits (RE320 → RE436)
 

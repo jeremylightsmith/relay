@@ -501,7 +501,7 @@ defmodule HamacaWeb.Api.RunnerContractTest do
       "env" => %{
         "prefix" => "HAMACA_",
         "read" => ~w(URL API_KEY STATE_DIR RUNNER_LOCK_DIR UPDATED_FROM UPDATE_ATTEMPTS NODE_OUTCOME),
-        "exported" => ~w(NODE_SCRATCH NODE_OUTCOME PLAN REF BRANCH BASE WORKTREE CACHE_DIR)
+        "exported" => ~w(NODE_SCRATCH NODE_OUTCOME PLAN REF BRANCH BASE WORKTREE CACHE_DIR TARGET)
       },
       # RE486 — the names a runner may run as (`Schemas.Runner.cli_names/0`, mirrored by
       # ./hamaca's CLI_NAMES) and the first RUNNER_VERSION that shipped as ./hamaca, below which a

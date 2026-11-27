@@ -350,8 +350,11 @@ defmodule HamacaWeb.BoardSettingsLive do
               <.page_heading class="mb-1.5">
                 General
               </.page_heading>
-              <p style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 18px 0;max-width:560px;">
-                The board's display name, its URL slug (relay.app/&lt;slug&gt;), and its card key.
+              <p
+                id="general-intro"
+                style="font-size:14px;line-height:1.55;color:color-mix(in oklab, var(--color-base-content) 70%, transparent);margin:0 0 18px 0;max-width:560px;"
+              >
+                The board's display name, its URL slug (relay.app/&lt;slug&gt;), its card key, and the branch its cards build on.
               </p>
               <div style="display:flex;flex-direction:column;gap:22px;max-width:420px;">
                 <div>
@@ -408,6 +411,38 @@ defmodule HamacaWeb.BoardSettingsLive do
                     style="font-size:12px;line-height:1.5;color:color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content));margin:0;"
                   >
                     Changing this renames every card on this board (e.g. {@board.key}230).
+                  </p>
+                </div>
+                <div class="flex flex-col gap-2">
+                  <label class="text-xs font-semibold text-base-content/80">
+                    Target branch
+                  </label>
+                  <.boxed_field
+                    :if={!@read_only?}
+                    id="board-target"
+                    value={@board.target_branch}
+                    form={@general_form}
+                    field={:target_branch}
+                    prefix_icon="hero-share"
+                    save_event="save_board_target"
+                    cancel_event="cancel_board_target"
+                  />
+                  <span
+                    :if={@read_only?}
+                    id="board-target-value"
+                    class="font-mono"
+                    style="font-size:14px;"
+                  >
+                    {@board.target_branch}
+                  </span>
+                  <p id="board-target-help" class="m-0 text-xs leading-normal text-base-content/65">
+                    Cards branch from, rebase onto and ship to this branch. A card can override it in its drawer; cards it spawns inherit the override.
+                  </p>
+                  <p
+                    id="board-target-warning"
+                    style="font-size:12px;line-height:1.5;color:color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content));margin:0;"
+                  >
+                    Changing it applies to each card's next run. A run in progress keeps the branch it started on.
                   </p>
                 </div>
               </div>
@@ -1338,7 +1373,7 @@ defmodule HamacaWeb.BoardSettingsLive do
 
   @impl true
   def handle_event(event, _params, %{assigns: %{read_only?: true}} = socket) when event in ~w(
-        save_board_name save_board_slug save_board_key edit_stage save_stage add_stage confirm_delete_stage
+        save_board_name save_board_slug save_board_key save_board_target edit_stage save_stage add_stage confirm_delete_stage
         toggle_wip bump_wip reorder_stage toggle_lane set_type set_reject_to
         toggle_collapsed_default invite_member remove_member flow_toggle
         flow_reset flow_confirm_reset flow_delete flow_confirm_delete
@@ -1492,6 +1527,25 @@ defmodule HamacaWeb.BoardSettingsLive do
   end
 
   def handle_event("cancel_board_key", _params, socket) do
+    {:noreply, assign(socket, :general_form, to_form(Boards.change_board(socket.assigns.board)))}
+  end
+
+  # RE458 — the board's default target branch; a card without its own override builds on it.
+  def handle_event("save_board_target", %{"board" => %{"target_branch" => _} = params}, socket) do
+    case Boards.update_board(socket.assigns.board, Map.take(params, ["target_branch"])) do
+      {:ok, board} ->
+        {:noreply,
+         socket
+         |> assign(:board, board)
+         |> assign(:general_form, to_form(Boards.change_board(board)))
+         |> put_flash(:info, "Target branch saved.")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :general_form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("cancel_board_target", _params, socket) do
     {:noreply, assign(socket, :general_form, to_form(Boards.change_board(socket.assigns.board)))}
   end
 

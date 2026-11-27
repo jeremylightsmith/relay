@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Ship a card's Flutter change to TestFlight. The Deploy flow's iOS step.
 #
-#   bin/deploy_ios.sh <REF>        (run from the repo root, on origin/main)
+#   bin/deploy_ios.sh <REF>        (run from the repo root, on origin/<target>)
 #   bin/deploy_ios.sh --head       (by hand, via `prod deploy_ios`: ship the checkout as-is)
 #
+# 0. Skips (exit 0, no card comment — deploy_fly.sh posts the one "Not deployed") when the card
+#    targets a branch other than main (RE458; HAMACA_TARGET via target_lib.sh): only main ships.
 # 1. Skips (exit 0) when the card's commit on main didn't touch flutter/ — BEFORE looking at any
 #    secret, so a web-only card never fails on missing mobile credentials.
 # 2. Fails fast naming every missing secret (unset or empty). Secrets come from the
@@ -25,6 +27,7 @@
 # `prod deploy_ios` isn't refused as dirty.
 
 set -euo pipefail
+. "$(dirname "$0")/target_lib.sh"
 
 say() { echo "deploy_ios: $*"; }
 fail() {
@@ -36,6 +39,12 @@ ref="${1:-}"
 if [ -z "$ref" ]; then
   echo "usage: bin/deploy_ios.sh <REF> | --head" >&2
   exit 2
+fi
+
+# --head is a by-hand ship of the checkout as-is: there is no card, so no card target to honour.
+if [ "$ref" != --head ] && ! target_is_deploy_branch; then
+  say "skipped — $ref targets $TARGET, not $DEPLOY_BRANCH"
+  exit 0
 fi
 
 bin_dir="$(cd "$(dirname "$0")" && pwd)"

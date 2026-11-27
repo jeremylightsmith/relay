@@ -123,4 +123,35 @@ defmodule Schemas.BoardTest do
       assert errors_on(changeset).name != []
     end
   end
+
+  describe "target_branch (RE458)" do
+    test "a blank target branch is required, not defaulted" do
+      changeset = Board.changeset(%Board{owner_id: 1, slug: "s"}, %{"target_branch" => ""})
+
+      refute changeset.valid?
+      assert "can't be blank" in errors_on(changeset).target_branch
+    end
+
+    test "an invalid git branch name is refused" do
+      changeset = Board.changeset(%Board{owner_id: 1, slug: "s"}, %{"target_branch" => "bad name..x"})
+
+      refute changeset.valid?
+      assert "is not a valid git branch name" in errors_on(changeset).target_branch
+    end
+
+    test "the name is trimmed" do
+      changeset = Board.changeset(%Board{owner_id: 1, slug: "s"}, %{"target_branch" => " exp/flows "})
+
+      assert changeset.valid?
+      assert get_change(changeset, :target_branch) == "exp/flows"
+    end
+
+    test "a freshly inserted board targets main" do
+      user = insert(:user)
+      board = %Board{owner_id: user.id} |> Board.changeset(%{slug: "fresh"}) |> Repo.insert!()
+
+      assert board.target_branch == "main"
+      assert Repo.reload!(board).target_branch == "main"
+    end
+  end
 end
