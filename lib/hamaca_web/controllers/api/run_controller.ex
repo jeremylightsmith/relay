@@ -4,7 +4,7 @@ defmodule HamacaWeb.Api.RunController do
 
   `POST /api/runs/:id/retry` is the id-addressed route the card names;
   `POST /api/cards/:ref/retry` is the ref-addressed alias the CLI uses, because every
-  other `relay` verb is ref-addressed and making the CLI discover a run id first would
+  other `./hamaca` verb is ref-addressed and making the CLI discover a run id first would
   be a worse surface for no gain. Both funnel into one private function.
 
   `GET /api/cards/:ref/runs` is the card's run history with **untruncated**
@@ -124,7 +124,7 @@ defmodule HamacaWeb.Api.RunController do
   end
 
   @doc """
-  Cancel a card's ACTIVE run — the ref-addressed route `relay cancel <ref>` calls (RE309).
+  Cancel a card's ACTIVE run — the ref-addressed route `./hamaca cancel <ref>` calls (RE309).
 
   `Runs.active_run/1`, not `latest_run_for_retry/1`: retry targets the card's newest run
   whatever its status, cancel targets the live one. An unknown ref is a 404; a card that

@@ -171,7 +171,7 @@ defmodule HamacaWeb.Api.CardController do
 
   # RE93 — create/2's pre-flight: the card is committed before its blockers are applied and the
   # web layer cannot open a transaction around the pair (boundary), so the one refusal a create
-  # can hit is checked first. `relay create --depends-on RE99` naming a card the agent has not
+  # can hit is checked first. `./hamaca create --depends-on RE99` naming a card the agent has not
   # written yet must not leave a blocker-less card behind for the retry to duplicate. A brand new
   # card has no dependents, so it cannot close a cycle — unknown refs are the whole risk.
   defp check_dependencies(board, params) do

@@ -5964,10 +5964,10 @@ defmodule HamacaWeb.CoreComponents do
                       {note_count_label(@note_count)}
                     </span>
                     <span class="flex-1"></span>
-                    <%!-- True today: every flow node runs `relay card REF`, which prints the
-                          card's comment-kind timeline entries (see ./relay's card printer) —
+                    <%!-- True today: every flow node runs `./hamaca card REF`, which prints the
+                          card's comment-kind timeline entries (see ./hamaca's card printer) —
                           a note's images print as `[image]` lines there, and an agent pulls
-                          their files with `relay images REF --pull`.
+                          their files with `./hamaca images REF --pull`.
                           If that ever stops being true this chip is a lie — fix one or the other. --%>
                     <span class="rounded bg-success/10 px-[7px] py-[2px] font-mono text-[9.5px] font-semibold tracking-[0.04em] text-success">
                       READ BY EVERY AGENT

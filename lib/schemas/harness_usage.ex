@@ -11,7 +11,7 @@ defmodule Schemas.HarnessUsage do
   - `pause_now` — an optional condition meaning "refused right now".
   - `recheck` — how a paused, idle harness is re-checked.
 
-  `wire/1` is the string-keyed shape the runner reads off `GET /api/harnesses`; `./relay` mirrors
+  `wire/1` is the string-keyed shape the runner reads off `GET /api/harnesses`; `./hamaca` mirrors
   the evaluator and the closed sets below, pinned by `test/fixtures/runner_contract.json`.
   """
 
@@ -47,15 +47,15 @@ defmodule Schemas.HarnessUsage do
 
   @type t :: %__MODULE__{}
 
-  @doc "Where a harness's usage readings come from — the ONE copy (`./relay`: `USAGE_SOURCES`)."
+  @doc "Where a harness's usage readings come from — the ONE copy (`./hamaca`: `USAGE_SOURCES`)."
   @spec sources() :: [String.t()]
   def sources, do: @sources
 
-  @doc "How a window's used value is expressed — the ONE copy (`./relay`: `USAGE_USED_UNITS`)."
+  @doc "How a window's used value is expressed — the ONE copy (`./hamaca`: `USAGE_USED_UNITS`)."
   @spec used_units() :: [String.t()]
   def used_units, do: @used_units
 
-  @doc "How a window's reset value is expressed — the ONE copy (`./relay`: `USAGE_RESETS_UNITS`)."
+  @doc "How a window's reset value is expressed — the ONE copy (`./hamaca`: `USAGE_RESETS_UNITS`)."
   @spec resets_units() :: [String.t()]
   def resets_units, do: @resets_units
 

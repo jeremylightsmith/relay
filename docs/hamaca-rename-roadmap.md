@@ -65,7 +65,7 @@ Two scope decisions (2026-10-25):
 | 4 | [RE481 Rename the code to Hamaca (modules, app, docs, repo)], done 2026-10-26 | RE476, RE477 |
 | 5 | [RE478 Rename the runner to ./hamaca with a compatibility window], done | RE481 |
 | 5 | [RE479 Mobile app as Hamaca: new bundle IDs, name, icons], done 2026-10-26 | RE480 |
-| 6 | [RE482 End the relay → hamaca compatibility window] | RE478 |
+| 6 | [RE482 End the relay → hamaca compatibility window], done (see the RE482 scope below) | RE478 |
 
 The GitHub repo rename was **dropped** from RE481: the repo stays `jeremylightsmith/relay`, so
 remotes, CI and the GitHub URLs in the docs keep that name.
@@ -89,6 +89,24 @@ compatibility window] removes what it left behind, once every active runner is o
   `.relay-retained`. Rename the `{relay}` flow placeholder.
 - Remove the `./relay` shim, the `relay-*` alias skills, the legacy scaffold layout (the default
   when `/api/scaffold` gets no `layout` param), and the `RELAY_*` env var fallbacks.
+
+**What shipped.** The board refuses every runner still installed as `./relay`. Claim gets a 409
+that names the board's install one-liner. The Runners page shows the runner as OUTDATED with an
+amber strip, and the board's stopped-work banner names the runner and links to its panel.
+`@min_runner_version` equals the new `RUNNER_VERSION`. `/api/scaffold` serves only the `hamaca`
+layout: a request with no `layout`, or `layout=legacy`, gets 410 `runner_renamed`. The `./relay`
+shim, the `relay-*` alias skills, the `RELAY_*` env fallbacks and the `.relay/` state fallback are
+gone. The runner reads only `HAMACA_*`, apart from a stale-env guard that dies naming the variable
+to rename. `update` keeps the one-shot rename migration, and that migration now *removes*
+`./relay` and the `relay-*` skills. A data migration (`RenameRelayEnvInFlows`) rewrote the
+exported `$RELAY_<suffix>` names in stored flows to `$HAMACA_<suffix>`. The Python suite is now
+`bin/test_hamaca.py`, and the setup preflight's `relay_files` key is now `hamaca_files`.
+
+**What was deferred, per the spec.** The machine paths stay: `~/.relay` (locks, state,
+`auto-update.json`), `~/.cache/relay/<ns>` and `.relay-retained`. So do the `{relay}` flow
+placeholder, the `relay_` / `relayu_` token prefixes, the `"relay"` value in `Schemas.Runner`'s
+`cli` set and the Fly app name `relayboard`. Relay brand prose outside the runner surface, and the
+server's own `RELAY_*` config (`RELAY_FEEDBACK_URL`, `RELAY_BASE_URL`), are a Backlog follow-up.
 
 ## RE481 residual names
 

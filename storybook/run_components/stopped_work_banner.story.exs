@@ -42,6 +42,21 @@ defmodule Storybook.RunComponents.StoppedWorkBanner do
           }
         }
       },
+      # RE482: every refused runner is still a ./relay install — the names link to their panels.
+      %Variation{
+        id: :runner_outdated_relay,
+        attributes: %{
+          id: "stopped-work-runner-outdated-relay",
+          runners_path: "/board/demo/runners",
+          verdict: %{
+            reason: :runner_outdated,
+            evidence: %{pre_rename_runners: [%{id: 1, name: "studio-mac"}]},
+            detail:
+              "No jobs claimed in 12m · Runner studio-mac is still installed as ./relay, which this " <>
+                "board no longer accepts. Update it to ./hamaca and restart."
+          }
+        }
+      },
       %Variation{
         id: :runner_rate_limited,
         attributes: %{

@@ -1,7 +1,7 @@
 defmodule HamacaWeb.Api.AttachmentController do
   @moduledoc """
   `GET /api/attachments/:id` (RE373): an attachment's raw bytes for a REST API key, so a fresh
-  agent session can read the mockups an earlier one uploaded (`./relay mockups REF --pull`).
+  agent session can read the mockups an earlier one uploaded (`./hamaca mockups REF --pull`).
   The browser twin is `HamacaWeb.AttachmentController`; this one shares its content headers
   (`put_content_headers/2` — HTML still gets the sandbox CSP and nosniff) but is scoped to the
   key's board (`Hamaca.Attachments.get_attachment_for_board/2`) and answers every miss — unknown,

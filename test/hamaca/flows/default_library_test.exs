@@ -363,13 +363,13 @@ defmodule Hamaca.Flows.DefaultLibraryTest do
     end
   end
 
-  describe "the branch node materializes the plan into the per-ref RELAY_PLAN path (RLY-223)" do
-    test "branch writes and probes $RELAY_PLAN, never a worktree-root plan.md" do
+  describe "the branch node materializes the plan into the per-ref HAMACA_PLAN path (RLY-223, RE482)" do
+    test "branch writes and probes $HAMACA_PLAN, never a worktree-root plan.md" do
       flow = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
       branch = Enum.find(flow.nodes, &(&1.key == "branch"))
 
-      assert branch.run =~ ~s(> "$RELAY_PLAN"), "branch must write the plan to $RELAY_PLAN"
-      assert branch.run =~ ~s(test -s "$RELAY_PLAN"), "branch must probe $RELAY_PLAN is non-empty"
+      assert branch.run =~ ~s(> "$HAMACA_PLAN"), "branch must write the plan to $HAMACA_PLAN"
+      assert branch.run =~ ~s(test -s "$HAMACA_PLAN"), "branch must probe $HAMACA_PLAN is non-empty"
       refute branch.run =~ "plan.md", "no bare worktree-root plan.md may remain in the branch command"
     end
 
@@ -413,7 +413,7 @@ defmodule Hamaca.Flows.DefaultLibraryTest do
     for key <- ~w(implement spec_review quality_review fix_findings) do
       node = Enum.find(code.nodes, &(&1.key == key))
       assert node.run =~ "{task_id}", "#{key} must name its task by id"
-      assert node.run =~ "relay task show", "#{key} must say which command fetches the task"
+      assert node.run =~ "hamaca task show command", "#{key} must say which command fetches the task"
       assert node.run =~ "{relay} task show {ref} {task_id}", "#{key} must give the exact command"
       assert :tasks in node.reads, "#{key} must declare it reads tasks"
     end
@@ -498,5 +498,15 @@ defmodule Hamaca.Flows.DefaultLibraryTest do
 
     assert post.run =~ "there is no `deploy_url`"
     assert post.run =~ "{relay} attach {ref}"
+  end
+
+  # RE482 scenario 4: the runner exports only `HAMACA_<suffix>`, so the library reads no `RELAY_*`.
+  test "no library flow reads a RELAY_ env name, and code's branch node writes \"$HAMACA_PLAN\"" do
+    for flow <- DefaultLibrary.all(), node <- flow.nodes, is_binary(node.run) do
+      refute node.run =~ "RELAY_", "#{flow.key}/#{node.key} still reads a RELAY_ name: #{node.run}"
+    end
+
+    code = Enum.find(DefaultLibrary.all(), &(&1.key == "code"))
+    assert Enum.find(code.nodes, &(&1.key == "branch")).run =~ ~s(> "$HAMACA_PLAN")
   end
 end

@@ -58,17 +58,17 @@ USAGE = None   # the running `hamaca start`'s HarnessUsageBook (RE436); None out
 # minimum it will work with, and anything below that is refused work and visibly marked.
 #
 # Bump RUNNER_VERSION on ANY change to this file — strictly past origin/main's RUNNER_VERSION,
-# not merely past the merge-base's — and paste the new fingerprint below. bin/test_relay.py's
+# not merely past the merge-base's — and paste the new fingerprint below. bin/test_hamaca.py's
 # RunnerVersionBumpGuardTest (RE425) enforces the bump and RunnerFingerprintGuardTest prints
 # the value to paste.
-RUNNER_VERSION = 101
-RUNNER_FINGERPRINT = "e6d629c5f4c15d5aa4495c47233876fe38d91ffa5b742b90e0d280e3a93b7e53"
+RUNNER_VERSION = 102
+RUNNER_FINGERPRINT = "d3dc3c20ece00e956454e0a20362e1dbf54a4653af99441834224acafc9c95b6"
 BOARD_URL = ""
 
 # The three constant lines above are masked out of the hash: satisfying the guard (bump the
 # integer, paste the fingerprint) must not itself re-break it, and BOARD_URL (RE443) is the
 # board's URL, which the board bakes into every copy it serves (`Hamaca.Scaffold.bake_board_url`)
-# so a project needs no RELAY_URL. The committed file carries it empty. Everything else in the
+# so a project needs no HAMACA_URL. The committed file carries it empty. Everything else in the
 # file is covered, so no behaviour change can slip through without a deliberate bump.
 FINGERPRINT_MASK = re.compile(r"(?m)^(RUNNER_VERSION|RUNNER_FINGERPRINT|BOARD_URL)\s*=.*$")
 
@@ -108,11 +108,10 @@ def runner_fingerprint(source=None):
 
 # ---- the name this runner answers to (RE478) ----
 #
-# The runner is `./hamaca`; `./relay` is the pre-rename name, kept for the compatibility window
-# (an unmigrated repo still runs the full runner as ./relay; a migrated one has a shim there that
-# execs ./hamaca). The name is derived from the file this process runs as and drives the
-# pre-migration note, the heartbeat's `runner.cli`, which scaffold layout auto-update fetches and
-# where NEW repo state is created. Pinned: runner_contract.json's runner.cli_names.
+# The runner is `./hamaca`; `./relay` is the pre-rename name (RE478's compatibility window, closed
+# by RE482 — the board refuses a runner running as ./relay). The name is derived from the file
+# this process runs as and is reported as the heartbeat's `runner.cli`, so the board can say why
+# it refuses one. Pinned: runner_contract.json's runner.cli_names.
 CLI_NAMES = ("hamaca", "relay")
 
 
@@ -126,7 +125,7 @@ def cli_name():
 def runner_ident(cfg):
     """The `runner` dict on the wire, shared by claim_node_job and heartbeat_body (RLY-184).
 
-    Pure and named so bin/test_relay.py can pin `version` against
+    Pure and named so bin/test_hamaca.py can pin `version` against
     test/fixtures/runner_contract.json the same way outcome_body/heartbeat_body are pinned.
     `cli` (RE478) is the name this runner runs as; the server ignores it until RE486."""
     return {"name": cfg["name"], "host": socket.gethostname(), "version": RUNNER_VERSION,
@@ -135,7 +134,7 @@ def runner_ident(cfg):
 
 class Died(SystemExit):
     """What die() raises (RE336): a SystemExit with exit status 1, so every existing
-    `except SystemExit` still catches it and `relay <cmd>` still exits 1, that ALSO carries the
+    `except SystemExit` still catches it and `hamaca <cmd>` still exits 1, that ALSO carries the
     message. A caller that swallows it (the heartbeat) can then say what failed instead of
     logging a bare `SystemExit: 1`."""
 
@@ -154,13 +153,15 @@ def log(msg, *, ref=None, kind="lifecycle"):
     forward(kind, msg, ref)
 
 
-# ============================ environment (RE478) ============================
+# ============================ environment (RE478, RE482) ============================
 #
-# Every variable the runner reads or exports exists under two names during the relay → hamaca
-# compatibility window: HAMACA_<X> is read first, then RELAY_<X>, and every per-node / per-hook
-# variable is exported under BOTH, so a skill, hook or script written against either name keeps
-# working. The suffix lists are the ONE definition, pinned by runner_contract.json's `env`.
-ENV_PREFIXES = ("HAMACA_", "RELAY_")
+# The runner reads only HAMACA_<X> and exports only HAMACA_<X>. RE478's relay -> hamaca window
+# also read and exported RELAY_<X>; RE482 closed it. One deliberate RELAY_ read is left: the
+# stale-env guard below, which turns "RELAY_API_KEY is set but no longer read" into a hard stop
+# that names the rename instead of a puzzling "HAMACA_API_KEY is not set". The suffix lists and
+# the prefix are the ONE definition, pinned by runner_contract.json's `env`.
+ENV_PREFIX = "HAMACA_"
+RETIRED_ENV_PREFIX = "RELAY_"   # read only by retired_env_guard and the migration's .envrc check
 ENV_READ = ("URL", "API_KEY", "STATE_DIR", "RUNNER_LOCK_DIR", "UPDATED_FROM", "UPDATE_ATTEMPTS",
             "NODE_OUTCOME")
 ENV_EXPORTED = ("NODE_SCRATCH", "NODE_OUTCOME", "PLAN", "REF", "BRANCH", "BASE", "WORKTREE",
@@ -168,74 +169,79 @@ ENV_EXPORTED = ("NODE_SCRATCH", "NODE_OUTCOME", "PLAN", "REF", "BRANCH", "BASE",
 
 
 def getenv(suffix):
-    """The first non-empty of HAMACA_<suffix>, RELAY_<suffix>, else None."""
-    for prefix in ENV_PREFIXES:
-        value = os.environ.get(prefix + suffix)
-        if value:
-            return value
-    return None
+    """HAMACA_<suffix> when set and non-empty, else None."""
+    return os.environ.get(ENV_PREFIX + suffix) or None
+
+
+def retired_env_guard(suffix):
+    """Die naming the rename when RELAY_<suffix> stands in for a missing HAMACA_<suffix> (RE482).
+    Called only once HAMACA_<suffix> is known to be unset."""
+    if os.environ.get(RETIRED_ENV_PREFIX + suffix):
+        die(f"{RETIRED_ENV_PREFIX}{suffix} is no longer read — rename it to "
+            f"{ENV_PREFIX}{suffix} (check .envrc.local)")
 
 
 def env(suffix):
-    """getenv(suffix), or die naming the HAMACA_ name."""
-    return getenv(suffix) or die(f"{ENV_PREFIXES[0]}{suffix} is not set")
+    """getenv(suffix), or die: naming the rename for a stale RELAY_ twin, else the HAMACA_ name."""
+    value = getenv(suffix)
+    if value:
+        return value
+    retired_env_guard(suffix)
+    return die(f"{ENV_PREFIX}{suffix} is not set")
 
 
 def export_env(child_env, suffix, value):
-    """Set `suffix` under every prefix in `child_env`, or pop every name when `value` is None —
-    set-or-CLEAR, so a child never inherits either name from the runner (RLY-216)."""
-    for prefix in ENV_PREFIXES:
-        if value is None:
-            child_env.pop(prefix + suffix, None)
-        else:
-            child_env[prefix + suffix] = value
+    """Set HAMACA_<suffix> in `child_env`, or pop it when `value` is None — set-or-CLEAR, so a
+    child never inherits it from the runner (RLY-216). A stale RELAY_<suffix> is always popped:
+    nothing reads it any more, and a child must not mistake it for this job's value."""
+    child_env.pop(RETIRED_ENV_PREFIX + suffix, None)
+    if value is None:
+        child_env.pop(ENV_PREFIX + suffix, None)
+    else:
+        child_env[ENV_PREFIX + suffix] = value
 
 
 def pop_env(suffix):
-    """Remove `suffix` under every prefix from this process's env; the first value read, or None."""
+    """Remove HAMACA_<suffix> from this process's env; the value read, or None."""
     value = getenv(suffix)
-    for prefix in ENV_PREFIXES:
-        os.environ.pop(prefix + suffix, None)
+    os.environ.pop(ENV_PREFIX + suffix, None)
     return value
 
 
-# ============================ repo state (RE478) ============================
+# ============================ repo state (RE478, RE482) ============================
 #
-# A project's runner state lives in `.hamaca/` — `.relay/` before migration. Each name resolves
-# to whichever copy exists (`.hamaca/` first); a NEW file goes to `.hamaca/`, except in an
-# unmigrated repo running as ./relay that only has `.relay/`, which keeps its one state dir.
-STATE_DIRS = (".hamaca", ".relay")
+# A project's runner state lives in `.hamaca/`. RE478's window also read `.relay/`; RE482 closed
+# it, so a `.relay/` is ignored at runtime and only `update` migrates it (OLD_STATE_DIR).
+STATE_DIR = ".hamaca"
 
 
 def repo_state_rel(name):
     """The project-relative path of repo state `name` — `runner.json`, `scaffold.json`, `flows`,
-    `prepare-worktree.sh` or `cleanup-worktree.sh` — for messages. Resolved from ROOT and HERE
-    at call time, so a repointed ROOT never reads this checkout's state."""
-    new, old = STATE_DIRS
-    for state_dir in (new, old):
-        if os.path.exists(os.path.join(ROOT, state_dir, name)):
-            return f"{state_dir}/{name}"
-    unmigrated = (cli_name() == "relay" and os.path.isdir(os.path.join(ROOT, old))
-                  and not os.path.isdir(os.path.join(ROOT, new)))
-    return f"{old if unmigrated else new}/{name}"
+    `prepare-worktree.sh` or `cleanup-worktree.sh` — for messages."""
+    return f"{STATE_DIR}/{name}"
 
 
 def repo_state_path(name):
-    """The absolute path of repo state `name` under ROOT, resolved at call time."""
+    """The absolute path of repo state `name` under ROOT, resolved at call time, so a repointed
+    ROOT never reads this checkout's state."""
     return os.path.join(ROOT, repo_state_rel(name))
 
 
 # ============================ REST API client ============================
 
 def configured_relay_url():
-    """The board this runner talks to, or "": HAMACA_URL / RELAY_URL when set and non-empty,
-    else the baked BOARD_URL (RE443). For the callers that must not die on neither."""
+    """The board this runner talks to, or "": HAMACA_URL when set and non-empty, else the baked
+    BOARD_URL (RE443). For the callers that must not die on neither."""
     return getenv("URL") or BOARD_URL
 
 
 def relay_url():
-    """The board this runner talks to (RE443) — HAMACA_URL / RELAY_URL override the baked
-    BOARD_URL — or die. Every URL-needing call site goes through here."""
+    """The board this runner talks to (RE443) — HAMACA_URL overrides the baked BOARD_URL — or
+    die. Every URL-needing call site goes through here. A stale RELAY_URL with no HAMACA_URL
+    dies naming the rename even when a URL is baked (RE482): the operator meant to point the
+    runner somewhere, and silently using the baked board instead would hide that."""
+    if not getenv("URL"):
+        retired_env_guard("URL")
     return configured_relay_url() or die(
         "HAMACA_URL is not set and this runner has no baked board URL — re-run the install "
         "command from your board's setup wizard, or export HAMACA_URL")
@@ -862,7 +868,7 @@ def board_identity():
     """`('"Hamaca" (RE)', None)` for the startup line, or `(None, why)` when the board
     cannot be reached (RE305).
 
-    NEVER raises. Decision 3 on the card: a wrong or expired RELAY_API_KEY, or a transient
+    NEVER raises. Decision 3 on the card: a wrong or expired HAMACA_API_KEY, or a transient
     outage at startup, must WARN and let the runner keep polling — the loop and
     auto-update already retry, and killing a long-running runner over one failed GET is
     strictly worse than a noisy start.
@@ -1904,7 +1910,7 @@ def cmd_audit(args):
 
 def cmd_version(args):
     # auth=False: /api/version is unauthenticated by design (RLY-177) so this is the one
-    # verb answerable with only RELAY_URL — no board key required.
+    # verb answerable with only HAMACA_URL — no board key required.
     v = api("GET", "/api/version", auth=False)
     emit(args, v, f'{v.get("sha", "unknown")}  built {v.get("built_at", "unknown")}  (v{v.get("version", "?")})')
 
@@ -2247,7 +2253,7 @@ def cmd_mockups(args):
 DEFAULT_BASE = "origin/main"
 
 # RE457: where this project's LLM reads its skills, and the file it reads first that points at
-# relay.md. Overridable per project with `"skill_dir"` / `"pointer_file"` in .relay/runner.json
+# hamaca.md. Overridable per project with `"skill_dir"` / `"pointer_file"` in .hamaca/runner.json
 # (pinned to CONTRACT["setup"]["runner_config_defaults"]). DEFAULT_SKILL_DIR is ALSO the
 # manifest's canonical skill dir: /api/scaffold always serves the skills under it, and
 # local_scaffold_path() maps them into the project's own.
@@ -2272,7 +2278,7 @@ def default_runner_name():
 
     This value is the runner's identity BOTH on the board — the server upserts on
     `conflict_target: [:board_id, :name]` — and in the local singleton lock, which hashes
-    `RELAY_URL + "\\0" + name`. So it has to differ between two checkouts of one project on
+    `HAMACA_URL + "\\0" + name`. So it has to differ between two checkouts of one project on
     one machine: a bare hostname did not, which made the two clobber each other's roster
     row and got the second `hamaca start` refused by its own lock. The checkout DIRECTORY
     is what differs between two clones, so it, and not the git remote, is the project part.
@@ -2312,7 +2318,7 @@ def legacy_identity_warning(name):
     name, so a brand-new install with no pre-RE305 history and no pinned runs would carry a
     permanent `kind="error"` line, mirrored to the board's runner feed on every start and
     every auto-update re-exec. `identity_lock_path` is the evidence: `acquire_singleton_lock`
-    creates that file and never unlinks it, and it is keyed on `sha256(RELAY_URL + "\\0" +
+    creates that file and never unlinks it, and it is keyed on `sha256(HAMACA_URL + "\\0" +
     name)` — so it exists iff this pairing really did run here.
 
     And silent AFTER IT HAS BEEN SAID ONCE. That same never-unlinked lock file makes the gate
@@ -2321,7 +2327,7 @@ def legacy_identity_warning(name):
     line forever, with no way to acknowledge it short of pinning a name. Emitting therefore
     drops `<identity lock>.re305-warned` beside the NEW identity's lock. Keyed on the new
     name, not the legacy one: the legacy name is the bare hostname, so its key is
-    machine-global (`sha256(RELAY_URL + "\\0" + hostname)`, no ROOT in it) and the first
+    machine-global (`sha256(HAMACA_URL + "\\0" + hostname)`, no ROOT in it) and the first
     checkout to start would eat the only telling while the others stayed silent forever — with
     the advice being checkout-specific ("restart THIS checkout"), usually silencing the very
     checkout that holds the pins. The new name embeds the checkout directory, so each one is
@@ -2339,7 +2345,7 @@ def legacy_identity_warning(name):
 
     The per-run recovery names the ONE thing that actually clears a pin. `Runs.park_claimed/1`
     is the only writer that nils `pinned_runner_name` and it transitions from `[:running]`
-    only (`lib/relay/runs.ex`), reached from `Listener.reconcile_active/2`'s `%Run{status:
+    only (`lib/hamaca/runs.ex`), reached from `Listener.reconcile_active/2`'s `%Run{status:
     :running}` clause — so a human baton clears the pin only while the run is still running.
     Once it has parked `:runner_gone` the listener leaves it on its no-op clause, the
     scheduler's resume still targets `{:pinned, pinned_runner_id}` and finds no capacity, and
@@ -2375,7 +2381,7 @@ def _identity_lock_or_none(name):
     """`identity_lock_path` for `name`, or None when there is nothing to key it on."""
     try:
         return identity_lock_path({"name": name})
-    except (Exception, SystemExit):     # no RELAY_URL to key the lock on; SystemExit via die()
+    except (Exception, SystemExit):     # no HAMACA_URL to key the lock on; SystemExit via die()
         return None
 
 
@@ -2452,8 +2458,8 @@ def _blank_if_comment(line):
 
 
 def load_runner_config():
-    """Runner-local config from .hamaca/runner.json (`.relay/` before migration, RE478 —
-    resolved at call time). Missing file → sensible defaults;
+    """Runner-local config from .hamaca/runner.json (resolved at call time; a `.relay/` is
+    ignored, RE482). Missing file → sensible defaults;
     capacity is the only field a developer routinely edits (ADR 0006, table 1). Full-line
     `//` comments are skipped (RE383), so the documented starter file loads as written. RE320's
     `limits` block is retired (RE436): PAUSE AT lives on each harness, so a file still carrying
@@ -2511,7 +2517,7 @@ def render_runner_config(namespace, base=None, layout=None):
     d = runner_config_defaults()
     lines = [
         "// Hamaca runner config — read by `./hamaca start`. Lines starting with // are comments.",
-        "// Docs: relay.md. Every key is optional; a missing key falls back to the runner's "
+        "// Docs: hamaca.md. Every key is optional; a missing key falls back to the runner's "
         "default.",
         "{",
     ]
@@ -2592,7 +2598,7 @@ def render_prepare_hook():
 # available and a plain recursive copy elsewhere. Empty WARM: nothing is copied.
 #
 # Invoked by ./hamaca right after `git worktree add`, cwd = the new worktree. Inputs arrive as
-# both argv and env (each env var also under its RELAY_ name). A nonzero exit FAILS the run
+# both argv and env. A nonzero exit FAILS the run
 # (fail-fast) — a broken cache surfaces at once.
 #
 #   $1/$HAMACA_WORKTREE   abs path of the new worktree (== cwd)
@@ -2803,7 +2809,7 @@ def plan_path(slot_path, ref):
 
 # Lifecycle vocabulary — pinned to the Elixir source (Schemas.*) through
 # test/fixtures/runner_contract.json and asserted by RunnerVocabularyContractTest in
-# bin/test_relay.py (RLY-203). Change a member here only alongside the owning Ecto enum.
+# bin/test_hamaca.py (RLY-203). Change a member here only alongside the owning Ecto enum.
 # NODE_OUTCOMES (what an agent may declare) is pinned the same way, as
 # vocabulary.agent_outcomes; it lives here, above OUTCOME_CONTRACT, which lists it.
 NODE_OUTCOMES = ("succeeded", "failed", "partial", "needs_input")
@@ -2847,8 +2853,8 @@ HOLDING_STATES = ("bound", "retained", "running", "talk")
 
 
 # RE339: the repo-state file each per-worktree lifecycle hook lives in when runner.json's
-# `worktrees` object does not name one — resolved `.hamaca/` → `.relay/` by repo_state_path
-# (RE478). `RunnerPool._hook_path` is the one reader of these and of the config keys.
+# `worktrees` object does not name one — under `.hamaca/` (repo_state_path; RE482 dropped the
+# `.relay/` fallback). `RunnerPool._hook_path` is the one reader of these and of the config keys.
 HOOK_FILES = {"prepare": "prepare-worktree.sh", "cleanup": "cleanup-worktree.sh"}
 
 # RE339: seconds a cleanup hook may run before it is killed. `_teardown` runs while
@@ -3465,8 +3471,8 @@ class RunnerPool:
         None when it does not exist or is not executable (RE339). The ONE place the precedence
         lives: `worktrees.prepare` > the flat `prepare` (deprecated alias, kept because
         auto-update pushes this runner into repos that still use it) > the default file;
-        `worktrees.cleanup` > the default file. A default file is `.hamaca/<HOOK_FILES[kind]>`,
-        else `.relay/<…>` (RE478). Relative paths resolve against ROOT. Pools
+        `worktrees.cleanup` > the default file. A default file is `.hamaca/<HOOK_FILES[kind]>`
+        (RE482: never `.relay/`). Relative paths resolve against ROOT. Pools
         are also built from raw dicts, so a missing `worktrees` is read as empty."""
         hooks = self.cfg.get("worktrees") or {}
         if kind == "prepare":
@@ -3482,8 +3488,8 @@ class RunnerPool:
     def _run_hook(self, hook_abs, slot_path, ref, branch, timeout=None):
         """Run one lifecycle hook with the contract every hook shares (§4, RE339): argv
         `[worktree, ref, branch, base, cache_dir]`, the same five as `HAMACA_WORKTREE`/
-        `HAMACA_REF`/`HAMACA_BRANCH`/`HAMACA_BASE`/`HAMACA_CACHE_DIR` in env — each also under
-        its RELAY_ twin (RE478) — cwd = the worktree. Returns the CompletedProcess. Past
+        `HAMACA_REF`/`HAMACA_BRANCH`/`HAMACA_BASE`/`HAMACA_CACHE_DIR` in env — cwd = the
+        worktree. Returns the CompletedProcess. Past
         `timeout` subprocess.run kills the hook and raises TimeoutExpired."""
         cache_dir = os.path.expanduser(self.cfg.get("cache_dir") or "")
         hook_env = dict(os.environ)
@@ -3809,7 +3815,7 @@ def render(template, vars):
 
 # ---- Harness command templates (RE433) ---------------------------------------
 # A board's harness is an agent CLI's shell-style command template. The runner expands it
-# GENERICALLY: no harness key or name is special-cased in this file (bin/test_relay.py's
+# GENERICALLY: no harness key or name is special-cased in this file (bin/test_hamaca.py's
 # RunnerHarnessGuardTest), so a new CLI is a board setting, not a runner release.
 # Pinned to Schemas.Harness.placeholders/0 by the contract fixture's
 # `vocabulary.harness_placeholders`.
@@ -3925,7 +3931,7 @@ def read_number(event, path):
 # to read them, as data: a jq-subset path (`.a.b[0].c`) per value and a condition
 # (`<path> ==|!= <literal> [and …]`) per kind of line. This evaluator mirrors
 # Schemas.HarnessUsage.Rule line for line; both pass the contract fixture's `usage_rule_cases`
-# (bin/test_relay.py UsageRuleContractTest), so neither can drift alone. Total: any input in,
+# (bin/test_hamaca.py UsageRuleContractTest), so neither can drift alone. Total: any input in,
 # None/False out for anything malformed — it runs on every line a CLI prints.
 # Pinned to Schemas.HarnessUsage.sources/0, used_units/0 and resets_units/0 by the fixture's
 # `vocabulary.usage_sources` / `usage_used_units` / `usage_resets_units`.
@@ -4159,10 +4165,10 @@ def _apply_node_env(child_env, partition, scratch, plan):
     job that does NOT must see it *unset* — never inherit the parent's. Assigning only when
     non-None was the RLY-213/214 bug: every node runs with MIX_TEST_PARTITION/HAMACA_NODE_SCRATCH/
     HAMACA_PLAN exported, so when such a node itself runs `./hamaca` (the precommit gate runs
-    `bin/test_relay.py`, whose own tests spawn env-less child steps) the value leaked in, and the
+    `bin/test_hamaca.py`, whose own tests spawn env-less child steps) the value leaked in, and the
     gate failed for every Code run. Pop when None so the child's env reflects the JOB's config,
-    not whatever the runner process happened to carry. The two node vars go through export_env
-    (RE478), so each is set — or popped — under both its HAMACA_ and RELAY_ name.
+    not whatever the runner process happened to carry. The two node vars go through export_env,
+    so each HAMACA_ name is set or popped and a stale RELAY_ twin never survives (RE482).
     """
     if partition is None:
         child_env.pop("MIX_TEST_PARTITION", None)
@@ -4174,7 +4180,7 @@ def _apply_node_env(child_env, partition, scratch, plan):
 
 # A failing gate's detail is the only thing the fix node gets, and a test runner prints each
 # failure mid-run, long before the tail (RE402: `mix precommit` buried an ExUnit deadlock under
-# its summary and bin/test_relay.py's output, so the fix agent was told "1 test failed" and not
+# its summary and bin/test_hamaca.py's output, so the fix agent was told "1 test failed" and not
 # which). Lines matching these start a highlight that is kept whatever scrolls after it. A
 # match is a failure header (ExUnit, unittest, pytest, go test, jest/vitest) or the seed line
 # that reproduces a randomised order.
@@ -4209,10 +4215,10 @@ def _stream_shell(cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scr
     the caller supplies `pool.partition_for(slot)` so every gate this job runs, including
     `precommit`, sees the slot's own test database.
 
-    `scratch`, if given, is exported as HAMACA_/RELAY_NODE_SCRATCH (RLY-214) — the caller supplies
+    `scratch`, if given, is exported as HAMACA_NODE_SCRATCH (RLY-214) — the caller supplies
     `scratch_path(slot, ref, node)` so a gate step can write findings there too.
 
-    `plan`, if given, is exported as HAMACA_/RELAY_PLAN (RLY-223) — the caller supplies
+    `plan`, if given, is exported as HAMACA_PLAN (RLY-223) — the caller supplies
     `plan_path(slot, ref)` so the branch node writes/probes the per-ref plan there."""
     child_env = dict(os.environ)
     _apply_node_env(child_env, partition, scratch, plan)
@@ -4357,7 +4363,7 @@ class UsageLimiter:
     """One harness's usage state (RE436, generalising RE320's): fed every line its rule can read,
     it answers whether that harness is paused. Thread-safe (job streams and the UsagePoller
     observe while the claim loop and the heartbeat read) and pure with respect to the clock —
-    every method takes `now` — so bin/test_relay.py needs no sleeps. No I/O.
+    every method takes `now` — so bin/test_hamaca.py needs no sleeps. No I/O.
 
     A window trips at `used_pct >= pause_at`. A line meeting the rule's `pause_now` is a refusal
     and trips whatever the readings say, until its reset; a later readable line that is not a
@@ -4759,7 +4765,7 @@ def outcome_body(outcome, detail, git_sha, session_id=None, no_changes=False, re
                  cost=None):
     """The exact body POSTed to /api/node-jobs/:id/outcome.
 
-    Pure and separate from the POST so bin/test_relay.py can pin its key set against
+    Pure and separate from the POST so bin/test_hamaca.py can pin its key set against
     test/fixtures/runner_contract.json's `outcome.request` — the same body the ExUnit
     generator posts at the real controller (RLY-176).
 
@@ -4796,7 +4802,7 @@ def claim_body(runner, capacity, running=(), held=(), harnesses=None):
     card's tree and `assign()` will reuse it. `harnesses` (RE436) is the harness keys this runner
     will run now — the installed ones minus those paused at a usage limit — sent only once the
     board's definitions are known (None omits it). Pure and separate from the POST so
-    bin/test_relay.py can pin its key set against test/fixtures/runner_contract.json."""
+    bin/test_hamaca.py can pin its key set against test/fixtures/runner_contract.json."""
     body = {"runner": runner, "capacity": capacity, "running": list(running),
             "held": list(held)}
     if harnesses is not None:
@@ -5005,11 +5011,11 @@ def _stream_agent_job(argv, cwd, tag="", session_id_path=None, outcome_path=None
     (RE433) — and stream its JSON events. The session id is read from each event at
     `session_id_path` (a dot path, `.session_id` for Claude Code, `.thread_id` for a CLI that
     names it so); the latest non-empty value wins, and no path captures nothing.
-    $HAMACA_NODE_OUTCOME (and its RELAY_ twin) is set so an agent node can signal `partial`. `partition`, if given,
+    $HAMACA_NODE_OUTCOME is set so an agent node can signal `partial`. `partition`, if given,
     is exported as MIX_TEST_PARTITION (RLY-213) so a gate this agent runs sees its slot's own
-    test database. `scratch`, if given, is exported as HAMACA_/RELAY_NODE_SCRATCH (RLY-214) — the
+    test database. `scratch`, if given, is exported as HAMACA_NODE_SCRATCH (RLY-214) — the
     agent's own scratch file for this node, per `scratch_path(slot, ref, node)`. `plan`, if
-    given, is exported as HAMACA_/RELAY_PLAN (RLY-223) — the per-ref materialized plan the agent reads.
+    given, is exported as HAMACA_PLAN (RLY-223) — the per-ref materialized plan the agent reads.
     `on_event`, if given, is called with each parsed event as it arrives, so a talk turn can
     stream its transcript while the turn is still working. `mirror`, if False, is passed
     through to `_print_claude_event` so a talk turn prints locally without also forwarding to
@@ -5074,7 +5080,7 @@ def _stream_agent_job(argv, cwd, tag="", session_id_path=None, outcome_path=None
 
 
 def determine_agent_outcome(job, ok, outcome_path, cwd=None, report=None):
-    """Agent-node outcome contract, evaluated in order (relay.md is the write-up):
+    """Agent-node outcome contract, evaluated in order (hamaca.md is the write-up):
       1. re-fetch the card — status needs_input ⇒ needs_input (exactly as work() detects today);
       2. else an outcome file at $HAMACA_NODE_OUTCOME supplies {outcome, detail} — the only
          way a node signals `partial`;
@@ -5102,7 +5108,7 @@ def determine_agent_outcome(job, ok, outcome_path, cwd=None, report=None):
       5. RE310: the outcome file may also carry `no_changes` — the node ASSERTING that its work
          was already committed (`hamaca outcome succeeded --no-changes`). It rides through as the
          third element verbatim; only the server can verify such a claim, and it rejects it by
-         default (see the guard in lib/relay/runs/run_server.ex)."""
+         default (see the guard in lib/hamaca/runs/run_server.ex)."""
     ref = (job.get("vars") or {}).get("ref")
     if ref:
         card = get_card(ref)
@@ -5534,7 +5540,7 @@ def run_node_job(job, slot_path, control, partition=None):
         # non-empty `git status --porcelain`, so a file inside slot_path would make every
         # agent job leave a spurious "salvaging leftovers" stash for the next job on this
         # slot. A fresh tempdir per job also means there is never a stale file to read.
-        outcome_dir = tempfile.mkdtemp(prefix="relay-node-outcome-")
+        outcome_dir = tempfile.mkdtemp(prefix="hamaca-node-outcome-")
         outcome_path = os.path.join(outcome_dir, "outcome.json")
         usage = USAGE.for_key((job.get("harness") or {}).get("key")) if USAGE is not None else None
         try:
@@ -5801,7 +5807,7 @@ class TalkEventSender:
 
 def talk_outcome_body(status, session_id, detail):
     """The exact body POSTed to /api/talk/turns/:id/outcome. Pure and separate from the POST so
-    bin/test_relay.py can pin its key set against the fixture's `talk_outcome.request`."""
+    bin/test_hamaca.py can pin its key set against the fixture's `talk_outcome.request`."""
     return {"status": status, "session_id": session_id, "detail": detail}
 
 
@@ -6227,7 +6233,7 @@ def carry_board_url(source, path):
     """`source` with the BOARD_URL of the ./hamaca already at `path` when that one is non-empty,
     else `source` as served (RE443): a project's baked board survives every rewrite of the file,
     by `hamaca update` and by auto-update alike. An unbaked ./hamaca stays unbaked while
-    HAMACA_URL / RELAY_URL names the board — Hamaca's own checkout commits it that way, and baking
+    HAMACA_URL names the board — Hamaca's own checkout commits it that way, and baking
     the served URL in left the file dirty after every update."""
     try:
         with open(path, encoding="utf-8") as f:
@@ -6277,7 +6283,7 @@ def verify_runner_source(body, url):
         return None
     try:
         # A syntax check with no execution and no .pyc side effect.
-        compile(source, "<relay-update>", "exec")
+        compile(source, "<hamaca-update>", "exec")
     except (SyntaxError, ValueError) as e:
         log(f"the runner at {url} does not compile ({e}) — refusing it and staying on "
             f"{RUNNER_VERSION}", kind="error")
@@ -6285,25 +6291,17 @@ def verify_runner_source(body, url):
     return source, version
 
 
-def auto_update_layout():
-    """The scaffold layout auto-update fetches the runner from (RE478): `"hamaca"` for a runner
-    running as ./hamaca, `"legacy"` for the full runner still running as ./relay — whose
-    replacement must stay a full runner at the same path, never the hamaca layout's shim."""
-    return "hamaca" if cli_name() == "hamaca" else "legacy"
-
-
-def download_runner(config_url, layout):
+def download_runner(config_url):
     """Fetch and verify the runner from the board's scaffold endpoint; (source, version) or None.
 
-    `layout` (RE478) picks the scaffold layout, and with it the runner item's path
-    (SCAFFOLD_RUNNERS); the download is still installed over HERE.
+    Always the hamaca layout's runner item (RE482: the board serves no other layout), whatever
+    name this runner runs as; the download is installed over HERE.
 
     The auto-update path. `hamaca update` shares verify_runner_source below but NOT the
     strictly-newer gate: update must be able to reinstall the same or an older version (a fresh
     project, or a deleted file), while auto-update must only ever move forward.
     """
-    url = (config_url.rstrip("/") + "/" + SCAFFOLD_RUNNERS[layout]
-           + "?" + urllib.parse.urlencode({SCAFFOLD_LAYOUT_PARAM: layout}))
+    url = scaffold_url(config_url.rstrip("/") + "/" + RUNNER_REL)
     try:
         body = _fetch(url)
     except OSError as e:                    # HTTPError/URLError both subclass OSError
@@ -6419,8 +6417,9 @@ def _cap_attempts(state):
 
 
 def check_update_handshake(state):
-    """Read (and clear) the HAMACA_/RELAY_UPDATED_FROM handshake the process that exec'd into us
-    left (both names, RE478: the exec'ing runner may be an older ./relay that sets only RELAY_).
+    """Read (and clear) the HAMACA_UPDATED_FROM handshake the process that exec'd into us left.
+    A RELAY_UPDATED_FROM is not read (RE482): only a pre-hamaca ./relay sets it, and that runner
+    is refused by the board.
 
     A restart that landed on the SAME or OLDER code means the update did not take — a symlinked
     ./hamaca, a read-only mount, a `python -m` wrapper. Looping on that would restart forever,
@@ -6504,7 +6503,7 @@ def maybe_auto_update(cfg, hb, state, config_url):
     # NOTHING_NEWER does not — the board serving nothing newer is the expected window while a
     # publish is committed here but not yet pushed, so counting it would cap out and permanently
     # disable self-update over a non-problem (RE185).
-    result = download_runner(config_url, auto_update_layout())
+    result = download_runner(config_url)
     if result is NOTHING_NEWER:
         return False
     if result is None:
@@ -6966,8 +6965,7 @@ RUNNER_OUTCOMES = NODE_OUTCOMES + (NODE_OUTCOME_BLOCKED,)
 
 
 def cmd_outcome(args):
-    """Declare this node's outcome by writing $HAMACA_NODE_OUTCOME (RLY-175) — or
-    $RELAY_NODE_OUTCOME alone, for an agent an older runner started (RE478).
+    """Declare this node's outcome by writing $HAMACA_NODE_OUTCOME (RLY-175).
 
     RLY-163 requires every agent node to declare an outcome — a node that writes nothing is
     reported `failed`, because a `claude -p` that exits 0 having done nothing is
@@ -7005,8 +7003,8 @@ def cmd_outcome(args):
 
 # ============================ the scaffold (RE304) ============================
 #
-# Hamaca owns a fixed set of files in a project — the runner, its skills, the agent guide and,
-# in the hamaca layout, the ./relay shim — and the BOARD serves them at /api/scaffold. They are
+# Hamaca owns a fixed set of files in a project — the runner, its skills and the agent guide —
+# and the BOARD serves them at /api/scaffold. They are
 # never user-edited, which is what lets an update overwrite them unconditionally: no provenance
 # ledger, no per-file diff prompt, no "did you edit this or did we ship a newer one?" question.
 #
@@ -7014,14 +7012,12 @@ def cmd_outcome(args):
 # for equality. "N versions behind" is deliberately not a thing.
 
 SCAFFOLD_PATH = "/api/scaffold"        # pinned to test/fixtures/runner_contract.json (RLY-176)
-# RE478: the board serves two layouts. `legacy` (no query param — what every v≤93 ./relay gets)
-# keeps a full runner at `relay`; `hamaca` serves the runner at `hamaca` plus the ./relay shim.
-# The query param and each layout's runner item are pinned to CONTRACT["scaffold"].
+# RE478, RE482: the board serves one layout, `hamaca` (RE478's `legacy` layout is retired and
+# answers 410). The query param and the layout's runner item are pinned to CONTRACT["scaffold"].
 SCAFFOLD_LAYOUT_PARAM = "layout"
-SCAFFOLD_RUNNERS = {"hamaca": "hamaca", "legacy": "relay"}
+SCAFFOLD_RUNNERS = {"hamaca": "hamaca"}
 RUNNER_REL = SCAFFOLD_RUNNERS["hamaca"]  # the ONE item that goes through RE185's installer
-# In the hamaca layout the legacy runner path holds the ./relay shim, which must be executable too.
-EXECUTABLE_ITEMS = (RUNNER_REL, SCAFFOLD_RUNNERS["legacy"])
+EXECUTABLE_ITEMS = (RUNNER_REL,)
 GUIDE_REL = "hamaca.md"                # the agent-facing guide; plain content, written verbatim
 # RE457: the line the project's pointer file carries so its LLM finds hamaca.md. Pinned to
 # CONTRACT["setup"]["pointer_line"] — the board's install script appends the same line.
@@ -7029,8 +7025,6 @@ POINTER_LINE = "Working Hamaca cards from this repo: see [hamaca.md](hamaca.md).
 # RE478: the pre-rename pointer line — the ONE definition of what the migration recognises and
 # replaces with POINTER_LINE.
 OLD_POINTER_LINE = "Working Relay cards from this repo: see [relay.md](relay.md)."
-# RE478: printed (dim, on stderr) by the full runner still running as ./relay — see main().
-NOTE_PRE_MIGRATION = "note: ./relay is now ./hamaca. Run `./relay update` to switch this repo."
 PROJECT_LAYOUT_KEYS = ("skill_dir", "pointer_file")
 
 
@@ -7102,7 +7096,7 @@ def local_scaffold_version():
 
 def project_layout():
     """The project's LLM layout (RE457): `{"skill_dir": str, "pointer_file": str}` from
-    runner.json (`.hamaca/`, else `.relay/`), each falling back to runner_config_defaults() when the file or key is
+    .hamaca/runner.json, each falling back to runner_config_defaults() when the file or key is
     missing. Read from ROOT at CALL time (see ensure_runner_config) so a repointed ROOT never
     reads this checkout's file. Invalid JSON and a non-string value die: guessing a skill dir
     would install the skills somewhere the project's LLM never looks."""
@@ -7129,7 +7123,7 @@ def project_layout():
 def local_scaffold_path(rel, skill_dir):
     """Where manifest path `rel` lives in this project (RE457): a skill under the manifest's
     canonical DEFAULT_SKILL_DIR moves under `skill_dir`; every other item (`./hamaca`,
-    `relay.md`) is returned unchanged. The fetch URL always keeps the manifest path."""
+    `hamaca.md`) is returned unchanged. The fetch URL always keeps the manifest path."""
     prefix = DEFAULT_SKILL_DIR + "/"
     return skill_dir + "/" + rel[len(prefix):] if rel.startswith(prefix) else rel
 
@@ -7183,8 +7177,8 @@ def in_relay_app_repo():
     return os.path.isfile(os.path.join(ROOT, "lib", "hamaca", "scaffold.ex"))
 
 
-# RE319 — the CLI moved from bin/relay to ./relay. `relay update` deletes the file an older
-# layout left behind, but only when it is provably Relay's: every Relay-installed bin/relay
+# RE319 — the CLI moved from bin/relay to ./relay. `hamaca update` deletes the file an older
+# layout left behind, but only when it is provably Hamaca's: every bin/relay we installed
 # declares this line, and a bin/relay without it is someone else's and is never touched. This
 # marker is the one place the CLI still spells its old identity.
 LEGACY_CLI_REL = "bin/relay"
@@ -7215,12 +7209,8 @@ def remove_obsolete(paths):
     return removed
 
 
-def scaffold_status(skill_dir=None, leave=()):
+def scaffold_status(skill_dir=None):
     """The ONE comparison behind both `--check` and apply.
-
-    `leave` (RE478) names local paths never compared, and so never written: the ./relay shim
-    item when a leftover FULL runner sits there beside ./hamaca (plan_rename's
-    `leftover_runner`) — it still works, and replacing it is not this run's call.
 
     Skills are compared, and reported, at their LOCAL path under `skill_dir` (RE457) — the
     project's own (project_layout) unless an LLM switch passes its new one.
@@ -7247,10 +7237,10 @@ def scaffold_status(skill_dir=None, leave=()):
     never equals a manifest sha, so it lands in `changed` like any other repair. `missing`
     stays in the report as information, not as a trigger.
 
-    An executable item (the runner, and the hamaca layout's ./relay shim — EXECUTABLE_ITEMS,
-    RE478) with matching bytes but no executable bit is `changed` too (RE319): an older CLI's
-    update writes every item except its own path at mode 644, so the upgrade from bin/relay
-    leaves exactly that state, and the reinstall through `install_runner` is what restores 0o755.
+    An executable item (the runner — EXECUTABLE_ITEMS) with matching bytes but no executable bit
+    is `changed` too (RE319): an older CLI's update writes every item except its own path at
+    mode 644, so the upgrade from bin/relay leaves exactly that state, and the reinstall through
+    `install_runner` is what restores 0o755.
     """
     if skill_dir is None:
         skill_dir = project_layout()["skill_dir"]
@@ -7258,7 +7248,7 @@ def scaffold_status(skill_dir=None, leave=()):
     served, local = manifest["version"], local_scaffold_version()
     paths = [(i, local_scaffold_path(i["path"], skill_dir)) for i in manifest["items"]]
     missing = [rel for _i, rel in paths if not os.path.exists(_safe_path(rel))]
-    changed = [rel for i, rel in paths if rel not in leave and (
+    changed = [rel for i, rel in paths if (
                _scaffold_sha256_file(rel) != manifest_sha(i)
                or (rel in EXECUTABLE_ITEMS and not os.access(_safe_path(rel), os.X_OK)))]
     return {"served_version": served, "local_version": local, "current": not changed,
@@ -7266,7 +7256,7 @@ def scaffold_status(skill_dir=None, leave=()):
             "skill_dir": skill_dir}
 
 
-# RE443: the manifest's `relay` item carries the sha of the BAKED bytes the board serves in
+# RE443: the manifest's `hamaca` item carries the sha of the BAKED bytes the board serves in
 # `sha256` (so every runner up to v89, which checks a download raw, can still update itself) and
 # the built placeholder copy's in this key. Pinned to test/fixtures/runner_contract.json.
 UNBAKED_SHA_KEY = "unbaked_sha256"
@@ -7289,9 +7279,8 @@ def _scaffold_sha256_file(rel):
 
 
 def _install_order(item):
-    """The runner first, the ./relay shim last, everything else between in manifest order
-    (RE478): ./relay never becomes a shim while no ./hamaca stands beside it."""
-    return {RUNNER_REL: 0, SCAFFOLD_RUNNERS["legacy"]: 2}.get(item["path"], 1)
+    """The runner first, everything else after it in manifest order (RE478)."""
+    return 0 if item["path"] == RUNNER_REL else 1
 
 
 def install_scaffold(status, carry_from=None):
@@ -7300,7 +7289,8 @@ def install_scaffold(status, carry_from=None):
     version once the whole apply is done.
 
     `carry_from` (RE478) is the file whose BOARD_URL the new runner keeps — the old full
-    ./relay a migration replaces with ./hamaca; by default the runner's own path.
+    ./relay a migration replaces with ./hamaca when there is no ./hamaca yet; by default the
+    runner's own path.
 
     Each body is checked against the manifest's sha256 before it touches disk, and `./hamaca`
     additionally goes through RE185's verified installer (`verify_runner_source` +
@@ -7360,18 +7350,41 @@ def append_pointer(rel):
     return True
 
 
-# ============================ the rename migration (RE478) ============================
+# ============================ the rename migration (RE478, RE482) ============================
 #
-# `update` (v94+) moves an old repo to the Hamaca names in the same pass that refreshes the
-# scaffold: ./relay -> ./hamaca (+ the shim), .relay/ -> .hamaca/, relay.md -> hamaca.md, the
-# relay-* skills -> hamaca-* (+ aliases), and the old pointer line. plan_rename decides it all
-# before anything is written; a half-migrated leftover is reported and never merged or deleted.
+# `update` moves an old repo to the Hamaca names in the same pass that refreshes the scaffold:
+# ./relay -> ./hamaca, .relay/ -> .hamaca/, relay.md -> hamaca.md, the relay-* skills ->
+# hamaca-*, and the old pointer line. RE482 closed the compatibility window, so what the old
+# names leave behind is REMOVED rather than replaced by a shim and aliases — except anything that
+# looks user-modified, which is reported and left. plan_rename decides it all before anything is
+# written; a half-migrated leftover `.relay/` beside `.hamaca/` is reported and never merged.
 
-OLD_RUNNER_REL = SCAFFOLD_RUNNERS["legacy"]      # ./relay: the old runner, then the shim
+OLD_RUNNER_REL = "relay"        # migration-only: the old runner, or RE478's window-era shim
+OLD_STATE_DIR = ".relay"        # migration-only: the old state dir, moved whole to STATE_DIR
 OLD_GUIDE_REL = "relay.md"
-SKILL_RENAMES = ("doctor", "onboard", "update")  # relay-X -> hamaca-X; relay-X stays as an alias
+SKILL_RENAMES = ("doctor", "onboard", "update")  # relay-X -> hamaca-X
 ENVRC_PREFIX = ".envrc"
-ENVRC_OLD_VAR = re.compile(r"RELAY_[A-Z]")
+ENVRC_OLD_VAR = re.compile(re.escape(RETIRED_ENV_PREFIX) + r"[A-Z]")
+ENVRC_RETIRED_REASON = (f"no longer read; rename to {ENV_PREFIX}* (the runner stops naming "
+                        f"any {RETIRED_ENV_PREFIX}* it finds in place of a missing {ENV_PREFIX}*)")
+MODIFIED_REASON = "modified since Hamaca installed it, so it was left; delete it by hand when done"
+MODIFIED_RUNNER_REASON = ("modified leftover runner (its RUNNER_FINGERPRINT does not match its "
+                          "source), so it was left; delete it by hand when done")
+
+# RE482: the sha256 of every committed version of what RE478's window installed — the ./relay
+# shim and the three relay-* alias skills (one commit, 684e2d7a). A file whose bytes are one of
+# these is Hamaca's own copy, so update removes it; any other bytes were edited, and it is left.
+# Skills are keyed by their manifest path under DEFAULT_SKILL_DIR and matched by content under
+# any skill dir: the same bytes were installed wherever a project keeps its skills.
+WINDOW_COPIES_SHA256 = {
+    "relay": frozenset({"75cf9ed769a13098677d3ed1784fecabee13c7861abdba0b005d6183c94292e0"}),
+    ".claude/skills/relay-doctor/SKILL.md": frozenset(
+        {"fe0527a7cb18bf565430c3b7ddb7471bd6fd9c04b1e58cad30fdf447217f28c9"}),
+    ".claude/skills/relay-onboard/SKILL.md": frozenset(
+        {"465721b32b4ec24afa876086976a7d5c5177f0bc322400f7fc99280e598624a0"}),
+    ".claude/skills/relay-update/SKILL.md": frozenset(
+        {"0ec16cb85f39473a499bd50b206ca8ff342a95a62da510d83aa910413113773d"}),
+}
 
 
 def _read_text(path):
@@ -7388,10 +7401,27 @@ def _is_full_runner(rel):
     return text is not None and parse_runner_version(text) is not None
 
 
+RUNNER_FINGERPRINT_RE = re.compile(r'(?m)^RUNNER_FINGERPRINT\s*=\s*"([0-9a-f]*)"')
+
+
+def _runner_modified(rel):
+    """Whether the full runner at `rel` looks user-modified: it declares a RUNNER_FINGERPRINT
+    that is not runner_fingerprint() of its own source. A runner with no such line predates
+    fingerprints and counts as unmodified — scaffold files are never user-edited (RE304)."""
+    text = _read_text(_safe_path(rel)) or ""
+    m = RUNNER_FINGERPRINT_RE.search(text)
+    return bool(m) and m.group(1) != runner_fingerprint(text)
+
+
+def _window_copy(rel, key):
+    """Whether the file at `rel` holds the bytes of a WINDOW_COPIES_SHA256[key] version."""
+    return _sha256_file(_safe_path(rel)) in WINDOW_COPIES_SHA256.get(key, frozenset())
+
+
 def leftover_runner():
-    """Whether a full runner still sits at ./relay beside ./hamaca — a half-migrated leftover
-    that keeps working, so neither the migration nor the shim item touches it."""
-    return _is_full_runner(OLD_RUNNER_REL) and os.path.exists(_safe_path(RUNNER_REL))
+    """Whether a user-modified full runner sits at ./relay — the one old-runner state update
+    reports and leaves instead of removing (RE482)."""
+    return _is_full_runner(OLD_RUNNER_REL) and _runner_modified(OLD_RUNNER_REL)
 
 
 def _skill_rel(skill_dir, name):
@@ -7408,45 +7438,75 @@ def _pointer_candidates(pointer_file):
     return seen
 
 
+def _plan_old_runner(migrating, renamed, skipped, removes):
+    """./relay's part of the plan: a full runner is replaced by ./hamaca and removed unless it
+    looks modified; a window-era shim is removed when its bytes are a known copy."""
+    subject = f"./{OLD_RUNNER_REL}"
+    if migrating:
+        if _runner_modified(OLD_RUNNER_REL):
+            skipped.append({"subject": subject, "reason": MODIFIED_RUNNER_REASON})
+            return
+        renamed.append({"subject": subject, "change": f"→ ./{RUNNER_REL}",
+                        "note": f"./{OLD_RUNNER_REL} removed"})
+    elif not os.path.isfile(_safe_path(OLD_RUNNER_REL)):
+        return
+    elif _window_copy(OLD_RUNNER_REL, OLD_RUNNER_REL):
+        renamed.append({"subject": subject, "change": "removed",
+                        "note": "retired compatibility shim"})
+    else:
+        skipped.append({"subject": subject, "reason": MODIFIED_REASON})
+        return
+    removes.append(OLD_RUNNER_REL)
+
+
+def _plan_old_skills(skill_dir, migrating, renamed, skipped, removes):
+    """The relay-X skills: legacy copies when migrating from a full ./relay, window aliases when
+    their bytes are a known copy — removed either way; anything else is left and reported."""
+    for skill in SKILL_RENAMES:
+        old, new = f"relay-{skill}", f"hamaca-{skill}"
+        rel = _skill_rel(skill_dir, old)
+        if not os.path.isfile(_safe_path(rel)):
+            continue
+        subject = f"{skill_dir}/{old}"
+        if migrating:
+            renamed.append({"subject": subject, "change": f"→ {new}", "note": f"{old} removed"})
+        elif _window_copy(rel, _skill_rel(DEFAULT_SKILL_DIR, old)):
+            renamed.append({"subject": subject, "change": "removed", "note": "retired alias"})
+        else:
+            skipped.append({"subject": subject, "reason": MODIFIED_REASON})
+            continue
+        removes.append(rel)
+
+
 def plan_rename(skill_dir, pointer_file, items=()):
     """What the migration would do, from the filesystem alone — nothing is written.
 
     `skill_dir`/`pointer_file` are the project's CURRENT layout (an LLM switch passes its old
-    one: the relay-* skills to rename live there). `items` is the served manifest: a relay-X
-    skill whose bytes already equal the served alias is not renamed again.
+    one: the relay-* skills live there). `items` (the served manifest) is accepted for the
+    caller's symmetry; nothing in it decides the plan any more (RE482).
 
     Returns `{"renamed": [{subject, change, note}], "skipped": [{subject, reason}], "moves":
-    {old: new}, "pointers": [pointer files to rewrite], "leftover_runner": bool}`. `moves` holds
-    `.relay` (a directory moved whole) and `relay.md` (removed once hamaca.md is written)."""
-    state_new, state_old = STATE_DIRS
-    renamed, skipped, moves, pointers = [], [], {}, []
-    leftover = leftover_runner()
-    if _is_full_runner(OLD_RUNNER_REL) and not os.path.exists(_safe_path(RUNNER_REL)):
-        renamed.append({"subject": f"./{OLD_RUNNER_REL}", "change": f"→ ./{RUNNER_REL}",
-                        "note": f"./{OLD_RUNNER_REL} is now a shim"})
-    if os.path.isdir(_safe_path(state_old)):
-        if os.path.isdir(_safe_path(state_new)):
-            skipped.append({"subject": f"{state_old}/",
-                            "reason": f"leftover beside {state_new}/; left as is — {state_new}/ "
+    {old: new}, "pointers": [pointer files to rewrite], "leftover_runner": bool, "removes":
+    [paths]}`. `moves` holds `.relay` (a directory moved whole) and `relay.md` (removed once
+    hamaca.md is written); `removes` holds the old runner or shim and the relay-* skills, deleted
+    once the scaffold is installed. `leftover_runner` is a modified full ./relay that was left."""
+    del items
+    renamed, skipped, moves, pointers, removes = [], [], {}, [], []
+    migrating = _is_full_runner(OLD_RUNNER_REL)
+    _plan_old_runner(migrating, renamed, skipped, removes)
+    if os.path.isdir(_safe_path(OLD_STATE_DIR)):
+        if os.path.isdir(_safe_path(STATE_DIR)):
+            skipped.append({"subject": f"{OLD_STATE_DIR}/",
+                            "reason": f"leftover beside {STATE_DIR}/; left as is — {STATE_DIR}/ "
                                       "is the one in use"})
         else:
-            renamed.append({"subject": f"{state_old}/", "change": f"→ {state_new}/",
+            renamed.append({"subject": f"{OLD_STATE_DIR}/", "change": f"→ {STATE_DIR}/",
                             "note": None})
-            moves[state_old] = state_new
-    if leftover:
-        skipped.append({"subject": f"./{OLD_RUNNER_REL}",
-                        "reason": f"leftover full runner beside ./{RUNNER_REL}; left as is and "
-                                  "still works"})
+            moves[OLD_STATE_DIR] = STATE_DIR
     if os.path.isfile(_safe_path(OLD_GUIDE_REL)):
         renamed.append({"subject": OLD_GUIDE_REL, "change": f"→ {GUIDE_REL}", "note": None})
         moves[OLD_GUIDE_REL] = GUIDE_REL
-    served = {local_scaffold_path(i["path"], skill_dir): i["sha256"] for i in items}
-    for skill in SKILL_RENAMES:
-        old, new = f"relay-{skill}", f"hamaca-{skill}"
-        rel = _skill_rel(skill_dir, old)
-        if os.path.isfile(_safe_path(rel)) and _sha256_file(_safe_path(rel)) != served.get(rel):
-            renamed.append({"subject": f"{skill_dir}/{old}", "change": f"→ {new}",
-                            "note": "alias kept"})
+    _plan_old_skills(skill_dir, migrating, renamed, skipped, removes)
     candidates = _pointer_candidates(pointer_file)
     unpointed = []
     for rel in candidates:
@@ -7461,14 +7521,15 @@ def plan_rename(skill_dir, pointer_file, items=()):
         skipped += [{"subject": f"{rel} pointer line",
                      "reason": f"no {OLD_GUIDE_REL} pointer found; left as is"}
                     for rel in unpointed]
-        for name in sorted(os.listdir(ROOT)):
-            text = _read_text(os.path.join(ROOT, name)) if name.startswith(ENVRC_PREFIX) else None
-            if text is not None and ENVRC_OLD_VAR.search(text):
-                skipped.append({"subject": f"RELAY_* in {name}",
-                                "reason": "yours, and still read; rename to HAMACA_* when "
-                                          "convenient"})
+    # RE482: a RELAY_* in an .envrc is never read again, so it is reported on every update.
+    for name in sorted(os.listdir(ROOT)):
+        text = _read_text(os.path.join(ROOT, name)) if name.startswith(ENVRC_PREFIX) else None
+        if text is not None and ENVRC_OLD_VAR.search(text):
+            skipped.append({"subject": f"{RETIRED_ENV_PREFIX}* in {name}",
+                            "reason": ENVRC_RETIRED_REASON})
     return {"renamed": renamed, "skipped": skipped, "moves": moves, "pointers": pointers,
-            "leftover_runner": leftover}
+            "leftover_runner": leftover_runner(),
+            "removes": removes}
 
 
 def _replace_pointer(rel):
@@ -7484,19 +7545,38 @@ def _replace_pointer(rel):
         f.write("".join(lines))
 
 
+def move_old_state_dir():
+    """Move `.relay/` to `.hamaca/` whole when only `.relay/` exists (RE482); True when it moved.
+    Shared by apply_rename and `update --starter-only`, which must move BEFORE it writes any
+    starter file — the install script runs it first, and a fresh `.hamaca/runner.json` beside
+    `.relay/` would strand the straggler's own config as a skipped leftover."""
+    if os.path.isdir(_safe_path(OLD_STATE_DIR)) and not os.path.exists(_safe_path(STATE_DIR)):
+        os.rename(_safe_path(OLD_STATE_DIR), _safe_path(STATE_DIR))
+        return True
+    return False
+
+
 def apply_rename(plan, install=None):
     """Carry out plan_rename's plan, in order: move each planned directory whole (`.relay/` ->
     `.hamaca/`, contents untouched); run `install` (the scaffold install, which writes ./hamaca
-    and then the shim); remove the planned old files (`relay.md`, now that hamaca.md is
-    written); rewrite the planned pointer lines. Skipped subjects are never in the plan."""
-    for old, new in plan["moves"].items():
-        if os.path.isdir(_safe_path(old)):
-            os.rename(_safe_path(old), _safe_path(new))
+    — carrying the old ./relay's BOARD_URL — and the hamaca-* skills); remove the planned old
+    files (`relay.md` now that hamaca.md is written, then `removes`: the old runner or shim and the
+    relay-* skills, each skill directory too once empty); rewrite the planned pointer lines.
+    Skipped subjects are never in the plan."""
+    if OLD_STATE_DIR in plan["moves"]:
+        move_old_state_dir()
     if install:
         install()
     for old in plan["moves"]:
         if os.path.isfile(_safe_path(old)):
             os.remove(_safe_path(old))
+    for rel in plan["removes"]:
+        path = _safe_path(rel)
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(path)
+        if os.path.dirname(rel):
+            with contextlib.suppress(OSError):      # not empty: leave the user's other files
+                os.rmdir(os.path.dirname(path))
     for rel in plan["pointers"]:
         _replace_pointer(rel)
 
@@ -7590,16 +7670,15 @@ def _format_rename(report):
 
 def _renamed_paths(renamed, skill_dir):
     """The scaffold paths the renamed group already accounts for, left out of `updated`."""
-    subjects = {e["subject"] for e in renamed}
+    subjects = {e["subject"] for e in renamed if e["change"] != "removed"}
     paths = set()
     if f"./{OLD_RUNNER_REL}" in subjects:
-        paths |= {RUNNER_REL, OLD_RUNNER_REL}
+        paths.add(RUNNER_REL)
     if OLD_GUIDE_REL in subjects:
         paths.add(GUIDE_REL)
     for skill in SKILL_RENAMES:
         if any(s.endswith(f"/relay-{skill}") for s in subjects):
-            paths |= {_skill_rel(skill_dir, f"relay-{skill}"),
-                      _skill_rel(skill_dir, f"hamaca-{skill}")}
+            paths.add(_skill_rel(skill_dir, f"hamaca-{skill}"))
     return paths
 
 
@@ -7637,9 +7716,11 @@ def format_scaffold(report, moves=None):
 
 
 def format_starter(report):
-    """The human report for `hamaca update --starter-only` (RE443)."""
-    return "\n".join([f"  {report['config']} {repo_state_rel('runner.json')}",
-                      f"  {report['hook']} {repo_state_rel(HOOK_FILES['prepare'])}"])
+    """The human report for `hamaca update --starter-only` (RE443), led by the `.relay/` move
+    when there was one (RE482)."""
+    moved = [f"  renamed {e['subject']} {e['change']}" for e in report["renamed"]]
+    return "\n".join(moved + [f"  {report['config']} {repo_state_rel('runner.json')}",
+                              f"  {report['hook']} {repo_state_rel(HOOK_FILES['prepare'])}"])
 
 
 def layout_flags(args):
@@ -7651,8 +7732,15 @@ def layout_flags(args):
 def update_starter_only(args):
     """`hamaca update --starter-only` (RE443): only the two user-owned starter files — the runner
     config (`base` from `--base`) and the generic prepare hook — each only if missing. No network
-    and no scaffold work, so it needs no board and is not refused in the Hamaca app repo."""
-    report = {"config": ensure_runner_config(False, args.base, layout_flags(args)),
+    and no scaffold work, so it needs no board and is not refused in the Hamaca app repo.
+
+    RE482: a straggler's `.relay/` is moved to `.hamaca/` FIRST (move_old_state_dir) — the
+    install script runs this before `update`, and a starter written beside `.relay/` would leave
+    the straggler's own runner.json and hooks stranded as a skipped leftover."""
+    renamed = ([{"subject": f"{OLD_STATE_DIR}/", "change": f"→ {STATE_DIR}/", "note": None}]
+               if move_old_state_dir() else [])
+    report = {"renamed": renamed,
+              "config": ensure_runner_config(False, args.base, layout_flags(args)),
               "hook": ensure_prepare_hook(),
               "applied": True}
     emit(args, report, lambda: print(format_starter(report)))
@@ -7701,9 +7789,7 @@ def cmd_update(args):
     if flags:
         for key in PROJECT_LAYOUT_KEYS:
             _safe_path(new[key])
-    # RE478: a leftover full ./relay beside ./hamaca keeps working; the shim never replaces it.
-    status = scaffold_status(new["skill_dir"],
-                             leave=(OLD_RUNNER_REL,) if leftover_runner() else ())
+    status = scaffold_status(new["skill_dir"])
     # The relay-* skills to rename live in the OLD skill dir; installs go to the new one.
     rename = plan_rename(old["skill_dir"], old["pointer_file"], status["items"])
     moves = moved_skills(status["items"], old["skill_dir"], new["skill_dir"])
@@ -7719,7 +7805,8 @@ def cmd_update(args):
                 f"applying would revert {touched} of them to it. "
                 f"Use `./{cli_name()} update --check` to see the difference, or --force if you really "
                 "mean to overwrite the sources.")
-        # A migration's ./hamaca keeps the BOARD_URL of the ./relay it replaces.
+        # A migration's ./hamaca keeps the BOARD_URL of the ./relay it replaces; a ./hamaca that is
+        # already there (the install script placed it) was baked by the board and keeps its own.
         carry_from = (None if os.path.exists(_safe_path(RUNNER_REL))
                       else _safe_path(OLD_RUNNER_REL))
 
@@ -7950,8 +8037,8 @@ HELP_DESCRIPTION = " ".join(__doc__.split())
 
 HELP_EPILOG = ('TEXT, NOTE and QUESTION accept "-" (stdin) or "@path" (a file). --json prints '
                "machine output; --field PATH prints one value bare (e.g. `hamaca card RLY-12 "
-               "--field status`). Needs HAMACA_URL and HAMACA_API_KEY (RELAY_URL and "
-               "RELAY_API_KEY still work); the runner also reads .hamaca/runner.json.")
+               "--field status`). Needs HAMACA_URL and HAMACA_API_KEY; the runner also reads "
+               ".hamaca/runner.json.")
 
 
 def _help_formatter():
@@ -8218,30 +8305,7 @@ def build_parser():
     return p
 
 
-# Machine-readable output flags: a caller parsing stdout never wants a note on stderr either.
-NOTE_QUIET_FLAGS = ("--json", "--field")
-# A node subprocess carries these; its output is a run's, not a human's.
-NOTE_NODE_ENV = ("NODE_SCRATCH", "NODE_OUTCOME")
-
-
-def should_note(argv, environ, isatty):
-    """True when a human at a terminal should see NOTE_PRE_MIGRATION (RE478) — the same rule as
-    the ./relay shim's note: never in a pipe, never with --json/--field, never in `start` (its
-    output is a log), never inside a node subprocess (either env prefix)."""
-    if not isatty:
-        return False
-    if any(arg in NOTE_QUIET_FLAGS for arg in argv[1:]):
-        return False
-    if len(argv) > 1 and argv[1] == "start":
-        return False
-    return not any(prefix + suffix in environ
-                   for prefix in ENV_PREFIXES for suffix in NOTE_NODE_ENV)
-
-
 def main():
-    # RE478: the full runner still running as ./relay is an unmigrated repo — say how to switch.
-    if cli_name() == "relay" and should_note(sys.argv, os.environ, sys.stderr.isatty()):
-        print(f"\x1b[2m{NOTE_PRE_MIGRATION}\x1b[0m", file=sys.stderr, flush=True)
     parser = build_parser()
     args = parser.parse_args()
     if not getattr(args, "cmd", None):

@@ -4,7 +4,7 @@ defmodule HamacaWeb.Api.RunnerContractTest do
 
   This test is the ONLY writer of `test/fixtures/runner_contract.json`. It drives the real
   `/api/node-jobs/*` routes, captures what they actually send and accept, and asserts the
-  committed fixture still matches. `bin/test_relay.py` builds every job dict from that same
+  committed fixture still matches. `bin/test_hamaca.py` builds every job dict from that same
   file, so a field renamed here breaks the Python suite on the next run — which is the whole
   point: before this existed, both suites were green against their own imagination of the
   other (RLY-163/165/166/170/175).
@@ -45,7 +45,7 @@ defmodule HamacaWeb.Api.RunnerContractTest do
       "runner" => runner_ident(),
       "capacity" => %{"shared_clean" => 1, "exclusive" => 1},
       # RLY-182: optional, send-on-change. Present here so the fixture records the key
-      # and its shape for bin/test_relay.py to build against.
+      # and its shape for bin/test_hamaca.py to build against.
       "capabilities" => %{"agents" => ["plan-implementer"], "skills" => ["write-plan"]},
       "running" => [],
       "held" => [],
@@ -98,16 +98,16 @@ defmodule HamacaWeb.Api.RunnerContractTest do
       "detail" => "asked the human",
       "git_sha" => "0000000000000000000000000000000000000000",
       "session_id" => "sess-fixture",
-      # RE310: always sent, never omitted — this is the key set bin/test_relay.py pins
+      # RE310: always sent, never omitted — this is the key set bin/test_hamaca.py pins
       # `outcome_body` against.
       "no_changes" => false,
       # RE267: optional — the runner sends it only for a usage-limit `blocked` with a known reset.
-      # Present here so bin/test_relay.py pins its key and format; on this `needs_input` it is
+      # Present here so bin/test_hamaca.py pins its key and format; on this `needs_input` it is
       # ignored by design (read only on `blocked`), which this POST also proves is not a 422.
       "resume_at" => "2100-01-01T00:00:00Z",
       # RE516: optional — the runner sends it only when the agent's stream reported a cost (the
       # session's cumulative USD at the harness's `cost_path`). The server stores the
-      # per-execution delta and never refuses junk; present here so bin/test_relay.py pins it.
+      # per-execution delta and never refuses junk; present here so bin/test_hamaca.py pins it.
       "cost" => 0.4213
     }
 
@@ -198,12 +198,16 @@ defmodule HamacaWeb.Api.RunnerContractTest do
     # pinned here like every other transport — a renamed key breaks CI instead of breaking a
     # project's bootstrap. Captured off the real route, unauthenticated like the runner's own
     # first call.
-    scaffold_manifest = build_conn() |> get(~p"/api/scaffold") |> json_response(200)
-    scaffold_manifest_hamaca = build_conn() |> get(~p"/api/scaffold?layout=hamaca") |> json_response(200)
+    scaffold_manifest = build_conn() |> get(~p"/api/scaffold?layout=hamaca") |> json_response(200)
+
+    # RE482 — the retired legacy layout: what a v≤93 ./relay asking with no `layout` param gets.
+    retired_conn = get(build_conn(), ~p"/api/scaffold")
+    %{"error" => %{"code" => retired_code}} = json_response(retired_conn, 410)
+    assert retired_code == Scaffold.retired_code()
 
     # RE355 — the card-task routes are runner wire: `./relay tasks add|list` and
     # `./relay task show|update|rm` build their requests and read their responses against these
-    # recorded shapes, so a renamed key breaks bin/test_relay.py instead of an agent's plan.
+    # recorded shapes, so a renamed key breaks bin/test_hamaca.py instead of an agent's plan.
     {:ok, tasks_card} = Hamaca.Cards.create_card(exclusive.next_up, %{title: "Tasks card"})
     tasks_ref = Hamaca.Cards.ref(exclusive.board, tasks_card)
 
@@ -479,22 +483,23 @@ defmodule HamacaWeb.Api.RunnerContractTest do
       "talk_outcome" => %{"request" => normalize(talk_outcome_request), "response" => normalize(talk_outcome_response)},
       "scaffold" => %{
         "manifest_path" => "/api/scaffold",
-        "file_path_example" => "/api/scaffold/relay",
-        # RE443 — the BOARD_URL line the app bakes into a served ./relay; ./relay's
+        "file_path_example" => "/api/scaffold/" <> Scaffold.runner_path("hamaca"),
+        # RE443 — the BOARD_URL line the app bakes into a served ./hamaca; ./hamaca's
         # BOARD_URL_RE parses it back.
         "board_url_line_example" => Scaffold.board_url_line("http://board.test"),
         "manifest" => scaffold_placeholders(scaffold_manifest),
         # RE478 — the query param that picks a layout, and each layout's runner item path.
         "layout_param" => Scaffold.layout_param(),
         "layouts" => Map.new(Scaffold.layouts(), &{&1, Scaffold.runner_path(&1)}),
-        "manifest_hamaca" => scaffold_placeholders(scaffold_manifest_hamaca)
+        # RE482 — the retired layout value and the refusal it gets.
+        "retired" => %{"layout" => Scaffold.retired_layout(), "status" => retired_conn.status, "code" => retired_code}
       },
       "setup" => setup,
-      # RE478 — owned by ./hamaca, not the app: the env prefixes it reads in precedence order, the
-      # suffixes it reads and the ones it exports to every node and hook under both prefixes.
-      # Pinned here so a drift on either side breaks CI.
+      # RE478, RE482 — owned by ./hamaca, not the app: the one env prefix it reads, the suffixes
+      # it reads and the ones it exports to every node and hook. Pinned here so a drift on either
+      # side breaks CI.
       "env" => %{
-        "prefixes" => ["HAMACA_", "RELAY_"],
+        "prefix" => "HAMACA_",
         "read" => ~w(URL API_KEY STATE_DIR RUNNER_LOCK_DIR UPDATED_FROM UPDATE_ATTEMPTS NODE_OUTCOME),
         "exported" => ~w(NODE_SCRATCH NODE_OUTCOME PLAN REF BRANCH BASE WORKTREE CACHE_DIR)
       },
@@ -523,36 +528,30 @@ defmodule HamacaWeb.Api.RunnerContractTest do
     assert document["note_images"]["origin_kinds"] == ["answer", "rejection"]
     assert document["version"] == 15
 
-    # RE478 scenario 14: the default stays today's five legacy items; ?layout=hamaca is nine.
+    # RE482 scenario 7: one served layout; the retired one gets a 410 runner_renamed; the
+    # manifest is the five hamaca items with only the runner carrying unbaked_sha256.
     assert document["scaffold"]["layout_param"] == "layout"
-    assert document["scaffold"]["layouts"] == %{"hamaca" => "hamaca", "legacy" => "relay"}
+    assert document["scaffold"]["layouts"] == Map.new(Scaffold.layouts(), &{&1, &1})
+    assert document["scaffold"]["layouts"] == %{"hamaca" => "hamaca"}
 
-    assert Enum.map(document["scaffold"]["manifest"]["items"], & &1["path"]) == [
-             ".claude/skills/relay-doctor/SKILL.md",
-             ".claude/skills/relay-onboard/SKILL.md",
-             ".claude/skills/relay-update/SKILL.md",
-             "relay",
-             "relay.md"
-           ]
+    assert document["scaffold"]["retired"] == %{
+             "layout" => Scaffold.retired_layout(),
+             "status" => 410,
+             "code" => Scaffold.retired_code()
+           }
 
-    assert Enum.map(document["scaffold"]["manifest_hamaca"]["items"], & &1["path"]) == [
-             ".claude/skills/hamaca-doctor/SKILL.md",
-             ".claude/skills/hamaca-onboard/SKILL.md",
-             ".claude/skills/hamaca-update/SKILL.md",
-             ".claude/skills/relay-doctor/SKILL.md",
-             ".claude/skills/relay-onboard/SKILL.md",
-             ".claude/skills/relay-update/SKILL.md",
-             "hamaca",
-             "hamaca.md",
-             "relay"
-           ]
+    assert Enum.map(document["scaffold"]["manifest"]["items"], & &1["path"]) == Scaffold.items("hamaca")
+    refute Map.has_key?(document["scaffold"], "manifest_hamaca")
+    assert document["scaffold"]["manifest"]["version"] == "<scaffold-version>"
 
-    assert document["scaffold"]["manifest_hamaca"]["version"] == "<scaffold-version>"
-
-    for item <- document["scaffold"]["manifest_hamaca"]["items"] do
+    for item <- document["scaffold"]["manifest"]["items"] do
       assert item["sha256"] == "<sha256>"
       assert item["bytes"] == "<bytes>"
+      assert Map.has_key?(item, "unbaked_sha256") == (item["path"] == Scaffold.runner_path("hamaca"))
     end
+
+    assert document["env"]["prefix"] == "HAMACA_"
+    refute Map.has_key?(document["env"], "prefixes")
 
     assert document["usage_rule_cases"] == Hamaca.UsageRuleCases.cases()
     assert "usage" in document["harnesses"]["harness_keys"]
@@ -614,10 +613,9 @@ defmodule HamacaWeb.Api.RunnerContractTest do
     assert document["setup"]["pointer_line"] == "Working Hamaca cards from this repo: see [hamaca.md](hamaca.md)."
 
     # RE478 — the runner names its CLI on every claim and heartbeat (RE486 stores it on
-    # `runners.cli`), and the env twins + CLI names ./hamaca defines are pinned here.
+    # `runners.cli`), and the env prefix + CLI names ./hamaca defines are pinned here.
     assert document["claim_request"]["runner"]["cli"] == "hamaca"
     assert document["heartbeat"]["request"]["runner"]["cli"] == "hamaca"
-    assert document["env"]["prefixes"] == ["HAMACA_", "RELAY_"]
     assert "API_KEY" in document["env"]["read"] and "NODE_SCRATCH" in document["env"]["exported"]
     assert document["runner"]["cli_names"] == ["hamaca", "relay"]
     assert document["runner"]["first_hamaca_version"] == 94
@@ -645,7 +643,7 @@ defmodule HamacaWeb.Api.RunnerContractTest do
       "name" => "fixture",
       "host" => "fixture-host",
       "interval" => 30,
-      "version" => Runs.shared_talk_min_version(),
+      "version" => Runs.min_runner_version(),
       "cli" => "hamaca"
     }
   end
@@ -877,7 +875,7 @@ defmodule HamacaWeb.Api.RunnerContractTest do
     assert committed == document, """
     #{@fixture_path} no longer matches what /api/node-jobs/* actually sends.
 
-    bin/test_relay.py builds every job dict from that file, so this is the seam guard, not a
+    bin/test_hamaca.py builds every job dict from that file, so this is the seam guard, not a
     snapshot nit. If the change is intended, regenerate and review the diff:
 
         RELAY_WRITE_CONTRACT_FIXTURE=1 mix test test/hamaca_web/controllers/api/runner_contract_test.exs

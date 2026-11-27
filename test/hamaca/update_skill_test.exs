@@ -42,8 +42,8 @@ defmodule Hamaca.UpdateSkillTest do
     end
   end
 
-  # RE478: the source is the Hamaca-named skill; `relay-update` stays only as a thin alias for the
-  # compatibility window (the legacy scaffold layout generates its full copy from this source).
+  # RE478: the source is the Hamaca-named skill. RE482 closed the compatibility window, so the
+  # thin `relay-update` alias is gone.
   describe "the Hamaca rename (RE478)" do
     @alias_skill Path.join([File.cwd!(), ".claude", "skills", "relay-update", "SKILL.md"])
 
@@ -53,29 +53,14 @@ defmodule Hamaca.UpdateSkillTest do
       for stale <- ["./relay", ".relay/", "relay.md", "RELAY_"] do
         refute doc =~ stale, "hamaca-update still says #{stale}"
       end
+
+      # RE482: the runner surface speaks Hamaca, never the Relay brand.
+      refute doc =~ "# Relay Update"
+      refute doc =~ ~r/\bRelay\b/
     end
 
-    test "relay-update is an alias: its own name, the same description, a one-line body",
-         %{doc: doc} do
-      alias_doc = File.read!(@alias_skill)
-
-      assert alias_doc =~ ~r/^name: relay-update$/m
-      assert frontmatter(alias_doc, "description") == frontmatter(doc, "description")
-      assert alias_doc |> body() |> String.trim() == "Renamed: use /hamaca-update."
+    test "the relay-update alias skill is retired (RE482)" do
+      refute File.exists?(Path.dirname(@alias_skill))
     end
-
-    test "the alias directory holds exactly SKILL.md" do
-      assert File.ls!(Path.dirname(@alias_skill)) == ["SKILL.md"]
-    end
-  end
-
-  defp frontmatter(doc, key) do
-    [_, value] = Regex.run(~r/^#{key}: (.*)$/m, doc)
-    value
-  end
-
-  defp body(doc) do
-    ["", _frontmatter, body] = String.split(doc, ~r/^---$/m, parts: 3)
-    body
   end
 end

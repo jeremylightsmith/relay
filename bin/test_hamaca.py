@@ -5,7 +5,7 @@ loop, and the REST transport underneath it.
 ./relay has no .py extension and only runs main() under __main__, so we load it by file
 path as a module and exercise it directly.
 
-Run: python3 bin/test_relay.py
+Run: python3 bin/test_hamaca.py
 """
 import argparse
 import ast
@@ -18,9 +18,7 @@ import io
 import itertools
 import json
 import os
-import pty
 import re
-import select
 import shutil
 import stat
 import subprocess
@@ -44,11 +42,11 @@ _spec = importlib.util.spec_from_file_location("relay_runner", RELAY_PATH, loade
 relay = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(relay)
 
-# RE478: the runner reads HAMACA_<X> before RELAY_<X>. This suite sets RELAY_* names throughout,
-# so a HAMACA_URL / HAMACA_API_KEY / HAMACA_NODE_* the developer's shell (or a v94+ runner
-# running this suite as a node) exports would silently win over every one of them. Tests that
-# exercise a HAMACA_ name set it themselves.
-for _name in [n for n in os.environ if n.startswith("HAMACA_")]:
+# RE482: the runner reads only HAMACA_<X>, and dies naming a stale RELAY_<X> it finds instead. A
+# HAMACA_URL / HAMACA_API_KEY / HAMACA_NODE_* the developer's shell (or a runner running this
+# suite as a node) exports would silently win over what a test sets, and a stale RELAY_* would
+# trip the guard. Tests that exercise either name set it themselves.
+for _name in [n for n in os.environ if n.startswith(("HAMACA_", "RELAY_"))]:
     del os.environ[_name]
 
 CONTRACT_PATH = os.path.join(
@@ -236,9 +234,9 @@ def errored_result_event(text):
 
 
 def pin_relay_url(test, url):
-    """Pin RELAY_URL for one test (RE443). The board URL comes from relay_url() — RELAY_URL,
+    """Pin HAMACA_URL for one test (RE443). The board URL comes from relay_url() — HAMACA_URL,
     else the baked BOARD_URL — not from env(), so a stubbed `relay.env` no longer supplies it."""
-    patcher = unittest.mock.patch.dict(os.environ, {"RELAY_URL": url})
+    patcher = unittest.mock.patch.dict(os.environ, {"HAMACA_URL": url})
     patcher.start()
     test.addCleanup(patcher.stop)
 
@@ -578,7 +576,7 @@ class PrintCardTest(unittest.TestCase):
                                                 **c) for c in comments]}
 
     def print_with_url(self, card, url="http://x/"):
-        with unittest.mock.patch.dict(os.environ, {"RELAY_URL": url}):
+        with unittest.mock.patch.dict(os.environ, {"HAMACA_URL": url}):
             return capture(relay.print_card, card)
 
     def test_print_card_lists_each_note_image_under_its_comment(self):
@@ -795,8 +793,8 @@ class RetryTest(unittest.TestCase):
         real = urllib.request.urlopen
         self.addCleanup(setattr, urllib.request, "urlopen", real)
         urllib.request.urlopen = fn
-        os.environ.setdefault("RELAY_URL", "http://x")
-        os.environ.setdefault("RELAY_API_KEY", "k")
+        os.environ.setdefault("HAMACA_URL", "http://x")
+        os.environ.setdefault("HAMACA_API_KEY", "k")
 
 
 class CancelTest(unittest.TestCase):
@@ -1060,8 +1058,8 @@ class TitleArchiveCommandsTest(unittest.TestCase):
         real_urlopen = urllib.request.urlopen
         self.addCleanup(setattr, urllib.request, "urlopen", real_urlopen)
         urllib.request.urlopen = refuse
-        os.environ.setdefault("RELAY_URL", "http://x")
-        os.environ.setdefault("RELAY_API_KEY", "k")
+        os.environ.setdefault("HAMACA_URL", "http://x")
+        os.environ.setdefault("HAMACA_API_KEY", "k")
 
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
@@ -1083,8 +1081,8 @@ class TitleArchiveCommandsTest(unittest.TestCase):
         real_urlopen = urllib.request.urlopen
         self.addCleanup(setattr, urllib.request, "urlopen", real_urlopen)
         urllib.request.urlopen = missing
-        os.environ.setdefault("RELAY_URL", "http://x")
-        os.environ.setdefault("RELAY_API_KEY", "k")
+        os.environ.setdefault("HAMACA_URL", "http://x")
+        os.environ.setdefault("HAMACA_API_KEY", "k")
 
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
@@ -1987,7 +1985,7 @@ class ApiBytesTest(unittest.TestCase):
     download comes back byte-for-byte."""
 
     def _run(self, fn, urlopen):
-        env = {"RELAY_URL": "http://x/", "RELAY_API_KEY": "k"}
+        env = {"HAMACA_URL": "http://x/", "HAMACA_API_KEY": "k"}
         with unittest.mock.patch.object(urllib.request, "urlopen", urlopen), \
                 unittest.mock.patch.dict(os.environ, env):
             return fn()
@@ -2545,7 +2543,7 @@ class OutcomeRetryBudgetTest(unittest.TestCase):
 class ApiAuthTest(unittest.TestCase):
     """`GET /api/version` is unauthenticated by design (RLY-177) so "which release is
     live?" is answerable before you have a board key — but the shared api() helper always
-    read RELAY_API_KEY and die()d without it, so the one CLI verb for that endpoint could
+    read HAMACA_API_KEY and die()d without it, so the one CLI verb for that endpoint could
     never actually exercise the property it exists to prove. api(auth=False) opts out of
     the Authorization header (and the env read behind it) entirely."""
 
@@ -2553,7 +2551,7 @@ class ApiAuthTest(unittest.TestCase):
         self._saved = {k: getattr(relay, k) for k in ("env", "_api_backoff", "log")}
 
         def fake_env(name):
-            if name == "RELAY_URL":
+            if name == "HAMACA_URL":
                 return "http://example.test"
             raise AssertionError(f"api(auth=False) must not read {name}")
 
@@ -2670,7 +2668,7 @@ class LegacyIdentityWarningTest(unittest.TestCase):
 
     def _an_runner_ran_here_as(self, name):
         """Leave the residue `acquire_singleton_lock` leaves and never unlinks: an identity
-        lock file, keyed on `sha256(RELAY_URL + "\\0" + name)`. It exists iff a runner
+        lock file, keyed on `sha256(HAMACA_URL + "\\0" + name)`. It exists iff a runner
         actually ran on THIS machine against THIS board under that name."""
         with open(relay.identity_lock_path({"name": name}), "w", encoding="utf-8") as f:
             f.write("{}\n")
@@ -2701,7 +2699,7 @@ class LegacyIdentityWarningTest(unittest.TestCase):
         self.assertIn("shared by every checkout", warning)    # ...don't pin it in the config
 
     def test_the_per_run_recovery_is_the_one_that_actually_clears_the_pin(self):
-        """`Runs.park_claimed/1` (lib/relay/runs.ex) is the ONLY writer that nils
+        """`Runs.park_claimed/1` (lib/hamaca/runs.ex) is the ONLY writer that nils
         `pinned_runner_name`, and it transitions from `[:running]` only — the listener calls
         it for `%Run{status: :running}` and leaves a `%Run{status: :parked, parked_reason:
         :runner_gone}` on its defensive no-op clause. So "take the baton" clears the pin only
@@ -2727,7 +2725,7 @@ class LegacyIdentityWarningTest(unittest.TestCase):
 
     def test_the_marker_is_keyed_on_the_identity_not_left_global(self):
         """The marker sits beside the legacy identity's own lock, so warning about one legacy
-        identity never silences a different board's (the lock path hashes RELAY_URL + name)."""
+        identity never silences a different board's (the lock path hashes HAMACA_URL + name)."""
         self._an_runner_ran_here_as("box.local")
         self._an_runner_ran_here_as("other-host")
         self.assertIsNotNone(relay.legacy_identity_warning(relay.default_runner_name()))
@@ -2736,7 +2734,7 @@ class LegacyIdentityWarningTest(unittest.TestCase):
 
     def test_each_checkout_is_told_even_though_they_share_a_legacy_identity(self):
         """Round-4 blocking #1. The marker used to be keyed on the LEGACY name — machine-global
-        (`sha256(RELAY_URL + "\\0" + hostname)`), with ROOT nowhere in it. Two checkouts of one
+        (`sha256(HAMACA_URL + "\\0" + hostname)`), with ROOT nowhere in it. Two checkouts of one
         project on one machine is RE305's motivating scenario, so the first one to start ate the
         only telling and the other was silent forever — and the advice is checkout-specific
         ("restart THIS checkout with --name"), so the one that got it often could not act on it
@@ -3436,7 +3434,7 @@ class RunnerPoolRecoverTest(unittest.TestCase):
 
     def test_recover_runs_the_cleanup_hook_before_reclaiming_a_retired_slot(self):
         """RE339: a retired `<ns>-work-N` slot is a real removal of an intact tree, so the
-        project's cleanup hook fires first. It has no card, so RELAY_REF is empty."""
+        project's cleanup hook fires first. It has no card, so HAMACA_REF is empty."""
         for name in ("git_worktree_with_retry", "_worktree_link_intact"):
             self.addCleanup(setattr, relay, name, getattr(relay, name))
         calls = []
@@ -3775,9 +3773,9 @@ class RunnerPoolCleanupHookTest(unittest.TestCase):
         path = os.path.join(self.repo, relay.repo_state_rel("cleanup-worktree.sh"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _write(path, "#!/bin/sh\n"
-                     'if [ -d "$RELAY_WORKTREE" ]; then s=exists; else s=gone; fi\n'
-                     'printf "%s %s %s %s [%s]\\n" "$RELAY_REF" "$RELAY_WORKTREE" "$s" '
-                     f'"$(pwd -P)" "$RELAY_BRANCH" >> {self.hook_log}\n'
+                     'if [ -d "$HAMACA_WORKTREE" ]; then s=exists; else s=gone; fi\n'
+                     'printf "%s %s %s %s [%s]\\n" "$HAMACA_REF" "$HAMACA_WORKTREE" "$s" '
+                     f'"$(pwd -P)" "$HAMACA_BRANCH" >> {self.hook_log}\n'
                      + extra + "\n")
         os.chmod(path, 0o755)
 
@@ -3944,7 +3942,7 @@ class RunnerPoolBaseTest(unittest.TestCase):
     `origin/main`. A repo whose trunk is `master` (or a fork tracking `upstream/main`) had no
     way to say so: `RunnerPool.__init__`'s default was the only definition, and nothing
     passed a value. Every reset path — worktree creation, per-card re-baseline, the idle
-    shared_clean refresh, and the prepare hook's RELAY_BASE — reads this one field."""
+    shared_clean refresh, and the prepare hook's HAMACA_BASE — reads this one field."""
 
     CFG = {"namespace": "exec", "capacity": {"shared_clean": 1, "exclusive": 2},
            "base": "origin/master"}
@@ -3983,13 +3981,13 @@ class RunnerPoolBaseTest(unittest.TestCase):
 
     def test_the_prepare_hook_is_told_the_configured_base(self):
         """The hook warms a worktree relative to the trunk it was baselined from, so a wrong
-        RELAY_BASE silently warms from the wrong branch."""
+        HAMACA_BASE silently warms from the wrong branch."""
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, True)
         hook = os.path.join(tmp, "hook.sh")
         out = os.path.join(tmp, "seen")
         with open(hook, "w") as f:
-            f.write(f'#!/bin/sh\nprintf "%s %s" "$RELAY_BASE" "$4" > {out}\n')
+            f.write(f'#!/bin/sh\nprintf "%s %s" "$HAMACA_BASE" "$4" > {out}\n')
         os.chmod(hook, 0o755)
 
         p = relay.RunnerPool({**self.CFG, "prepare": hook})
@@ -4113,19 +4111,19 @@ class WorktreeHookConfigTest(unittest.TestCase):
 
     def test_the_prepare_hook_runs_through_worktrees_prepare(self):
         out = os.path.join(self.root, "seen")
-        self.script("warm.sh", f'printf "%s" "$RELAY_REF" > {out}')
+        self.script("warm.sh", f'printf "%s" "$HAMACA_REF" > {out}')
         p = self.pool(worktrees={"prepare": "warm.sh"})
         self.assertIsNone(p.run_prepare_hook(self.tree, "RLY-1", "rly-1-x"))
         with open(out) as f:
             self.assertEqual(f.read(), "RLY-1")
 
     def test_the_cleanup_hook_gets_the_prepare_contract(self):
-        """argv [worktree, ref, branch, base, cache_dir], the same five as RELAY_* env, and
+        """argv [worktree, ref, branch, base, cache_dir], the same five as HAMACA_* env, and
         cwd = the worktree. The tree is not a git checkout here, so branch is empty."""
         out = os.path.join(self.root, "seen")
         self.script(relay.repo_state_rel("cleanup-worktree.sh"),
-                    'printf "%s|" "$1" "$2" "$3" "$4" "$5" "$RELAY_WORKTREE" "$RELAY_REF" '
-                    f'"$RELAY_BRANCH" "$RELAY_BASE" "$RELAY_CACHE_DIR" "$(pwd -P)" > {out}')
+                    'printf "%s|" "$1" "$2" "$3" "$4" "$5" "$HAMACA_WORKTREE" "$HAMACA_REF" '
+                    f'"$HAMACA_BRANCH" "$HAMACA_BASE" "$HAMACA_CACHE_DIR" "$(pwd -P)" > {out}')
         p = self.pool(cache_dir="/tmp/relay-cache")
         self.assertIsNone(p.run_cleanup_hook(self.tree, "RLY-1"))
         with open(out) as f:
@@ -4274,9 +4272,9 @@ class PrepareWorktreeHookTest(unittest.TestCase):
                        cwd=self.main, check=True)
 
     def run_hook(self, cache_dir=""):
-        # Real invocation (the runner's run_prepare_hook) sets both argv AND env, each env var
-        # under its HAMACA_ and RELAY_ name (RE478); a script may read the cache dir from either,
-        # so the test must mirror that, not argv-only.
+        # Real invocation (the runner's run_prepare_hook) sets both argv AND env (HAMACA_*,
+        # RE482); a script may read the cache dir from either, so the test must mirror that, not
+        # argv-only.
         env = dict(os.environ)
         for suffix, value in (("WORKTREE", self.wt), ("REF", "RLY-1"), ("BRANCH", "b"),
                               ("BASE", "origin/main"), ("CACHE_DIR", cache_dir)):
@@ -4288,8 +4286,8 @@ class PrepareWorktreeHookTest(unittest.TestCase):
     def test_is_executable(self):
         self.assertTrue(os.access(self.HOOK, os.X_OK))
 
-    # RE478 scenario 6: `_run_hook` exports every hook var under both names, argv unchanged.
-    def test_run_hook_exports_both_env_names_and_keeps_the_argv(self):
+    # RE482: `_run_hook` exports every hook var as HAMACA_ only, argv unchanged.
+    def test_run_hook_exports_the_hamaca_env_names_and_keeps_the_argv(self):
         out = os.path.join(self.tmp, "seen.json")
         hook = os.path.join(self.tmp, "dump-hook")
         _write(hook, "#!/usr/bin/env python3\nimport json, os, sys\n"
@@ -4306,7 +4304,7 @@ class PrepareWorktreeHookTest(unittest.TestCase):
                     "CACHE_DIR": "/tmp/relay-cache"}
         for suffix, value in expected.items():
             self.assertEqual(seen["env"]["HAMACA_" + suffix], value, suffix)
-            self.assertEqual(seen["env"]["RELAY_" + suffix], value, suffix)
+            self.assertNotIn("RELAY_" + suffix, seen["env"], suffix)
 
     def test_copies_deps_from_the_main_checkout_when_no_cache_dir(self):
         proc = self.run_hook()
@@ -4979,7 +4977,7 @@ class StreamAgentJobTest(unittest.TestCase):
             seen.update(env=k.get("env", {})) or _FakePopen([], code=0))
         capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
                     outcome_path="/tmp/wt/out.json")
-        self.assertEqual(seen["env"].get("RELAY_NODE_OUTCOME"), "/tmp/wt/out.json")
+        self.assertEqual(seen["env"].get("HAMACA_NODE_OUTCOME"), "/tmp/wt/out.json")
 
     def test_lifts_the_default_background_wait_ceiling_so_long_runs_do_not_get_cut_off(self):
         """claude -p caps a background workflow's wait at 10 minutes by default; a long agent
@@ -5224,7 +5222,7 @@ class AgentOutcomeContractTest(unittest.TestCase):
 
     def test_no_outcome_file_is_failed_even_on_a_clean_exit(self):
         """An agent node must DECLARE its verdict. Exiting 0 without writing
-        $RELAY_NODE_OUTCOME used to be reported `succeeded`, which let a node that produced
+        $HAMACA_NODE_OUTCOME used to be reported `succeeded`, which let a node that produced
         nothing route past its gate — the RLY-159 dogfood shipped a card to Spec:Review with
         an empty spec that way, and the same hole would let a silent review approve a merge.
         No file (and no needs-input) is now `failed`, whatever the exit code."""
@@ -5391,7 +5389,7 @@ class AgentOutcomeContractTest(unittest.TestCase):
         return d
 
     def test_an_undeclared_exit_names_the_work_it_abandoned_in_the_worktree(self):
-        """RE298: `acceptance_fix` twice exited 0 without writing $RELAY_NODE_OUTCOME, having
+        """RE298: `acceptance_fix` twice exited 0 without writing $HAMACA_NODE_OUTCOME, having
         made every edit its findings asked for — six files, uncommitted. The card said only
         "did not write an outcome", so the work was invisible: nothing pointed at the worktree,
         and the next job on that slot would have stashed it away. The verdict stays `failed`
@@ -5454,7 +5452,7 @@ class AgentOutcomeContractTest(unittest.TestCase):
                          ("succeeded", "wrote the spec", False))
 
     def test_a_malformed_outcome_file_is_reported_as_failed_not_silently_succeeded(self):
-        """$RELAY_NODE_OUTCOME is the only way a node signals `partial`; if the file an
+        """$HAMACA_NODE_OUTCOME is the only way a node signals `partial`; if the file an
         agent wrote is truncated/invalid JSON, swallowing the parse error and falling
         through to the exit-code check would report `succeeded` for a claude -p process
         that exited 0 while having failed to hand back its real outcome. That's a silent
@@ -5488,18 +5486,18 @@ class NoChangesFlagTest(unittest.TestCase):
     job is to carry it faithfully — and to refuse it where it could not mean anything."""
 
     def setUp(self):
-        self._saved = os.environ.get("RELAY_NODE_OUTCOME")
+        self._saved = os.environ.get("HAMACA_NODE_OUTCOME")
         self.addCleanup(self._restore_env)
         fd, self.path = tempfile.mkstemp(suffix=".json")
         os.close(fd)
         self.addCleanup(os.remove, self.path)
-        os.environ["RELAY_NODE_OUTCOME"] = self.path
+        os.environ["HAMACA_NODE_OUTCOME"] = self.path
 
     def _restore_env(self):
         if self._saved is None:
-            os.environ.pop("RELAY_NODE_OUTCOME", None)
+            os.environ.pop("HAMACA_NODE_OUTCOME", None)
         else:
-            os.environ["RELAY_NODE_OUTCOME"] = self._saved
+            os.environ["HAMACA_NODE_OUTCOME"] = self._saved
 
     def test_the_flag_is_written_into_the_outcome_file(self):
         relay.cmd_outcome(argparse.Namespace(outcome="succeeded", detail="already committed",
@@ -5541,15 +5539,15 @@ class AgentCannotDeclareBlockedTest(unittest.TestCase):
     """RE308: `blocked` is runner-only — `relay outcome blocked` must refuse."""
 
     def setUp(self):
-        saved = os.environ.get("RELAY_NODE_OUTCOME")
-        self.addCleanup(lambda: os.environ.pop("RELAY_NODE_OUTCOME", None) if saved is None
-                        else os.environ.__setitem__("RELAY_NODE_OUTCOME", saved))
+        saved = os.environ.get("HAMACA_NODE_OUTCOME")
+        self.addCleanup(lambda: os.environ.pop("HAMACA_NODE_OUTCOME", None) if saved is None
+                        else os.environ.__setitem__("HAMACA_NODE_OUTCOME", saved))
         fd, self.path = tempfile.mkstemp(suffix=".json")
         os.close(fd)
         self.addCleanup(os.remove, self.path)
-        os.environ["RELAY_NODE_OUTCOME"] = self.path
+        os.environ["HAMACA_NODE_OUTCOME"] = self.path
 
-    def test_relay_outcome_blocked_dies(self):
+    def test_outcome_blocked_dies(self):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 relay.cmd_outcome(argparse.Namespace(outcome="blocked", detail="x", no_changes=False))
@@ -5596,8 +5594,8 @@ class AdvanceCommandTest(unittest.TestCase):
         real_urlopen = urllib.request.urlopen
         self.addCleanup(setattr, urllib.request, "urlopen", real_urlopen)
         urllib.request.urlopen = boom
-        os.environ.setdefault("RELAY_URL", "http://x")
-        os.environ.setdefault("RELAY_API_KEY", "k")
+        os.environ.setdefault("HAMACA_URL", "http://x")
+        os.environ.setdefault("HAMACA_API_KEY", "k")
 
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
@@ -5904,11 +5902,11 @@ class RunNodeJobTest(unittest.TestCase):
         seen = {}
         relay._stream_shell = lambda cmd, cwd, tag="", sink=None, on_proc=None, partition=None, scratch=None, plan=None: (
             seen.__setitem__("cmd", cmd) or True)
-        old_url = os.environ.get("RELAY_URL")
-        os.environ["RELAY_URL"] = "https://relay.example"
+        old_url = os.environ.get("HAMACA_URL")
+        os.environ["HAMACA_URL"] = "https://relay.example"
         self.addCleanup(lambda: (
-            os.environ.__setitem__("RELAY_URL", old_url) if old_url is not None
-            else os.environ.pop("RELAY_URL", None)))
+            os.environ.__setitem__("HAMACA_URL", old_url) if old_url is not None
+            else os.environ.pop("HAMACA_URL", None)))
         j = job(node_type="shell", id="nj-6", run_id="r1",
                 run="git checkout -B {branch} && {relay} card {ref} --json > out; "
                     "curl {url}",
@@ -5986,7 +5984,7 @@ class RunNodeJobTest(unittest.TestCase):
         shell_job = job(node_type="shell", run="true", id="nj-10", run_id="r1",
                         vars={"ref": "RLY-10"})
         relay.run_node_job(shell_job, "/tmp/wt", self.control)
-        self.assertNotIn("RELAY_NODE_OUTCOME", seen["cmd"])
+        self.assertNotIn("HAMACA_NODE_OUTCOME", seen["cmd"])
 
     def test_a_loop_back_prompt_carries_the_findings(self):
         """The composition helper is only worth anything if run_node_job actually uses it."""
@@ -6773,8 +6771,8 @@ def isolate_relay_state(test):
     """
     statedir = tempfile.mkdtemp()
     test.addCleanup(shutil.rmtree, statedir, ignore_errors=True)
-    # RE478: HAMACA_STATE_DIR is read first, so a developer's shell value must not win over this.
-    for name in ("HAMACA_STATE_DIR", "RELAY_STATE_DIR"):
+    # A developer's shell HAMACA_STATE_DIR must not win over this.
+    for name in ("HAMACA_STATE_DIR",):
         prev = os.environ.get(name)
         os.environ[name] = statedir
         test.addCleanup(lambda n=name, v=prev: os.environ.__setitem__(n, v)
@@ -6913,7 +6911,7 @@ class AutoUpdateDownloadTest(unittest.TestCase):
         relay.log = lambda msg, **k: self.logs.append(msg)
 
     def test_a_valid_newer_source_comes_back_with_its_own_version(self):
-        source, version = relay.download_runner("http://config.test", "hamaca")
+        source, version = relay.download_runner("http://config.test")
         self.assertEqual(version, relay.RUNNER_VERSION + 1)
         self.assertIn("RUNNER_VERSION", source)
 
@@ -6921,25 +6919,25 @@ class AutoUpdateDownloadTest(unittest.TestCase):
         """A board that announces a version ahead of what it actually serves must be harmless,
         not a chase: the version is read from the bytes we actually got."""
         self.body = VALID_STUB.format(relay.RUNNER_VERSION + 5).encode()
-        _source, version = relay.download_runner("http://config.test", "hamaca")
+        _source, version = relay.download_runner("http://config.test")
         self.assertEqual(version, relay.RUNNER_VERSION + 5)
 
     def test_an_html_error_page_is_refused(self):
         self.body = b"<!doctype html><title>404</title>"
-        self.assertIsNone(relay.download_runner("http://config.test", "hamaca"))
+        self.assertIsNone(relay.download_runner("http://config.test"))
         self.assertTrue(any("#!" in m for m in self.logs))
 
     def test_an_empty_body_is_refused(self):
         self.body = b""
-        self.assertIsNone(relay.download_runner("http://config.test", "hamaca"))
+        self.assertIsNone(relay.download_runner("http://config.test"))
 
     def test_a_source_without_a_version_line_is_refused(self):
         self.body = b"#!/usr/bin/env python3\nprint('hi')\n"
-        self.assertIsNone(relay.download_runner("http://config.test", "hamaca"))
+        self.assertIsNone(relay.download_runner("http://config.test"))
 
     def test_a_non_compiling_source_is_refused_and_says_why(self):
         self.body = (VALID_STUB.format(relay.RUNNER_VERSION + 1) + "def (:\n").encode()
-        self.assertIsNone(relay.download_runner("http://config.test", "hamaca"))
+        self.assertIsNone(relay.download_runner("http://config.test"))
         self.assertTrue(any("does not compile" in m for m in self.logs))
 
     def test_an_equal_or_older_version_is_a_benign_noop_not_a_failure(self):
@@ -6949,22 +6947,25 @@ class AutoUpdateDownloadTest(unittest.TestCase):
         # anti-thrash budget (RE185).
         for v in (relay.RUNNER_VERSION, relay.RUNNER_VERSION - 1):
             self.body = VALID_STUB.format(v).encode()
-            self.assertIs(relay.download_runner("http://config.test", "hamaca"), relay.NOTHING_NEWER)
+            self.assertIs(relay.download_runner("http://config.test"), relay.NOTHING_NEWER)
 
     def test_a_fetch_failure_is_reported_not_raised(self):
         def boom(url, timeout=30):
             raise urllib.error.URLError("refused")
 
         relay._fetch = boom
-        self.assertIsNone(relay.download_runner("http://config.test", "hamaca"))
+        self.assertIsNone(relay.download_runner("http://config.test"))
 
-    def test_it_asks_for_the_layouts_runner_under_the_config_url(self):
+    # RE482 scenario 13: always the hamaca runner of the hamaca layout, whatever the CLI name.
+    def test_it_asks_for_the_hamaca_runner_whatever_the_cli_name(self):
         seen = []
         relay._fetch = lambda url, timeout=30: (seen.append(url) or self.body)
-        relay.download_runner("http://config.test/", "hamaca")
-        relay.download_runner("http://config.test/", "legacy")
-        self.assertEqual(seen, ["http://config.test/hamaca?layout=hamaca",
-                                "http://config.test/relay?layout=legacy"])
+        for here in ("/x/hamaca", "/x/relay"):
+            with unittest.mock.patch.object(relay, "HERE", here):
+                relay.download_runner("http://board.test/api/scaffold/")
+        self.assertEqual(seen, ["http://board.test/api/scaffold/hamaca?layout=hamaca"] * 2)
+        self.assertEqual(relay.EXECUTABLE_ITEMS, ("hamaca",))
+        self.assertFalse(hasattr(relay, "auto_update_layout"))
 
     def test_the_layout_names_are_pinned_in_the_contract_fixture(self):
         self.assertEqual(relay.SCAFFOLD_LAYOUT_PARAM, CONTRACT["scaffold"]["layout_param"])
@@ -6992,9 +6993,10 @@ class AutoUpdateDownloadTest(unittest.TestCase):
         _here, seen = self._auto_update_as("hamaca")
         self.assertEqual(seen[0], "http://board.test/api/scaffold/hamaca?layout=hamaca")
 
-    def test_a_relay_runner_auto_updates_from_the_legacy_layout_in_place(self):
+    # RE482 scenario 13: a runner still named ./relay asks for the hamaca runner too.
+    def test_a_relay_named_runner_auto_updates_from_the_hamaca_layout_in_place(self):
         here, seen = self._auto_update_as("relay")
-        self.assertEqual(seen[0], "http://board.test/api/scaffold/relay?layout=legacy")
+        self.assertEqual(seen[0], "http://board.test/api/scaffold/hamaca?layout=hamaca")
         with open(here) as f:
             self.assertEqual(f.read(), self.body.decode())
 
@@ -7127,7 +7129,7 @@ class AutoUpdateInstallTest(unittest.TestCase):
         _write(self.path, '#!/usr/bin/env python3\nRUNNER_VERSION = 1\nBOARD_URL = ""\n')
         source = '#!/usr/bin/env python3\nRUNNER_VERSION = 99\nBOARD_URL = "https://served.test"\n'
 
-        with unittest.mock.patch.dict(os.environ, {"HAMACA_URL": "", "RELAY_URL": ""}):
+        with unittest.mock.patch.dict(os.environ, {"HAMACA_URL": ""}):
             self.assertTrue(relay.install_runner(source, 99, self.path))
 
         with open(self.path, encoding="utf-8") as f:
@@ -7136,13 +7138,13 @@ class AutoUpdateInstallTest(unittest.TestCase):
 
 class AutoUpdateHandshakeTest(unittest.TestCase):
     """RE185 anti-thrash: the ONLY thing standing between a bad restart and an infinite
-    restart loop is what we read out of RELAY_UPDATED_FROM on the way back up."""
+    restart loop is what we read out of HAMACA_UPDATED_FROM on the way back up."""
 
     def setUp(self):
         self.addCleanup(setattr, relay, "log", relay.log)
         self.logs = []
         relay.log = lambda msg, **k: self.logs.append(msg)
-        for k in ("RELAY_UPDATED_FROM", "RELAY_UPDATE_ATTEMPTS"):
+        for k in ("HAMACA_UPDATED_FROM", "HAMACA_UPDATE_ATTEMPTS"):
             prev = os.environ.get(k)
             self.addCleanup(lambda k=k, v=prev: os.environ.__setitem__(k, v)
                             if v is not None else os.environ.pop(k, None))
@@ -7153,46 +7155,64 @@ class AutoUpdateHandshakeTest(unittest.TestCase):
         self.assertFalse(state["disabled"])
         self.assertEqual(self.logs, [])
 
-    # RE478 scenario 8: the handshake is set under both names and popped under both.
-    def test_restart_sets_both_handshake_names_and_the_check_pops_all_four(self):
-        names = _twins("UPDATED_FROM") + _twins("UPDATE_ATTEMPTS")
-        _scrub_env(self, *names)
+    # RE482: the handshake is set and popped under the HAMACA_ name only.
+    def test_restart_sets_the_hamaca_handshake_and_the_check_pops_it(self):
+        _scrub_env(self, "RELAY_UPDATED_FROM", "RELAY_UPDATE_ATTEMPTS")
         self.addCleanup(setattr, relay, "release_runner_locks", relay.release_runner_locks)
         self.addCleanup(setattr, relay.os, "execv", relay.os.execv)
         relay.release_runner_locks = lambda: None
         relay.os.execv = lambda path, argv: None
         relay.restart_runner(93, 1)
         self.assertEqual(os.environ["HAMACA_UPDATED_FROM"], "93")
-        self.assertEqual(os.environ["RELAY_UPDATED_FROM"], "93")
         self.assertEqual(os.environ["HAMACA_UPDATE_ATTEMPTS"], "1")
-        self.assertEqual(os.environ["RELAY_UPDATE_ATTEMPTS"], "1")
+        self.assertNotIn("RELAY_UPDATED_FROM", os.environ)
+        self.assertNotIn("RELAY_UPDATE_ATTEMPTS", os.environ)
         relay.check_update_handshake(relay.new_auto_update_state())
-        for name in names:
-            self.assertNotIn(name, os.environ)
+        self.assertNotIn("HAMACA_UPDATED_FROM", os.environ)
+        self.assertNotIn("HAMACA_UPDATE_ATTEMPTS", os.environ)
+
+    # RE482 scenario 12: a stale RELAY_UPDATED_FROM is not a previous version.
+    def test_a_relay_updated_from_alone_reads_no_previous_version(self):
+        _scrub_env(self, "RELAY_UPDATED_FROM")
+        os.environ["RELAY_UPDATED_FROM"] = "90"
+        state = relay.check_update_handshake(relay.new_auto_update_state())
+        self.assertFalse(state["disabled"])
+        self.assertFalse(any("restarted into" in m for m in self.logs))
+        self.assertEqual(self.logs, [])
+
+    # RE482 scenario 12: the HAMACA_ handshake still resets the attempts.
+    def test_hamaca_updated_from_an_older_version_resets_the_attempts(self):
+        self.assertGreater(relay.RUNNER_VERSION, 90)
+        os.environ["HAMACA_UPDATED_FROM"] = "90"
+        os.environ["HAMACA_UPDATE_ATTEMPTS"] = "2"
+        state = relay.check_update_handshake(relay.new_auto_update_state())
+        self.assertEqual(state["attempts"], 0)
+        self.assertFalse(state["disabled"])
+        self.assertTrue(any("restarted into version" in m for m in self.logs))
 
     def test_landing_on_newer_code_logs_the_transition(self):
-        os.environ["RELAY_UPDATED_FROM"] = str(relay.RUNNER_VERSION - 1)
+        os.environ["HAMACA_UPDATED_FROM"] = str(relay.RUNNER_VERSION - 1)
         state = relay.check_update_handshake(relay.new_auto_update_state())
         self.assertFalse(state["disabled"])
         self.assertTrue(any("restarted into version" in m for m in self.logs))
-        self.assertNotIn("RELAY_UPDATED_FROM", os.environ)
+        self.assertNotIn("HAMACA_UPDATED_FROM", os.environ)
 
     def test_landing_on_the_same_code_disables_auto_update_loudly(self):
-        os.environ["RELAY_UPDATED_FROM"] = str(relay.RUNNER_VERSION)
+        os.environ["HAMACA_UPDATED_FROM"] = str(relay.RUNNER_VERSION)
         state = relay.check_update_handshake(relay.new_auto_update_state())
         self.assertTrue(state["disabled"])
         self.assertTrue(any("did not take" in m for m in self.logs))
 
     def test_a_garbage_marker_disables_rather_than_trusting_it(self):
-        os.environ["RELAY_UPDATED_FROM"] = "not-a-number"
+        os.environ["HAMACA_UPDATED_FROM"] = "not-a-number"
         state = relay.check_update_handshake(relay.new_auto_update_state())
         self.assertTrue(state["disabled"])
 
     def test_the_failure_count_survives_the_exec_and_caps_out(self):
         # The cap is for restarts that did NOT advance the version — the one shape of "the
-        # update did not take" that could repeat. RELAY_UPDATED_FROM is left unset here so the
+        # update did not take" that could repeat. HAMACA_UPDATED_FROM is left unset here so the
         # seeded count alone is what disables: a process re-exec'd carrying failures.
-        os.environ["RELAY_UPDATE_ATTEMPTS"] = str(relay.AUTO_UPDATE_MAX_ATTEMPTS)
+        os.environ["HAMACA_UPDATE_ATTEMPTS"] = str(relay.AUTO_UPDATE_MAX_ATTEMPTS)
         state = relay.check_update_handshake(relay.new_auto_update_state())
         self.assertEqual(state["attempts"], relay.AUTO_UPDATE_MAX_ATTEMPTS)
         self.assertTrue(state["disabled"])
@@ -7202,8 +7222,8 @@ class AutoUpdateHandshakeTest(unittest.TestCase):
         # The regression this guards: counting *successful* updates disabled auto-update on a
         # healthy machine that had simply picked up three releases. An update that took is not
         # thrash, so it clears the count no matter how high the count was.
-        os.environ["RELAY_UPDATED_FROM"] = str(relay.RUNNER_VERSION - 1)
-        os.environ["RELAY_UPDATE_ATTEMPTS"] = str(relay.AUTO_UPDATE_MAX_ATTEMPTS)
+        os.environ["HAMACA_UPDATED_FROM"] = str(relay.RUNNER_VERSION - 1)
+        os.environ["HAMACA_UPDATE_ATTEMPTS"] = str(relay.AUTO_UPDATE_MAX_ATTEMPTS)
         state = relay.check_update_handshake(relay.new_auto_update_state())
         self.assertEqual(state["attempts"], 0)
         self.assertFalse(state["disabled"])
@@ -7230,7 +7250,7 @@ class MaybeAutoUpdateTest(unittest.TestCase):
         relay.FORWARDER = None
         self.new = relay.RUNNER_VERSION + 1
         self.installed, self.restarts = [], []
-        relay.download_runner = lambda url, layout: (VALID_STUB.format(self.new), self.new)
+        relay.download_runner = lambda url: (VALID_STUB.format(self.new), self.new)
         relay.install_runner = lambda src, v, path=None, carry_from=None: (self.installed.append(v) or True)
         relay._safe_to_overwrite = lambda path: True
         relay.restart_runner = lambda frm, attempts: self.restarts.append((frm, attempts))
@@ -7266,7 +7286,7 @@ class MaybeAutoUpdateTest(unittest.TestCase):
         # is committed but not yet deployed — every heartbeat hits it, so counting it would cap
         # out and PERMANENTLY disable self-update over a non-problem. Only genuine failures
         # (None) count.
-        relay.download_runner = lambda url, layout: relay.NOTHING_NEWER
+        relay.download_runner = lambda url: relay.NOTHING_NEWER
         self.state["attempts"] = relay.AUTO_UPDATE_MAX_ATTEMPTS - 1
         self.assertFalse(self._run(self.new))
         self.assertEqual(self.state["attempts"], relay.AUTO_UPDATE_MAX_ATTEMPTS - 1)
@@ -7306,7 +7326,7 @@ class MaybeAutoUpdateTest(unittest.TestCase):
         self.assertEqual(sum("local modifications" in m for m in self.logs), 1)
 
     def test_a_refused_download_leaves_the_running_version_alone(self):
-        relay.download_runner = lambda url, layout: None
+        relay.download_runner = lambda url: None
         self.assertFalse(self._run(self.new))
         self.assertEqual((self.installed, self.restarts), ([], []))
         self.assertEqual(self.state["attempts"], 1)     # THIS is what the cap counts
@@ -7318,7 +7338,7 @@ class MaybeAutoUpdateTest(unittest.TestCase):
         self.assertEqual(self.state["attempts"], 1)
 
     def test_repeated_failures_reach_the_cap_and_disable(self):
-        relay.download_runner = lambda url, layout: None
+        relay.download_runner = lambda url: None
         for _ in range(relay.AUTO_UPDATE_MAX_ATTEMPTS):
             self.state["last"] = 0                     # skip the cooldown, not the cap
             self.assertFalse(self._run(self.new))
@@ -7347,7 +7367,7 @@ class RestartRunnerTest(unittest.TestCase):
     def setUp(self):
         self.addCleanup(setattr, relay, "release_runner_locks", relay.release_runner_locks)
         self.addCleanup(setattr, relay.os, "execv", relay.os.execv)
-        for k in ("RELAY_UPDATED_FROM", "RELAY_UPDATE_ATTEMPTS"):
+        for k in ("HAMACA_UPDATED_FROM", "HAMACA_UPDATE_ATTEMPTS"):
             prev = os.environ.get(k)
             self.addCleanup(lambda k=k, v=prev: os.environ.__setitem__(k, v)
                             if v is not None else os.environ.pop(k, None))
@@ -7363,8 +7383,8 @@ class RestartRunnerTest(unittest.TestCase):
     def test_it_releases_the_locks_before_exec_and_hands_over_the_handshake(self):
         relay.restart_runner(28, 2)
         self.assertEqual(self.order, ["release", "execv"])
-        self.assertEqual(os.environ["RELAY_UPDATED_FROM"], "28")
-        self.assertEqual(os.environ["RELAY_UPDATE_ATTEMPTS"], "2")
+        self.assertEqual(os.environ["HAMACA_UPDATED_FROM"], "28")
+        self.assertEqual(os.environ["HAMACA_UPDATE_ATTEMPTS"], "2")
         (path, argv), = self.execs
         self.assertEqual(path, relay.sys.executable)
         self.assertEqual(argv, relay.auto_update_argv())
@@ -7955,11 +7975,11 @@ def isolate_runner_locks(test):
     """
     lockdir = tempfile.mkdtemp()
     test.addCleanup(shutil.rmtree, lockdir, ignore_errors=True)
-    prev = os.environ.get("RELAY_RUNNER_LOCK_DIR")
-    os.environ["RELAY_RUNNER_LOCK_DIR"] = os.path.join(lockdir, "locks")
-    test.addCleanup(lambda: os.environ.__setitem__("RELAY_RUNNER_LOCK_DIR", prev)
+    prev = os.environ.get("HAMACA_RUNNER_LOCK_DIR")
+    os.environ["HAMACA_RUNNER_LOCK_DIR"] = os.path.join(lockdir, "locks")
+    test.addCleanup(lambda: os.environ.__setitem__("HAMACA_RUNNER_LOCK_DIR", prev)
                     if prev is not None
-                    else os.environ.pop("RELAY_RUNNER_LOCK_DIR", None))
+                    else os.environ.pop("HAMACA_RUNNER_LOCK_DIR", None))
     test.addCleanup(setattr, relay, "WORKTREES_DIR", relay.WORKTREES_DIR)
     relay.WORKTREES_DIR = os.path.join(lockdir, "worktrees")
 
@@ -8581,14 +8601,14 @@ class ExecuteLoopTest(unittest.TestCase):
         # POSTs an :error line; report_talk_outcome is stubbed per-test but this delivery is not,
         # so it hits the real `api()` -> urlopen path and, on failure, burns the full 15.5s
         # default `_talk_backoff` (a bound default arg, so it can't be swapped from here). Two
-        # things are needed to keep it instant: RELAY_URL must carry a scheme or `api()` dies in
+        # things are needed to keep it instant: HAMACA_URL must carry a scheme or `api()` dies in
         # `urllib.request.Request` before urlopen is ever reached (a schemeless "x" raised
         # ValueError and triggered all six retries), and urlopen must return a body so the POST
         # succeeds on the first try. All other runner HTTP is stubbed at the function level.
         self._urlopen = relay.urllib.request.urlopen
         self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
         relay.urllib.request.urlopen = lambda req, *a, **k: _FakeResp(b"{}")
-        relay.env = lambda name: "http://relay.test" if name == "RELAY_URL" else "x"
+        relay.env = lambda name: "http://relay.test" if name == "HAMACA_URL" else "x"
         pin_relay_url(self, "http://relay.test")
         relay.log = lambda *a, **k: None
         relay.reset_worktree = lambda *a, **k: None
@@ -8600,8 +8620,8 @@ class ExecuteLoopTest(unittest.TestCase):
             "poll_timeout": 1, "heartbeat_interval": 60}
         self.addCleanup(setattr, relay.RunnerPool, "ensure", relay.RunnerPool.ensure)
         relay.RunnerPool.ensure = lambda self: None
-        os.environ.setdefault("RELAY_URL", "http://example.test")
-        os.environ.setdefault("RELAY_API_KEY", "k")
+        os.environ.setdefault("HAMACA_URL", "http://example.test")
+        os.environ.setdefault("HAMACA_API_KEY", "k")
 
     def test_once_claims_runs_and_reports(self):
         j = job(node_type="shell", run="true", id="nj-1", run_id="r1", vars={"ref": "RLY-1"})
@@ -9414,8 +9434,8 @@ class TalkJobRefMapIsolationTest(unittest.TestCase):
             "poll_timeout": 1, "heartbeat_interval": 60}
         self.addCleanup(setattr, relay.RunnerPool, "ensure", relay.RunnerPool.ensure)
         relay.RunnerPool.ensure = lambda self: None
-        os.environ.setdefault("RELAY_URL", "http://example.test")
-        os.environ.setdefault("RELAY_API_KEY", "k")
+        os.environ.setdefault("HAMACA_URL", "http://example.test")
+        os.environ.setdefault("HAMACA_API_KEY", "k")
 
     def test_a_talk_job_neither_sees_nor_clobbers_a_concurrent_node_jobs_attribution(self):
         seen = []
@@ -9495,8 +9515,8 @@ class AutoUpdateBoundaryTest(unittest.TestCase):
         relay.RunnerHeartbeat = FakeHeartbeat
         self.addCleanup(setattr, relay.RunnerPool, "ensure", relay.RunnerPool.ensure)
         relay.RunnerPool.ensure = lambda self: None
-        os.environ.setdefault("RELAY_URL", "http://example.test")
-        os.environ.setdefault("RELAY_API_KEY", "k")
+        os.environ.setdefault("HAMACA_URL", "http://example.test")
+        os.environ.setdefault("HAMACA_API_KEY", "k")
 
     def _interrupt_after(self, seconds):
         t = threading.Timer(seconds, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
@@ -9603,9 +9623,11 @@ class RunnerLayoutTest(unittest.TestCase):
         self.assertEqual(relay.ROOT, os.path.dirname(os.path.abspath(RELAY_PATH)))
 
     def test_the_runner_config_resolves_to_a_file_under_root(self):
-        # RE478: `.hamaca/runner.json`, falling back to this repo's unmigrated `.relay/` one.
+        # RE482: always `.hamaca/runner.json` — there is no `.relay/` fallback.
         path = relay.repo_state_path("runner.json")
-        self.assertIn(path, [os.path.join(relay.ROOT, d, "runner.json") for d in relay.STATE_DIRS])
+        self.assertEqual(path, os.path.join(relay.ROOT, ".hamaca", "runner.json"))
+        self.assertEqual(relay.STATE_DIR, ".hamaca")
+        self.assertFalse(hasattr(relay, "STATE_DIRS"))
         self.assertTrue(os.path.isfile(path))
 
     def test_the_scaffold_installs_the_cli_at_the_project_root(self):
@@ -9617,7 +9639,7 @@ class LegacyDispatcherRetiredTest(unittest.TestCase):
     deleted — Code was the last stage on it. Regression guard so a future edit can't
     quietly resurrect the file or the functions that read it."""
 
-    def test_relay_config_json_is_deleted(self):
+    def test_the_retired_relay_config_json_is_deleted(self):
         path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "relay_config.json")
         self.assertFalse(os.path.exists(path))
@@ -9708,8 +9730,8 @@ class RunnerSingletonLockTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self._dir, ignore_errors=True)
         self._env = dict(os.environ)
         self.addCleanup(lambda: (os.environ.clear(), os.environ.update(self._env)))
-        os.environ["RELAY_RUNNER_LOCK_DIR"] = os.path.join(self._dir, "locks")
-        os.environ["RELAY_URL"] = "https://a.example"
+        os.environ["HAMACA_RUNNER_LOCK_DIR"] = os.path.join(self._dir, "locks")
+        os.environ["HAMACA_URL"] = "https://a.example"
         self._wt = relay.WORKTREES_DIR
         self.addCleanup(setattr, relay, "WORKTREES_DIR", self._wt)
         relay.WORKTREES_DIR = os.path.join(self._dir, "worktrees")
@@ -9777,10 +9799,10 @@ class RunnerSingletonLockTest(unittest.TestCase):
 
     def test_identity_lock_is_keyed_on_server_and_name(self):
         cfg = self._cfg(name="same")
-        os.environ["RELAY_URL"] = "https://a.example"
+        os.environ["HAMACA_URL"] = "https://a.example"
         relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg))
         # same name, different server → different lock, also acquires
-        os.environ["RELAY_URL"] = "https://b.example"
+        os.environ["HAMACA_URL"] = "https://b.example"
         relay.acquire_singleton_lock(relay.identity_lock_path(cfg), self._holder(cfg))
 
     def test_acquire_runner_locks_takes_both_and_refuses_a_second(self):
@@ -9793,28 +9815,28 @@ class RunnerSingletonLockTest(unittest.TestCase):
 
 
 class BoardUrlTest(unittest.TestCase):
-    """RE443: a served ./relay carries its board's URL on the BOARD_URL line. RELAY_URL still
+    """RE443: a served ./relay carries its board's URL on the BOARD_URL line. HAMACA_URL still
     overrides it; with neither, every URL-needing verb dies with a pointer to the install."""
 
     def setUp(self):
         self.addCleanup(setattr, relay, "BOARD_URL", relay.BOARD_URL)
-        prev = os.environ.get("RELAY_URL")
-        self.addCleanup(lambda: os.environ.__setitem__("RELAY_URL", prev)
-                        if prev is not None else os.environ.pop("RELAY_URL", None))
-        os.environ.pop("RELAY_URL", None)
+        prev = os.environ.get("HAMACA_URL")
+        self.addCleanup(lambda: os.environ.__setitem__("HAMACA_URL", prev)
+                        if prev is not None else os.environ.pop("HAMACA_URL", None))
+        os.environ.pop("HAMACA_URL", None)
 
     def test_the_baked_url_is_used_when_relay_url_is_unset(self):
         relay.BOARD_URL = "https://b.test"
         self.assertEqual(relay.relay_url(), "https://b.test")
 
-    def test_relay_url_overrides_the_baked_url(self):
+    def test_hamaca_url_overrides_the_baked_url(self):
         relay.BOARD_URL = "https://b.test"
-        os.environ["RELAY_URL"] = "http://override.test"
+        os.environ["HAMACA_URL"] = "http://override.test"
         self.assertEqual(relay.relay_url(), "http://override.test")
 
-    def test_an_empty_relay_url_falls_back_to_the_baked_url(self):
+    def test_an_empty_hamaca_url_falls_back_to_the_baked_url(self):
         relay.BOARD_URL = "https://b.test"
-        os.environ["RELAY_URL"] = ""
+        os.environ["HAMACA_URL"] = ""
         self.assertEqual(relay.relay_url(), "https://b.test")
 
     def test_neither_dies_naming_the_missing_baked_url(self):
@@ -9865,7 +9887,7 @@ class RunnerFingerprintGuardTest(unittest.TestCase):
         computed = relay.runner_fingerprint()
         self.assertEqual(
             computed, relay.RUNNER_FINGERPRINT,
-            "\n\n./relay changed but RUNNER_FINGERPRINT was not refreshed. Set RUNNER_VERSION "
+            "\n\n./hamaca changed but RUNNER_FINGERPRINT was not refreshed. Set RUNNER_VERSION "
             "above origin/main's (rebase first if main has moved; the RE425 version-bump guard "
             f"names the minimum), then set RUNNER_FINGERPRINT to:\n\n    {computed}\n")
 
@@ -9913,11 +9935,11 @@ def version_bump_problem(current_src, base_src, main_src, base_rev="the merge-ba
     main = relay.parse_runner_version(main_src) or 0
     required = max(main + 1, 1)
     if current is None:
-        return (f"\n\n./relay changed since {base_rev} but declares no RUNNER_VERSION. "
+        return (f"\n\n./hamaca changed since {base_rev} but declares no RUNNER_VERSION. "
                 f"Set RUNNER_VERSION to at least {required}.\n")
     if current > main:
         return None
-    return (f"\n\n./relay changed since {base_rev} but RUNNER_VERSION is {current}; "
+    return (f"\n\n./hamaca changed since {base_rev} but RUNNER_VERSION is {current}; "
             f"origin/main is at {main}. Set RUNNER_VERSION to at least {required} "
             "(rebase onto origin/main first if main has moved), then paste the fingerprint "
             "the fingerprint test prints.\n")
@@ -10000,7 +10022,7 @@ class RunnerVersionBumpGuardTest(unittest.TestCase):
         self.assertIn(f"origin/main is at {self.V}", problem)
         self.assertIn(f"at least {self.V + 1}", problem)
         self.assertIn(
-            f"./relay changed since abc123 but RUNNER_VERSION is {self.V}; "
+            f"./hamaca changed since abc123 but RUNNER_VERSION is {self.V}; "
             f"origin/main is at {self.V}.", problem)
         self.assertIn("(rebase onto origin/main first if main has moved), then paste the "
                       "fingerprint the fingerprint test prints.", problem)
@@ -10108,7 +10130,7 @@ class RunnerVersionBumpGuardTest(unittest.TestCase):
 
     # -- the live guard ---------------------------------------------------------------------
 
-    def test_relay_change_bumps_version_past_main(self):
+    def test_runner_change_bumps_version_past_main(self):
         try:
             base_src, main_src, sha = read_version_bump_sources(os.path.dirname(RELAY_PATH))
         except RunnerVersionBumpSkip as skip:
@@ -10127,7 +10149,7 @@ class RunnerVersionBumpGuardTest(unittest.TestCase):
         with unittest.mock.patch(f"{__name__}.read_version_bump_sources",
                                  side_effect=RunnerVersionBumpSkip("no origin/main ref")), \
              unittest.mock.patch("sys.__stderr__", err):
-            RunnerVersionBumpGuardTest("test_relay_change_bumps_version_past_main").run(result)
+            RunnerVersionBumpGuardTest("test_runner_change_bumps_version_past_main").run(result)
         self.assertEqual(len(result.skipped), 1, result.errors + result.failures)
         self.assertEqual(result.skipped[0][1],
                          "RE425 version-bump guard skipped: no origin/main ref")
@@ -10278,7 +10300,7 @@ class UsageRuleContractTest(unittest.TestCase):
 
 class RunnerIdentTest(unittest.TestCase):
     """The `runner` dict both claim and heartbeat put on the wire. Pure and named for the
-    same reason outcome_body/heartbeat_body are: bin/test_relay.py pins it against the
+    same reason outcome_body/heartbeat_body are: bin/test_hamaca.py pins it against the
     contract fixture the ExUnit generator writes."""
 
     def test_the_ident_carries_the_declared_version(self):
@@ -10301,8 +10323,8 @@ class ApiSoftConflictTest(unittest.TestCase):
     def setUp(self):
         self._urlopen = relay.urllib.request.urlopen
         self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
-        os.environ["RELAY_URL"] = "http://example.test"
-        os.environ["RELAY_API_KEY"] = "k"
+        os.environ["HAMACA_URL"] = "http://example.test"
+        os.environ["HAMACA_API_KEY"] = "k"
 
     def _raise_409(self, body):
         payload = json.dumps(body).encode()
@@ -10436,8 +10458,8 @@ class ExecuteLoopOutdatedTest(unittest.TestCase):
         relay.RunnerHeartbeat = FakeHeartbeat
         self.addCleanup(setattr, relay.RunnerPool, "ensure", relay.RunnerPool.ensure)
         relay.RunnerPool.ensure = lambda self: None
-        os.environ.setdefault("RELAY_URL", "http://example.test")
-        os.environ.setdefault("RELAY_API_KEY", "k")
+        os.environ.setdefault("HAMACA_URL", "http://example.test")
+        os.environ.setdefault("HAMACA_API_KEY", "k")
 
     def _interrupt_after(self, seconds):
         t = threading.Timer(seconds, lambda: os.kill(os.getpid(), relay.signal.SIGINT))
@@ -10554,11 +10576,11 @@ class PlanPausedRequestTest(unittest.TestCase):
     def setUp(self):
         self._urlopen = relay.urllib.request.urlopen
         self.addCleanup(setattr, relay.urllib.request, "urlopen", self._urlopen)
-        saved = {k: os.environ.get(k) for k in ("RELAY_URL", "RELAY_API_KEY")}
+        saved = {k: os.environ.get(k) for k in ("HAMACA_URL", "HAMACA_API_KEY")}
         self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
                                  for k, v in saved.items()])
-        os.environ["RELAY_URL"] = "http://example.test/"
-        os.environ["RELAY_API_KEY"] = "k"
+        os.environ["HAMACA_URL"] = "http://example.test/"
+        os.environ["HAMACA_API_KEY"] = "k"
         self.calls = 0
 
     def _raise_402(self, body):
@@ -10874,16 +10896,16 @@ class OutcomeCommandTest(unittest.TestCase):
         import tempfile
         self.dir = tempfile.mkdtemp(prefix="relay-outcome-test-")
         self.path = os.path.join(self.dir, "outcome.json")
-        self._env = os.environ.get("RELAY_NODE_OUTCOME")
-        os.environ["RELAY_NODE_OUTCOME"] = self.path
+        self._env = os.environ.get("HAMACA_NODE_OUTCOME")
+        os.environ["HAMACA_NODE_OUTCOME"] = self.path
         self.addCleanup(self._restore)
 
     def _restore(self):
         import shutil
         if self._env is None:
-            os.environ.pop("RELAY_NODE_OUTCOME", None)
+            os.environ.pop("HAMACA_NODE_OUTCOME", None)
         else:
-            os.environ["RELAY_NODE_OUTCOME"] = self._env
+            os.environ["HAMACA_NODE_OUTCOME"] = self._env
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def run_cli(self, *argv):
@@ -10922,7 +10944,7 @@ class OutcomeCommandTest(unittest.TestCase):
             capture(self.run_cli, "outcome", "definitely-not-an-outcome", "--detail", "x")
 
     def test_errors_clearly_when_the_env_var_is_missing(self):
-        os.environ.pop("RELAY_NODE_OUTCOME", None)
+        os.environ.pop("HAMACA_NODE_OUTCOME", None)
         with self.assertRaises(SystemExit):
             capture(self.run_cli, "outcome", "succeeded", "--detail", "x")
 
@@ -11006,7 +11028,7 @@ class UpdateTest(unittest.TestCase):
 
     BOARD = "http://board.test"
 
-    SKILLS = ("relay-update", "relay-doctor", "relay-onboard")
+    SKILLS = ("hamaca-update", "hamaca-doctor", "hamaca-onboard")
 
     def setUp(self):
         isolate_relay_state(self)
@@ -11019,10 +11041,10 @@ class UpdateTest(unittest.TestCase):
         relay.HERE = self.here
 
         self.addCleanup(setattr, relay.urllib.request, "urlopen", relay.urllib.request.urlopen)
-        prev = os.environ.get("RELAY_URL")
-        os.environ["RELAY_URL"] = self.BOARD
-        self.addCleanup(lambda: os.environ.__setitem__("RELAY_URL", prev)
-                        if prev is not None else os.environ.pop("RELAY_URL", None))
+        prev = os.environ.get("HAMACA_URL")
+        os.environ["HAMACA_URL"] = self.BOARD
+        self.addCleanup(lambda: os.environ.__setitem__("HAMACA_URL", prev)
+                        if prev is not None else os.environ.pop("HAMACA_URL", None))
 
         self.served = {relay.RUNNER_REL: VALID_STUB.format(relay.RUNNER_VERSION),
                        relay.GUIDE_REL: "# Working with Relay from your agent\n"}
@@ -11115,23 +11137,6 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(self.fetched, [self.BOARD + "/api/scaffold?layout=hamaca",
                                         self.BOARD + "/api/scaffold/hamaca.md?layout=hamaca"])
 
-    # RE478: the hamaca layout serves the ./relay shim; it must land executable, like the runner.
-    SHIM = "#!/usr/bin/env python3\nprint('shim')\n"
-
-    def test_update_installs_the_relay_shim_executable(self):
-        self.served[relay.SCAFFOLD_RUNNERS["legacy"]] = self.SHIM
-        report = capture_ret(relay.cmd_update, self.args())
-        self.assertIn("relay", report["written"])
-        self.assertEqual(self._read("relay"), self.SHIM)
-        self.assertTrue(os.access(self.path("relay"), os.X_OK))
-
-    def test_a_non_executable_shim_with_matching_bytes_is_changed(self):
-        self.served[relay.SCAFFOLD_RUNNERS["legacy"]] = self.SHIM
-        self.make_current()
-        os.chmod(self.path("relay"), 0o644)
-        report = capture_ret(relay.cmd_update, self.args(check=True))
-        self.assertEqual(report["changed"], ["relay"])
-
     # RE478 scenario 17: the app-repo marker is the renamed scaffold module.
     def test_the_app_repo_is_marked_by_lib_hamaca_scaffold_ex(self):
         self.write_local("lib/relay/scaffold.ex", "")
@@ -11139,10 +11144,10 @@ class UpdateTest(unittest.TestCase):
         self.write_local("lib/hamaca/scaffold.ex", "")
         self.assertTrue(relay.in_relay_app_repo())
 
-    # RE478 scenario 20: an unmigrated `.relay/runner.json` still shapes the layout.
-    def test_project_layout_reads_the_dot_relay_fallback(self):
+    # RE482: `.relay/runner.json` is ignored at runtime; only `update` migrates it.
+    def test_project_layout_ignores_a_dot_relay_runner_json(self):
         self.write_local(".relay/runner.json", '{"skill_dir": ".agents/skills"}\n')
-        self.assertEqual(relay.project_layout()["skill_dir"], ".agents/skills")
+        self.assertEqual(relay.project_layout()["skill_dir"], relay.DEFAULT_SKILL_DIR)
 
     # RE319 final review finding 1: an old bin/relay's update writes every item but its own path
     # at mode 644, so ./relay lands with the right bytes and no executable bit. A sha-only
@@ -11306,7 +11311,8 @@ class UpdateTest(unittest.TestCase):
         report = capture_ret(relay.cmd_update, self.args(starter_only=True, base="origin/trunk"))
 
         self.assertEqual(self.fetched, [])
-        self.assertEqual(report, {"config": "created", "hook": "created", "applied": True})
+        self.assertEqual(report, {"renamed": [], "config": "created", "hook": "created",
+                                  "applied": True})
         config = json.loads(relay.strip_json_comments(self._read(relay.repo_state_rel("runner.json"))))
         self.assertEqual(config["base"], "origin/trunk")
         hook = self.path(relay.repo_state_rel("prepare-worktree.sh"))
@@ -11321,7 +11327,8 @@ class UpdateTest(unittest.TestCase):
 
         report = capture_ret(relay.cmd_update, self.args(starter_only=True))
 
-        self.assertEqual(report, {"config": "present", "hook": "present", "applied": True})
+        self.assertEqual(report, {"renamed": [], "config": "present", "hook": "present",
+                                  "applied": True})
         self.assertEqual(self._read(relay.repo_state_rel("runner.json")), '{"namespace": "mine"}\n')
         self.assertEqual(self._read(relay.repo_state_rel("prepare-worktree.sh")), "#!/bin/sh\necho mine\n")
 
@@ -11372,7 +11379,7 @@ class UpdateTest(unittest.TestCase):
         self.assertIn(relay.GUIDE_REL, installed)
         for rel in installed:
             self.assertTrue(rel in (relay.RUNNER_REL, relay.GUIDE_REL)
-                            or rel.startswith(".claude/skills/relay-"), rel)
+                            or rel.startswith(".claude/skills/hamaca-"), rel)
 
     def test_the_runner_config_is_the_one_file_written_outside_the_manifest(self):
         capture_ret(relay.cmd_update, self.args())
@@ -11467,18 +11474,18 @@ class UpdateTest(unittest.TestCase):
 
     def test_a_deleted_skill_is_restored_even_when_the_version_matches(self):
         self.make_current()
-        os.remove(self.path(".claude/skills/relay-doctor/SKILL.md"))
+        os.remove(self.path(".claude/skills/hamaca-doctor/SKILL.md"))
 
         report = capture_ret(relay.cmd_update, self.args())
 
         self.assertFalse(report["current"])
-        self.assertEqual(report["written"], [".claude/skills/relay-doctor/SKILL.md"])
-        self.assertTrue(os.path.exists(self.path(".claude/skills/relay-doctor/SKILL.md")))
+        self.assertEqual(report["written"], [".claude/skills/hamaca-doctor/SKILL.md"])
+        self.assertTrue(os.path.exists(self.path(".claude/skills/hamaca-doctor/SKILL.md")))
 
     # RE304 review finding 1, symptom A: RE185's auto-update rewrites ./relay in place and
     # never touches .relay/scaffold.json, so the marker legitimately lags the bytes. A
     # version-gated verdict called that "not current" with an EMPTY change list, and
-    # /relay-update then asked a human where to commit zero files. The work list is the verdict.
+    # /hamaca-update then asked a human where to commit zero files. The work list is the verdict.
     def test_a_lagging_marker_with_matching_bytes_reports_current(self):
         self.make_current()
         self.write_local(".hamaca/scaffold.json", json.dumps({"version": "0" * 12}))
@@ -11511,14 +11518,14 @@ class UpdateTest(unittest.TestCase):
     # verdict left it corrupted while reporting the project current.
     def test_a_corrupted_file_is_repaired_even_when_the_version_matches(self):
         self.make_current()
-        self.write_local(".claude/skills/relay-doctor/SKILL.md", "CORRUPTED\n")
+        self.write_local(".claude/skills/hamaca-doctor/SKILL.md", "CORRUPTED\n")
 
         report = capture_ret(relay.cmd_update, self.args())
 
         self.assertFalse(report["current"])
-        self.assertEqual(report["written"], [".claude/skills/relay-doctor/SKILL.md"])
-        with open(self.path(".claude/skills/relay-doctor/SKILL.md")) as f:
-            self.assertEqual(f.read(), self.served[".claude/skills/relay-doctor/SKILL.md"])
+        self.assertEqual(report["written"], [".claude/skills/hamaca-doctor/SKILL.md"])
+        with open(self.path(".claude/skills/hamaca-doctor/SKILL.md")) as f:
+            self.assertEqual(f.read(), self.served[".claude/skills/hamaca-doctor/SKILL.md"])
 
     # RE304 review finding 5: .relay/scaffold.json is the one file `relay update` exists to
     # heal, so a garbled one must refetch, not raise AttributeError out of the CLI.
@@ -11580,25 +11587,25 @@ class UpdateTest(unittest.TestCase):
 
     def test_a_moved_version_refetches_only_what_actually_changed(self):
         self.make_current()
-        self.served[".claude/skills/relay-onboard/SKILL.md"] = "onboard skill v2\n"
+        self.served[".claude/skills/hamaca-onboard/SKILL.md"] = "onboard skill v2\n"
 
         report = capture_ret(relay.cmd_update, self.args())
 
-        self.assertEqual(report["written"], [".claude/skills/relay-onboard/SKILL.md"])
-        with open(self.path(".claude/skills/relay-onboard/SKILL.md")) as f:
+        self.assertEqual(report["written"], [".claude/skills/hamaca-onboard/SKILL.md"])
+        with open(self.path(".claude/skills/hamaca-onboard/SKILL.md")) as f:
             self.assertEqual(f.read(), "onboard skill v2\n")
 
     # ---- --check ----
 
     def test_check_names_the_files_that_would_change_and_writes_nothing(self):
         self.make_current()
-        os.remove(self.path(".claude/skills/relay-doctor/SKILL.md"))
+        os.remove(self.path(".claude/skills/hamaca-doctor/SKILL.md"))
 
         out = capture(relay.cmd_update, self.args(check=True))
 
-        self.assertIn("relay-doctor", out)
+        self.assertIn("hamaca-doctor", out)
         self.assertIn("nothing written", out)
-        self.assertFalse(os.path.exists(self.path(".claude/skills/relay-doctor/SKILL.md")))
+        self.assertFalse(os.path.exists(self.path(".claude/skills/hamaca-doctor/SKILL.md")))
 
     def test_check_on_a_current_tree_reports_current(self):
         self.make_current()
@@ -11801,9 +11808,9 @@ class UpdateTest(unittest.TestCase):
 
         for rel in self.skill_paths(".agents/skills") + ["AGENTS.md"]:
             self.assertIn(rel, report["written"])
-        self.assertEqual(report["removed"], [".claude/skills/relay-doctor/SKILL.md",
-                                             ".claude/skills/relay-onboard/SKILL.md",
-                                             ".claude/skills/relay-update/SKILL.md"])
+        self.assertEqual(report["removed"], [".claude/skills/hamaca-doctor/SKILL.md",
+                                             ".claude/skills/hamaca-onboard/SKILL.md",
+                                             ".claude/skills/hamaca-update/SKILL.md"])
         for skill in self.SKILLS:
             self.assertFalse(os.path.exists(self.path(f".claude/skills/{skill}")), skill)
         self.assertEqual(self._read(".claude/skills/my-skill/SKILL.md"), "mine\n")
@@ -11856,13 +11863,13 @@ class UpdateTest(unittest.TestCase):
     # scenario 11
     def test_switch_removes_only_relays_file_from_a_skill_directory(self):
         self.make_current()
-        self.write_local(".claude/skills/relay-onboard/notes.md", "my notes\n")
+        self.write_local(".claude/skills/hamaca-onboard/notes.md", "my notes\n")
 
         self.switch(skill_dir=".agents/skills")
 
-        self.assertFalse(os.path.exists(self.path(".claude/skills/relay-onboard/SKILL.md")))
-        self.assertTrue(os.path.isdir(self.path(".claude/skills/relay-onboard")))
-        self.assertEqual(self._read(".claude/skills/relay-onboard/notes.md"), "my notes\n")
+        self.assertFalse(os.path.exists(self.path(".claude/skills/hamaca-onboard/SKILL.md")))
+        self.assertTrue(os.path.isdir(self.path(".claude/skills/hamaca-onboard")))
+        self.assertEqual(self._read(".claude/skills/hamaca-onboard/notes.md"), "my notes\n")
 
     # scenario 12
     def test_switch_check_reports_and_writes_nothing(self):
@@ -11942,8 +11949,8 @@ class UpdateTest(unittest.TestCase):
         out = capture(relay.cmd_update, self.args(skill_dir=".agents/skills",
                                                   pointer_file="AGENTS.md"))
 
-        self.assertIn("removed .claude/skills/relay-doctor/SKILL.md "
-                      "(moved to .agents/skills/relay-doctor/SKILL.md)", out)
+        self.assertIn("removed .claude/skills/hamaca-doctor/SKILL.md "
+                      "(moved to .agents/skills/hamaca-doctor/SKILL.md)", out)
 
     # scenario 19
     def test_skill_dir_and_pointer_file_are_registered(self):
@@ -11961,8 +11968,10 @@ class UpdateTest(unittest.TestCase):
 
 
 class RenameMigrationTest(unittest.TestCase):
-    """RE478: `update` migrates an old (`./relay`) repo to the Hamaca names in place, in one
-    planned pass, against UpdateTest's stub board serving the nine-path hamaca layout."""
+    """RE478, RE482: `update` migrates a straggler `./relay` repo to the Hamaca names in place and
+    removes everything the compatibility window left behind — the old runner, the shim, `.relay/`,
+    `relay.md` and the `relay-*` skills — against UpdateTest's stub board serving the five-path
+    hamaca layout."""
 
     BOARD = UpdateTest.BOARD
     setUp_stub = UpdateTest.setUp
@@ -11976,55 +11985,91 @@ class RenameMigrationTest(unittest.TestCase):
     SKILLS = ("doctor", "onboard", "update")
     SERVED_RUNNER = ('#!/usr/bin/env python3\nRUNNER_VERSION = {}\nBOARD_URL = ""\n'
                      "print('hamaca')\n").format(relay.RUNNER_VERSION)
-    SHIM = "#!/usr/bin/env python3\nprint('shim: run ./hamaca')\n"
+    HAND_PLACED = SERVED_RUNNER.replace('BOARD_URL = ""', 'BOARD_URL = "https://new.test"')
+    SHIM = "#!/usr/bin/env python3\n# the window-era ./relay shim\n"
     OLD_RUNNER = VALID_STUB.format(93).replace("\nprint", '\nBOARD_URL = "https://old.test"\nprint')
     OLD_CLAUDE = "# Proj\nWorking Relay cards from this repo: see [relay.md](relay.md).\nmore\n"
     NEW_CLAUDE = "# Proj\nWorking Hamaca cards from this repo: see [hamaca.md](hamaca.md).\nmore\n"
     RENAMED_LINES = [
-        "    ✓ ./relay                      → ./hamaca        (./relay is now a shim)",
+        "    ✓ ./relay                      → ./hamaca        (./relay removed)",
         "    ✓ .relay/                      → .hamaca/",
         "    ✓ relay.md                     → hamaca.md",
-        "    ✓ .claude/skills/relay-doctor  → hamaca-doctor   (alias kept)",
-        "    ✓ .claude/skills/relay-onboard → hamaca-onboard  (alias kept)",
-        "    ✓ .claude/skills/relay-update  → hamaca-update   (alias kept)",
+        "    ✓ .claude/skills/relay-doctor  → hamaca-doctor   (relay-doctor removed)",
+        "    ✓ .claude/skills/relay-onboard → hamaca-onboard  (relay-onboard removed)",
+        "    ✓ .claude/skills/relay-update  → hamaca-update   (relay-update removed)",
         "    ✓ CLAUDE.md pointer line       relay.md → hamaca.md",
     ]
     RESTART = "Restart the runner to pick up the new name:  ./hamaca start"
+
+    @staticmethod
+    def alias(skill):
+        return f"---\nname: relay-{skill}\n---\n\nRenamed: use /hamaca-{skill}.\n"
+
+    @staticmethod
+    def skill_rel(skill, skill_dir=".claude/skills"):
+        return f"{skill_dir}/relay-{skill}/SKILL.md"
 
     def setUp(self):
         self.setUp_stub()
         self.baked_url = None
         self.served = {"hamaca": self.SERVED_RUNNER,
-                       "hamaca.md": "# Working Hamaca cards from your agent\n",
-                       "relay": self.SHIM}
+                       "hamaca.md": "# Working Hamaca cards from your agent\n"}
         for skill in self.SKILLS:
             self.served[f".claude/skills/hamaca-{skill}/SKILL.md"] = f"hamaca-{skill} skill\n"
-            self.served[f".claude/skills/relay-{skill}/SKILL.md"] = \
-                f"---\nname: relay-{skill}\n---\n\nRenamed: use /hamaca-{skill}.\n"
-        self.make_old_repo()
+        # This suite's window copies: the committed RE478 bytes are pinned by
+        # WindowCopiesTest; here the mechanism is driven with small stand-ins.
+        sha = lambda text: hashlib.sha256(text.encode()).hexdigest()   # noqa: E731
+        window = {"relay": frozenset({sha(self.SHIM)})}
+        for skill in self.SKILLS:
+            window[self.skill_rel(skill)] = frozenset({sha(self.alias(skill))})
+        patcher = unittest.mock.patch.object(relay, "WINDOW_COPIES_SHA256", window)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     # ---- fixtures ----
 
-    def make_old_repo(self):
-        self.here = self.path("relay")
-        relay.HERE = self.here
+    def make_straggler(self, *, with_hamaca):
+        """A v93 `./relay` repo; `with_hamaca` places ./hamaca by hand, as the install script does
+        before it runs `./hamaca update`."""
         self.write_local("relay", self.OLD_RUNNER)
         os.chmod(self.path("relay"), 0o755)
         self.write_local("relay.md", "# Working Relay cards from your agent\n")
-        self.write_local(".relay/runner.json", '{"base": "origin/main"}\n')
-        self.write_local(".relay/prepare-worktree.sh", "echo mine\n")
+        self.write_local(".relay/runner.json", '{"name":"box"}')
+        self.write_local(".relay/prepare-worktree.sh", "echo mine")
         self.write_local(".relay/scaffold.json", json.dumps({"version": "old-version"}))
         for skill in self.SKILLS:
-            self.write_local(f".claude/skills/relay-{skill}/SKILL.md", f"old relay-{skill} skill\n")
+            self.write_local(self.skill_rel(skill), f"legacy relay-{skill} skill: ./relay {skill}\n")
         self.write_local("CLAUDE.md", self.OLD_CLAUDE)
+        if with_hamaca:
+            self.write_local("hamaca", self.HAND_PLACED)
+            os.chmod(self.path("hamaca"), 0o755)
+            self.run_as("hamaca")
+        else:
+            self.run_as("relay")
 
-    def run_as_hamaca(self):
-        self.here = self.path("hamaca")
+    def make_window_repo(self):
+        """A repo installed during the window: current Hamaca files plus the shim and aliases."""
+        for rel, content in self.served.items():
+            self.write_local(rel, content)
+        os.chmod(self.path("hamaca"), 0o755)
+        self.write_local(".hamaca/runner.json", "{}\n")
+        self.write_local(".hamaca/scaffold.json", json.dumps({"version": self.manifest()["version"]}))
+        self.write_local("relay", self.SHIM)
+        os.chmod(self.path("relay"), 0o755)
+        for skill in self.SKILLS:
+            self.write_local(self.skill_rel(skill), self.alias(skill))
+        self.run_as("hamaca")
+
+    def run_as(self, name):
+        self.here = self.path(name)
         relay.HERE = self.here
 
     def read(self, rel):
         with open(self.path(rel), encoding="utf-8") as f:
             return f.read()
+
+    def exists(self, rel):
+        return os.path.exists(self.path(rel))
 
     def snapshot(self):
         """Every file under ROOT (bytes + mode) and every directory — the whole tree."""
@@ -12045,45 +12090,97 @@ class RenameMigrationTest(unittest.TestCase):
             self.assertNotEqual(found, -1, f"{needle!r} not found in order in:\n{out}")
             pos = found + len(needle)
 
-    def json_report(self, **kw):
+    def json_report(self, fn=None, **kw):
         args = self.args(**kw)
         args.json = True
-        return json.loads(capture(relay.cmd_update, args))
+        return json.loads(capture(fn or relay.cmd_update, args))
 
-    # ---- scenario 1 ----
+    def assert_no_relay_left(self):
+        self.assertFalse(self.exists("relay"))
+        self.assertFalse(self.exists("relay.md"))
+        self.assertFalse(self.exists(".relay"))
+        for skill in self.SKILLS:
+            self.assertFalse(self.exists(f".claude/skills/relay-{skill}"), skill)
 
-    def test_update_migrates_an_old_repo_to_the_hamaca_names(self):
+    # ---- RE482 scenario 14 (acceptance criterion 6) ----
+
+    def test_a_straggler_install_moves_its_state_and_removes_every_relay_file(self):
+        self.make_straggler(with_hamaca=True)
+
+        starter = self.json_report(starter_only=True)
+        report = self.json_report()
+
+        self.assertEqual(self.read(".hamaca/runner.json"), '{"name":"box"}')
+        self.assertEqual(self.read(".hamaca/prepare-worktree.sh"), "echo mine")
+        self.assert_no_relay_left()
+        self.assertTrue(self.exists("hamaca"))
+        self.assertTrue(self.exists("hamaca.md"))
+        for skill in self.SKILLS:
+            rel = f".claude/skills/hamaca-{skill}/SKILL.md"
+            self.assertEqual(self.read(rel), self.served[rel])
+        # The server baked the hand-placed ./hamaca; update keeps that board.
+        self.assertIn('\nBOARD_URL = "https://new.test"\n', self.read("hamaca"))
+        self.assertEqual(self.read("CLAUDE.md"), self.NEW_CLAUDE)
+
+        self.assertEqual(starter["renamed"], [{"subject": ".relay/", "change": "→ .hamaca/",
+                                               "note": None}])
+        self.assertEqual([(e["subject"], e["change"]) for e in report["renamed"]], [
+            ("./relay", "→ ./hamaca"),
+            ("relay.md", "→ hamaca.md"),
+            (".claude/skills/relay-doctor", "→ hamaca-doctor"),
+            (".claude/skills/relay-onboard", "→ hamaca-onboard"),
+            (".claude/skills/relay-update", "→ hamaca-update"),
+            ("CLAUDE.md pointer line", "relay.md → hamaca.md"),
+        ])
+        self.assertEqual(report["skipped"], [])
+
+    def setUp_straggler(self, with_hamaca=True):
+        self.make_straggler(with_hamaca=with_hamaca)
+
+    def test_starter_only_moves_dot_relay_before_writing_any_starter_file(self):
+        self.setUp_straggler()
+
+        report = self.json_report(starter_only=True)
+
+        self.assertFalse(self.exists(".relay"))
+        self.assertEqual(self.read(".hamaca/runner.json"), '{"name":"box"}')
+        self.assertEqual(report["config"], "present")
+        self.assertEqual(report["hook"], "present")
+
+    def test_starter_only_leaves_a_dot_relay_beside_dot_hamaca_alone(self):
+        self.write_local(".relay/runner.json", '{"name":"old"}')
+        self.write_local(".hamaca/runner.json", '{"name":"new"}')
+        self.run_as("hamaca")
+
+        report = self.json_report(starter_only=True)
+
+        self.assertEqual(report["renamed"], [])
+        self.assertEqual(self.read(".relay/runner.json"), '{"name":"old"}')
+        self.assertEqual(self.read(".hamaca/runner.json"), '{"name":"new"}')
+
+    def test_an_old_update_without_hamaca_carries_the_board_url_and_removes_relay(self):
+        self.setUp_straggler(with_hamaca=False)
+
         capture(relay.cmd_update, self.args())
 
         hamaca = self.read("hamaca")
         self.assertTrue(os.access(self.path("hamaca"), os.X_OK))
         self.assertIn('\nBOARD_URL = "https://old.test"\n', hamaca)
         self.assertEqual(relay.parse_runner_version(hamaca), relay.RUNNER_VERSION)
-        self.assertEqual(self.read("relay"), self.SHIM)
-        self.assertEqual(stat.S_IMODE(os.stat(self.path("relay")).st_mode), 0o755)
-        self.assertEqual(self.read(".hamaca/runner.json"), '{"base": "origin/main"}\n')
-        self.assertEqual(self.read(".hamaca/prepare-worktree.sh"), "echo mine\n")
+        self.assertEqual(self.read(".hamaca/runner.json"), '{"name":"box"}')
+        self.assertEqual(self.read(".hamaca/prepare-worktree.sh"), "echo mine")
         self.assertEqual(json.loads(self.read(".hamaca/scaffold.json")),
                          {"version": self.manifest()["version"]})
-        self.assertFalse(os.path.exists(self.path(".relay")))
-        self.assertEqual(self.read("hamaca.md"), self.served["hamaca.md"])
-        self.assertFalse(os.path.exists(self.path("relay.md")))
-        for skill in self.SKILLS:
-            for name in (f"hamaca-{skill}", f"relay-{skill}"):
-                rel = f".claude/skills/{name}/SKILL.md"
-                self.assertEqual(self.read(rel), self.served[rel])
-        self.assertEqual(self.read("CLAUDE.md"), self.NEW_CLAUDE)
-
-    # ---- scenario 2 ----
+        self.assert_no_relay_left()
 
     def test_the_report_names_each_rename_and_asks_for_a_restart(self):
+        self.setUp_straggler(with_hamaca=False)
+
         out = capture(relay.cmd_update, self.args())
 
         self.assert_in_order(out, ["scaffold: served ", "  renamed to Hamaca (7):\n"]
                              + [line + "\n" for line in self.RENAMED_LINES])
         self.assertEqual(out.rstrip("\n").splitlines()[-1], self.RESTART)
-        accounted = {"hamaca", "relay", "hamaca.md"} | {
-            f".claude/skills/{p}-{s}/SKILL.md" for p in ("hamaca", "relay") for s in self.SKILLS}
         listed = set()
         in_updated = False
         for line in out.splitlines():
@@ -12093,30 +12190,123 @@ class RenameMigrationTest(unittest.TestCase):
                 listed.add(line.strip())
             else:
                 in_updated = False
+        accounted = {"hamaca", "hamaca.md"} | {f".claude/skills/hamaca-{s}/SKILL.md"
+                                               for s in self.SKILLS}
         self.assertFalse(listed & accounted, out)
 
-    # ---- scenario 3 ----
+    # ---- RE482 scenario 15 ----
 
-    def test_leftovers_the_migration_does_not_own_are_skipped_and_kept(self):
-        self.write_local("AGENTS.md", "# Agents\n")
+    def test_window_copies_of_the_shim_and_aliases_are_removed_and_reported(self):
+        self.make_window_repo()
+
+        report = self.json_report()
+
+        self.assert_no_relay_left()
+        self.assertTrue(self.exists("hamaca"))
+        removed = [e["subject"] for e in report["renamed"] if e["change"] == "removed"]
+        self.assertEqual(removed, ["./relay"] + [f".claude/skills/relay-{s}" for s in self.SKILLS])
+        self.assertEqual(report["skipped"], [])
+
+    def test_a_window_alias_under_another_skill_dir_matches_by_content(self):
+        for rel, content in self.served.items():
+            self.write_local(rel.replace(".claude/skills", ".agents/skills"), content)
+        self.write_local(".hamaca/runner.json", '{"skill_dir": ".agents/skills"}\n')
+        self.write_local(self.skill_rel("doctor", ".agents/skills"), self.alias("doctor"))
+        self.run_as("hamaca")
+
+        report = self.json_report()
+
+        self.assertFalse(self.exists(".agents/skills/relay-doctor"))
+        self.assertIn({"subject": ".agents/skills/relay-doctor", "change": "removed",
+                       "note": "retired alias"}, report["renamed"])
+
+    # ---- RE482 scenario 16 ----
+
+    def test_an_edited_shim_and_an_edited_alias_are_left_and_skipped(self):
+        self.make_window_repo()
+        self.write_local("relay", self.SHIM + "# mine\n")
+        self.write_local(self.skill_rel("update"), self.alias("update") + "my note\n")
+
+        report = self.json_report()
+
+        self.assertEqual(self.read("relay"), self.SHIM + "# mine\n")
+        self.assertEqual(self.read(self.skill_rel("update")), self.alias("update") + "my note\n")
+        skipped = {e["subject"]: e["reason"] for e in report["skipped"]}
+        self.assertEqual(set(skipped), {"./relay", ".claude/skills/relay-update"})
+        for reason in skipped.values():
+            self.assertIn("modified", reason)
+            self.assertIn("left", reason)
+        self.assertFalse(self.exists(".claude/skills/relay-doctor"))
+
+    # ---- RE482 scenario 17 ----
+
+    def full_relay(self, fingerprint):
+        """A full v93 runner whose RUNNER_FINGERPRINT line is `fingerprint` (None: no line)."""
+        source = VALID_STUB.format(93)
+        if fingerprint is None:
+            return source
+        source = source.replace("\nprint", '\nRUNNER_FINGERPRINT = "x"\nprint')
+        if fingerprint == "match":
+            fingerprint = relay.runner_fingerprint(source)
+        return source.replace('RUNNER_FINGERPRINT = "x"', f'RUNNER_FINGERPRINT = "{fingerprint}"')
+
+    def beside_hamaca(self, relay_source):
+        self.make_window_repo()
+        for skill in self.SKILLS:
+            os.remove(self.path(self.skill_rel(skill)))
+            os.rmdir(os.path.dirname(self.path(self.skill_rel(skill))))
+        self.write_local("relay", relay_source)
+
+    def test_a_modified_full_relay_beside_hamaca_is_left_and_skipped(self):
+        modified = self.full_relay("0" * 64)
+        self.beside_hamaca(modified)
+
+        report = self.json_report()
+
+        self.assertEqual(self.read("relay"), modified)
+        reasons = [e["reason"] for e in report["skipped"] if e["subject"] == "./relay"]
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("modified leftover runner", reasons[0])
+
+    def test_an_unmodified_full_relay_beside_hamaca_is_removed(self):
+        for fingerprint in ("match", None):
+            with self.subTest(fingerprint=fingerprint):
+                self.beside_hamaca(self.full_relay(fingerprint))
+
+                report = self.json_report()
+
+                self.assertFalse(self.exists("relay"))
+                self.assertIn("./relay", [e["subject"] for e in report["renamed"]])
+                self.assertEqual(report["skipped"], [])
+
+    # ---- RE482 scenario 18 ----
+
+    def test_a_relay_var_in_envrc_local_is_reported_as_no_longer_read(self):
+        self.make_window_repo()
         self.write_local(".envrc.local", "export RELAY_API_KEY=x\n")
 
-        out = capture(relay.cmd_update, self.args())
+        report = self.json_report()
 
-        self.assert_in_order(out, [
-            "  renamed to Hamaca (7):",
-            "  skipped (2):\n",
-            "    – AGENTS.md pointer line       no relay.md pointer found; left as is\n",
-            "    – RELAY_* in .envrc.local      yours, and still read; rename to HAMACA_* "
-            "when convenient\n"])
-        if "  updated (" in out:
-            self.assertLess(out.index("  skipped (2):"), out.index("  updated ("))
-        self.assertEqual(self.read("AGENTS.md"), "# Agents\n")
+        entry = next(e for e in report["skipped"] if e["subject"] == "RELAY_* in .envrc.local")
+        self.assertIn("no longer read", entry["reason"])
+        self.assertIn("rename to HAMACA_*", entry["reason"])
         self.assertEqual(self.read(".envrc.local"), "export RELAY_API_KEY=x\n")
 
-    # ---- scenario 4 ----
+    def test_plan_rename_reports_the_envrc_on_an_otherwise_migrated_repo(self):
+        self.run_as("hamaca")
+        self.write_local(".envrc.local", "export RELAY_API_KEY=x\n")
+
+        plan = relay.plan_rename(".claude/skills", "CLAUDE.md")
+
+        self.assertEqual(plan["skipped"], [{"subject": "RELAY_* in .envrc.local",
+                                            "reason": relay.ENVRC_RETIRED_REASON}])
+        self.assertEqual(set(plan), {"renamed", "skipped", "moves", "pointers",
+                                     "leftover_runner", "removes"})
+
+    # ---- carried over from RE478 ----
 
     def test_check_reports_the_migration_and_writes_nothing(self):
+        self.setUp_straggler(with_hamaca=False)
         before = self.snapshot()
 
         out = capture(relay.cmd_update, self.args(check=True))
@@ -12127,11 +12317,10 @@ class RenameMigrationTest(unittest.TestCase):
         self.assertNotIn("Restart the runner", out)
         self.assertEqual(self.snapshot(), before)
 
-    # ---- scenario 5 ----
-
     def test_a_second_update_on_a_migrated_repo_is_a_no_op(self):
+        self.setUp_straggler()
+        capture(relay.cmd_update, self.args(starter_only=True))
         capture(relay.cmd_update, self.args())
-        self.run_as_hamaca()
         before = self.snapshot()
         version = self.manifest()["version"]
 
@@ -12147,43 +12336,24 @@ class RenameMigrationTest(unittest.TestCase):
         self.assertEqual(report["skipped"], [])
         self.assertIs(report["current"], True)
 
-    # ---- scenario 6 ----
-
     def test_a_leftover_dot_relay_beside_dot_hamaca_is_skipped_untouched(self):
-        capture(relay.cmd_update, self.args())
-        self.run_as_hamaca()
+        self.make_window_repo()
         self.write_local(".relay/runner.json", "{}")
         hamaca_config = self.read(".hamaca/runner.json")
 
         out = capture(relay.cmd_update, self.args())
 
-        self.assertIn("  skipped (1):\n", out)
-        self.assertIn("    – .relay/ leftover beside .hamaca/; left as is — .hamaca/ is the one "
-                      "in use\n", out)
+        self.assertRegex(out, r"\n    – \.relay/ +leftover beside \.hamaca/; left as is — "
+                              r"\.hamaca/ is the one in use\n")
         self.assertNotIn("already on Hamaca names", out)
         self.assertEqual(self.read(".relay/runner.json"), "{}")
         self.assertEqual(self.read(".hamaca/runner.json"), hamaca_config)
 
-    # ---- scenario 7 ----
-
-    def test_a_leftover_full_relay_beside_hamaca_is_skipped_and_not_shimmed(self):
-        capture(relay.cmd_update, self.args())
-        self.run_as_hamaca()
-        leftover = VALID_STUB.format(93)
-        self.write_local("relay", leftover)
-
-        report = self.json_report()
-
-        self.assertIn({"subject": "./relay",
-                       "reason": "leftover full runner beside ./hamaca; left as is and still works"},
-                      report["skipped"])
-        self.assertEqual(self.read("relay"), leftover)
-
-    # ---- scenario 8 ----
-
     def test_the_configured_pointer_file_is_rewritten_first(self):
+        self.setUp_straggler()
         self.write_local(".relay/runner.json", '{"pointer_file": "AGENTS.md"}\n')
         self.write_local("AGENTS.md", "# Agents\n" + relay.OLD_POINTER_LINE + "\n")
+        capture(relay.cmd_update, self.args(starter_only=True))
 
         report = self.json_report()
 
@@ -12193,24 +12363,18 @@ class RenameMigrationTest(unittest.TestCase):
         self.assertLess(subjects.index("AGENTS.md pointer line"),
                         subjects.index("CLAUDE.md pointer line"))
 
-    # ---- scenario 9 ----
-
-    def test_json_renamed_lists_only_what_needs_renaming(self):
+    def test_json_renamed_entries_have_the_three_keys(self):
+        self.setUp_straggler(with_hamaca=False)
         os.remove(self.path("relay.md"))
-        for skill in self.SKILLS:
-            rel = f".claude/skills/relay-{skill}/SKILL.md"
-            self.write_local(rel, self.served[rel])
 
         report = self.json_report()
 
-        self.assertEqual([e["subject"] for e in report["renamed"]],
-                         ["./relay", ".relay/", "CLAUDE.md pointer line"])
+        self.assertNotIn("relay.md", [e["subject"] for e in report["renamed"]])
         for entry in report["renamed"]:
             self.assertEqual(set(entry), {"subject", "change", "note"})
 
-    # ---- scenario 10 ----
-
     def test_the_app_repo_refuses_the_migration_without_force(self):
+        self.setUp_straggler(with_hamaca=False)
         self.write_local("lib/hamaca/scaffold.ex", "")
         before = self.snapshot()
 
@@ -12220,21 +12384,18 @@ class RenameMigrationTest(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
 
     def test_force_migrates_the_app_repo(self):
+        self.setUp_straggler(with_hamaca=False)
         self.write_local("lib/hamaca/scaffold.ex", "")
 
         capture(relay.cmd_update, self.args(force=True))
 
-        self.assertEqual(self.read("relay"), self.SHIM)
         self.assertTrue(os.path.isfile(self.path(".hamaca/runner.json")))
-        self.assertFalse(os.path.exists(self.path(".relay")))
-        self.assertFalse(os.path.exists(self.path("relay.md")))
+        self.assert_no_relay_left()
         self.assertEqual(self.read("CLAUDE.md"), self.NEW_CLAUDE)
 
-    # ---- scenario 11 ----
-
     def test_a_board_without_the_hamaca_layout_is_refused_before_writing(self):
-        runner = self.served.pop("hamaca")
-        self.served["relay"] = runner
+        self.setUp_straggler(with_hamaca=False)
+        self.served["relay"] = self.served.pop("hamaca")
         before = self.snapshot()
 
         err = io.StringIO()
@@ -12244,20 +12405,41 @@ class RenameMigrationTest(unittest.TestCase):
         self.assertIn("does not serve the Hamaca layout", err.getvalue())
         self.assertEqual(self.snapshot(), before)
 
-    # ---- scenario 12 ----
-
     def test_a_fresh_repo_installs_the_scaffold_with_nothing_to_rename(self):
-        shutil.rmtree(self.tmp)
-        os.makedirs(self.tmp)
-        self.run_as_hamaca()
-        self.write_local(".envrc", "export RELAY_URL=x\n")
+        self.run_as("hamaca")
 
         report = self.json_report()
 
         self.assertEqual(report["renamed"], [])
         self.assertEqual(report["skipped"], [])
         self.assertEqual(sorted(report["written"]), sorted(self.served))
-        self.assertEqual(stat.S_IMODE(os.stat(self.path("relay")).st_mode), 0o755)
+        self.assertFalse(self.exists("relay"))
+
+
+class WindowCopiesTest(unittest.TestCase):
+    """RE482: WINDOW_COPIES_SHA256 is every committed version of the RE478 shim and alias skills —
+    what `update` may delete without asking."""
+
+    WINDOW_COMMITS = ("684e2d7a3c1b31ba1e148ba40318e85db4ed6354",)   # RE478, the only one
+
+    def test_the_keys_are_the_shim_and_one_per_alias_skill(self):
+        self.assertEqual(set(relay.WINDOW_COPIES_SHA256), {
+            "relay", ".claude/skills/relay-doctor/SKILL.md",
+            ".claude/skills/relay-onboard/SKILL.md", ".claude/skills/relay-update/SKILL.md"})
+        for key, shas in relay.WINDOW_COPIES_SHA256.items():
+            self.assertIsInstance(shas, frozenset, key)
+            for sha in shas:
+                self.assertRegex(sha, r"\A[0-9a-f]{64}\Z", key)
+
+    def test_the_hashes_are_the_committed_window_bytes(self):
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for commit in self.WINDOW_COMMITS:
+            for key, shas in relay.WINDOW_COPIES_SHA256.items():
+                got = subprocess.run(["git", "show", f"{commit}:{key}"], cwd=repo,
+                                     capture_output=True)
+                if got.returncode != 0:
+                    self.skipTest(f"git history for {commit} is not available here")
+                self.assertIn(hashlib.sha256(got.stdout).hexdigest(), shas, key)
 
 
 class ScaffoldContractTest(unittest.TestCase):
@@ -12272,8 +12454,8 @@ class ScaffoldContractTest(unittest.TestCase):
                          "http://board.test" + self.scaffold["manifest_path"])
 
     def test_item_keys_are_what_scaffold_status_reads(self):
-        # RE478: ./hamaca only ever reads the hamaca layout's manifest.
-        for item in self.scaffold["manifest_hamaca"]["items"]:
+        # RE478, RE482: ./hamaca only ever reads the hamaca layout's manifest — the only one.
+        for item in self.scaffold["manifest"]["items"]:
             extra = {relay.UNBAKED_SHA_KEY} if item["path"] == relay.RUNNER_REL else set()
             self.assertEqual(set(item), {"path", "sha256", "bytes"} | extra)
 
@@ -12281,15 +12463,22 @@ class ScaffoldContractTest(unittest.TestCase):
         self.assertIn("version", self.scaffold["manifest"])
 
     def test_the_runner_path_update_special_cases_is_a_manifest_item(self):
-        paths = [i["path"] for i in self.scaffold["manifest_hamaca"]["items"]]
+        paths = [i["path"] for i in self.scaffold["manifest"]["items"]]
         self.assertEqual(relay.RUNNER_REL, "hamaca")
         self.assertEqual(relay.RUNNER_REL, self.scaffold["layouts"]["hamaca"])
         self.assertIn(relay.RUNNER_REL, paths)
         self.assertIn(relay.GUIDE_REL, paths)
-        shim = relay.SCAFFOLD_RUNNERS["legacy"]
         for path in paths:
-            self.assertTrue(path in (relay.RUNNER_REL, relay.GUIDE_REL, shim)
+            self.assertTrue(path in (relay.RUNNER_REL, relay.GUIDE_REL)
                             or path.startswith(relay.DEFAULT_SKILL_DIR + "/"), path)
+
+    # RE482 scenario 20: the one served layout and the one env prefix are the board's.
+    def test_the_layouts_and_env_prefix_are_pinned_in_the_contract_fixture(self):
+        self.assertEqual(self.scaffold["layouts"], relay.SCAFFOLD_RUNNERS)
+        self.assertEqual(relay.SCAFFOLD_RUNNERS, {"hamaca": "hamaca"})
+        self.assertEqual(CONTRACT["env"]["prefix"], relay.ENV_PREFIX)
+        self.assertNotIn("prefixes", CONTRACT["env"])
+        self.assertFalse(hasattr(relay, "ENV_PREFIXES"))
 
     # RE443: the app bakes BOARD_URL with Relay.Scaffold.board_url_line/1; ./relay parses the
     # same line with BOARD_URL_RE. One example pins the two together.
@@ -12300,8 +12489,7 @@ class ScaffoldContractTest(unittest.TestCase):
                          "http://board.test")
 
     def test_the_raw_file_route_is_the_base_plus_the_item_path(self):
-        # The fixture's example is the legacy layout's runner path (no query param).
-        self.assertEqual(relay.scaffold_base("http://x") + "/" + relay.SCAFFOLD_RUNNERS["legacy"],
+        self.assertEqual(relay.scaffold_base("http://x") + "/" + relay.RUNNER_REL,
                          "http://x" + self.scaffold["file_path_example"])
 
     # RE457 scenario 18: the runner.json layout defaults and the pointer line are the board's.
@@ -12311,10 +12499,9 @@ class ScaffoldContractTest(unittest.TestCase):
         for key in ("skill_dir", "pointer_file"):
             self.assertEqual(defaults[key], setup["runner_config_defaults"][key], key)
         self.assertEqual(relay.POINTER_LINE, setup["pointer_line"])
-        skills = [i["path"] for i in self.scaffold["manifest_hamaca"]["items"]
-                  if i["path"] not in (relay.RUNNER_REL, relay.GUIDE_REL,
-                                       relay.SCAFFOLD_RUNNERS["legacy"])]
-        self.assertEqual(len(skills), 6)
+        skills = [i["path"] for i in self.scaffold["manifest"]["items"]
+                  if i["path"] not in (relay.RUNNER_REL, relay.GUIDE_REL)]
+        self.assertEqual(len(skills), 3)
         for path in skills:
             self.assertTrue(path.startswith(relay.DEFAULT_SKILL_DIR + "/"), path)
 
@@ -13022,7 +13209,7 @@ class DiscoverabilityTest(unittest.TestCase):
         sub = next(a for a in relay.build_parser()._actions if isinstance(a, argparse._SubParsersAction))
         self.assertIn("--field", sub.choices["card"].format_help())
 
-    def test_relay_md_documents_every_new_verb(self):
+    def test_hamaca_md_documents_every_new_verb(self):
         path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "hamaca.md")
         with open(path, encoding="utf-8") as f:
@@ -13072,14 +13259,15 @@ class GroupedHelpTest(unittest.TestCase):
         for _g, name, text in relay.COMMANDS:
             self.assertRegex(out, rf"(?m)^  {re.escape(name)}\s+{re.escape(text)}$")
 
-    # RE494: help introduces the CLI as hamaca; the only "relay" left is the env-var fallback.
-    def test_plain_help_names_hamaca_and_relay_only_in_the_env_fallback(self):
+    # RE494, RE482: help introduces the CLI as hamaca, and with the env fallback retired it
+    # names "relay" nowhere.
+    def test_plain_help_names_hamaca_and_never_relay(self):
         text = self.plain_help()
         for phrase in ("hamaca — one tool for a Hamaca board", "Hamaca-owned files",
-                       "/hamaca-onboard", "hamaca card RLY-12 --field status"):
+                       "/hamaca-onboard", "hamaca card RLY-12 --field status",
+                       "Needs HAMACA_URL", "HAMACA_API_KEY; the runner"):
             self.assertIn(phrase, text)
-        self.assertIn("RELAY_URL and RELAY_API_KEY still work", text)
-        self.assertNotIn("relay", text.replace("RELAY_URL and RELAY_API_KEY still work", "").lower())
+        self.assertNotIn("relay", text.lower())
 
     def test_plain_help_has_no_colour_even_when_colour_is_forced(self):
         with unittest.mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
@@ -13167,7 +13355,7 @@ class TestPartitionTest(unittest.TestCase):
 
     def test_failed_shell_step_keeps_test_failures_that_scrolled_above_the_tail(self):
         # RE402: `mix precommit` prints ExUnit's failure block mid-run, then the summary, then
-        # bin/test_relay.py's output — so a 12-line tail named no test at all, and the fix
+        # bin/test_hamaca.py's output — so a 12-line tail named no test at all, and the fix
         # agent could only guess at a flake. The sink must keep the failing test's header,
         # location and error, plus the seed that reproduces the order.
         with tempfile.TemporaryDirectory() as d:
@@ -13225,19 +13413,19 @@ class TestPartitionTest(unittest.TestCase):
         self.assertEqual(seen["env"].get("MIX_TEST_PARTITION"), "3")
 
     def test_partitionless_child_does_not_inherit_the_parents_var(self):
-        # RLY-216/223: every node runs with MIX_TEST_PARTITION/RELAY_NODE_SCRATCH/RELAY_PLAN
-        # exported, so an env-less child step (e.g. the precommit gate running bin/test_relay.py's
+        # RLY-216/223: every node runs with MIX_TEST_PARTITION/HAMACA_NODE_SCRATCH/HAMACA_PLAN
+        # exported, so an env-less child step (e.g. the precommit gate running bin/test_hamaca.py's
         # own partition tests) must NOT inherit the parent's value — it must see it unset.
-        for name in ("MIX_TEST_PARTITION", "RELAY_NODE_SCRATCH", "RELAY_PLAN"):
+        for name in ("MIX_TEST_PARTITION", "HAMACA_NODE_SCRATCH", "HAMACA_PLAN"):
             self.addCleanup(os.environ.pop, name, None)
         os.environ["MIX_TEST_PARTITION"] = "7"
-        os.environ["RELAY_NODE_SCRATCH"] = "/leak/n.md"
-        os.environ["RELAY_PLAN"] = "/leak/plan.md"
+        os.environ["HAMACA_NODE_SCRATCH"] = "/leak/n.md"
+        os.environ["HAMACA_PLAN"] = "/leak/plan.md"
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "env.txt")
             ok = relay._stream_shell(
                 "printf '%s,%s,%s' \"${MIX_TEST_PARTITION-unset}\" "
-                "\"${RELAY_NODE_SCRATCH-unset}\" \"${RELAY_PLAN-unset}\" > " + out, cwd=d)
+                "\"${HAMACA_NODE_SCRATCH-unset}\" \"${HAMACA_PLAN-unset}\" > " + out, cwd=d)
             self.assertTrue(ok)
             with open(out) as f:
                 self.assertEqual(f.read(), "unset,unset,unset")
@@ -13354,7 +13542,7 @@ class ScratchPathTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "env.txt")
             ok = relay._stream_shell(
-                f"printf '%s' \"$RELAY_NODE_SCRATCH\" > {out}", cwd=d, scratch="/wt/tmp/X/n.md")
+                f"printf '%s' \"$HAMACA_NODE_SCRATCH\" > {out}", cwd=d, scratch="/wt/tmp/X/n.md")
             self.assertTrue(ok)
             with open(out) as f:
                 self.assertEqual(f.read(), "/wt/tmp/X/n.md")
@@ -13363,7 +13551,7 @@ class ScratchPathTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "env.txt")
             ok = relay._stream_shell(
-                f"printf '%s' \"${{RELAY_NODE_SCRATCH-unset}}\" > {out}", cwd=d)
+                f"printf '%s' \"${{HAMACA_NODE_SCRATCH-unset}}\" > {out}", cwd=d)
             self.assertTrue(ok)
             with open(out) as f:
                 self.assertEqual(f.read(), "unset")
@@ -13381,7 +13569,7 @@ class ScratchPathTest(unittest.TestCase):
             capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt", scratch="/wt/tmp/X/n.md")
         finally:
             relay.subprocess.Popen = _popen
-        self.assertEqual(seen["env"].get("RELAY_NODE_SCRATCH"), "/wt/tmp/X/n.md")
+        self.assertEqual(seen["env"].get("HAMACA_NODE_SCRATCH"), "/wt/tmp/X/n.md")
 
     def test_claude_job_without_a_scratch_path_leaves_the_env_unset(self):
         seen = {}
@@ -13396,7 +13584,7 @@ class ScratchPathTest(unittest.TestCase):
             capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         finally:
             relay.subprocess.Popen = _popen
-        self.assertNotIn("RELAY_NODE_SCRATCH", seen["env"])
+        self.assertNotIn("HAMACA_NODE_SCRATCH", seen["env"])
 
     def test_outcome_contract_names_no_literal_tmp_path(self):
         self.assertNotIn("/tmp/findings.md", relay.OUTCOME_CONTRACT)
@@ -13505,7 +13693,7 @@ class PlanPathTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "env.txt")
             ok = relay._stream_shell(
-                f"printf '%s' \"$RELAY_PLAN\" > {out}", cwd=d, plan="/wt/tmp/X/plan.md")
+                f"printf '%s' \"$HAMACA_PLAN\" > {out}", cwd=d, plan="/wt/tmp/X/plan.md")
             self.assertTrue(ok)
             with open(out) as f:
                 self.assertEqual(f.read(), "/wt/tmp/X/plan.md")
@@ -13514,7 +13702,7 @@ class PlanPathTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "env.txt")
             ok = relay._stream_shell(
-                f"printf '%s' \"${{RELAY_PLAN-unset}}\" > {out}", cwd=d)
+                f"printf '%s' \"${{HAMACA_PLAN-unset}}\" > {out}", cwd=d)
             self.assertTrue(ok)
             with open(out) as f:
                 self.assertEqual(f.read(), "unset")
@@ -13532,7 +13720,7 @@ class PlanPathTest(unittest.TestCase):
             capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt", plan="/wt/tmp/X/plan.md")
         finally:
             relay.subprocess.Popen = _popen
-        self.assertEqual(seen["env"].get("RELAY_PLAN"), "/wt/tmp/X/plan.md")
+        self.assertEqual(seen["env"].get("HAMACA_PLAN"), "/wt/tmp/X/plan.md")
 
     def test_claude_job_without_a_plan_path_leaves_the_env_unset(self):
         seen = {}
@@ -13547,7 +13735,7 @@ class PlanPathTest(unittest.TestCase):
             capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt")
         finally:
             relay.subprocess.Popen = _popen
-        self.assertNotIn("RELAY_PLAN", seen["env"])
+        self.assertNotIn("HAMACA_PLAN", seen["env"])
 
     def test_run_node_job_threads_the_plan_path_into_a_shell_step(self):
         seen = {}
@@ -13597,7 +13785,7 @@ class PlanPathTest(unittest.TestCase):
 
 class NoHardcodedScratchPathTest(unittest.TestCase):
     """RLY-214 Task 2: no doc, skill, or agent-definition file may hard-code an absolute /tmp
-    path an agent could copy-paste into a command. Every node already gets $RELAY_NODE_SCRATCH,
+    path an agent could copy-paste into a command. Every node already gets $HAMACA_NODE_SCRATCH,
     a real path unique to (ref, node); a literal `/tmp/whatever.json` an agent copies instead
     collides across every card and node that runs the same instructions — the RLY-177 incident
     this card fixes. Mirrors the sweep plan.md's Task 2 prescribes (`grep -rn "/tmp/" .claude/
@@ -13628,7 +13816,7 @@ class NoHardcodedScratchPathTest(unittest.TestCase):
         self.assertEqual(
             hits, [],
             "hard-coded /tmp path(s) an agent could copy-paste — point at "
-            "$RELAY_NODE_SCRATCH's directory instead:\n" + "\n".join(hits))
+            "$HAMACA_NODE_SCRATCH's directory instead:\n" + "\n".join(hits))
 
 
 class TalkPromptTest(unittest.TestCase):
@@ -14542,94 +14730,6 @@ class TaskCommandsTest(unittest.TestCase):
                 relay.build_parser().parse_args(argv)
 
 
-SHIM_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "relay")
-
-
-def _load_shim():
-    loader = importlib.machinery.SourceFileLoader("relay_shim", SHIM_PATH)
-    spec = importlib.util.spec_from_file_location("relay_shim", SHIM_PATH, loader=loader)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-class ShimTest(unittest.TestCase):
-    """RE478: `./relay` is a shim that execs `./hamaca` beside it for the compatibility window.
-
-    It is not a runner — it declares no RUNNER_VERSION, which is how a full runner is told apart
-    from it — and it never downloads anything."""
-
-    FAKE_HAMACA = (
-        "import os, sys\n"
-        "print(sys.argv[1:])\n"
-        "print(os.environ.get('X_PROBE'))\n"
-    )
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, self.tmp, True)
-        shutil.copy(SHIM_PATH, os.path.join(self.tmp, "relay"))
-
-    def run_shim(self, *argv, env=None):
-        return subprocess.run([sys.executable, os.path.join(self.tmp, "relay"), *argv],
-                              cwd=self.tmp, capture_output=True, text=True,
-                              env={**os.environ, **(env or {})}, timeout=30)
-
-    def test_the_shim_is_not_a_runner(self):
-        with open(SHIM_PATH, encoding="utf-8") as f:
-            src = f.read()
-        self.assertIsNone(relay.parse_runner_version(src))
-        self.assertTrue(src.startswith("#!/usr/bin/env python3\n"))
-        self.assertTrue(os.stat(SHIM_PATH).st_mode & stat.S_IXUSR, "the shim must be executable")
-
-    # Scenario 16
-    def test_execs_hamaca_beside_it_with_argv_and_env_untouched(self):
-        _write(os.path.join(self.tmp, "hamaca"), self.FAKE_HAMACA)
-        out = self.run_shim("board", "--json", env={"X_PROBE": "1"})
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(out.stdout, "['board', '--json']\n1\n")
-        self.assertEqual(out.stderr, "")
-
-    # Scenario 17
-    def test_should_note_only_for_a_human_at_a_terminal(self):
-        should_note = _load_shim().should_note
-        self.assertTrue(should_note(["relay", "board"], {}, True))
-        self.assertFalse(should_note(["relay", "board"], {}, False))
-        self.assertFalse(should_note(["relay", "board", "--json"], {}, True))
-        self.assertFalse(should_note(["relay", "card", "RE1", "--field", "title"], {}, True))
-        self.assertFalse(should_note(["relay", "start"], {}, True))
-        self.assertFalse(should_note(["relay", "board"], {"RELAY_NODE_SCRATCH": "/x"}, True))
-        self.assertFalse(should_note(["relay", "board"], {"HAMACA_NODE_SCRATCH": "/x"}, True))
-        self.assertFalse(should_note(["relay", "board"], {"RELAY_NODE_OUTCOME": "/x"}, True))
-        self.assertFalse(should_note(["relay", "board"], {"HAMACA_NODE_OUTCOME": "/x"}, True))
-
-    def test_the_note_goes_to_a_terminal_stderr_before_the_command_runs(self):
-        _write(os.path.join(self.tmp, "hamaca"), self.FAKE_HAMACA)
-        primary, secondary = pty.openpty()
-        self.addCleanup(os.close, primary)
-        env = {k: v for k, v in os.environ.items()
-               if k not in ("RELAY_NODE_SCRATCH", "HAMACA_NODE_SCRATCH",
-                            "RELAY_NODE_OUTCOME", "HAMACA_NODE_OUTCOME")}
-        self.addCleanup(os.close, secondary)
-        out = subprocess.run([sys.executable, os.path.join(self.tmp, "relay"), "board"],
-                             cwd=self.tmp, stdout=subprocess.PIPE, stderr=secondary,
-                             text=True, env=env, timeout=30)
-        # Read while the secondary is still open: macOS drops a pty's buffer once it closes.
-        ready, _, _ = select.select([primary], [], [], 5)
-        err = os.read(primary, 4096).decode() if ready else ""
-        self.assertEqual(out.returncode, 0)
-        self.assertEqual(out.stdout, "['board']\nNone\n")
-        self.assertIn("\x1b[2mnote: ./relay is now ./hamaca — use that name.\x1b[0m", err)
-
-    # Scenario 18
-    def test_missing_hamaca_is_a_clear_error_and_no_download(self):
-        out = self.run_shim("board")
-        self.assertEqual(out.returncode, 1)
-        self.assertIn("./hamaca is missing next to this ./relay", out.stderr)
-        self.assertIn("run ./hamaca update, or re-run your board's install command.", out.stderr)
-        self.assertEqual(sorted(os.listdir(self.tmp)), ["relay"])
-
-
 def _scrub_env(test, *names):
     """Pop `names` from os.environ for one test, restoring whatever the shell had afterwards."""
     for name in names:
@@ -14637,10 +14737,6 @@ def _scrub_env(test, *names):
         test.addCleanup(lambda n=name, v=prev: os.environ.__setitem__(n, v)
                         if v is not None else os.environ.pop(n, None))
         os.environ.pop(name, None)
-
-
-def _twins(suffix):
-    return tuple(prefix + suffix for prefix in relay.ENV_PREFIXES)
 
 
 class CliNameTest(unittest.TestCase):
@@ -14671,28 +14767,86 @@ class CliNameTest(unittest.TestCase):
         self.assertGreaterEqual(relay.RUNNER_VERSION, CONTRACT["runner"]["first_hamaca_version"])
 
 
-class EnvTwinTest(unittest.TestCase):
-    """RE478: the runner reads HAMACA_<X> before RELAY_<X> and exports both names to children."""
+class EnvTest(unittest.TestCase):
+    """RE482: the runner reads and exports only HAMACA_<X>; a stale RELAY_<X> standing in for a
+    missing HAMACA_<X> is a hard stop that names the rename."""
 
     def setUp(self):
-        _scrub_env(self, *_twins("URL"), *_twins("API_KEY"), *_twins("NODE_OUTCOME"))
+        _scrub_env(self, *(p + s for p in ("HAMACA_", "RELAY_")
+                           for s in ("URL", "API_KEY", "NODE_OUTCOME") + relay.ENV_EXPORTED))
 
-    # Scenario 3
-    def test_hamaca_url_wins_over_relay_url(self):
+    # Scenario 9
+    def test_getenv_ignores_a_relay_twin(self):
+        os.environ["RELAY_NODE_SCRATCH"] = "x"
+        self.assertIsNone(relay.getenv("NODE_SCRATCH"))
+
+    def test_getenv_reads_the_hamaca_name(self):
+        os.environ["HAMACA_API_KEY"] = "k"
+        self.assertEqual(relay.getenv("API_KEY"), "k")
+        os.environ["HAMACA_API_KEY"] = ""
+        self.assertIsNone(relay.getenv("API_KEY"))
+
+    # Scenario 9
+    def test_a_child_env_holds_only_hamaca_names(self):
+        for suffix in relay.ENV_EXPORTED:
+            os.environ["RELAY_" + suffix] = "x"
+        child = dict(os.environ)
+
+        relay._apply_node_env(child, None, "/s", None)
+
+        self.assertEqual(child["HAMACA_NODE_SCRATCH"], "/s")
+        for suffix in relay.ENV_EXPORTED:
+            relay.export_env(child, suffix, "v")
+        self.assertEqual([k for k in child if k.startswith("RELAY_")], [])
+        for suffix in relay.ENV_EXPORTED:
+            self.assertEqual(child["HAMACA_" + suffix], "v", suffix)
+
+    def test_export_env_sets_or_pops_the_hamaca_name(self):
+        child = {"HAMACA_REF": "old"}
+        relay.export_env(child, "REF", "RE1")
+        self.assertEqual(child, {"HAMACA_REF": "RE1"})
+        relay.export_env(child, "REF", None)
+        self.assertEqual(child, {})
+
+    # Scenario 10
+    def test_a_stale_relay_api_key_dies_naming_the_rename(self):
+        os.environ["RELAY_API_KEY"] = "x"
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(relay.Died) as ctx:
+                relay.env("API_KEY")
+        self.assertEqual(ctx.exception.msg, "RELAY_API_KEY is no longer read — rename it to "
+                                            "HAMACA_API_KEY (check .envrc.local)")
+
+    # Scenario 10
+    def test_a_stale_relay_url_dies_naming_the_rename_even_with_a_baked_url(self):
+        os.environ["RELAY_URL"] = "https://r.test"
+        for baked in ("", "https://b.test"):
+            with self.subTest(baked=baked), unittest.mock.patch.object(relay, "BOARD_URL", baked), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(relay.Died) as ctx:
+                    relay.relay_url()
+                self.assertEqual(ctx.exception.msg, "RELAY_URL is no longer read — rename it to "
+                                                    "HAMACA_URL (check .envrc.local)")
+
+    # Scenario 10
+    def test_neither_api_key_dies_with_the_existing_message(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(relay.Died) as ctx:
+                relay.env("API_KEY")
+        self.assertEqual(ctx.exception.msg, "HAMACA_API_KEY is not set")
+
+    def test_hamaca_api_key_set_ignores_a_relay_twin(self):
+        os.environ.update(HAMACA_API_KEY="k2", RELAY_API_KEY="k1")
+        self.assertEqual(relay.env("API_KEY"), "k2")
+
+    def test_hamaca_url_wins_and_a_relay_twin_is_ignored(self):
         os.environ.update(HAMACA_URL="https://h.test", RELAY_URL="https://r.test")
+        self.assertEqual(relay.relay_url(), "https://h.test")
         self.assertEqual(relay.configured_relay_url(), "https://h.test")
 
-    def test_relay_url_alone_is_read(self):
-        os.environ["RELAY_URL"] = "https://r.test"
-        self.assertEqual(relay.configured_relay_url(), "https://r.test")
-
-    def test_an_empty_hamaca_url_falls_through_to_relay_url(self):
-        os.environ.update(HAMACA_URL="", RELAY_URL="https://r.test")
-        self.assertEqual(relay.configured_relay_url(), "https://r.test")
-
-    def test_neither_falls_back_to_the_baked_board_url(self):
+    def test_no_url_falls_back_to_the_baked_board_url(self):
         with unittest.mock.patch.object(relay, "BOARD_URL", "https://b.test"):
-            self.assertEqual(relay.configured_relay_url(), "https://b.test")
+            self.assertEqual(relay.relay_url(), "https://b.test")
 
     def test_no_url_at_all_dies_naming_hamaca_url(self):
         with unittest.mock.patch.object(relay, "BOARD_URL", ""), \
@@ -14701,57 +14855,20 @@ class EnvTwinTest(unittest.TestCase):
                 relay.relay_url()
         self.assertIn("HAMACA_URL is not set", ctx.exception.msg)
 
-    # Scenario 4
-    def _authorization(self):
+    def test_the_bearer_token_comes_from_hamaca_api_key(self):
         seen = []
 
         def fake(req, *a, **k):
             seen.append(req.get_header("Authorization"))
             return _FakeResp(b'{"data": []}')
 
-        os.environ["HAMACA_URL"] = "http://board.test"
+        os.environ.update(HAMACA_URL="http://board.test", HAMACA_API_KEY="k2")
         with unittest.mock.patch.object(relay.urllib.request, "urlopen", fake):
             relay.api("GET", "/api/board")
-        return seen[0]
+        self.assertEqual(seen, ["Bearer k2"])
 
-    def test_the_bearer_token_comes_from_relay_api_key_alone(self):
-        os.environ["RELAY_API_KEY"] = "k1"
-        self.assertEqual(self._authorization(), "Bearer k1")
-
-    def test_hamaca_api_key_wins_over_relay_api_key(self):
-        os.environ.update(RELAY_API_KEY="k1", HAMACA_API_KEY="k2")
-        self.assertEqual(self._authorization(), "Bearer k2")
-
-    def test_no_api_key_dies_naming_hamaca_api_key(self):
-        with contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(relay.Died) as ctx:
-                self._authorization()
-        self.assertEqual(ctx.exception.msg, "HAMACA_API_KEY is not set")
-
-    def test_getenv_returns_the_first_non_empty_twin(self):
-        os.environ.update(HAMACA_API_KEY="", RELAY_API_KEY="r")
-        self.assertEqual(relay.getenv("API_KEY"), "r")
-        os.environ.pop("RELAY_API_KEY")
-        self.assertIsNone(relay.getenv("API_KEY"))
-
-    # Scenario 5
-    def test_node_env_sets_both_scratch_names_and_pops_both_plan_names(self):
-        child = {"RELAY_PLAN": "stale", "HAMACA_PLAN": "stale"}
-        relay._apply_node_env(child, None, "/s/scratch.md", None)
-        self.assertEqual(child["HAMACA_NODE_SCRATCH"], "/s/scratch.md")
-        self.assertEqual(child["RELAY_NODE_SCRATCH"], "/s/scratch.md")
-        self.assertNotIn("HAMACA_PLAN", child)
-        self.assertNotIn("RELAY_PLAN", child)
-
-    def test_export_env_sets_both_names_or_pops_both(self):
-        child = {"HAMACA_REF": "old", "RELAY_REF": "old"}
-        relay.export_env(child, "REF", "RE1")
-        self.assertEqual((child["HAMACA_REF"], child["RELAY_REF"]), ("RE1", "RE1"))
-        relay.export_env(child, "REF", None)
-        self.assertEqual(child, {})
-
-    # Scenario 7
-    def test_an_agent_child_sees_both_outcome_names(self):
+    def test_an_agent_child_sees_only_the_hamaca_outcome_name(self):
+        os.environ["RELAY_NODE_OUTCOME"] = "/stale"
         seen = {}
         self.addCleanup(setattr, relay.subprocess, "Popen", relay.subprocess.Popen)
         relay.subprocess.Popen = lambda cmd, *a, **k: (
@@ -14759,33 +14876,28 @@ class EnvTwinTest(unittest.TestCase):
         capture_ret(relay._stream_agent_job, CLAUDE_ARGV, cwd="/tmp/wt",
                     outcome_path="/tmp/wt/out.json")
         self.assertEqual(seen["env"]["HAMACA_NODE_OUTCOME"], "/tmp/wt/out.json")
-        self.assertEqual(seen["env"]["RELAY_NODE_OUTCOME"], "/tmp/wt/out.json")
+        self.assertNotIn("RELAY_NODE_OUTCOME", seen["env"])
 
-    def test_outcome_writes_to_relay_node_outcome_when_only_that_is_set(self):
+    def test_outcome_with_only_relay_node_outcome_dies_naming_hamaca(self):
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, True)
         path = os.path.join(tmp, "outcome.json")
         os.environ["RELAY_NODE_OUTCOME"] = path
-        args = relay.build_parser().parse_args(["outcome", "succeeded", "--detail", "ok"])
-        args.func(args)
-        with open(path) as f:
-            self.assertEqual(json.load(f)["outcome"], "succeeded")
-
-    def test_outcome_without_either_name_dies_naming_hamaca(self):
         args = relay.build_parser().parse_args(["outcome", "succeeded"])
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(relay.Died) as ctx:
                 args.func(args)
         self.assertIn("HAMACA_NODE_OUTCOME is not set", ctx.exception.msg)
+        self.assertFalse(os.path.exists(path))
 
-    # Scenario 9
+    # Scenario 20 (the env half)
     def test_the_env_lists_are_pinned_in_the_contract_fixture(self):
-        self.assertEqual(relay.ENV_PREFIXES, tuple(CONTRACT["env"]["prefixes"]))
+        self.assertEqual(relay.ENV_PREFIX, CONTRACT["env"]["prefix"])
+        self.assertEqual(relay.ENV_PREFIX, "HAMACA_")
+        self.assertEqual(relay.RETIRED_ENV_PREFIX, "RELAY_")
         self.assertEqual(relay.ENV_READ, tuple(CONTRACT["env"]["read"]))
         self.assertEqual(relay.ENV_EXPORTED, tuple(CONTRACT["env"]["exported"]))
-        self.assertEqual(relay.ENV_PREFIXES, ("HAMACA_", "RELAY_"))
 
-    # Scenario 18
     def test_the_outcome_contract_names_hamaca_node_scratch(self):
         self.assertIn("$HAMACA_NODE_SCRATCH", relay.OUTCOME_CONTRACT)
         self.assertNotIn("$RELAY_NODE_SCRATCH", relay.OUTCOME_CONTRACT)
@@ -14802,8 +14914,8 @@ class EnvTwinTest(unittest.TestCase):
 
 
 class RepoStateResolverTest(unittest.TestCase):
-    """RE478: repo state resolves `.hamaca/X` → `.relay/X`; new files go to `.hamaca/` except in
-    an unmigrated repo running as ./relay that only has `.relay/`."""
+    """RE482: repo state is always `.hamaca/<name>`; a `.relay/` is ignored at runtime and only
+    `update` migrates it."""
 
     def setUp(self):
         self.root = os.path.realpath(tempfile.mkdtemp(prefix="relay-state-"))
@@ -14820,83 +14932,45 @@ class RepoStateResolverTest(unittest.TestCase):
         os.chmod(path, mode)
         return path
 
-    # Scenario 10
-    def test_hamaca_wins_when_both_exist(self):
-        self.put(".hamaca/runner.json")
+    # Scenario 11
+    def test_a_dot_relay_alone_is_ignored(self):
         self.put(".relay/runner.json")
         self.assertEqual(relay.repo_state_rel("runner.json"), ".hamaca/runner.json")
         self.assertEqual(relay.repo_state_path("runner.json"),
                          os.path.join(self.root, ".hamaca", "runner.json"))
 
-    def test_an_existing_relay_file_is_read(self):
+    def test_a_relay_cli_still_resolves_to_dot_hamaca(self):
+        relay.HERE = os.path.join(self.root, "relay")
         self.put(".relay/runner.json")
-        self.assertEqual(relay.repo_state_rel("runner.json"), ".relay/runner.json")
-
-    def test_a_new_file_goes_to_hamaca_for_a_hamaca_cli(self):
-        os.makedirs(os.path.join(self.root, ".relay"))
-        self.assertEqual(relay.repo_state_rel("runner.json"), ".hamaca/runner.json")
-
-    def test_a_new_file_goes_to_relay_for_an_unmigrated_relay_cli(self):
-        relay.HERE = os.path.join(self.root, "relay")
-        os.makedirs(os.path.join(self.root, ".relay"))
-        self.assertEqual(relay.repo_state_rel("runner.json"), ".relay/runner.json")
-
-    def test_a_new_file_goes_to_hamaca_for_a_relay_cli_with_no_state_dir(self):
-        relay.HERE = os.path.join(self.root, "relay")
-        self.assertEqual(relay.repo_state_rel("runner.json"), ".hamaca/runner.json")
-
-    def test_a_relay_cli_with_both_dirs_creates_under_hamaca(self):
-        relay.HERE = os.path.join(self.root, "relay")
-        os.makedirs(os.path.join(self.root, ".relay"))
-        os.makedirs(os.path.join(self.root, ".hamaca"))
         self.assertEqual(relay.repo_state_rel("scaffold.json"), ".hamaca/scaffold.json")
 
-    # Scenario 11
     def pool(self):
         return relay.RunnerPool({"namespace": "t", "capacity": {"shared_clean": 1, "exclusive": 1}})
 
-    def test_the_prepare_hook_falls_back_to_dot_relay(self):
-        old = self.put(".relay/prepare-worktree.sh", "#!/bin/sh\nexit 0\n", 0o755)
-        self.assertEqual(self.pool()._hook_path("prepare"), old)
-
-    def test_the_dot_hamaca_prepare_hook_wins(self):
+    def test_a_dot_relay_prepare_hook_is_not_run(self):
         self.put(".relay/prepare-worktree.sh", "#!/bin/sh\nexit 0\n", 0o755)
+        self.assertIsNone(self.pool()._hook_path("prepare"))
+
+    def test_the_dot_hamaca_prepare_hook_is_the_default(self):
         new = self.put(".hamaca/prepare-worktree.sh", "#!/bin/sh\nexit 0\n", 0o755)
         self.assertEqual(self.pool()._hook_path("prepare"), new)
 
-    def test_load_runner_config_reads_the_resolved_file(self):
+    def test_load_runner_config_ignores_dot_relay(self):
         self.put(".relay/runner.json", '{"namespace": "from-relay"}\n')
-        self.assertEqual(relay.load_runner_config()["namespace"], "from-relay")
+        self.assertNotEqual(relay.load_runner_config()["namespace"], "from-relay")
         self.put(".hamaca/runner.json", '{"namespace": "from-hamaca"}\n')
         self.assertEqual(relay.load_runner_config()["namespace"], "from-hamaca")
 
 
-class PreMigrationNoteTest(unittest.TestCase):
-    """RE478: the full runner, run as ./relay, tells a human at a terminal to migrate."""
+class PreMigrationNoteRetiredTest(unittest.TestCase):
+    """RE482 scenario 19: the pre-migration note is gone with the window — a runner named
+    ./relay says nothing extra, even to a human at a terminal."""
 
-    # Scenario 15
-    def test_should_note_only_for_a_human_at_a_terminal(self):
-        should_note = relay.should_note
-        self.assertTrue(should_note(["relay", "board"], {}, True))
-        self.assertFalse(should_note(["relay", "board"], {}, False))
-        self.assertFalse(should_note(["relay", "board", "--json"], {}, True))
-        self.assertFalse(should_note(["relay", "card", "RE1", "--field", "title"], {}, True))
-        self.assertFalse(should_note(["relay", "start"], {}, True))
-        self.assertFalse(should_note(["relay", "board"], {"HAMACA_NODE_SCRATCH": "/x"}, True))
-        self.assertFalse(should_note(["relay", "board"], {"RELAY_NODE_OUTCOME": "/x"}, True))
+    def test_the_note_and_its_rule_are_gone(self):
+        for name in ("NOTE_PRE_MIGRATION", "should_note", "NOTE_NODE_ENV", "NOTE_QUIET_FLAGS"):
+            self.assertFalse(hasattr(relay, name), name)
 
-    # Scenario 16
-    def test_a_piped_relay_copy_prints_no_note(self):
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp, True)
-        copy_path = os.path.join(tmp, "relay")
-        shutil.copy(RELAY_PATH, copy_path)
-        out = subprocess.run([sys.executable, copy_path, "--help"], cwd=tmp,
-                             capture_output=True, text=True, timeout=60)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertNotIn("note:", out.stderr)
-
-    def _main_stderr(self, here):
+    def test_main_run_as_relay_at_a_terminal_prints_no_note(self):
         ran = []
 
         class TTY(io.StringIO):
@@ -14904,35 +14978,18 @@ class PreMigrationNoteTest(unittest.TestCase):
                 return True
 
         err = TTY()
-
-        def fake_board(args):
-            ran.append(err.getvalue())
-
         parser = relay.build_parser()
         for action in parser._subparsers._group_actions:
-            action.choices["board"].set_defaults(func=fake_board)
-        env = {k: v for k, v in os.environ.items()
-               if not any(k == p + s for p in relay.ENV_PREFIXES for s in ("NODE_SCRATCH", "NODE_OUTCOME"))}
-        with unittest.mock.patch.object(relay, "HERE", here), \
+            action.choices["board"].set_defaults(func=lambda args: ran.append(err.getvalue()))
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("HAMACA_", "RELAY_"))}
+        with unittest.mock.patch.object(relay, "HERE", "/x/relay"), \
                 unittest.mock.patch.object(relay, "build_parser", lambda: parser), \
                 unittest.mock.patch.object(sys, "argv", ["relay", "board"]), \
                 unittest.mock.patch.dict(os.environ, env, clear=True), \
                 unittest.mock.patch.object(sys, "stderr", err):
             relay.main()
-        return ran, err.getvalue()
-
-    def test_main_as_relay_writes_the_dim_note_before_the_command(self):
-        ran, err = self._main_stderr("/x/relay")
-        note = "\x1b[2m" + relay.NOTE_PRE_MIGRATION + "\x1b[0m\n"
-        self.assertEqual(err, note)
-        self.assertEqual(ran, [note])
-        self.assertEqual(relay.NOTE_PRE_MIGRATION,
-                         "note: ./relay is now ./hamaca. Run `./relay update` to switch this repo.")
-
-    def test_main_as_hamaca_writes_nothing(self):
-        ran, err = self._main_stderr("/x/hamaca")
-        self.assertEqual(err, "")
         self.assertEqual(ran, [""])
+        self.assertEqual(err.getvalue(), "")
 
 
 if __name__ == "__main__":

@@ -1418,14 +1418,15 @@ sharing behavior.
   ignores talk jobs; `stop_turn/1` revokes unconditionally so a person can always end it. Not
   here in step 1: receipts, `awaiting` turns, the write lease, card-level runner pinning — a
   talk turn never moves the card's baton.
-- **Scaffold** — the Hamaca-owned files the board serves at `/api/scaffold`, in two layouts
-  (RE478, `Hamaca.Scaffold.layouts/0`): **legacy** (no `layout` param — `./relay` as the full
-  runner, `relay.md` and the three `relay-*` skills, generated from the hamaca sources by
-  `to_legacy_names/1`) and **hamaca** (`?layout=hamaca` — `./hamaca`, `hamaca.md`, the
-  `hamaca-*` skills, the `./relay` shim and the `relay-*` alias skills); an unknown layout is a
-  400 `unknown_layout`. The layout's runner has the board's URL baked into its `BOARD_URL` line
-  (RE443). Built into `priv/scaffold/<layout>/` by `mix hamaca.build_scaffold`
-  (RE304, [ADR 0010](../adr/0010-serving-the-scaffold-from-the-app.md)).
+- **Scaffold** — the Hamaca-owned files the board serves at `/api/scaffold`, in one layout
+  (RE482, `Hamaca.Scaffold.layouts/0` = `["hamaca"]`): `?layout=hamaca` — `./hamaca`,
+  `hamaca.md` and the three `hamaca-*` skills (`items("hamaca")`). A request with no `layout`
+  param or with the retired `legacy` (`retired_layout/0`) — only a v≤93 `./relay` sends one — is a
+  **410 `runner_renamed`** (`retired_code/0`) naming the board's install one-liner; any other
+  layout is a 400 `unknown_layout`. RE478's legacy layout, `./relay` shim and `relay-*` alias
+  skills are gone. The runner has the board's URL baked into its `BOARD_URL` line (RE443). Built
+  into `priv/scaffold/hamaca/` by `mix hamaca.build_scaffold` (RE304,
+  [ADR 0010](../adr/0010-serving-the-scaffold-from-the-app.md)).
 - **Setup** (`Hamaca.Setup`, RE443) — a board's **setup checklist**, the guided path from "board
   created from a template" to "an agent picked up the first card". Owns the ONE step catalog
   (`steps/0`, in order 1–5, 5.1–5.8, 6, 7: `id`, `parent`, `title`, `done_title`, `actor` —
@@ -1539,7 +1540,7 @@ sharing behavior.
   and marks step 4 `:waiting`
   (`"preflight passed HH:MM · <machine>"`, `data.checks`) or `:failed` (the first failure's
   `headline` as `error`, plus `checks` / `headline` / `fix` / `fix_command` in `data`); it answers
-  the board name, the onboarding LLM, `relay_files` (`Hamaca.Scaffold.primary_items/1` over the LLM's
+  the board name, the onboarding LLM, `hamaca_files` (`Hamaca.Scaffold.primary_items/1` over the LLM's
   `skill_dir`, RE457/RE478) and every check with its fix text. `preflight_checks/0` is
   the ONE list of the script's local check ids and labels (`git_repo`, `remote`,
   `default_branch`, `python3`), whose fix texts live beside it; the server adds the `cli` and

@@ -114,7 +114,7 @@
       "host": "fixture-host",
       "interval": 30,
       "name": "fixture",
-      "version": 99
+      "version": 102
     },
     "running": []
   },
@@ -129,10 +129,7 @@
       "WORKTREE",
       "CACHE_DIR"
     ],
-    "prefixes": [
-      "HAMACA_",
-      "RELAY_"
-    ],
+    "prefix": "HAMACA_",
     "read": [
       "URL",
       "API_KEY",
@@ -245,7 +242,7 @@
         "host": "fixture-host",
         "interval": 30,
         "name": "fixture",
-        "version": 99
+        "version": 102
       },
       "running": [],
       "sessions": {
@@ -256,7 +253,7 @@
       "harnesses_digest": "<harnesses-digest>",
       "latest_runner_version": "<latest-runner-version>",
       "release_held": [],
-      "required_version": 88,
+      "required_version": 102,
       "revoked": [],
       "runner_outdated": false,
       "want_capabilities": false
@@ -339,44 +336,12 @@
   },
   "scaffold": {
     "board_url_line_example": "BOARD_URL = \"http://board.test\"",
-    "file_path_example": "/api/scaffold/relay",
+    "file_path_example": "/api/scaffold/hamaca",
     "layout_param": "layout",
     "layouts": {
-      "hamaca": "hamaca",
-      "legacy": "relay"
+      "hamaca": "hamaca"
     },
     "manifest": {
-      "items": [
-        {
-          "bytes": "<bytes>",
-          "path": ".claude/skills/relay-doctor/SKILL.md",
-          "sha256": "<sha256>"
-        },
-        {
-          "bytes": "<bytes>",
-          "path": ".claude/skills/relay-onboard/SKILL.md",
-          "sha256": "<sha256>"
-        },
-        {
-          "bytes": "<bytes>",
-          "path": ".claude/skills/relay-update/SKILL.md",
-          "sha256": "<sha256>"
-        },
-        {
-          "bytes": "<bytes>",
-          "path": "relay",
-          "sha256": "<sha256>",
-          "unbaked_sha256": "<sha256>"
-        },
-        {
-          "bytes": "<bytes>",
-          "path": "relay.md",
-          "sha256": "<sha256>"
-        }
-      ],
-      "version": "<scaffold-version>"
-    },
-    "manifest_hamaca": {
       "items": [
         {
           "bytes": "<bytes>",
@@ -395,21 +360,6 @@
         },
         {
           "bytes": "<bytes>",
-          "path": ".claude/skills/relay-doctor/SKILL.md",
-          "sha256": "<sha256>"
-        },
-        {
-          "bytes": "<bytes>",
-          "path": ".claude/skills/relay-onboard/SKILL.md",
-          "sha256": "<sha256>"
-        },
-        {
-          "bytes": "<bytes>",
-          "path": ".claude/skills/relay-update/SKILL.md",
-          "sha256": "<sha256>"
-        },
-        {
-          "bytes": "<bytes>",
           "path": "hamaca",
           "sha256": "<sha256>",
           "unbaked_sha256": "<sha256>"
@@ -418,16 +368,16 @@
           "bytes": "<bytes>",
           "path": "hamaca.md",
           "sha256": "<sha256>"
-        },
-        {
-          "bytes": "<bytes>",
-          "path": "relay",
-          "sha256": "<sha256>"
         }
       ],
       "version": "<scaffold-version>"
     },
-    "manifest_path": "/api/scaffold"
+    "manifest_path": "/api/scaffold",
+    "retired": {
+      "code": "runner_renamed",
+      "layout": "legacy",
+      "status": 410
+    }
   },
   "setup": {
     "interview_keys": [

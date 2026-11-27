@@ -1,9 +1,9 @@
 ---
 name: hamaca-onboard
-description: Use when wiring a repo to a Relay board for the first time — after the board's install script has run — to work step 5 of the board's guided-setup checklist (sub-steps 5.1–5.8: pull the flows, detect the repo, interview, customize, push, land the files, follow-ups, first card) as a resumable loop through `./hamaca setup status` and `./hamaca setup report`. Keywords: onboard, wire up, set up Relay, new project, guided setup, setup checklist, step 5, project.md.
+description: Use when wiring a repo to a Hamaca board for the first time — after the board's install script has run — to work step 5 of the board's guided-setup checklist (sub-steps 5.1–5.8: pull the flows, detect the repo, interview, customize, push, land the files, follow-ups, first card) as a resumable loop through `./hamaca setup status` and `./hamaca setup report`. Keywords: onboard, wire up, set up Hamaca, new project, guided setup, setup checklist, step 5, project.md.
 ---
 
-# Relay Onboard
+# Hamaca Onboard
 
 ## Overview
 
@@ -29,7 +29,7 @@ with the loop in the same turn.
 **Never run this from a flow node.** It asks the human questions; a flow node has nobody to
 answer.
 
-**Blast radius:** Relay's own files only — `./hamaca`, the onboarding skill file(s), `hamaca.md`
+**Blast radius:** Hamaca's own files only — `./hamaca`, the onboarding skill file(s), `hamaca.md`
 and the one pointer line in your LLM's convention file, `.gitignore`, everything under
 `.hamaca/` (flows, `runner.json`, `prepare-worktree.sh`, `project.md`) — plus the board's flows
 and the cards made in 5.7–5.8. On a copied board, 5.4 may also write the missing
@@ -75,16 +75,16 @@ and first-card sub-steps are already `skipped`. Only 5.1 and 5.6 are left.
   does>."*
 - Do **5.1** exactly as written.
 - At **5.6**, do **not** commit, push or open a PR. `git fetch`, then check that every
-  Relay-owned file exists on origin/<base> — `./hamaca`, `hamaca.md`, `.hamaca/scaffold.json`,
+  Hamaca-owned file exists on origin/<base> — `./hamaca`, `hamaca.md`, `.hamaca/scaffold.json`,
   `<llm.skill_dir>/hamaca-onboard/SKILL.md`, `<llm.skill_dir>/hamaca-update/SKILL.md` and
   `<llm.skill_dir>/hamaca-doctor/SKILL.md` (status `llm.skill_dir`) — with
   `git cat-file -e origin/<base>:<path>` for **each** of the six. If they all do:
 
-      ./hamaca setup report 5.6 --status done --evidence "origin/<base> has the Relay files"
+      ./hamaca setup report 5.6 --status done --evidence "origin/<base> has the Hamaca files"
 
   Otherwise:
 
-      ./hamaca setup report 5.6 --status failed --error "The Relay files aren't on origin/<base> yet. Finish onboarding on the first machine, then run /hamaca-onboard again."
+      ./hamaca setup report 5.6 --status failed --error "The Hamaca files aren't on origin/<base> yet. Finish onboarding on the first machine, then run /hamaca-onboard again."
 
 Then go to **Close**.
 
@@ -171,7 +171,7 @@ At the end write `.hamaca/project.md` in this format — a title, then one secti
 in catalog order, its `label` as the heading, the question on one italic line, the answer
 beneath it:
 
-    # <board> — project notes for Relay
+    # <board> — project notes for Hamaca
 
     ## Done means
     *What does "done" mean for a card: a PR opened, merged, or deployed?*
@@ -237,7 +237,7 @@ Candidates:
 - flow commands and nodes (e.g. the validate command → the "all green" command; drop the
   screenshot and smoke nodes when there is no UI);
 - `.hamaca/runner.json` — `capacity`, from the `capacity` answer (how much of the LLM plan
-  Relay may use is set per harness on the board — say so);
+  Hamaca may use is set per harness on the board — say so);
 - the `WARM=""` list in `.hamaca/prepare-worktree.sh`, from the `warm_up` answer;
 - pointers to `.hamaca/project.md` (and the never-touch list) in flow prompts.
 
@@ -270,7 +270,7 @@ Re-read status — the board ticks 5.5 itself once every board flow has arrived 
 "Pushed <N> flows; they're enabled." A rejected push (e.g. a 422 naming a node) is a step that
 won't go green: fix the flow file and retry, at most 3 attempts.
 
-## 5.6 Relay files on origin/<base>
+## 5.6 Hamaca files on origin/<base>
 
 **First, run `/hamaca-doctor`** (invoke the skill) now that the flows are on the board. It checks
 that every node resolves to a real agent, skill, command or binary in this repo, so a broken
@@ -280,8 +280,8 @@ goes back with `./hamaca flow-push`. Two of its warnings are expected at this po
 fix: no runner is online yet (that's step 6), and the board has no run history to audit. Anything
 the human chooses to leave becomes a 5.7 card.
 
-Then say *"The runner can't work until these changes are on origin/<base>."* Commit everything Relay
-wrote — the Relay-owned files `./hamaca`, `hamaca.md`, `.hamaca/scaffold.json` and the three skills
+Then say *"The runner can't work until these changes are on origin/<base>."* Commit everything Hamaca
+wrote — the Hamaca-owned files `./hamaca`, `hamaca.md`, `.hamaca/scaffold.json` and the three skills
 `<llm.skill_dir>/hamaca-onboard/SKILL.md`, `<llm.skill_dir>/hamaca-update/SKILL.md` and
 `<llm.skill_dir>/hamaca-doctor/SKILL.md` (status `llm.skill_dir`); the pointer-file line (status
 `llm.pointer_file`), `.gitignore`, `.hamaca/` including `.hamaca/project.md`; and any `.claude/agents/*.md`,
@@ -347,6 +347,6 @@ and that the first card turns violet on the board when an agent picks it up. Exi
 - **Writing during 5.4's agreement.** No file — flows, `runner.json`, the warm-up hook, prompt
   pointers — changes until the last change is decided (the missing-files walk excepted).
 - **Reporting a partial list.** 5.3 sends all answers so far; 5.4 sends the whole change list.
-- **Committing more than Relay's files in 5.6.** Stage paths by name; app code is never part of
+- **Committing more than Hamaca's files in 5.6.** Stage paths by name; app code is never part of
   it.
 - **Looping on a broken step.** Three attempts, then report `failed` and ask the human.

@@ -219,20 +219,24 @@ defmodule Hamaca.Runs.RunnerStatusTest do
     end
   end
 
-  describe "pre_rename (RE486)" do
-    test "each entry carries cli and pre_rename; an outdated runner keeps its treatment", %{board: board} do
-      insert(:runner, board: board, name: "old", version: 94, cli: "relay")
-      insert(:runner, board: board, name: "new", version: 94, cli: "hamaca")
-      insert(:runner, board: board, name: "ancient", version: Runs.min_runner_version() - 1, cli: "relay")
+  describe "pre_rename (RE486, RE482)" do
+    # RE482: `pre_rename` now means "refused, and the reason is the rename" — it implies outdated.
+    test "a refused ./relay runner is pre_rename and outdated; a ./hamaca one is never pre_rename",
+         %{board: board} do
+      n = Runs.min_runner_version()
+      insert(:runner, board: board, name: "old", version: 93, cli: "relay")
+      insert(:runner, board: board, name: "mid", version: n - 1, cli: "relay")
+      insert(:runner, board: board, name: "ham", version: n - 1, cli: "hamaca")
+      insert(:runner, board: board, name: "cur", version: n, cli: "hamaca")
 
       statuses = Map.new(Runs.list_runner_status(board), &{&1.name, &1})
 
-      assert statuses["old"].pre_rename == true
-      assert statuses["new"].pre_rename == false
-      assert statuses["ancient"].pre_rename == false
-      assert statuses["old"].cli == "relay"
-      assert statuses["ancient"].outdated == true
-      assert statuses["ancient"].display_state == :outdated
+      for name <- ["old", "mid"] do
+        assert %{pre_rename: true, outdated: true, display_state: :outdated, cli: "relay"} = statuses[name]
+      end
+
+      assert %{pre_rename: false, outdated: true} = statuses["ham"]
+      assert %{pre_rename: false, outdated: false} = statuses["cur"]
     end
   end
 

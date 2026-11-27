@@ -7,8 +7,8 @@ defmodule HamacaWeb.Api.SetupController do
   first authed call ticks setup step 3), installed after (finishing step 4).
   `Hamaca.Setup.preflight/2` / `installed/2` do the work.
 
-  `GET /api/setup` and `POST /api/setup/steps/:step` (RE445) are how `./relay setup status|report`
-  — and through it the `/relay-onboard` skill — read the checklist and move its reportable step
+  `GET /api/setup` and `POST /api/setup/steps/:step` (RE445) are how `./hamaca setup status|report`
+  — and through it the `/hamaca-onboard` skill — read the checklist and move its reportable step
   (`Hamaca.Setup.reportable_id/1`). Both answer `{"data": checklist}` (`HamacaWeb.Api.SetupJSON`).
   Every endpoint works the key's own setup (`Hamaca.Setup.target_for_key/1`, RE446): a connected
   machine's checklist for the key minted for it, else the board's.

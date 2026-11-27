@@ -1006,37 +1006,60 @@ defmodule Hamaca.RunsTest do
   end
 
   # RE486 — the relay→hamaca CLI rename (RE478), NOT NodeJobController's RE319 wire rename.
-  describe "pre_rename_runner?/1 (RE486)" do
-    test "a current runner reporting cli relay is pre-rename" do
-      assert Runs.pre_rename_runner?(%Schemas.Runner{version: 94, cli: "relay"})
+  describe "pre_rename_runner?/1 (RE486, RE482)" do
+    # RE482: true iff the runner is REFUSED (`runner_outdated?/1`) and the reason is the rename —
+    # it reports `cli: "relay"`, or reports no cli and predates the first `./hamaca` version.
+    # N is the floor, read from its one source rather than re-typed.
+    setup do
+      %{n: Runs.min_runner_version()}
     end
 
-    test "a current runner reporting cli hamaca is not pre-rename" do
-      refute Runs.pre_rename_runner?(%Schemas.Runner{version: 94, cli: "hamaca"})
+    defp pre_rename?(cli, version), do: Runs.pre_rename_runner?(%Schemas.Runner{cli: cli, version: version})
+
+    test "a ./relay runner below the floor is pre-rename", %{n: n} do
+      for v <- [93, 94, n - 1], do: assert(pre_rename?("relay", v), "relay v#{v}")
     end
 
-    test "a runner below the first hamaca version reporting no cli is pre-rename" do
-      version = Runs.first_hamaca_runner_version() - 1
-      assert version >= Runs.min_runner_version()
-      assert Runs.pre_rename_runner?(%Schemas.Runner{version: version, cli: nil})
+    test "a ./relay runner at or above the floor is not pre-rename", %{n: n} do
+      for v <- [n, n + 1], do: refute(pre_rename?("relay", v), "relay v#{v}")
     end
 
-    test "a runner at the first hamaca version reporting no cli is not pre-rename" do
-      refute Runs.pre_rename_runner?(%Schemas.Runner{version: Runs.first_hamaca_runner_version(), cli: nil})
+    test "an outdated ./hamaca runner is not pre-rename", %{n: n} do
+      for v <- [93, n - 1], do: refute(pre_rename?("hamaca", v), "hamaca v#{v}")
     end
 
-    test "an outdated runner is never pre-rename, even reporting cli relay" do
-      refute Runs.pre_rename_runner?(%Schemas.Runner{version: Runs.min_runner_version() - 1, cli: "relay"})
+    test "a current ./hamaca runner is not pre-rename", %{n: n} do
+      refute pre_rename?("hamaca", n)
+    end
+
+    test "a runner reporting no cli that predates the first ./hamaca version is pre-rename" do
+      assert pre_rename?(nil, 93)
+    end
+
+    test "a runner reporting no cli at or past the first ./hamaca version is not pre-rename", %{n: n} do
+      for v <- [94, n - 1, n], do: refute(pre_rename?(nil, v), "nil cli v#{v}")
     end
 
     test "a runner reporting no version is never pre-rename" do
-      refute Runs.pre_rename_runner?(%Schemas.Runner{version: nil, cli: nil})
-      refute Runs.pre_rename_runner?(%Schemas.Runner{version: nil, cli: "relay"})
+      refute pre_rename?("relay", nil)
+      refute pre_rename?(nil, nil)
+    end
+  end
+
+  describe "the RE482 floor" do
+    test "refuses every ./relay install: the floor is the RUNNER_VERSION ./hamaca declares" do
+      # 102 is the RUNNER_VERSION ./hamaca declared when RE482 raised the floor (the first build
+      # that no longer serves any ./relay). `>=` so a later RUNNER_VERSION bump that leaves the
+      # floor alone does not break this; the floor may never exceed what ./hamaca declares.
+      declared = Hamaca.Scaffold.parse_runner_version(File.read!("hamaca"))
+
+      assert Runs.min_runner_version() >= 102
+      assert declared >= Runs.min_runner_version()
     end
 
-    test "the cutoff is 94, above the minimum runner version" do
+    test "the first ./hamaca version stays 94, below the floor" do
       assert Runs.first_hamaca_runner_version() == 94
-      assert Runs.first_hamaca_runner_version() > Runs.min_runner_version()
+      assert Runs.first_hamaca_runner_version() < Runs.min_runner_version()
     end
   end
 
@@ -2041,7 +2064,7 @@ defmodule Hamaca.RunsTest do
       # the ~15s before the release channel fires, and the card carries a cancelled run and a
       # running one — the tree belongs to the live run, so the ref must not be named. The
       # runner is what makes that safe: `assign` adopts the card's own idle tree for R2
-      # instead of refusing it (bin/test_relay.py's
+      # instead of refusing it (bin/test_hamaca.py's
       # `test_a_new_run_adopts_the_cards_idle_worktree_bound_to_an_old_run`).
       flow = retry_flow(board)
       card = card_in(board, "Next up", "cancel then retry")

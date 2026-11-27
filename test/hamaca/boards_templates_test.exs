@@ -25,6 +25,17 @@ defmodule Hamaca.BoardsTemplatesTest do
   end
 
   describe "the library" do
+    # RE482: the runner exports only `HAMACA_<suffix>`, so a template-seeded flow reads no `RELAY_*`.
+    test "every template flow seeds a board that reads no RELAY_ env name" do
+      for slug <- @slugs, flow <- Flows.list_flows(create!(slug)), node <- flow.nodes, is_binary(node.run) do
+        refute node.run =~ "RELAY_", "#{slug}/#{flow.key}/#{node.key} still reads a RELAY_ name"
+      end
+
+      assert Enum.any?(Flows.list_flows(create!("design-led")), fn flow ->
+               Enum.any?(flow.nodes, &(is_binary(&1.run) and &1.run =~ "$HAMACA_NODE_SCRATCH"))
+             end)
+    end
+
     # Scenario 1
     test "slugs/0 is the three templates in picker order, and all/0 follows it" do
       assert Templates.slugs() == @slugs

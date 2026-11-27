@@ -62,7 +62,8 @@ defmodule Hamaca.Runs.SchedulerExplainTest do
        version: Keyword.get(opts, :version, 1),
        outdated: Keyword.get(opts, :outdated, false),
        freshness: Keyword.get(opts, :freshness, :fresh),
-       rate_limit: Keyword.get(opts, :rate_limit)
+       rate_limit: Keyword.get(opts, :rate_limit),
+       pre_rename: Keyword.get(opts, :pre_rename, false)
      }}
   end
 
@@ -282,6 +283,21 @@ defmodule Hamaca.Runs.SchedulerExplainTest do
                Scheduler.capacity_diagnosis(snap(cards: [], runners: Map.new([exec(1, freshness: :gone)])))
 
       assert {:awaiting_capacity, _} = Scheduler.capacity_diagnosis(snap(cards: [], runners: Map.new([exec(1)])))
+    end
+
+    test "RE482: each running_versions entry carries exactly id, name, version and pre_rename" do
+      execs = Map.new([exec(1, outdated: true, version: 93, pre_rename: true), exec(2, outdated: true, version: 0)])
+
+      s = snap(cards: [], runners: execs)
+
+      assert {:runner_outdated, %{running_versions: rvs}} = Scheduler.capacity_diagnosis(s)
+
+      assert Enum.sort_by(rvs, & &1.id) == [
+               %{id: 1, name: "e1", version: 93, pre_rename: true},
+               %{id: 2, name: "e2", version: 0, pre_rename: false}
+             ]
+
+      assert Enum.all?(rvs, &(&1 |> Map.keys() |> Enum.sort() == [:id, :name, :pre_rename, :version]))
     end
   end
 

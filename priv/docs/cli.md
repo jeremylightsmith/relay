@@ -156,10 +156,10 @@ until each one reaches Done.
 restarts between jobs, so nothing running is cut off.
 
 `./hamaca update` refreshes everything Hamaca puts in your repo: `./hamaca`, `hamaca.md` and
-the three `hamaca-*` skills, plus the old-name `./relay` shim and its three `relay-*` alias
-skills. Those files belong to Hamaca, so an update overwrites any edits you made to them. It
+the three `hamaca-*` skills. Those files belong to Hamaca, so an update overwrites any edits you made to them. It
 also creates `.hamaca/runner.json` if you don't have one, but never overwrites it. In a repo
-still set up under the old `./relay` names, it moves you over to the new ones.
+still set up under the old `./relay` names, it moves you over to the new ones (see
+[Upgrading from ./relay](#upgrading-from-relay)).
 
 ```bash
 ./hamaca update --check    # what would change; writes nothing
@@ -199,17 +199,17 @@ edit. A step that runs a command should check out the card's branch first (it's 
 
 ## Upgrading from ./relay
 
-The CLI used to be called `./relay`. A repo set up then moves to the new names in two steps:
+The CLI used to be called `./relay`. Boards no longer accept it: a runner still installed as
+`./relay` is refused when it asks for work, and the board's Runners page marks it OUTDATED with
+the command to run. `./relay update` can't upgrade it any more.
 
-1. Run `./relay update`. It installs the new runner as `./relay`, so the repo keeps working
-   under the old name.
-2. Run `./relay update` again. This time the next `./relay update` renames the repo: `./relay`
-   becomes `./hamaca` (a small `./relay` stays and runs it), `.relay/` becomes `.hamaca/`,
-   `relay.md` becomes `hamaca.md`, the `relay-*` skills become `hamaca-*`, and the line in
-   your `CLAUDE.md` or `AGENTS.md` points at `hamaca.md`. Commit the result.
+To move a repo over, run your board's install command in the checkout. It's the
+`curl -fsSL …/install | sh` line that the Runners page and the setup wizard show. It installs
+`./hamaca`, then renames the repo: `.relay/` becomes `.hamaca/`, `relay.md` becomes `hamaca.md`,
+the `relay-*` skills become `hamaca-*`, an unmodified `./relay` is removed, and the line in your
+`CLAUDE.md` or `AGENTS.md` points at `hamaca.md`. Commit the result, then start the runner with
+`./hamaca start`.
 
-Then stop the runner and start it again with `./hamaca start`.
-
-Nothing breaks in between. `./relay`, the `RELAY_*` environment variables, `.relay/` and the
-`relay-*` skills keep working until RE482 ends the compatibility window. Rename `RELAY_API_KEY`
-in your shell setup to `HAMACA_API_KEY` when it suits you.
+The `RELAY_*` environment variables are no longer read. Rename them in your shell setup:
+`RELAY_API_KEY` becomes `HAMACA_API_KEY` and `RELAY_URL` becomes `HAMACA_URL`. `./hamaca` stops
+and names any old one it still finds.

@@ -69,9 +69,9 @@ defmodule Hamaca.PlanSkillsTest do
 
     test "/hamaca-doctor counts the task verbs as tasks evidence" do
       doc = File.read!(@doctor)
-      assert doc =~ "| `tasks` | `relay tasks add` |"
-      assert doc =~ "`relay task show`"
-      assert doc =~ "`relay tasks list`"
+      assert doc =~ "| `tasks` | `./hamaca tasks add` |"
+      assert doc =~ "`./hamaca task show`"
+      assert doc =~ "`./hamaca tasks list`"
     end
   end
 

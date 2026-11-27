@@ -227,7 +227,7 @@ defmodule HamacaWeb.Router do
   # Unauthenticated on purpose (RLY-177): the deployed SHA leaks nothing a deploy does not,
   # and "which release is live?" must be answerable before you have a board key in hand.
   # RE304 puts the scaffold here for the same reason: the board's install script downloads
-  # `./relay` before anything has authenticated. The exact route precedes the glob so `/api/scaffold`
+  # `./hamaca` before anything has authenticated. The exact route precedes the glob so `/api/scaffold`
   # is the manifest, not a zero-segment file lookup.
   # RE443: the board's install script, piped into `sh`. Public and pipeline-free on purpose —
   # it carries no secret, curl sends no `Accept: json`, and it answers plain text.

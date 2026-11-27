@@ -23,7 +23,7 @@ source of truth, and they are deliberately NOT copied into the plan (at `$HAMACA
 ./hamaca card <ref> --json | jq -r '.acceptance_criteria // ""'
 ```
 
-`HAMACA_URL` + `HAMACA_API_KEY` (or their `RELAY_` twins) are already set. If the field is empty, return `verdict: "pass"`
+`HAMACA_URL` + `HAMACA_API_KEY` are already set. If the field is empty, return `verdict: "pass"`
 with an empty `criteria` list and say so in `summary` — an unspecced card is a no-op, never an
 error.
 

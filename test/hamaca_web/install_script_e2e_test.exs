@@ -10,6 +10,7 @@ defmodule HamacaWeb.InstallScriptE2ETest do
   use HamacaWeb.ConnCase, async: false
 
   alias Hamaca.Boards
+  alias Hamaca.Scaffold
   alias Hamaca.Setup
   alias HamacaWeb.InstallScript
 
@@ -21,14 +22,12 @@ defmodule HamacaWeb.InstallScriptE2ETest do
   @ignores [".claude/worktrees/", "/tmp/", ".envrc.local"]
 
   # RE457: every Hamaca-owned file `./hamaca update` lays down, skills under the LLM's skill dir.
-  # RE478: the hamaca layout — `./hamaca`, `hamaca.md`, the `hamaca-*` skills, the `./relay` shim
-  # and the `relay-*` alias skills, with the repo state under `.hamaca/`.
+  # RE478, RE482: the hamaca layout — `./hamaca`, `hamaca.md` and the `hamaca-*` skills, with the
+  # repo state under `.hamaca/`. No `./relay` shim and no `relay-*` alias skills since RE482.
   @codex_files ~w(.agents/skills/hamaca-onboard/SKILL.md .agents/skills/hamaca-update/SKILL.md
-                  .agents/skills/hamaca-doctor/SKILL.md .agents/skills/relay-onboard/SKILL.md
-                  hamaca hamaca.md relay .hamaca/scaffold.json)
+                  .agents/skills/hamaca-doctor/SKILL.md hamaca hamaca.md .hamaca/scaffold.json)
   @claude_files ~w(.claude/skills/hamaca-onboard/SKILL.md .claude/skills/hamaca-update/SKILL.md
-                   .claude/skills/hamaca-doctor/SKILL.md .claude/skills/relay-onboard/SKILL.md
-                   hamaca hamaca.md relay .hamaca/scaffold.json)
+                   .claude/skills/hamaca-doctor/SKILL.md hamaca hamaca.md .hamaca/scaffold.json)
 
   setup %{tmp_dir: tmp} = tags do
     home = Path.join(tmp, "home")
@@ -152,6 +151,12 @@ defmodule HamacaWeb.InstallScriptE2ETest do
 
     assert status == 0, out
     for rel <- @claude_files, do: assert(File.exists?(Path.join(ctx.repo, rel)), "#{rel} missing\n#{out}")
+
+    # RE482 scenario 7: the "Writing:" preview lists the preflight's `hamaca_files`, one per line.
+    [_, preview] = String.split(out, "Writing:\n", parts: 2)
+
+    files = Scaffold.primary_items(".claude/skills")
+    assert preview |> String.split("\n") |> Enum.take(length(files)) == Enum.map(files, &"  #{&1}")
     assert count_lines(file(ctx, "CLAUDE.md"), Setup.pointer_line()) == 1
 
     assert %{"skill_dir" => ".claude/skills", "base" => "origin/main"} =
@@ -187,7 +192,7 @@ defmodule HamacaWeb.InstallScriptE2ETest do
 
     for rel <-
           ~w(.agents/skills/hamaca-onboard/SKILL.md .agents/skills/hamaca-update/SKILL.md
-             .agents/skills/hamaca-doctor/SKILL.md hamaca.md relay AGENTS.md .hamaca/runner.json
+             .agents/skills/hamaca-doctor/SKILL.md hamaca.md AGENTS.md .hamaca/runner.json
              .hamaca/prepare-worktree.sh .gitignore),
         do: assert(rel in files, "#{rel} not in #{inspect(files)}")
 
@@ -206,9 +211,9 @@ defmodule HamacaWeb.InstallScriptE2ETest do
     hamaca = file(ctx, "hamaca")
     assert hamaca =~ ~r/^#{Regex.escape(~s(BOARD_URL = "#{HamacaWeb.Endpoint.url()}"))}$/m
     assert executable?(ctx, "hamaca")
-    # RE478: ./relay is the compatibility shim that execs ./hamaca — not a runner.
-    refute file(ctx, "relay") =~ ~r/^RUNNER_VERSION\s*=/m
-    assert executable?(ctx, "relay")
+    # RE482: the compatibility shim is retired — a fresh install has no ./relay at all.
+    refute File.exists?(Path.join(ctx.repo, "relay"))
+    refute File.exists?(Path.join(ctx.repo, ".agents/skills/relay-onboard"))
 
     assert File.exists?(Path.join(ctx.repo, ".agents/skills/hamaca-onboard/SKILL.md"))
     assert File.exists?(Path.join(ctx.repo, "hamaca.md"))

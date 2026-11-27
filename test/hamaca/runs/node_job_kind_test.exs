@@ -119,7 +119,9 @@ defmodule Hamaca.Runs.NodeJobKindTest do
           board: ctx.board,
           name: "mac-now",
           capacity: %{"shared_clean" => 1, "exclusive" => 1},
-          version: Runs.shared_talk_min_version()
+          # RE482: the base floor now sits at or above the shared-talk floor, so a runner at the
+          # base floor is the fully current one (claims everything, shared talk included).
+          version: Runs.min_runner_version()
         )
 
       %{current: current}
@@ -147,7 +149,15 @@ defmodule Hamaca.Runs.NodeJobKindTest do
       assert claimed.id == job.id
     end
 
+    # Defense in depth (RE366 → RE482). Since RE482 raised the base floor to or past the
+    # shared-talk floor, a runner below the shared-talk floor is also below the base floor: over
+    # HTTP it is refused 409 before it claims, and in-process `claim_next_job/4` narrows it to flow
+    # kinds. The shared-talk gate is kept anyway — it is a fact about `./hamaca`, not about the
+    # floor — so this pins the predicate directly and checks an in-process claim (which skips the
+    # HTTP floor) still never hands such a runner a shared_clean talk turn, pinned or not.
     test "a runner below the shared-talk floor is never offered shared_clean talk", ctx do
+      refute Runs.shared_talk_capable?(%Schemas.Runner{version: Runs.shared_talk_min_version() - 1})
+
       older =
         insert(:runner,
           board: ctx.board,
@@ -156,15 +166,8 @@ defmodule Hamaca.Runs.NodeJobKindTest do
           version: Runs.shared_talk_min_version() - 1
         )
 
-      assert older.version >= Runs.min_runner_version()
-
       shared = Runs.insert_talk_job!(ctx.card, %{"turn_id" => 1, "isolation" => "shared_clean"}, nil)
       assert {:ok, nil} = Runs.claim_next_job(older, %{shared_clean: 1, exclusive: 1})
-
-      other = insert(:card, board: ctx.board, stage: insert(:stage, board: ctx.board))
-      exclusive = Runs.insert_talk_job!(other, %{"turn_id" => 2, "isolation" => "exclusive"}, nil)
-      assert {:ok, claimed} = Runs.claim_next_job(older, %{shared_clean: 1, exclusive: 1})
-      assert claimed.id == exclusive.id
 
       Repo.update_all(from(j in NodeJob, where: j.id == ^shared.id), set: [runner_name: "mac-older"])
       assert {:ok, nil} = Runs.claim_next_job(older, %{shared_clean: 1, exclusive: 1})
@@ -177,11 +180,11 @@ defmodule Hamaca.Runs.NodeJobKindTest do
       assert claimed.id == job.id
     end
 
-    test "shared-talk capability is a version floor above the runner floor" do
+    test "shared-talk capability is a version floor at or below the runner floor (RE482)" do
       refute Runs.shared_talk_capable?(%Schemas.Runner{version: nil})
       refute Runs.shared_talk_capable?(%Schemas.Runner{version: Runs.shared_talk_min_version() - 1})
       assert Runs.shared_talk_capable?(%Schemas.Runner{version: Runs.shared_talk_min_version()})
-      assert Runs.shared_talk_min_version() > Runs.min_runner_version()
+      assert Runs.shared_talk_min_version() <= Runs.min_runner_version()
     end
   end
 

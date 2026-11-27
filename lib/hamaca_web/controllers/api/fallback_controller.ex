@@ -154,7 +154,7 @@ defmodule HamacaWeb.Api.FallbackController do
     |> render(:error, code: "invalid", message: changeset_message(changeset))
   end
 
-  # The blob the drawer renders has one documented shape (relay.md § "The AI result blob"), and
+  # The blob the drawer renders has one documented shape (hamaca.md § "The AI result blob"), and
   # `Hamaca.Cards` owns both the vocabulary and this sentence — the caller is an agent that just
   # wrote the file, so the refusal names the key it invented and the ones that exist.
   def call(conn, {:error, {:invalid_ai_result, message}}) do

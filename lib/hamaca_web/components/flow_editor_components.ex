@@ -372,7 +372,7 @@ defmodule HamacaWeb.FlowEditorComponents do
             CARD CONTRACT
           </.meta_label>
           <%!-- Display only (RE244): a declared `writes` is ENFORCED at run time, so authoring
-          it belongs to `flow-push` + /relay-doctor's establish dialogue, never an inline
+          it belongs to `flow-push` + /hamaca-doctor's establish dialogue, never an inline
           control that could ship an aspirational declaration. --%>
           <div
             id="inspector-card-contract-value"

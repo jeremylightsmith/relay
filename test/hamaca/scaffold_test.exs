@@ -1,13 +1,12 @@
 defmodule Hamaca.ScaffoldTest do
   @moduledoc """
-  RE304, RE478. Two halves: `build!/2` against a throwaway source tree (never this repo's, so a
-  test can mutate a "skill" freely), and the read side against the scaffold `mix test` actually
-  built — which is the thing `/api/scaffold` serves.
+  RE304, RE478, RE482. Two halves: `build!/2` against a throwaway source tree (never this
+  repo's, so a test can mutate a "skill" freely), and the read side against the scaffold
+  `mix test` actually built — which is the thing `/api/scaffold` serves.
 
-  RE478 builds two layouts from one set of Hamaca-named sources: `legacy` (what every v≤93
-  `./relay` gets — a full runner at `relay`, complete `relay.md` and `relay-*` skills generated
-  by `to_legacy_names/1`) and `hamaca` (the runner at `hamaca`, the `relay` shim and the thin
-  `relay-*` alias skills served as they are).
+  RE482 retired the legacy layout and the compatibility-window shim and aliases: one layout,
+  `hamaca`, is built and served; `"legacy"` survives only as `retired_layout/0`, the value the
+  controller answers 410 to.
   """
   use ExUnit.Case, async: true
 
@@ -15,159 +14,73 @@ defmodule Hamaca.ScaffoldTest do
 
   @moduletag :tmp_dir
 
-  @legacy_items [
-    ".claude/skills/relay-doctor/SKILL.md",
-    ".claude/skills/relay-onboard/SKILL.md",
-    ".claude/skills/relay-update/SKILL.md",
-    "relay",
-    "relay.md"
-  ]
-
   @hamaca_items [
     ".claude/skills/hamaca-doctor/SKILL.md",
     ".claude/skills/hamaca-onboard/SKILL.md",
     ".claude/skills/hamaca-update/SKILL.md",
-    ".claude/skills/relay-doctor/SKILL.md",
-    ".claude/skills/relay-onboard/SKILL.md",
-    ".claude/skills/relay-update/SKILL.md",
     "hamaca",
-    "hamaca.md",
-    "relay"
-  ]
-
-  # Every repo source a layout is built from: the hamaca-named files, the shim and the aliases.
-  @sources [
-    ".claude/skills/hamaca-doctor/SKILL.md",
-    ".claude/skills/hamaca-onboard/SKILL.md",
-    ".claude/skills/hamaca-update/SKILL.md",
-    ".claude/skills/relay-doctor/SKILL.md",
-    ".claude/skills/relay-onboard/SKILL.md",
-    ".claude/skills/relay-update/SKILL.md",
-    "hamaca",
-    "hamaca.md",
-    "relay"
+    "hamaca.md"
   ]
 
   @runner ~s(#!/usr/bin/env python3\nRUNNER_VERSION = 94\nBOARD_URL = ""\n)
   @guide "Run ./hamaca card, see .hamaca/runner.json, hamaca.md, $HAMACA_NODE_SCRATCH, /hamaca-doctor\n"
-  @update_skill "---\nname: hamaca-update\ndescription: Refresh ./hamaca\n---\nRun ./hamaca update; it writes .hamaca/scaffold.json.\n"
-  @shim "#!/usr/bin/env python3\n# the ./relay shim\n"
-  @doctor_alias "---\nname: relay-doctor\ndescription: doctor\n---\nRenamed: use /hamaca-doctor.\n"
 
   setup %{tmp_dir: tmp_dir} do
     src = Path.join(tmp_dir, "src")
 
-    for rel <- @sources do
+    for rel <- @hamaca_items do
       path = Path.join(src, rel)
       File.mkdir_p!(Path.dirname(path))
       File.write!(path, "contents of #{rel}\n")
     end
 
-    write = fn rel, body -> File.write!(Path.join(src, rel), body) end
-    write.("hamaca", @runner)
-    write.("hamaca.md", @guide)
-    write.(".claude/skills/hamaca-update/SKILL.md", @update_skill)
-    write.("relay", @shim)
-    write.(".claude/skills/relay-doctor/SKILL.md", @doctor_alias)
+    File.write!(Path.join(src, "hamaca"), @runner)
+    File.write!(Path.join(src, "hamaca.md"), @guide)
 
     %{src: src, dest: Path.join(tmp_dir, "out")}
   end
 
   defp paths(manifest), do: Enum.map(manifest["items"], & &1["path"])
 
-  defp built(dest, layout, rel), do: File.read!(Path.join([dest, layout, rel]))
-
   describe "build!/2" do
-    # Scenario 1
-    test "builds both layouts, each listing exactly its own items", %{src: src, dest: dest} do
-      assert %{"hamaca" => hamaca, "legacy" => legacy} = Scaffold.build!(src, dest)
+    # Scenario 6
+    test "builds only the hamaca layout, its manifest the five hamaca items", %{src: src, dest: dest} do
+      assert %{"hamaca" => hamaca} = built = Scaffold.build!(src, dest)
 
-      assert paths(legacy) == Scaffold.items("legacy")
-      assert paths(legacy) == @legacy_items
-      assert paths(hamaca) == Scaffold.items("hamaca")
+      assert Map.keys(built) == ["hamaca"]
+      assert File.ls!(dest) == ["hamaca"]
       assert paths(hamaca) == @hamaca_items
+      assert paths(hamaca) == Scaffold.items("hamaca")
 
-      for {layout, manifest} <- [{"hamaca", hamaca}, {"legacy", legacy}], item <- manifest["items"] do
+      for item <- hamaca["items"] do
         assert item["sha256"] =~ ~r/\A[0-9a-f]{64}\z/
         assert item["bytes"] > 0
-        assert File.exists?(Path.join([dest, layout, item["path"]]))
+        assert File.exists?(Path.join([dest, "hamaca", item["path"]]))
       end
 
-      for layout <- ["hamaca", "legacy"] do
-        assert dest |> Path.join("#{layout}/manifest.json") |> File.read!() |> Jason.decode!() ==
-                 Map.fetch!(%{"hamaca" => hamaca, "legacy" => legacy}, layout)
-      end
+      assert dest |> Path.join("hamaca/manifest.json") |> File.read!() |> Jason.decode!() == hamaca
+      assert File.read!(Path.join(dest, "hamaca/hamaca")) == @runner
     end
 
-    # Scenario 2
-    test "legacy relay and hamaca hamaca are both the full runner, byte for byte",
-         %{src: src, dest: dest} do
-      Scaffold.build!(src, dest)
-
-      assert built(dest, "legacy", "relay") == @runner
-      assert built(dest, "hamaca", "hamaca") == @runner
-    end
-
-    # Scenario 3
-    test "the legacy guide and skills are generated from the hamaca sources with the old names",
-         %{src: src, dest: dest} do
-      Scaffold.build!(src, dest)
-
-      assert built(dest, "legacy", "relay.md") ==
-               "Run ./relay card, see .relay/runner.json, relay.md, $RELAY_NODE_SCRATCH, /relay-doctor\n"
-
-      update = built(dest, "legacy", ".claude/skills/relay-update/SKILL.md")
-      assert update == Scaffold.to_legacy_names(@update_skill)
-      assert update =~ "name: relay-update"
-    end
-
-    # Scenario 4
-    test "the hamaca layout serves the alias skills and the shim as they are", %{src: src, dest: dest} do
-      Scaffold.build!(src, dest)
-
-      assert built(dest, "hamaca", ".claude/skills/relay-doctor/SKILL.md") == @doctor_alias
-      assert built(dest, "hamaca", "relay") == @shim
-    end
-
-    # Scenario 5
-    test "each layout's version is derived from content", %{src: src, dest: dest} do
+    test "the version is derived from content", %{src: src, dest: dest} do
       first = Scaffold.build!(src, dest)
       second = Scaffold.build!(src, dest)
 
-      for layout <- Scaffold.layouts() do
-        assert first[layout]["version"] =~ ~r/\A[0-9a-f]{12}\z/
-        assert first[layout]["version"] == second[layout]["version"]
-      end
-    end
+      assert first["hamaca"]["version"] =~ ~r/\A[0-9a-f]{12}\z/
+      assert first["hamaca"]["version"] == second["hamaca"]["version"]
 
-    # Scenario 5
-    test "a byte changed in hamaca.md moves both layouts' versions", %{src: src, dest: dest} do
-      before = Scaffold.build!(src, dest)
       File.write!(Path.join(src, "hamaca.md"), @guide <> "\n")
-      later = Scaffold.build!(src, dest)
-
-      refute later["hamaca"]["version"] == before["hamaca"]["version"]
-      refute later["legacy"]["version"] == before["legacy"]["version"]
+      refute Scaffold.build!(src, dest)["hamaca"]["version"] == first["hamaca"]["version"]
     end
 
-    # Scenario 5
-    test "a byte changed only in the shim moves only the hamaca layout's version", %{src: src, dest: dest} do
-      before = Scaffold.build!(src, dest)
-      File.write!(Path.join(src, "relay"), @shim <> "\n")
-      later = Scaffold.build!(src, dest)
-
-      refute later["hamaca"]["version"] == before["hamaca"]["version"]
-      assert later["legacy"]["version"] == before["legacy"]["version"]
-    end
-
-    test "a stale file left by an earlier (flat) build is not served", %{src: src, dest: dest} do
-      File.mkdir_p!(dest)
-      File.write!(Path.join(dest, "relay"), "old flat build\n")
+    test "a stale layout left by an earlier build is not served", %{src: src, dest: dest} do
+      File.mkdir_p!(Path.join(dest, "legacy"))
+      File.write!(Path.join(dest, "legacy/relay"), "old legacy build\n")
       File.write!(Path.join(dest, "manifest.json"), "{}\n")
 
       Scaffold.build!(src, dest)
 
-      refute File.exists?(Path.join(dest, "relay"))
+      refute File.exists?(Path.join(dest, "legacy"))
       refute File.exists?(Path.join(dest, "manifest.json"))
     end
 
@@ -180,81 +93,52 @@ defmodule Hamaca.ScaffoldTest do
   end
 
   describe "the layout vocabulary" do
-    # Scenario 8
-    test "layouts, the default, the param and each layout's runner path" do
-      assert Scaffold.layouts() == ["hamaca", "legacy"]
-      assert Scaffold.default_layout() == "legacy"
+    # Scenario 6
+    test "one served layout, the retired one, its 410 code, the param and the runner path" do
+      assert Scaffold.layouts() == ["hamaca"]
+      assert Scaffold.retired_layout() == "legacy"
+      assert Scaffold.retired_code() == "runner_renamed"
       assert Scaffold.layout_param() == "layout"
-      assert Scaffold.runner_path("legacy") == "relay"
       assert Scaffold.runner_path("hamaca") == "hamaca"
     end
 
-    # Scenario 8
-    test "alias_items/0 is what the hamaca layout carries only for the compatibility window" do
-      assert Scaffold.alias_items() == [
-               ".claude/skills/relay-doctor/SKILL.md",
-               ".claude/skills/relay-onboard/SKILL.md",
-               ".claude/skills/relay-update/SKILL.md",
-               "relay"
-             ]
-    end
+    # Scenario 6
+    test "primary_items/1 is the localized hamaca layout" do
+      assert Scaffold.primary_items(".claude/skills") == Scaffold.items("hamaca")
+      assert Scaffold.primary_items(".claude/skills") == @hamaca_items
 
-    # Scenario 8
-    test "local_items/2 moves every skill path to another skill dir, keeping order" do
-      assert Scaffold.local_items("hamaca", ".agents/skills") == [
+      assert Scaffold.primary_items(".agents/skills") == [
                ".agents/skills/hamaca-doctor/SKILL.md",
                ".agents/skills/hamaca-onboard/SKILL.md",
                ".agents/skills/hamaca-update/SKILL.md",
-               ".agents/skills/relay-doctor/SKILL.md",
-               ".agents/skills/relay-onboard/SKILL.md",
-               ".agents/skills/relay-update/SKILL.md",
-               "hamaca",
-               "hamaca.md",
-               "relay"
-             ]
-
-      assert Scaffold.local_items("legacy", Scaffold.skill_dir()) == Scaffold.items("legacy")
-    end
-
-    # Scenario 8
-    test "primary_items/1 is the hamaca layout without its aliases" do
-      assert Scaffold.primary_items(".claude/skills") == [
-               ".claude/skills/hamaca-doctor/SKILL.md",
-               ".claude/skills/hamaca-onboard/SKILL.md",
-               ".claude/skills/hamaca-update/SKILL.md",
                "hamaca",
                "hamaca.md"
              ]
     end
 
-    test "items/1 is sorted for every layout, and sources/0 names every repo source" do
-      for layout <- Scaffold.layouts() do
-        assert Scaffold.items(layout) == Enum.sort(Scaffold.items(layout))
-      end
+    test "local_items/2 moves every skill path to another skill dir, keeping order" do
+      assert Scaffold.local_items("hamaca", ".agents/skills") == Scaffold.primary_items(".agents/skills")
+      assert Scaffold.local_items("hamaca", Scaffold.skill_dir()) == Scaffold.items("hamaca")
+    end
 
-      assert Enum.sort(Scaffold.sources()) == Enum.sort(@sources)
+    test "the compatibility-window API is gone" do
+      Code.ensure_loaded!(Scaffold)
+      refute function_exported?(Scaffold, :default_layout, 0)
+      refute function_exported?(Scaffold, :alias_items, 0)
+      refute function_exported?(Scaffold, :to_legacy_names, 1)
+    end
+
+    test "items/1 is sorted, and sources/0 names every repo source" do
+      assert Scaffold.items("hamaca") == Enum.sort(Scaffold.items("hamaca"))
+      assert Scaffold.sources() == @hamaca_items
     end
 
     test "skill_dir/0 is .claude/skills and every skill item lives under it" do
       assert Scaffold.skill_dir() == ".claude/skills"
 
-      for layout <- Scaffold.layouts(),
-          path <- Scaffold.items(layout),
-          String.ends_with?(path, "SKILL.md") do
+      for path <- Scaffold.items("hamaca"), String.ends_with?(path, "SKILL.md") do
         assert String.starts_with?(path, ".claude/skills/")
       end
-    end
-  end
-
-  describe "to_legacy_names/1" do
-    test "swaps exactly the seven Hamaca tokens and leaves the rest alone" do
-      assert Scaffold.to_legacy_names(
-               "./hamaca .hamaca/x hamaca.md HAMACA_URL /hamaca-doctor /hamaca-onboard /hamaca-update"
-             ) ==
-               "./relay .relay/x relay.md RELAY_URL /relay-doctor /relay-onboard /relay-update"
-
-      untouched = "Hamaca {relay} ~/.relay/locks .relay-retained relay start"
-      assert Scaffold.to_legacy_names(untouched) == untouched
     end
   end
 
@@ -276,69 +160,46 @@ defmodule Hamaca.ScaffoldTest do
   end
 
   describe "the scaffold this build serves" do
-    test "the legacy relay.md is served, generated from hamaca.md with the old names" do
-      assert {:ok, body} = Scaffold.fetch("relay.md")
-      assert body =~ "RELAY_NODE_SCRATCH"
-      assert body == Scaffold.to_legacy_names(File.read!("hamaca.md"))
+    test "the manifest names the items the module declares, and defaults to hamaca" do
+      assert {:ok, manifest} = Scaffold.manifest(layout: "hamaca")
+      assert paths(manifest) == Scaffold.items("hamaca")
+      assert manifest["version"] =~ ~r/\A[0-9a-f]{12}\z/
+
+      assert Scaffold.manifest() == {:ok, manifest}
     end
 
-    test "each layout's manifest names the items the module declares" do
-      for layout <- Scaffold.layouts() do
-        assert {:ok, manifest} = Scaffold.manifest(layout: layout)
-        assert paths(manifest) == Scaffold.items(layout)
-        assert manifest["version"] =~ ~r/\A[0-9a-f]{12}\z/
-      end
-
-      assert Scaffold.manifest() == Scaffold.manifest(layout: Scaffold.default_layout())
+    test "the retired layout is neither built nor served" do
+      assert Scaffold.manifest(layout: "legacy") == :error
+      assert Scaffold.fetch("relay", layout: "legacy") == :error
+      refute File.exists?(Path.join(Scaffold.root(), "legacy"))
     end
 
-    # Scenario 6
-    test "the legacy relay is the full runner with the board URL baked in" do
-      assert {:ok, source} = Scaffold.fetch("relay", layout: "legacy", board_url: "https://b.test")
-      assert source =~ ~r/^BOARD_URL = "https:\/\/b.test"$/m
-      assert is_integer(Scaffold.parse_runner_version(source))
+    test "fetch/2 defaults to the hamaca layout and bakes only the runner, and only that line" do
+      {:ok, placeholder} = Scaffold.fetch("hamaca")
+      assert {:ok, placeholder} == Scaffold.fetch("hamaca", layout: "hamaca")
+      assert placeholder =~ ~r/^BOARD_URL = ""$/m
+
+      assert {:ok, baked} = Scaffold.fetch("hamaca", board_url: "https://relay.test")
+      assert baked =~ ~r/^BOARD_URL = "https:\/\/relay.test"$/m
+      assert Scaffold.bake_board_url(baked, "") == placeholder
+
+      {:ok, guide} = Scaffold.fetch("hamaca.md")
+      assert Scaffold.fetch("hamaca.md", board_url: "https://relay.test") == {:ok, guide}
     end
 
-    # Scenario 6
-    test "hamaca is served only from the hamaca layout" do
-      assert Scaffold.fetch("hamaca", layout: "legacy") == :error
-      assert {:ok, _} = Scaffold.fetch("hamaca", layout: "hamaca")
-    end
-
-    test "fetch/2 with board_url: bakes only the layout's runner, and only that line" do
-      for layout <- Scaffold.layouts() do
-        runner = Scaffold.runner_path(layout)
-        {:ok, placeholder} = Scaffold.fetch(runner, layout: layout)
-        assert placeholder =~ ~r/^BOARD_URL = ""$/m
-
-        assert {:ok, baked} = Scaffold.fetch(runner, layout: layout, board_url: "https://relay.test")
-        assert baked =~ ~r/^BOARD_URL = "https:\/\/relay.test"$/m
-        assert Scaffold.bake_board_url(baked, "") == placeholder
-      end
-
-      {:ok, shim} = Scaffold.fetch("relay", layout: "hamaca")
-      assert Scaffold.fetch("relay", layout: "hamaca", board_url: "https://relay.test") == {:ok, shim}
-    end
-
-    # Scenario 7
-    test "fetch/2 and manifest/1 refuse anything outside the requested layout" do
-      assert Scaffold.fetch("../mix.exs", layout: "hamaca") == :error
-      assert Scaffold.fetch("relay.md", layout: "hamaca") == :error
+    test "fetch/2 and manifest/1 refuse anything outside the layout, including traversal" do
+      assert Scaffold.fetch("../mix.exs") == :error
+      assert Scaffold.fetch("mix.exs") == :error
+      assert Scaffold.fetch("hamaca/../../mix.exs") == :error
+      assert Scaffold.fetch("relay") == :error
+      assert Scaffold.fetch("relay.md") == :error
+      assert Scaffold.fetch("hamaca", layout: "bogus") == :error
       assert Scaffold.manifest(layout: "bogus") == :error
     end
 
-    test "fetch/2 refuses anything outside the manifest, including traversal" do
-      assert Scaffold.fetch("mix.exs") == :error
-      assert Scaffold.fetch("../../mix.exs") == :error
-      assert Scaffold.fetch("relay/../../mix.exs") == :error
-      assert Scaffold.fetch("relay", layout: "bogus") == :error
-    end
+    test "runner_version/0 is what the served runner declares" do
+      {:ok, hamaca} = Scaffold.fetch("hamaca")
 
-    test "runner_version/0 is what the served runner declares, in both layouts" do
-      {:ok, legacy} = Scaffold.fetch("relay")
-      {:ok, hamaca} = Scaffold.fetch("hamaca", layout: "hamaca")
-
-      assert legacy == hamaca
       assert is_integer(Scaffold.runner_version())
       assert Scaffold.runner_version() == Scaffold.parse_runner_version(hamaca)
     end
@@ -349,7 +210,6 @@ defmodule Hamaca.ScaffoldTest do
     end
 
     test "the CLI is served from the project root (RE319)" do
-      refute "bin/relay" in Scaffold.items("legacy")
       refute "bin/hamaca" in Scaffold.items("hamaca")
     end
   end

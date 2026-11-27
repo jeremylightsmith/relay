@@ -253,7 +253,7 @@
       "reads": [
         "plan"
       ],
-      "run": "{relay} git-fetch && open=$(gh pr list --head {branch} --state open --json number -q length) && if [ \"$open\" -gt 0 ]; then base=origin/{branch}; else base=origin/main; fi && git checkout -B {branch} \"$base\" && {relay} card {ref} --json | jq -r '.plan // empty' > \"$RELAY_PLAN\" && test -s \"$RELAY_PLAN\" && {relay} branch {ref} {branch}",
+      "run": "{relay} git-fetch && open=$(gh pr list --head {branch} --state open --json number -q length) && if [ \"$open\" -gt 0 ]; then base=origin/{branch}; else base=origin/main; fi && git checkout -B {branch} \"$base\" && {relay} card {ref} --json | jq -r '.plan // empty' > \"$HAMACA_PLAN\" && test -s \"$HAMACA_PLAN\" && {relay} branch {ref} {branch}",
       "type": "shell",
       "writes": [
         "branch"

@@ -1,6 +1,6 @@
 defmodule Schemas.HarnessUsage.Rule do
   @moduledoc """
-  The pure evaluator behind a harness's usage rule (RE436), mirrored line for line by `./relay`
+  The pure evaluator behind a harness's usage rule (RE436), mirrored line for line by `./hamaca`
   (`parse_rule_path`, `parse_rule_condition`, `read_rule_path`, `rule_holds`, `usage_reading`).
   Both pass the shared `usage_rule_cases` in `test/fixtures/runner_contract.json`.
 

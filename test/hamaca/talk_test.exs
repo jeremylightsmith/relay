@@ -34,7 +34,7 @@ defmodule Hamaca.TalkTest do
         board: board,
         name: "mac-1",
         capacity: %{"shared_clean" => 1, "exclusive" => 1},
-        version: Runs.shared_talk_min_version()
+        version: Runs.min_runner_version()
       )
 
     %{board: board, stage: stage, card: card, author: author, runner: runner}
@@ -477,7 +477,7 @@ defmodule Hamaca.TalkTest do
           board: ctx.board,
           name: "mac-2",
           capacity: %{"shared_clean" => 1, "exclusive" => 1},
-          version: Runs.shared_talk_min_version()
+          version: Runs.min_runner_version()
         )
 
       job_id = turn.node_job_id
@@ -753,7 +753,7 @@ defmodule Hamaca.TalkTest do
           board: ctx.board,
           name: "mac-2",
           capacity: %{"shared_clean" => 1, "exclusive" => 1},
-          version: Runs.shared_talk_min_version()
+          version: Runs.min_runner_version()
         )
 
       job_id = job.id

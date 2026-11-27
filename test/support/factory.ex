@@ -346,7 +346,8 @@ defmodule Hamaca.Factory do
       host: "mac.local",
       interval: 30,
       capacity: %{"shared_clean" => 3, "exclusive" => 1},
-      version: Hamaca.Runs.shared_talk_min_version(),
+      # A fully current runner: the base floor, which RE482 raised to or past the shared-talk floor.
+      version: Hamaca.Runs.min_runner_version(),
       # RE486: a runner installed as ./hamaca, so the default reads as NOT pre-rename whatever
       # its version sits relative to Hamaca.Runs.first_hamaca_runner_version/0. Pass
       # `cli: "relay"` (or `cli: nil`) to exercise a pre-rename runner.

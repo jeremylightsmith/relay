@@ -61,13 +61,12 @@ COPY docs docs
 COPY .claude .claude
 COPY hamaca hamaca
 COPY hamaca.md hamaca.md
-COPY relay relay
 
 # Compile the release
 RUN mix compile
 
-# RE304, RE478: build priv/scaffold/<layout>/ from the .claude, hamaca, hamaca.md and relay (the
-# shim) sources copied above. It must exist before `mix release` bundles priv/ into the image —
+# RE304, RE478, RE482: build priv/scaffold/hamaca/ from the .claude, hamaca and hamaca.md
+# sources copied above. It must exist before `mix release` bundles priv/ into the image —
 # the release ships priv/ but ships neither the runner nor .claude/, so this is the only way
 # /api/scaffold and Hamaca.Runs.latest_runner_version/0 have anything to read at runtime.
 #

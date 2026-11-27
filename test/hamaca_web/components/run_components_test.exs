@@ -691,6 +691,22 @@ defmodule HamacaWeb.RunComponentsTest do
       refute gone =~ "var(--color-warning)"
     end
 
+    # RE482 scenario 13 — the amber tokens moved into one shared helper; the banner's are unchanged.
+    test "an outdated roster renders the same three amber token values" do
+      html =
+        render_component(&RunComponents.stopped_work_banner/1,
+          id: "b-amber",
+          verdict: %{reason: :runner_outdated, detail: "running v0, requires v9."}
+        )
+
+      style =
+        html |> LazyHTML.from_fragment() |> LazyHTML.query("#b-amber") |> LazyHTML.attribute("style") |> List.first()
+
+      assert style =~ "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));"
+      assert style =~ "border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));"
+      assert style =~ "color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
+    end
+
     test "layout margins are the caller's, not the component's" do
       html =
         render_component(&RunComponents.stopped_work_banner/1,
@@ -712,6 +728,86 @@ defmodule HamacaWeb.RunComponentsTest do
 
       assert html =~ "var(--color-warning)"
       refute html =~ "var(--color-error)"
+    end
+
+    @relay_detail "No jobs claimed in 12m · Runner mac.local is still installed as ./relay, which this board " <>
+                    "no longer accepts. Update it to ./hamaca and restart."
+
+    defp relay_banner_doc(verdict, opts) do
+      RunComponents
+      |> Function.capture(:stopped_work_banner, 1)
+      |> render_component([id: "b", verdict: verdict] ++ opts)
+      |> LazyHTML.from_fragment()
+    end
+
+    defp normalized_text(doc, selector),
+      do: doc |> LazyHTML.query(selector) |> LazyHTML.text() |> String.split() |> Enum.join(" ")
+
+    test "RE482: a ./relay verdict links each runner's name to its Runners-page panel" do
+      doc =
+        relay_banner_doc(
+          %{
+            reason: :runner_outdated,
+            evidence: %{pre_rename_runners: [%{id: 7, name: "mac.local"}]},
+            detail: @relay_detail
+          },
+          runners_path: "/board/s1/runners"
+        )
+
+      link = "a#b-runner-7[href='/board/s1/runners#runner-mac-local']"
+      assert text_at(doc, link) == "mac.local"
+      assert classes_of(doc, link) == ~w(font-mono font-semibold underline)
+      assert doc |> LazyHTML.query("#b code") |> Enum.map(&LazyHTML.text/1) == ["./relay", "./hamaca"]
+      assert normalized_text(doc, "#b") == @relay_detail
+      # Exact, not normalized: no stray whitespace between the name, the code and the punctuation.
+      assert text_at(doc, "#b > span.flex-1") == @relay_detail
+    end
+
+    test "RE482: several ./relay runners render comma-separated links with the sentence intact" do
+      detail =
+        "No jobs claimed in 12m · Runners a-box, b-box are still installed as ./relay, which this board " <>
+          "no longer accepts. Update them to ./hamaca and restart."
+
+      doc =
+        relay_banner_doc(
+          %{
+            reason: :runner_outdated,
+            evidence: %{pre_rename_runners: [%{id: 1, name: "a-box"}, %{id: 2, name: "b-box"}]},
+            detail: detail
+          },
+          runners_path: "/board/s1/runners"
+        )
+
+      assert text_at(doc, "a#b-runner-1[href='/board/s1/runners#runner-a-box']") == "a-box"
+      assert text_at(doc, "a#b-runner-2[href='/board/s1/runners#runner-b-box']") == "b-box"
+      assert text_at(doc, "#b > span.flex-1") == detail
+    end
+
+    test "RE482: a verdict with no evidence renders its detail as plain text" do
+      doc = relay_banner_doc(%{reason: :runner_outdated, detail: @relay_detail}, runners_path: "/board/s1/runners")
+
+      assert normalized_text(doc, "#b") == @relay_detail
+      assert doc |> LazyHTML.query("#b a") |> Enum.count() == 0
+      assert doc |> LazyHTML.query("#b code") |> Enum.count() == 0
+    end
+
+    test "RE482: generic outdated evidence renders its detail as plain text" do
+      detail = "No jobs claimed in 12m · every connected runner is running old code."
+
+      doc =
+        relay_banner_doc(
+          %{reason: :runner_outdated, evidence: %{required_version: 9, running_versions: []}, detail: detail},
+          runners_path: "/board/s1/runners"
+        )
+
+      assert normalized_text(doc, "#b") == detail
+      assert doc |> LazyHTML.query("#b a") |> Enum.count() == 0
+    end
+  end
+
+  describe "runner_panel_id/1 (RE482)" do
+    test "is runner- plus the CSS-safe name" do
+      assert RunComponents.runner_panel_id("mac.local") == "runner-mac-local"
     end
   end
 
@@ -1152,34 +1248,38 @@ defmodule HamacaWeb.RunComponentsTest do
     end
   end
 
-  describe "pre_rename_hint/1 (RE486)" do
-    # Scenario 1
+  describe "pre_rename_hint/1 (RE486, RE482)" do
+    @install "curl -fsSL http://x.test/b/s1/install | sh"
+
+    # Scenario 12 — the refused-./relay strip: amber, with the board's install one-liner.
     setup do
-      html = render_component(&RunComponents.pre_rename_hint/1, id: "hint")
+      html = render_component(&RunComponents.pre_rename_hint/1, id: "hint", command: @install)
       %{html: html, doc: LazyHTML.from_fragment(html)}
     end
 
-    test "the strip sits on base-200 with a base-300 rule", %{doc: doc} do
-      classes = classes_of(doc, "#hint")
-      assert "bg-base-200" in classes
-      assert "border-base-300" in classes
+    test "the strip wears the warning tokens, not base-200", %{doc: doc} do
+      style = doc |> LazyHTML.query("#hint") |> LazyHTML.attribute("style") |> List.first()
+      assert style =~ "var(--color-warning) 10%"
+      assert style =~ "var(--color-warning) 50%"
+      refute "bg-base-200" in classes_of(doc, "#hint")
     end
 
-    test "it shows ./relay update in code and copies exactly that", %{doc: doc} do
-      assert "./relay update" in (doc |> LazyHTML.query("code") |> Enum.map(&LazyHTML.text/1))
-      assert doc |> LazyHTML.query(~s(#hint-copy[data-copy-text="./relay update"])) |> Enum.count() == 1
+    test "it leads with the warning triangle", %{doc: doc} do
+      assert doc |> LazyHTML.query("#hint .hero-exclamation-triangle") |> Enum.count() == 1
     end
 
-    test "it explains the runner keeps working and needs a restart", %{doc: doc} do
+    test "it says the runner is refused and how to restart it", %{doc: doc} do
       text = doc |> LazyHTML.query("#hint") |> LazyHTML.text()
-      assert text =~ "Still installed as"
-      assert text =~ "restart the runner"
+      assert text =~ "Refused:"
+      assert text =~ "./hamaca start"
     end
 
-    test "it never wears a warning, error or OUTDATED", %{html: html} do
-      refute html =~ "warning"
-      refute html =~ "error"
-      refute html =~ "OUTDATED"
+    test "it copies exactly the install one-liner", %{doc: doc} do
+      assert doc |> LazyHTML.query(~s(#hint-copy[data-copy-text="#{@install}"])) |> Enum.count() == 1
+    end
+
+    test "it never offers ./relay update", %{html: html} do
+      refute html =~ "./relay update"
     end
   end
 

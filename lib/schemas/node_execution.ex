@@ -87,14 +87,14 @@ defmodule Schemas.NodeExecution do
 
   @doc """
   The closed set of node outcomes a runner may report — the wire contract pinned by the runner
-  contract fixture and `./relay`'s `RUNNER_OUTCOMES`. Excludes `server_only_outcomes/0`.
+  contract fixture and `./hamaca`'s `RUNNER_OUTCOMES`. Excludes `server_only_outcomes/0`.
   """
   @spec outcomes() :: [atom()]
   def outcomes, do: all_outcomes() -- @server_only_outcomes
 
   @doc """
   The outcomes a flow edge may route `on:` — and, identically, the ones an agent may declare
-  (`./relay`'s `NODE_OUTCOMES`, pinned as the contract fixture's `agent_outcomes`). Excludes
+  (`./hamaca`'s `NODE_OUTCOMES`, pinned as the contract fixture's `agent_outcomes`). Excludes
   `:blocked` (RE308): the engine parks on it before any edge is consulted, and a flow able to route
   around that park could spend a retry budget on a condition retrying cannot fix.
   """

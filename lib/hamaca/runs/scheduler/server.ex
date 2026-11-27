@@ -221,7 +221,7 @@ defmodule Hamaca.Runs.Scheduler.Server do
   # global ETS store keyed by runner id across every board and never evicted, so an id this
   # board's `runners` map does not name — another board's runner, or an entry whose row is
   # gone — is dropped rather than passed through. Before this, another board's runner's free
-  # slots reached `relay why`'s evidence AND `take_slot/3`, so the planner started runs no
+  # slots reached `./hamaca why`'s evidence AND `take_slot/3`, so the planner started runs no
   # runner on this board had room for. Every capacity key is therefore a runner the roster
   # (`Hamaca.Runs.list_runner_status/2`) names.
   #

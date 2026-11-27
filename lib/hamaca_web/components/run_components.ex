@@ -1147,7 +1147,7 @@ defmodule HamacaWeb.RunComponents do
   # frame, no invented cause: it leads with `runs.failure_detail` — the engine's
   # human-first sentence, which the Run tab surfaced nowhere before RLY-179.
   # RE320 — a live run whose queued job waits on a roster paused at its usage limits. The
-  # sentence is `Hamaca.Runs.rate_limited_run_detail/1`, the same copy `relay why` prints; the
+  # sentence is `Hamaca.Runs.rate_limited_run_detail/1`, the same copy `./hamaca why` prints; the
   # warning tokens match the run face's "Rate limited" chip (no artboard covers rate limiting).
   def run_state_banner(%{variant: :rate_limited} = assigns) do
     ~H"""
@@ -1262,14 +1262,25 @@ defmodule HamacaWeb.RunComponents do
   caller owns layout margins via `class` and the DOM `id`, since the same verdict renders on two
   pages under two different ids.
 
+  RE482: when `verdict.evidence.pre_rename_runners` is set (every refused runner is still a
+  `./relay` install) and `runners_path` is given, the same `detail` is rendered as structured
+  HEEx rather than plain text — each runner name becomes a link to its panel on the Runners
+  page (`runner_panel_id/1`), and `./relay` / `./hamaca` become `<code>`. The words still come
+  only from `detail`: the component splits that sentence around the names, it never retypes
+  it, so the banner's text always equals the domain's. A verdict with no `evidence` (the
+  storybook shape) or generic evidence renders the plain sentence.
+
   Deliberately no `<.icon>`: this module imports no CoreComponents (see the moduledoc), and
   `icon/1` is only ever `<span class={[@name, @class]} />`.
   """
   attr :id, :string, required: true
   attr :verdict, :map, required: true
   attr :class, :any, default: nil
+  attr :runners_path, :string, default: nil
 
   def stopped_work_banner(assigns) do
+    assigns = assign(assigns, :rename, rename_parts(assigns.verdict, assigns.runners_path))
+
     ~H"""
     <div
       id={@id}
@@ -1277,14 +1288,42 @@ defmodule HamacaWeb.RunComponents do
       style={stopped_work_style(@verdict.reason)}
     >
       <span class="hero-exclamation-triangle size-4" />
-      <span class="flex-1">{@verdict.detail}</span>
+      <span :if={!@rename} class="flex-1">{@verdict.detail}</span>
+      <%!-- phx-no-format: this is one sentence; any whitespace the formatter adds between the
+           name links, the <code> and the punctuation would render as stray spaces. --%>
+      <span :if={@rename} class="flex-1" phx-no-format>{@rename.before}<%= for {runner, i} <- Enum.with_index(@rename.runners) do %>{if i > 0, do: ", "}<a id={"#{@id}-runner-#{runner.id}"} href={"#{@runners_path}#" <> runner_panel_id(runner.name)} class="font-mono font-semibold underline">{runner.name}</a><% end %><%= for {kind, text} <- @rename.after do %><%= if kind == :code do %><code class="font-mono">{text}</code><% else %>{text}<% end %><% end %></span>
     </div>
     """
   end
 
-  defp stopped_work_style(:runner_outdated),
-    do:
-      "background:color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100));border:1px solid color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100));color:color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content));"
+  # Splits `detail` around the joined runner names (searched after the " · " separator, preceded
+  # by a space, so a name can never match inside the "No jobs claimed in Nm" prefix), and the rest
+  # around `./relay` / `./hamaca`. nil — render the plain sentence — whenever the verdict is not
+  # the rename one or the names cannot be found in it.
+  defp rename_parts(_verdict, nil), do: nil
+
+  defp rename_parts(%{detail: detail} = verdict, _runners_path) do
+    with [_ | _] = runners <- verdict |> Map.get(:evidence, %{}) |> Map.get(:pre_rename_runners),
+         [head, tail] <- String.split(detail, " · ", parts: 2),
+         names = " " <> Enum.map_join(runners, ", ", & &1.name),
+         [lead, rest] <- String.split(tail, names, parts: 2) do
+      %{
+        before: head <> " · " <> lead <> " ",
+        runners: runners,
+        after:
+          ~r{\./relay|\./hamaca}
+          |> Regex.split(rest, include_captures: true, trim: true)
+          |> Enum.map(&{if(&1 in ["./relay", "./hamaca"], do: :code, else: :text), &1})
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp stopped_work_style(:runner_outdated) do
+    %{background: background, border: border, text: text} = amber_tokens()
+    "background:#{background};border:1px solid #{border};color:#{text};"
+  end
 
   defp stopped_work_style(:runner_rate_limited), do: stopped_work_style(:runner_outdated)
 
@@ -1318,39 +1357,47 @@ defmodule HamacaWeb.RunComponents do
 
   # ---------- pre_rename_hint ----------
 
-  @relay_update_command "./relay update"
+  # The ONE definition of the amber "refused / stopped" tint (RE482): background, border colour and
+  # text colour. `stopped_work_style(:runner_outdated)` (the board banners) and `pre_rename_hint/1`
+  # (the Runners strip) both build from it, so the values exist once.
+  defp amber_tokens do
+    %{
+      background: "color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100))",
+      border: "color-mix(in oklab, var(--color-warning) 50%, var(--color-base-100))",
+      text: "color-mix(in oklab, var(--color-warning) 35%, var(--color-base-content))"
+    }
+  end
+
+  defp pre_rename_hint_style do
+    %{background: background, border: border, text: text} = amber_tokens()
+    "padding:10px 18px;font-size:12.5px;border-bottom:1px solid #{border};background:#{background};color:#{text};"
+  end
 
   @doc ~S"""
-  The Runners page's calm nudge for a runner still installed as `./relay` during the relay →
-  hamaca compatibility window (RE486): a base-200 strip under the panel header with the restart
-  note and a copyable `./relay update`. The page renders it when the roster entry's `pre_rename`
-  (`Hamaca.Runs.pre_rename_runner?/1`) is true — never re-derived here. Deliberately neutral —
-  no warning/error tokens and never the word OUTDATED: the runner keeps working. The copy control
-  is the shared `CoreComponents.copy_button/1` (the card mockup draws a text "Copy" button).
+  The Runners page's amber strip under a runner **refused because it is still installed as
+  `./relay`** (RE486, RE482): a warning triangle, "Refused:", and a chip holding the board's install
+  one-liner (`command`, from `Hamaca.Setup.install_command/2`) with a copy button, then the
+  `./hamaca start` restart note. The page renders it when the roster entry's `pre_rename`
+  (`Hamaca.Runs.pre_rename_runner?/1`) is true — never re-derived here — beside the panel's
+  OUTDATED treatment. The tint is the shared amber of `stopped_work_banner/1`. The copy control is
+  the shared `CoreComponents.copy_button/1`.
   """
   attr :id, :string, required: true
+  attr :command, :string, required: true, doc: "the board's install one-liner (`Hamaca.Setup.install_command/2`)"
 
   def pre_rename_hint(assigns) do
-    assigns = assign(assigns, :command, @relay_update_command)
+    assigns = assign(assigns, :style, pre_rename_hint_style())
 
     ~H"""
-    <div
-      id={@id}
-      class="flex flex-wrap items-center gap-x-3 gap-y-2 px-[18px] py-2.5 bg-base-200 border-b border-base-300"
-      style="font-size:12.5px;"
-    >
-      <span style="font-size:13px;color:color-mix(in oklab, var(--color-base-content) 55%, transparent);">
-        ↑
+    <div id={@id} class="flex flex-wrap items-center gap-x-3 gap-y-2" style={@style}>
+      <span class="hero-exclamation-triangle size-4 shrink-0" />
+      <span class="flex-1 min-w-[220px]">
+        <strong>Refused:</strong>
+        still installed as <code class="font-mono">./relay</code>. Run this in its checkout to install <code class="font-mono">./hamaca</code>, then restart the runner with <code class="font-mono">./hamaca start</code>:
       </span>
-      <span
-        class="flex-1 min-w-[220px]"
-        style="color:color-mix(in oklab, var(--color-base-content) 75%, transparent);"
-      >
-        Still installed as <code class="font-mono">./relay</code>. It keeps working. To switch it to <code class="font-mono">./hamaca</code>, run this in its checkout and then restart the runner:
-      </span>
-      <span class="flex items-center gap-2 rounded-lg bg-base-100 border border-base-300 pl-2.5 pr-1 py-1">
-        <code class="font-mono" style="font-size:12px;">{@command}</code>
-        <CoreComponents.copy_button id={"#{@id}-copy"} text={@command} label="Copy update command" />
+      <span class="flex items-center gap-2 rounded-lg bg-base-100 border border-base-300 pl-2.5 pr-1 py-1 max-w-full min-w-0">
+        <code class="font-mono truncate text-base-content" style="font-size:12px;">{@command}</code>
+        <CoreComponents.copy_button id={"#{@id}-copy"} text={@command} label="Copy install command" />
       </span>
     </div>
     """
@@ -1373,6 +1420,14 @@ defmodule HamacaWeb.RunComponents do
   call it, so a link can never point at an id the row does not carry.
   """
   def held_row_id(runner_name, ref), do: "held-" <> dom_safe(runner_name) <> "-" <> dom_safe(ref)
+
+  @doc ~S"""
+  The DOM id of a runner's panel on the Runners page — `runner-<name>`, CSS-safe (`mac.local` →
+  `runner-mac-local`). The ONE builder (RE482): the panel and the stopped-work banner's runner
+  links both call it, so a link can never point at an id the panel does not carry.
+  """
+  @spec runner_panel_id(String.t()) :: String.t()
+  def runner_panel_id(name), do: "runner-" <> dom_safe(name)
 
   defp dom_safe(value), do: String.replace(to_string(value), ~r/[^A-Za-z0-9_-]/, "-")
 

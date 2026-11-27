@@ -69,8 +69,8 @@ defmodule Hamaca.DoctorSkillTest do
     test "detection covers the planner, the task nodes, legacy spellings and the blocked card", %{doc: doc} do
       detect = flat(subsection(migration(doc), "#### Detect"))
 
-      assert detect =~ "relay tasks add"
-      assert detect =~ "relay task show"
+      assert detect =~ "hamaca tasks add"
+      assert detect =~ "hamaca task show"
       assert detect =~ "`card.sub_tasks`"
       assert detect =~ "`{sub_task_id}`"
       refute detect =~ @retired_check
@@ -181,8 +181,8 @@ defmodule Hamaca.DoctorSkillTest do
     refute before <> after_rule =~ ~r/sub[_-]tasks?/i
   end
 
-  # RE478: the source is the Hamaca-named skill; `relay-doctor` stays only as a thin alias for the
-  # compatibility window (the legacy scaffold layout generates its full copy from this source).
+  # RE478: the source is the Hamaca-named skill. RE482 closed the compatibility window, so the
+  # thin `relay-doctor` alias is gone.
   describe "the Hamaca rename (RE478)" do
     @alias_skill Path.join([File.cwd!(), ".claude", "skills", "relay-doctor", "SKILL.md"])
 
@@ -192,29 +192,14 @@ defmodule Hamaca.DoctorSkillTest do
       for stale <- ["./relay", ".relay/", "relay.md", "RELAY_"] do
         refute doc =~ stale, "hamaca-doctor still says #{stale}"
       end
+
+      # RE482: no bare `relay <verb>` CLI call is left — only the `{relay}` flow placeholder.
+      refute doc =~ ~r/(?<![{\w-])relay (card|plan|tasks|task|describe|spec|criteria|branch|pr|result|update|audit)\b/
+      refute doc =~ "# Relay Doctor"
     end
 
-    test "relay-doctor is an alias: its own name, the same description, a one-line body",
-         %{doc: doc} do
-      alias_doc = File.read!(@alias_skill)
-
-      assert alias_doc =~ ~r/^name: relay-doctor$/m
-      assert frontmatter(alias_doc, "description") == frontmatter(doc, "description")
-      assert alias_doc |> body() |> String.trim() == "Renamed: use /hamaca-doctor."
+    test "the relay-doctor alias skill is retired (RE482)" do
+      refute File.exists?(Path.dirname(@alias_skill))
     end
-
-    test "the alias directory holds exactly SKILL.md" do
-      assert File.ls!(Path.dirname(@alias_skill)) == ["SKILL.md"]
-    end
-  end
-
-  defp frontmatter(doc, key) do
-    [_, value] = Regex.run(~r/^#{key}: (.*)$/m, doc)
-    value
-  end
-
-  defp body(doc) do
-    ["", _frontmatter, body] = String.split(doc, ~r/^---$/m, parts: 3)
-    body
   end
 end

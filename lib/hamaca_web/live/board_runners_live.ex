@@ -74,6 +74,7 @@ defmodule HamacaWeb.BoardRunnersLive do
   alias Hamaca.Boards
   alias Hamaca.Cards
   alias Hamaca.Runs
+  alias Hamaca.Setup
   alias HamacaWeb.BoardCrumbs
   alias HamacaWeb.BoardSettingsLive
   alias HamacaWeb.RunComponents
@@ -133,6 +134,7 @@ defmodule HamacaWeb.BoardRunnersLive do
                 :if={@stopped_work}
                 id="queue-diagnosis"
                 verdict={@stopped_work}
+                runners_path={~p"/board/#{@board.slug}/runners"}
               />
               <RunComponents.starvation_banner
                 :if={@starvation}
@@ -337,7 +339,7 @@ defmodule HamacaWeb.BoardRunnersLive do
             <div style="display:flex;flex-direction:column;gap:16px;margin-top:24px;">
               <div
                 :for={runner <- @runners}
-                id={"runner-#{dom_id(runner)}"}
+                id={RunComponents.runner_panel_id(runner.name)}
                 style={panel_style(runner.display_state)}
               >
                 <%!-- Panel header — artboard lines ~72-79. --%>
@@ -358,15 +360,6 @@ defmodule HamacaWeb.BoardRunnersLive do
                     style="font-size:9.5px;letter-spacing:0.06em;"
                   >
                     {pill_label(runner.display_state)}
-                  </span>
-                  <%!-- RE486 — a runner still installed as ./relay: neutral, never a warning. --%>
-                  <span
-                    :if={runner.pre_rename}
-                    id={"runner-#{dom_id(runner)}-update-available"}
-                    class="badge badge-sm badge-ghost font-mono font-bold"
-                    style="font-size:9.5px;letter-spacing:0.06em;"
-                  >
-                    UPDATE AVAILABLE
                   </span>
                   <RunComponents.rate_limit_note
                     :if={runner.rate_limit}
@@ -394,9 +387,12 @@ defmodule HamacaWeb.BoardRunnersLive do
                     {last_seen_label(runner, @now)}
                   </span>
                 </div>
+                <%!-- RE482 — refused because it is still installed as ./relay: the amber strip
+                  with the board's install one-liner, under the panel's OUTDATED treatment. --%>
                 <RunComponents.pre_rename_hint
                   :if={runner.pre_rename}
                   id={"runner-#{dom_id(runner)}-relay-hint"}
+                  command={@install_command}
                 />
                 <div style={"display:flex;align-items:stretch;#{if runner.freshness != :fresh, do: "opacity:0.92;"}"}>
                   <div style="flex:1;min-width:0;padding:15px 18px;display:flex;flex-direction:column;gap:16px;">
@@ -586,6 +582,8 @@ defmodule HamacaWeb.BoardRunnersLive do
      socket
      |> assign(:page_title, "Runners")
      |> assign(:board, board)
+     # RE482 — the one-liner a refused ./relay runner's strip copies (`Setup.install_command/2`).
+     |> assign(:install_command, Setup.install_command(HamacaWeb.Endpoint.url(), board.slug))
      |> assign(:logs, %{})
      |> assign_runners()}
   end
@@ -749,13 +747,15 @@ defmodule HamacaWeb.BoardRunnersLive do
   # `v1 · requires v2` when outdated, plain `v1` otherwise — the mismatch legible without
   # hovering. "unversioned" rather than a bare `v`: a runner reporting nothing predates
   # RLY-184, and naming that is more useful than an empty slot.
+  # RE482 — `pre_rename` is `Runs.pre_rename_runner?/1`'s answer, never re-derived here. It implies
+  # `outdated`, so it MUST come before the outdated clauses or it is unreachable; it always carries
+  # an integer version.
+  defp version_label(%{pre_rename: true, version: version}),
+    do: "v#{version} · ./relay · requires v#{Runs.min_runner_version()}"
+
   defp version_label(%{version: nil, outdated: true}), do: "unversioned · requires v#{Runs.min_runner_version()}"
 
   defp version_label(%{version: version, outdated: true}), do: "v#{version} · requires v#{Runs.min_runner_version()}"
-
-  # RE486 — `pre_rename` is `Runs.pre_rename_runner?/1`'s answer, never re-derived here; it is
-  # never true for an outdated runner, but the outdated clauses stay first regardless.
-  defp version_label(%{pre_rename: true, version: version}), do: "v#{version} · ./relay"
 
   defp version_label(%{version: nil}), do: "unversioned"
   defp version_label(%{version: version}), do: "v#{version}"

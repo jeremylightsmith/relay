@@ -5,7 +5,7 @@ defmodule Hamaca.ScaffoldBuildWiringTest do
   A Mix release ships `priv/` but ships neither `bin/` nor `.claude/`, so
   `RUN mix hamaca.build_scaffold` is the ONLY thing that puts anything in `priv/scaffold/` for
   the image to serve. If that line is dropped, reordered after `RUN mix release`, or the
-  `COPY .claude` / `COPY relay` lines drift below it, the release ships an empty scaffold and the
+  `COPY .claude` / `COPY hamaca` lines drift below it, the release ships an empty scaffold and the
   failure is completely silent in production: `GET /api/scaffold` answers 503
   `scaffold_unavailable`, every heartbeat advertises `latest_runner_version: null` (which the
   runner reads as "never auto-update", indistinguishable from "nothing published"), and
@@ -44,9 +44,18 @@ defmodule Hamaca.ScaffoldBuildWiringTest do
     end
   end
 
-  # Scenario 13 (RE478): the sources are hamaca, hamaca.md, the relay shim and the skills.
-  test "the copy sources are exactly the hamaca runner, guide, shim and .claude" do
-    assert Enum.sort(scaffold_copy_sources()) == [".claude", "hamaca", "hamaca.md", "relay"]
+  # RE482 scenario 8: the sources are hamaca, hamaca.md and the skills — the relay shim is gone.
+  test "the copy sources are exactly the hamaca runner, guide and .claude" do
+    assert Enum.sort(scaffold_copy_sources()) == [".claude", "hamaca", "hamaca.md"]
+  end
+
+  # RE482 scenario 8: the Dockerfile COPYs exactly what the scaffold is built from.
+  test "the builder stage COPYs exactly Scaffold.sources/0's top-level paths, and no relay", %{builder: builder} do
+    copied = for [path] <- Regex.scan(~r/^COPY (\S+) \1$/m, builder, capture: :all_but_first), do: path
+    scaffold_copies = Enum.filter(copied, &(&1 in [".claude", "hamaca", "hamaca.md", "relay", "relay.md"]))
+
+    assert Enum.sort(scaffold_copies) == Enum.sort(scaffold_copy_sources())
+    refute builder =~ ~r/^COPY relay relay$/m
   end
 
   # The top-level path each source arrives by: `hamaca` -> `hamaca`, a skill -> `.claude`,

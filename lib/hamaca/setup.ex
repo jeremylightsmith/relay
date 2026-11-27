@@ -637,7 +637,7 @@ defmodule Hamaca.Setup do
            ok: is_nil(failed),
            board: board.name,
            llm: Map.take(llm, [:harness, :label, :cli, :skill_dir, :skill_path, :pointer_file, :onboard_command]),
-           relay_files: Scaffold.primary_items(llm.skill_dir),
+           hamaca_files: Scaffold.primary_items(llm.skill_dir),
            checks: checks
          },
          failure

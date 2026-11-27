@@ -1,7 +1,7 @@
 defmodule Hamaca.Runs.Scheduler do
   @moduledoc """
   The pure dispatch core (ADR 0006 / RLY-133) — the server-side heir to
-  `./relay`'s `find_all_ready`. `plan/1` takes a `Snapshot` and returns a
+  `./hamaca`'s `find_all_ready`. `plan/1` takes a `Snapshot` and returns a
   `Plan`: an ordered list of `{:resume, ...}` / `{:start, ...}` decisions plus
   the `ready ↔ queued` reconciliation. No processes, no DB — every ported rule
   unit-tests directly.
@@ -189,7 +189,7 @@ defmodule Hamaca.Runs.Scheduler do
       not MapSet.member?(decided, card.id)
   end
 
-  # --- WIP accounting (column + sub-lanes, mirrors `used/1` in ./relay) ---
+  # --- WIP accounting (column + sub-lanes, mirrors `used/1` in ./hamaca) ---
 
   defp lane_ids(stage_id, children), do: [stage_id | Map.get(children, stage_id, [])]
 
@@ -294,7 +294,7 @@ defmodule Hamaca.Runs.Scheduler do
 
   `:dispatchable` is decided by running `plan/1` itself, never re-derived; only the
   *reason* for a non-dispatch is walked, in the same order `plan/1` excludes cards.
-  Returns `%{verdict, detail, evidence}`; `detail` is the human sentence `relay why`
+  Returns `%{verdict, detail, evidence}`; `detail` is the human sentence `./hamaca why`
   prints. Verdicts needing DB state beyond the snapshot (`:run_failed`, `:job_stranded`,
   `:job_awaiting_slot`) are layered on by `Hamaca.Runs.diagnose/3`.
   """
@@ -562,7 +562,7 @@ defmodule Hamaca.Runs.Scheduler do
 
   @doc """
   The roster-level reason no node-job is being claimed on this snapshot, shared by
-  `explain/2`'s terminal branch and `Hamaca.Runs.stopped_work/2` so the board banner, `relay
+  `explain/2`'s terminal branch and `Hamaca.Runs.stopped_work/2` so the board banner, `./hamaca
   why`, and `GET /api/cards/:ref/diagnosis` all speak one diagnosis. `plan/1` never calls this;
   it reads only `capacity`, so the plan/explain agreement property is untouched.
 
@@ -578,14 +578,15 @@ defmodule Hamaca.Runs.Scheduler do
     * `:awaiting_capacity` — at least one live, current, unpaused runner exists; it is simply out
       of free slots.
 
-  The evidence carries the required version and one `%{name, version}` per live runner, so
-  every consumer names the mismatch without a second query.
+  The evidence carries the required version and one `%{id, name, version, pre_rename}` per live
+  runner (`id` the runner row id, `pre_rename` from `Hamaca.Runs.pre_rename_runner?/1` — RE482),
+  so every consumer names the mismatch without a second query.
   """
   @spec capacity_diagnosis(Snapshot.t()) ::
           {:runner_outdated | :no_runner | :runner_gone | :runner_rate_limited | :awaiting_capacity, map()}
   def capacity_diagnosis(%Snapshot{runners: runners}) do
-    live = for {_id, e} <- runners, Hamaca.Runs.counting_runner?(e), do: e
-    current = Enum.reject(live, & &1.outdated)
+    live = for {_id, e} = runner <- runners, Hamaca.Runs.counting_runner?(e), do: runner
+    current = for {_id, e} <- live, not e.outdated, do: e
 
     cond do
       map_size(runners) == 0 -> {:no_runner, version_evidence([])}
@@ -599,7 +600,7 @@ defmodule Hamaca.Runs.Scheduler do
   defp version_evidence(live) do
     %{
       required_version: Hamaca.Runs.min_runner_version(),
-      running_versions: Enum.map(live, &%{name: &1.name, version: &1.version})
+      running_versions: for({id, e} <- live, do: %{id: id, name: e.name, version: e.version, pre_rename: e.pre_rename})
     }
   end
 
@@ -631,7 +632,7 @@ defmodule Hamaca.Runs.Scheduler do
   The one-sentence human explanation of a `Schemas.Run.resume_refusal_reasons/0` value —
   shared by `explain/2`'s `:resume_refused` detail and the `failure_detail`
   `Hamaca.Runs.abandon_unresumable_runs/1` writes, so an operator reads the same words in
-  `relay why` and on the failed card.
+  `./hamaca why` and on the failed card.
   """
   @spec resume_refusal_sentence(atom()) :: String.t()
   def resume_refusal_sentence(:no_isolation), do: "its flow row no longer exists, so it has no isolation class to place"

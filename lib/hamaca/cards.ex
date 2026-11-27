@@ -229,7 +229,7 @@ defmodule Hamaca.Cards do
 
   @doc """
   The cards on `board` whose ref or title matches `query` — the ONE definition of what
-  "matches" means (RE198). Every surface calls this: `GET /api/cards?q=`, `./relay search`,
+  "matches" means (RE198). Every surface calls this: `GET /api/cards?q=`, `./hamaca search`,
   and the board header's results popover. There is deliberately no second predicate anywhere.
 
   Ranking is two-tier:
@@ -967,7 +967,7 @@ defmodule Hamaca.Cards do
 
   @doc """
   Board-wide `%{card_id => [unsatisfied blocker card_id]}` in ONE query — the single definition
-  of "is this card blocked", read by the scheduler, the board, the drawer and `relay why`. Cards
+  of "is this card blocked", read by the scheduler, the board, the drawer and `./hamaca why`. Cards
   with no unmet blocker are absent from the map.
 
   **Satisfied** is `Hamaca.Boards.top_level_done_stage_ids/1`: the blocker's *status is
@@ -1249,7 +1249,7 @@ defmodule Hamaca.Cards do
     end
   end
 
-  # The `ai_result` blob's vocabulary, spelled once (relay.md § "The AI result blob" quotes
+  # The `ai_result` blob's vocabulary, spelled once (hamaca.md § "The AI result blob" quotes
   # these, and the drawer reads exactly these). RE322/TH153: an agent that invented its own
   # spelling — the screenshot under `screens[].image`, the deployed page under `url` — uploaded
   # every attachment fine and then rendered twelve broken images, and nobody found out for days.
@@ -1368,7 +1368,7 @@ defmodule Hamaca.Cards do
 
   defp quoted(keys), do: Enum.map_join(keys, ", ", &~s("#{&1}"))
 
-  # RE370 — one mockup entry's vocabulary, spelled once (relay.md and priv/docs/api.md quote it).
+  # RE370 — one mockup entry's vocabulary, spelled once (hamaca.md and priv/docs/api.md quote it).
   @mockup_keys ~w(url caption)
 
   @doc "The keys one entry of a card's `mockups` list may carry (RE370)."

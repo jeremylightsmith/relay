@@ -24,7 +24,7 @@ defmodule Hamaca.Runs.RunServer do
       revokes the job, stamps the newest of them `:needs_input` and parks the
       run instead of entering another attempt.
     * `{:reenter_new_visit, resume_session}` — a human retry aimed at a
-      different node (`relay retry --at`, RLY-189): identical, except the
+      different node (`./hamaca retry --at`, RLY-189): identical, except the
       current node is entered on a FRESH visit at attempt 1, matching what a
       real `{:transition, node}` does.
     * `{:advance_foreach, resume_session}` — a human advancing a foreach past a task
@@ -183,7 +183,7 @@ defmodule Hamaca.Runs.RunServer do
     reenter(state, &enter_same_node!(&1, &2, resume_session), cap_outcomeless: true, binding: :inherit)
   end
 
-  # RLY-189: a retry re-entering a DIFFERENT node (`relay retry --at`) must start a
+  # RLY-189: a retry re-entering a DIFFERENT node (`./hamaca retry --at`) must start a
   # fresh visit of that node, attempt 1 — exactly like a real {:transition, node}.
   # Re-entering it on its old visit number would corrupt per-visit retry accounting.
   def handle_continue({:reenter_new_visit, resume_session}, state) do
@@ -1027,7 +1027,7 @@ defmodule Hamaca.Runs.RunServer do
   #   * anything else                -> inherit (spec_review/quality_review stay bound)
   #
   # Keying off the TARGET NODE instead was the RE252 bug. `done` is not a private engine
-  # cursor — the card drawer's checkbox and `relay check <ref> <id>` both write it — so a
+  # cursor — the card drawer's checkbox and `./hamaca check <ref> <id>` both write it — so a
   # failure loop-back that re-derived the cursor jumped to the next task whenever anything
   # else had checked the in-flight one off, and that task's findings reached nothing.
   defp binding_for(run, flow, node, guard, execution) do
@@ -1528,7 +1528,7 @@ defmodule Hamaca.Runs.RunServer do
   # The scheduler skips `:failed` cards by rule, so a card whose last run died is
   # never silently re-pulled.
   #
-  # Unlike ./relay's flag() (which wraps the detail in "[auto] stage failed: …
+  # Unlike ./hamaca's flag() (which wraps the detail in "[auto] stage failed: …
   # a human needs to look" framing), this posts the bare detail.
   #
   # `apply_decision({:fail, _})` already closed the run in this transaction and the caller

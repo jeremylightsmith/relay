@@ -46,7 +46,7 @@
           "key": "judge",
           "type": "agent",
           "writes": ["tasks"],
-          "run": "Three models planned card {ref} independently. Their plans follow, one section per planner:\n\n{prior_detail}\n\nRead the card with `{relay} card {ref}`. Merge the plans into one: keep the best approach, take the strongest tasks from each, and drop duplicates. End with 2–6 tasks, each small enough to build and test in one sitting and saying how to tell it works.\n\n1. Post a comment headed \"How the plans were combined\" with `{relay} comment {ref} @<file>`, crediting what you took from claude_plan, gpt_plan and gemini_plan.\n2. Write each task's body to a file in the directory of $RELAY_NODE_SCRATCH and save them all in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> …`.\n\nDo not write code."
+          "run": "Three models planned card {ref} independently. Their plans follow, one section per planner:\n\n{prior_detail}\n\nRead the card with `{relay} card {ref}`. Merge the plans into one: keep the best approach, take the strongest tasks from each, and drop duplicates. End with 2–6 tasks, each small enough to build and test in one sitting and saying how to tell it works.\n\n1. Post a comment headed \"How the plans were combined\" with `{relay} comment {ref} @<file>`, crediting what you took from claude_plan, gpt_plan and gemini_plan.\n2. Write each task's body to a file in the directory of $HAMACA_NODE_SCRATCH and save them all in one call: `{relay} tasks add {ref} --task \"<title>\" @<file> …`.\n\nDo not write code."
         },
         {
           "key": "mockup",

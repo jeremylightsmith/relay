@@ -9,7 +9,7 @@ defmodule Hamaca.Flows.Shape do
 
   A flow that breaks the rule has exactly one `t:problem/0`, of the first kind in `kinds/0`
   that applies, carrying a structured `what` / `why` / `fixes` / `columns` explanation. The
-  web layer, the API and `./relay` render `what`, `why` and each fix's `label` verbatim — they
+  web layer, the API and `./hamaca` render `what`, `why` and each fix's `label` verbatim — they
   never re-word them. Nothing here is stored: a problem is recomputed from the board on read.
 
   Pure — no Repo access; `Hamaca.Flows.shape_problems/1` is the DB convenience.

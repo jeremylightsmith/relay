@@ -1154,7 +1154,7 @@ defmodule Hamaca.Runs do
   is what BoardLive treats as a candidate for the stalled run-face treatment. Reuses
   `runner_stale?/2`, so "working" can never disagree with what the reclaim sweep would act on.
 
-  A claim IS the start signal: `./relay` claims a job and spawns its worker thread in the same
+  A claim IS the start signal: `./hamaca` claims a job and spawns its worker thread in the same
   loop iteration, so there is no meaningful claimed-but-not-working window (RE255). There is
   deliberately no time ceiling here — a hung-but-claimed agent is `Cards.health/1`'s signal, and
   a job on a runner that has gone silent is already excluded by `runner_stale?/2`.
@@ -2001,7 +2001,7 @@ defmodule Hamaca.Runs do
 
   ## Runners (ADR 0006 card 04)
 
-  # The oldest `./relay` RUNNER_VERSION this server will hand work to (RLY-184). One
+  # The oldest `./hamaca` RUNNER_VERSION this server will hand work to (RLY-184). One
   # module owns the number; the controller and the runners view read it through
   # min_runner_version/0 rather than re-deriving it. Raise it only when running the old
   # runner is genuinely worse than a stopped one — every runner below it is refused at
@@ -2044,9 +2044,16 @@ defmodule Hamaca.Runs do
   # to finish a terminal run tears the tree down under its still-running siblings, and it
   # attributes their board-log lines by card ref, so branches clobber each other's. Genuinely
   # worse than a stopped runner. (88, not 87: RE358 took 87 on main first.)
-  @min_runner_version 88
+  # RE482 (2026-11) raised this to 102 — the ONE deliberate override of "raise it only when the old
+  # runner is genuinely worse than a stopped one". It ends the relay → hamaca compatibility window
+  # RE478 opened: the server no longer serves any `./relay` (the scaffold answers a layout-less or
+  # legacy request 410 `runner_renamed`), so no `./relay` can ever reach 102, and the floor alone
+  # refuses every `./relay` install at claim — with a message naming the board's install one-liner
+  # (`pre_rename_runner?/1`). It also forces v94..101 `./hamaca` runners to update, which their
+  # auto-update already does. Equals the RUNNER_VERSION `./hamaca` declared when it shipped.
+  @min_runner_version 102
 
-  @doc "The minimum `./relay` RUNNER_VERSION this server will claim jobs to."
+  @doc "The minimum RUNNER_VERSION this server will claim jobs to."
   def min_runner_version, do: @min_runner_version
 
   # RE486: the RUNNER_VERSION RE478 shipped `./hamaca` at — the first runner that runs as
@@ -2107,13 +2114,13 @@ defmodule Hamaca.Runs do
   def shared_talk_capable?(%Runner{}), do: false
 
   # RE304: the version a runner can actually FETCH is the `RUNNER_VERSION` of the
-  # `./relay` this app SERVES at /api/scaffold — truthful by construction, which is exactly
+  # `./hamaca` this app SERVES at /api/scaffold — truthful by construction, which is exactly
   # what the retired `.relay/published.json` marker existed to paper over. Deliberately NOT
   # min_runner_version/0 (a floor, not a target). Read at RUNTIME, from `priv/scaffold/`,
-  # because a Mix release ships `priv/` but ships neither `relay` nor `.claude/`.
+  # because a Mix release ships `priv/` but ships neither `hamaca` nor `.claude/`.
 
   @doc """
-  The newest `./relay` RUNNER_VERSION a runner can download, or `nil`.
+  The newest `./hamaca` RUNNER_VERSION a runner can download, or `nil`.
 
   `nil` when the scaffold has not been built, which reads on the wire as "never auto-update" —
   the correct answer when there is nothing to fetch.
@@ -2133,23 +2140,20 @@ defmodule Hamaca.Runs do
   def runner_outdated?(%Runner{}), do: true
 
   @doc """
-  Whether this runner is still installed as `./relay` during the relay → hamaca CLI rename's
-  compatibility window (RE478) — the Runners page's neutral UPDATE AVAILABLE hint (RE486).
-  Unrelated to `HamacaWeb.Api.NodeJobController`'s RE319 `executor` → `runner` wire rename.
-
-  An outdated runner (`runner_outdated?/1`, which includes a nil version) is never pre-rename: it
-  keeps the outdated treatment instead. Otherwise the reported `cli` decides, and a runner
-  reporting none is pre-rename when it predates `first_hamaca_runner_version/0`.
+  Whether this runner is **refused, and the reason is the relay → hamaca rename** (RE486, RE482):
+  it is outdated (`runner_outdated?/1`) and still installed as `./relay` — it reports
+  `cli: "relay"`, or reports no `cli` and predates `first_hamaca_runner_version/0`. The 409 claim
+  refusal then names the board's install one-liner, and the Runners page shows the amber
+  "Refused:" strip. Implies `runner_outdated?/1`. A runner reporting no version is never
+  pre-rename (it keeps the plain outdated treatment). Unrelated to
+  `HamacaWeb.Api.NodeJobController`'s RE319 `executor` → `runner` wire rename.
   """
   @spec pre_rename_runner?(Runner.t()) :: boolean()
-  def pre_rename_runner?(%Runner{version: version, cli: cli} = runner) do
-    cond do
-      runner_outdated?(runner) -> false
-      cli == "relay" -> true
-      cli == "hamaca" -> false
-      true -> version < @first_hamaca_runner_version
-    end
+  def pre_rename_runner?(%Runner{version: version, cli: cli} = runner) when is_integer(version) do
+    runner_outdated?(runner) and (cli == "relay" or (is_nil(cli) and version < @first_hamaca_runner_version))
   end
+
+  def pre_rename_runner?(%Runner{}), do: false
 
   @doc """
   One harness's live usage pause at `now` (RE436), from one `Schemas.Runner.normalize_harnesses/1`
@@ -2281,7 +2285,8 @@ defmodule Hamaca.Runs do
       version: runner.version,
       outdated: runner_outdated?(runner),
       freshness: runner_freshness(runner, now),
-      rate_limit: active_rate_limit(runner, now)
+      rate_limit: active_rate_limit(runner, now),
+      pre_rename: pre_rename_runner?(runner)
     }
   end
 
@@ -2324,7 +2329,7 @@ defmodule Hamaca.Runs do
   defp usage_percent(pct), do: "#{round(pct)}%"
 
   @doc """
-  The `:runner_rate_limited` run diagnosis sentence — ONE copy for `diagnose/3` (`relay why`, the
+  The `:runner_rate_limited` run diagnosis sentence — ONE copy for `diagnose/3` (`./hamaca why`, the
   API) and the card drawer's Run tab, which reads `roster_rate_limit/2`'s `resumes_at` per tick
   rather than paying for a full snapshot.
   """
@@ -3218,8 +3223,9 @@ defmodule Hamaca.Runs do
         # Orthogonal to `freshness` on purpose (RLY-184): a refused runner is perfectly
         # healthy and beating normally — it is just running old code.
         outdated: outdated,
-        # RE486: the CLI name it runs as, and whether it is still a `./relay` install during the
-        # rename's window — the Runners page's neutral hint, never set for an outdated runner.
+        # RE486/RE482: the CLI name it runs as, and whether it is refused because it is still a
+        # `./relay` install (`pre_rename_runner?/1`) — implies `outdated`. The Runners page's
+        # amber "Refused:" strip with the install one-liner.
         cli: runner.cli,
         pre_rename: pre_rename_runner?(runner),
         # RE320: the live usage pause, nil once it resets. RE436: set only while EVERY installed
@@ -3326,7 +3332,9 @@ defmodule Hamaca.Runs do
   # The runner columns `runner_snapshot_entry/2` and `working_run_ids/2` read (RE402). RE436:
   # `harnesses` is what `active_rate_limit/2` derives the pause from — without it every snapshot
   # would read every runner as unpaused and the `:runner_rate_limited` diagnosis would vanish.
-  @board_runner_fields [:id, :board_id, :name, :version, :last_heartbeat, :interval, :harnesses]
+  # RE482: `cli` is what `pre_rename_runner?/1` reads — without it every `./relay` runner at
+  # v94+ would read as a `./hamaca` one and the stopped-work banner could never name it.
+  @board_runner_fields [:id, :board_id, :name, :version, :cli, :last_heartbeat, :interval, :harnesses]
 
   @doc """
   The board's `Runner` rows, narrowed to #{inspect(@board_runner_fields)} — the lean read
@@ -3438,7 +3446,7 @@ defmodule Hamaca.Runs do
 
   Landing on `:failed` is what makes the stall visible with no new UI: a `:failed` card is
   skipped by `Policy.pullable?/1` and `resumable?/2`, is counted by the board's stalled badge
-  (`restartable_runs/1`), appears in the restart dialog, and gives `relay why` the `:run_failed`
+  (`restartable_runs/1`), appears in the restart dialog, and gives `./hamaca why` the `:run_failed`
   verdict carrying the detail.
 
   The pin is cleared **only** when the refusal reason proves it unhonourable
@@ -3479,7 +3487,7 @@ defmodule Hamaca.Runs do
       else: run
   end
 
-  # Names the cause in the shape a human can act on, in the same words `relay why` prints
+  # Names the cause in the shape a human can act on, in the same words `./hamaca why` prints
   # (`Scheduler.resume_refusal_sentence/1` is the one definition of that phrasing).
   defp unresumable_detail(%Run{resume_refused_since: since, resume_refused_reason: reason}, now) do
     minutes = div(DateTime.diff(now, since, :second), 60)
@@ -3514,6 +3522,13 @@ defmodule Hamaca.Runs do
   `@stopped_work_after_s`, AND the shared `Scheduler.capacity_diagnosis/1` blames the roster
   (outdated / no runner / all gone / all paused at a usage limit) rather than a legitimately
   busy board. `now` is injectable.
+
+  `evidence` is the diagnosis's own. RE482: when the reason is `:runner_outdated` and **every**
+  live refused runner is a `./relay` install (`pre_rename_runner?/1`), `evidence` adds
+  `pre_rename_runners: [%{id, name}]` (sorted by name, `id` the runner row id) and `detail`
+  names them — "Runner studio-mac is still installed as ./relay, which this board no longer
+  accepts. Update it to ./hamaca and restart." A mixed or non-rename refusal keeps the generic
+  detail and carries no `pre_rename_runners` key.
   """
   @spec stopped_work(Board.t(), DateTime.t() | nil) ::
           nil
@@ -3522,7 +3537,10 @@ defmodule Hamaca.Runs do
               detail: String.t(),
               queued_count: pos_integer(),
               oldest_queued_age_s: pos_integer(),
-              evidence: map()
+              evidence: %{
+                optional(:pre_rename_runners) => [%{id: pos_integer(), name: String.t()}],
+                optional(atom()) => term()
+              }
             }
   def stopped_work(%Board{} = board, now \\ nil) do
     now = now || now()
@@ -3548,6 +3566,8 @@ defmodule Hamaca.Runs do
     {reason, bits} = Scheduler.capacity_diagnosis(snapshot)
 
     if reason in Scheduler.roster_blocking_reasons() do
+      bits = with_pre_rename_runners(reason, bits)
+
       %{
         reason: reason,
         detail: stopped_work_detail(reason, bits, age),
@@ -3557,6 +3577,19 @@ defmodule Hamaca.Runs do
       }
     end
   end
+
+  # RE482: only when EVERY live refused runner is a `./relay` install — a mixed roster has a
+  # second cause the rename sentence would hide, so it keeps the generic copy.
+  defp with_pre_rename_runners(:runner_outdated, %{running_versions: [_ | _] = rvs} = bits) do
+    if Enum.all?(rvs, & &1.pre_rename) do
+      runners = rvs |> Enum.map(&Map.take(&1, [:id, :name])) |> Enum.sort_by(& &1.name)
+      Map.put(bits, :pre_rename_runners, runners)
+    else
+      bits
+    end
+  end
+
+  defp with_pre_rename_runners(_reason, bits), do: bits
 
   defp queued_jobs_summary(%Board{} = board) do
     row =
@@ -3578,6 +3611,16 @@ defmodule Hamaca.Runs do
       %{count: 0} -> nil
       %{count: count, oldest: oldest} -> %{count: count, oldest_inserted_at: oldest}
     end
+  end
+
+  defp stopped_work_detail(:runner_outdated, %{pre_rename_runners: [%{name: name}]}, age) do
+    "No jobs claimed in #{div(age, 60)}m · Runner #{name} is still installed as ./relay, " <>
+      "which this board no longer accepts. Update it to ./hamaca and restart."
+  end
+
+  defp stopped_work_detail(:runner_outdated, %{pre_rename_runners: runners}, age) do
+    "No jobs claimed in #{div(age, 60)}m · Runners #{Enum.map_join(runners, ", ", & &1.name)} are still " <>
+      "installed as ./relay, which this board no longer accepts. Update them to ./hamaca and restart."
   end
 
   defp stopped_work_detail(:runner_outdated, bits, age) do
@@ -3957,7 +4000,7 @@ defmodule Hamaca.Runs do
   end
 
   # Read through list_runner_status/2 — the SAME read the runners page renders — so the
-  # verdict can never disagree with what an operator is looking at while they run `relay why`.
+  # verdict can never disagree with what an operator is looking at while they run `./hamaca why`.
   # OUTDATED rows are excluded: a refused runner claims nothing whatever its free slots say,
   # so "no free slot" would be the wrong diagnosis — with only outdated rows this returns [] and
   # the more specific `:runner_outdated` from roster_blocked?/5 keeps winning. RE320: paused
@@ -5455,7 +5498,7 @@ defmodule Hamaca.Runs do
   # expansion ({ref}/{branch}/{relay}) stays runner-side per
   # Schemas.Flow.Node; the engine only supplies the vars. `branch` follows
   # today's runner convention: the card's stored branch, else
-  # <key>-<n>-<title-slug> (mirrors ./relay's slug()).
+  # <key>-<n>-<title-slug> (mirrors ./hamaca's slug()).
   @doc false
   def build_payload(%Run{} = run, %Flow{} = flow, node_key, opts) do
     card = Repo.get!(Card, run.card_id)
@@ -5599,7 +5642,7 @@ defmodule Hamaca.Runs do
 
   # {task} lets a foreach node's prompt name the exact task it is working
   # instead of saying "the next unchecked one"; {task_id} lets it FETCH that
-  # task (`relay task show {ref} {task_id}`, RE357; canonical names since RE367 —
+  # task (`./hamaca task show {ref} {task_id}`, RE357; canonical names since RE367 —
   # a flow push spelling the old {sub_task}/{sub_task_id} is refused, RE487, and no
   # stored flow still uses them). Both are nil outside a foreach binding, and the runner
   # drops nil vars, so the placeholder survives literally there — use them only in

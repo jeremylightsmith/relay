@@ -91,7 +91,7 @@ use them.
   nobody: the server compares the runner's declared version against
   `Hamaca.Runs.min_runner_version/0` and **refuses work** to anything below it (409
   `runner_outdated`), which is the only thing that turns "the fix was merged" into "the fix
-  is running". `bin/test_relay.py`'s `RunnerVersionBumpGuardTest` (RE425) enforces this: when
+  is running". `bin/test_hamaca.py`'s `RunnerVersionBumpGuardTest` (RE425) enforces this: when
   `./hamaca`'s masked contents changed since the merge-base with `origin/main`, it requires
   `RUNNER_VERSION` to be **strictly greater than `origin/main`'s** and names the minimum — so
   two parallel branches bumping to the same number fail for whichever lands second (rebase and

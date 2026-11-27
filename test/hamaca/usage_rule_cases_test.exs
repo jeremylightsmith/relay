@@ -1,7 +1,7 @@
 defmodule Hamaca.UsageRuleCasesTest do
   @moduledoc """
   RE436 — `Schemas.HarnessUsage.Rule` passes every shared case in `Hamaca.UsageRuleCases`, the
-  same cases `bin/test_relay.py` runs the Python mirror against (via the contract fixture).
+  same cases `bin/test_hamaca.py` runs the Python mirror against (via the contract fixture).
   """
   use ExUnit.Case, async: true
 

@@ -1,13 +1,13 @@
 ---
 name: hamaca-update
-description: Use when a project's Relay tooling may be stale — refreshing `./hamaca` and its skills from the board, after a Relay release, or when a run was refused with `runner_outdated`. Keywords: relay update, update ./hamaca, refresh skills, scaffold, runner outdated, stale tooling.
+description: Use when a project's Hamaca tooling may be stale — refreshing `./hamaca` and its skills from the board, after a Hamaca release, or when a run was refused with `runner_outdated`. Keywords: ./hamaca update, update ./hamaca, refresh skills, scaffold, runner outdated, stale tooling.
 ---
 
-# Relay Update
+# Hamaca Update
 
 ## Overview
 
-Relay owns exactly five files in your project:
+Hamaca owns exactly five files in your project:
 
 | Item | Path |
 |---|---|
@@ -32,7 +32,7 @@ know what would change, ask the command.
 
 ## When to Use
 
-- A Relay release shipped and this project has not picked it up.
+- A Hamaca release shipped and this project has not picked it up.
 - A run was refused with `runner_outdated`, or the Runners view shows an `OUTDATED` badge.
 - One of the five files above is missing, was deleted, or was edited — `update` repairs all
   five the same way, because none of them is yours to change.
@@ -43,11 +43,11 @@ know what would change, ask the command.
   the new pointer file. Commit the result. When a board's default LLM moves, its Settings →
   Agents flash names the exact values.
 
-**Never run this in the Relay app repo itself.** There these five files are the *source*, not
+**Never run this in the Hamaca app repo itself.** There these five files are the *source*, not
 installed copies, and because publishing is coupled to deploying (ADR 0010) the board serves
 whatever was last deployed — so an update reverts local work to it. `./hamaca update` refuses
 there without `--force`; `--check` is still fine and still tells you the truth.
-- Any time someone asks "is our Relay tooling current?"
+- Any time someone asks "is our Hamaca tooling current?"
 
 ## The checklist
 
@@ -71,17 +71,17 @@ If it is `false`, report the `changed` list by name before you write anything.
 ```
 
 Report `written` by name. If `./hamaca` is in that list, mention that a running
-`relay start` keeps serving the old code until it restarts (it will pick this up itself at a
+`./hamaca start` keeps serving the old code until it restarts (it will pick this up itself at a
 job boundary if `auto_update` is on).
 
 If the report's `removed` lists `bin/relay`, say so: the CLI moved to `./hamaca` (RE319) and the
-update deleted the old Relay-installed copy (and `bin/` if that left it empty) — include that
+update deleted the old Hamaca-installed copy (and `bin/` if that left it empty) — include that
 deletion in the commit. A project whose update was run by an old `bin/relay` gets `./hamaca`
 installed **without the executable bit** and keeps the old file, because that old code
 predates both the new path and the cleanup. Fix it once with
 `chmod +x ./hamaca && ./hamaca update` — the update also removes the leftover — and make sure the
 commit records `./hamaca` as mode 755 (`git ls-files -s ./hamaca` shows `100755`). A `bin/relay` that
-is not Relay's is never touched.
+is not Hamaca's is never touched.
 
 ### 3. Confirm the commit, and explain why it matters
 
@@ -100,7 +100,7 @@ fine — say what you're doing and do that.
 - Stage **only the files this run wrote** — the `written` list from step 2, one `git add` per
   path. **Never `git add -A`.**
 - Commit with a message naming the version, e.g.
-  `chore(relay): update scaffold to a3f9c81b20d4`.
+  `chore(hamaca): update scaffold to a3f9c81b20d4`.
 - **Never push.** Pushing is the human's call and is not part of this skill.
 
 ### 5. Nudge toward the doctor

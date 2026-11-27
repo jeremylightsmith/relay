@@ -107,5 +107,6 @@ Still stuck? Run `./hamaca why <card>` and it tells you why that card isn't movi
 - [How Hamaca works](/docs/how-hamaca-works) follows one card across a board, from you to an
   agent and back.
 - [CLI](/docs/cli) lists every `./hamaca` command. A repo set up with the older `./relay`
-  moves over with two updates; see [Upgrading from ./relay](/docs/cli#upgrading-from-relay).
+  moves over by running the board's install command; see
+  [Upgrading from ./relay](/docs/cli#upgrading-from-relay).
 - [REST API](/docs/api) is for building your own tools on Hamaca.

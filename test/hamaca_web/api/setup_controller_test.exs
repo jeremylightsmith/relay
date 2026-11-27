@@ -97,13 +97,16 @@ defmodule HamacaWeb.Api.SetupControllerTest do
              }
 
       # RE478: the wizard lists the Hamaca-named files — never the ./relay shim or the aliases.
-      assert body["relay_files"] == [
+      assert body["hamaca_files"] == [
                ".claude/skills/hamaca-doctor/SKILL.md",
                ".claude/skills/hamaca-onboard/SKILL.md",
                ".claude/skills/hamaca-update/SKILL.md",
                "hamaca",
                "hamaca.md"
              ]
+
+      # RE482 scenario 7: the preflight key is renamed with the rest of the runner surface.
+      refute Map.has_key?(body, "relay_files")
 
       ids = Enum.map(body["checks"], & &1["id"])
       assert ids == Enum.map(Setup.preflight_checks(), & &1.id) ++ ["cli", "key"]
@@ -124,7 +127,7 @@ defmodule HamacaWeb.Api.SetupControllerTest do
     end
 
     # RE457 scenario 11
-    test "a Codex board's preflight answers the .agents/skills dir and relay files", %{conn: conn, user: user} do
+    test "a Codex board's preflight answers the .agents/skills dir and hamaca files", %{conn: conn, user: user} do
       board = create!(user)
       {:ok, %{token: token}} = Setup.choose_llm(board, user, "codex")
       clis = %{"claude" => nil, "codex" => "/usr/bin/codex", "gemini" => nil}
@@ -133,8 +136,8 @@ defmodule HamacaWeb.Api.SetupControllerTest do
 
       assert body["ok"] == true
       assert body["llm"]["skill_dir"] == ".agents/skills"
-      assert ".agents/skills/hamaca-update/SKILL.md" in body["relay_files"]
-      refute Enum.any?(body["relay_files"], &String.starts_with?(&1, ".claude/"))
+      assert ".agents/skills/hamaca-update/SKILL.md" in body["hamaca_files"]
+      refute Enum.any?(body["hamaca_files"], &String.starts_with?(&1, ".claude/"))
     end
 
     # Scenario 4

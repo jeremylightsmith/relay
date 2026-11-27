@@ -134,7 +134,7 @@ defmodule HamacaWeb.CardMedia do
   def fetchable_url?("data:image/" <> _rest), do: true
 
   # A root-relative src only resolves if this app serves that path: a static prefix, or an uploaded
-  # attachment (RE322 — `relay attach` hands agents `/attachments/<id>`, a router route rather than a
+  # attachment (RE322 — `./hamaca attach` hands agents `/attachments/<id>`, a router route rather than a
   # static path, so checking static_paths alone drew every uploaded screenshot as the placeholder).
   # An agent's local screenshot path ("/Users/…/tmp/smoke/12-review.png") is neither, and must not
   # become a broken <img>.

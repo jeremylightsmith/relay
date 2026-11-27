@@ -125,7 +125,8 @@ defmodule Hamaca.DocsContentTest do
     runner = File.read!(Path.join(File.cwd!(), "docs/architecture/runner.md"))
     cli = read("cli.md")
 
-    assert runner =~ "./relay start"
+    # RE482: the current runner is started as `./hamaca start`.
+    assert runner =~ "./hamaca start"
     assert runner =~ "is **deleted**", "runner.md must still record that the legacy runner is gone"
 
     refute cli =~ "./hamaca pull"
@@ -253,15 +254,22 @@ defmodule Hamaca.DocsContentTest do
     [upgrading | _] = String.split(upgrading, "\n## ")
     upgrading = String.replace(upgrading, ~r/\s+/, " ")
 
-    assert upgrading =~ "installs the new runner as `./relay`"
-    assert upgrading =~ "the next `./relay update` renames the repo"
+    # RE482: the compatibility window is closed — the board refuses `./relay`, and the upgrade
+    # path is the board's install command, never `./relay update`.
+    assert upgrading =~ "Boards no longer accept it"
+    assert upgrading =~ "run your board's install command in the checkout"
+    refute upgrading =~ "keep working"
+    refute upgrading =~ "Run `./relay update`"
 
-    for name <- ["`./relay`", "`RELAY_*`", "`.relay/`", "`relay-*` skills", "RE482"] do
+    for name <- ["`./relay`", "`RELAY_*`", "`.relay/`", "`relay-*` skills", "`HAMACA_API_KEY`"] do
       assert upgrading =~ name, "the upgrade section should name #{name}"
     end
 
-    assert upgrading =~ "keep working"
     assert upgrading =~ "`./hamaca start`"
+    refute read("getting-started.md") =~ "two updates"
+    # The update section no longer promises the retired shim or alias skills.
+    refute cli =~ "shim"
+    refute cli =~ "alias\nskills"
   end
 
   # RE478 task 4 scenario 11

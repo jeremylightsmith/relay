@@ -114,7 +114,7 @@ flowchart LR
 The rationale that used to live in `code.jsonc`'s comments, relocated here when the files
 became comment-free JSON (RLY-241). Keyed by node.
 
-- **`branch`** — also materializes the card's `plan` into the per-ref `$RELAY_PLAN` path
+- **`branch`** — also materializes the card's `plan` into the per-ref `$HAMACA_PLAN` path
   (what `/exec-plan` used to do before RLY-139) for `implement` to read. RLY-224 routed its
   fetch through the single retrying `{relay} git-fetch` helper, and, last in the chain, records
   the branch on the card with `{relay} branch {ref} {branch}` (RE244 §5 — last deliberately: if
@@ -132,7 +132,7 @@ became comment-free JSON (RLY-241). Keyed by node.
 - **`implement`** — execute-plan's per-task loop as a real engine `foreach`: each entry begins
   one iteration bound to one of the card's tasks. The `next_task` grep-gate is **gone** —
   "which task is next" is derived server-side; `{task}` names the task in the prompt and
-  `{task_id}` lets the node fetch its body with `relay task show {ref} {task_id}` (RE357;
+  `{task_id}` lets the node fetch its body with `./hamaca task show {ref} {task_id}` (RE357;
   canonical since RE367 — the legacy `{sub_task}` / `{sub_task_id}` / `card.sub_tasks`
   spellings are refused on push, naming the rename). `implement`, `spec_review`, `quality_review` and
   `fix_findings` all declare `reads: [tasks]`.
@@ -211,7 +211,7 @@ became comment-free JSON (RLY-241). Keyed by node.
   `Hamaca.Flows.sync_defaults!/0` runs at deploy (`Hamaca.Release.migrate/0`) and re-syncs every
   **library-managed** (`version == 1`) flow to the new default, so the contract and the run
   strings that satisfy it land together in one transaction. A **hand-customized** flow
-  (`version > 1`) is skipped and keeps its undeclared nodes — `/relay-doctor`'s establish
+  (`version > 1`) is skipped and keeps its undeclared nodes — `/hamaca-doctor`'s establish
   dialogue is the upgrade path for those. An undeclared node never fires the guard, so a skipped
   flow behaves exactly as it does today.
 - **`role`** — RE346's **Do / Check / Fix** value-stream role, `Schemas.Flow.Node.roles/0`.

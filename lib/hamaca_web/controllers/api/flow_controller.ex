@@ -1,7 +1,7 @@
 defmodule HamacaWeb.Api.FlowController do
   @moduledoc """
   Read and write a board's flow definitions as canonical documents (RLY-241) — the read surface
-  `relay doctor` needs, and the write half the seed/adopt/refactor reconcile engine needs.
+  `/hamaca-doctor` needs, and the write half the seed/adopt/refactor reconcile engine needs.
   """
   use HamacaWeb, :controller
 

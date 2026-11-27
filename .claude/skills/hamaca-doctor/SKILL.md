@@ -1,9 +1,9 @@
 ---
 name: hamaca-doctor
-description: Use when a flow may no longer match this repo's factory — after editing a flow or one of its nodes, after adding, renaming, or removing a `.claude/agents`, skill, or command file, when a run failed with an unknown agent or skill, or when wiring Relay into a repo. Keywords: flow, factory, agent not found, unknown skill, alignment, doctor.
+description: Use when a flow may no longer match this repo's factory — after editing a flow or one of its nodes, after adding, renaming, or removing a `.claude/agents`, skill, or command file, when a run failed with an unknown agent or skill, or when wiring Hamaca into a repo. Keywords: flow, factory, agent not found, unknown skill, alignment, doctor.
 ---
 
-# Relay Doctor
+# Hamaca Doctor
 
 ## Overview
 
@@ -15,16 +15,16 @@ flow?" is a question, not a computation.
 
 The doctor now answers **two** questions: "do these names resolve?" (checks 1–9) and **"is this
 board's history clean?"** (the audit). The gap between those was the whole bug — RE249 was filed
-after a green doctor was followed, hours later, by five Relay bugs on one card, none of which
+after a green doctor was followed, hours later, by five Hamaca bugs on one card, none of which
 was a naming problem.
 
 A third section, **factory migrations**, asks "has this repo picked up what the platform now
 expects of a factory?" ADR 0010 makes the planner and executor agents the repo's own, so
-`relay update` cannot deliver a change to them; doctor detects the old shape and walks the human
+`./hamaca update` cannot deliver a change to them; doctor detects the old shape and walks the human
 through the new one (see [Factory migrations](#factory-migrations)).
 
 **Core principle:** never re-implement a check — resolution comes from the runner's own
-resolver, board health from `relay audit` — and change nothing without asking.
+resolver, board health from `./hamaca audit` — and change nothing without asking.
 
 `/hamaca-doctor` with no argument checks **every** flow, disabled ones included and marked
 `(disabled)` — the flow you are about to enable is exactly the one worth doctoring.
@@ -38,7 +38,7 @@ resolver, board health from `relay audit` — and change nothing without asking.
 - After adding, renaming, or deleting a `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`,
   or `.claude/commands/*.md`.
 - After a run failed with an unknown agent or skill, or a node that never started.
-- When wiring Relay into a repo, or before enabling a flow.
+- When wiring Hamaca into a repo, or before enabling a flow.
 
 ## Gather
 
@@ -71,8 +71,8 @@ this machine reports to the server. If it cannot load (no `python3`, no `./hamac
 so and **skip checks 1 and 2**: unknown is not missing. Check 7 still runs — it needs only
 `ls .claude/agents/*.md` and the flow documents, never the inventory.
 
-What a flow *requires* is read off the document, mirroring `Relay.Flows.node_requirements/1`
-in `lib/relay/flows.ex` — check the two still agree:
+What a flow *requires* is read off the document, mirroring `Hamaca.Flows.node_requirements/1`
+in `lib/hamaca/flows.ex` — check the two still agree:
 
 - **agents:** every node's `agent` field (absent = none).
 - **skills:** the leading slash token `^/([A-Za-z0-9_-]+)` of an **agent** node's `run`
@@ -147,25 +147,25 @@ own `run` string. A file doctor cannot locate (a built-in, a `~/.claude` global)
 
 | field | write evidence |
 |---|---|
-| `description` | `relay describe` |
-| `spec` | `relay spec` |
-| `acceptance_criteria` | `relay criteria` |
-| `plan` | `relay plan` |
-| `tasks` | `relay tasks add` |
-| `branch` | `relay branch` |
-| `pr_url` | `relay pr` |
-| `ai_result` | `relay result` |
+| `description` | `./hamaca describe` |
+| `spec` | `./hamaca spec` |
+| `acceptance_criteria` | `./hamaca criteria` |
+| `plan` | `./hamaca plan` |
+| `tasks` | `./hamaca tasks add` |
+| `branch` | `./hamaca branch` |
+| `pr_url` | `./hamaca pr` |
+| `ai_result` | `./hamaca result` |
 
 A repo-local flow file may still carry the `tasks` field's legacy spelling. The board
 normalizes it when a flow is loaded or pushed, so a pulled flow never shows it; detection rule 3
 of the [`tasks-cutover`](#factory-migrations) migration reports it, and check 8 treats it as
 `tasks`.
 
-**Read evidence is card-level, not per-field — with one exception.** `relay card <ref>` (in any
+**Read evidence is card-level, not per-field — with one exception.** `./hamaca card <ref>` (in any
 form) shows the node reads the card, but not *which* field it uses. Say so in the report rather
 than claiming precision you don't have: a node with any `reads` declared is confirmed by a single
-`relay card` occurrence. The exception is `tasks`: a card's task bodies are not in
-`relay card`, so `relay task show` or `relay tasks list` is the **read** evidence for `tasks`
+`./hamaca card` occurrence. The exception is `tasks`: a card's task bodies are not in
+`./hamaca card`, so `./hamaca task show` or `./hamaca tasks list` is the **read** evidence for `tasks`
 (and also confirms the node reads the card).
 
 ## Board health (the audit)
@@ -192,8 +192,8 @@ covering all three.
 
 ## Factory migrations
 
-ADR 0010 makes a repo's planner and executor agents **its own**, and `relay update` ships only
-the Relay-owned files — so when the platform changes what a factory should *do*, nothing
+ADR 0010 makes a repo's planner and executor agents **its own**, and `./hamaca update` ships only
+the Hamaca-owned files — so when the platform changes what a factory should *do*, nothing
 delivers that change to the repo. Checks 1–9 can't see it either: they compare a flow's
 *declared* contract to the repo, and a customized flow (which the board's default sync skips)
 declares nothing wrong. A **factory migration** closes that gap: doctor detects that the repo
@@ -223,14 +223,14 @@ any other fix.
 
 ### Migration `tasks-cutover` (RE357)
 
-**Why.** The planner must write the plan header with `relay plan` and each task as a standalone
-body with `relay tasks add`; executors fetch ONE task by id with `relay task show`. A card's
+**Why.** The planner must write the plan header with `./hamaca plan` and each task as a standalone
+body with `./hamaca tasks add`; executors fetch ONE task by id with `./hamaca task show`. A card's
 tasks are the only source of a `foreach` node's work: the board never reads them out of
 `card.plan`. Until a repo migrates, every card its planner plans arrives with no tasks, and the
 Code flow refuses to start it — the card blocks on a human instead.
 
 **The plan node** is any agent node that declares `writes` containing `plan`, or whose evidence
-file (see "Where doctor looks for evidence") contains `relay plan`. **A task node** is a
+file (see "Where doctor looks for evidence") contains `./hamaca plan`. **A task node** is a
 `foreach` node, or any node whose `run` references `{task}` or `{task_id}`. The migration is
 **n/a** on a board with neither.
 
@@ -240,9 +240,9 @@ Pending if ANY of these holds:
 
 1. **The planner doesn't write tasks.** The plan node's evidence file —
    `.claude/skills/<name>/SKILL.md` or `.claude/commands/<name>.md` — contains no
-   `relay tasks add`.
+   `./hamaca tasks add`.
 2. **A task node doesn't fetch its task.** Neither its agent file (`.claude/agents/<name>.md`)
-   nor its own `run` text contains `relay task show` (`{relay} task show` counts — expand
+   nor its own `run` text contains `./hamaca task show` (`{relay} task show` counts — expand
    `{relay}` to `./hamaca`).
 3. **Legacy spellings in a repo flow file.** A repo-local flow file (`docs/designs/flows/*.json`,
    or wherever this repo keeps its flows) still says a legacy spelling: `sub_tasks`,
@@ -291,7 +291,7 @@ confirm it on the next real card: once that card runs plan → code, `./hamaca t
 shows the planner's tasks and the Code flow starts instead of blocking the card with "could not
 start: this card has no tasks".
 
-**Reference implementation.** In the Relay repo itself: `.claude/commands/write-plan.md`
+**Reference implementation.** In the Hamaca repo itself: `.claude/commands/write-plan.md`
 ("Writing it to the card") and `docs/designs/flows/code.json` (the `implement`, `spec_review`,
 `quality_review` and `fix_findings` nodes). They are the worked example — name them; don't
 fetch them into another repo.
@@ -313,7 +313,7 @@ code flow (enabled, v1)
 
 factory migrations
   MIGRATION tasks-cutover
-          detected: `write_plan` runs /write-plan (.claude/commands/write-plan.md), which never calls `relay tasks add`
+          detected: `write_plan` runs /write-plan (.claude/commands/write-plan.md), which never calls `./hamaca tasks add`
           fix: walk the plan-side and exec-side recipe — offered after the errors
 ```
 
@@ -344,7 +344,7 @@ all-clear.
 5. **Check 9's fix path — establish the contract, don't assume it.** A hand-declared contract
    just moves the "is it correct?" question, so for a node with no declared I/O:
    1. **Infer** a proposal from two signals — the node's flow/stage role (a node in a flow
-      landing on Plan probably writes `plan`) *and* what its skill actually does (a `relay plan`
+      landing on Plan probably writes `plan`) *and* what its skill actually does (a `./hamaca plan`
       call is evidence it writes `plan`).
    2. **Confirm per node** — "`write_plan`: reads `spec`, `acceptance_criteria`; writes `plan`?
       [y / adjust / skip]". Never assume: the human confirmation is what breaks the
@@ -382,7 +382,7 @@ all-clear.
 - **Running this from a flow node** — it is interactive by design.
 - **Declaring a contract the skill doesn't honor yet** — `writes` is enforced at run time, so an
   aspirational declaration turns a working flow into a failing one. But when a migration covers
-  the gap (`writes: tasks` on a planner that never calls `relay tasks add`), fix the skill
+  the gap (`writes: tasks` on a planner that never calls `./hamaca tasks add`), fix the skill
   rather than removing the declaration — the declaration is right; the skill is behind.
 - **Applying a migration without asking** — a migration is a recipe the human walks with you,
   one confirmed edit at a time; doctor never runs it.

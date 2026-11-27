@@ -20,7 +20,7 @@ defmodule HamacaWeb.Api.CardJSON do
       tag: card.tag,
       status: card.status,
       # RE198 — a genuine card fact the API never exposed. `archived_at` is already in the
-      # `@list_card_fields` projection, so this costs nothing; `./relay search` marks
+      # `@list_card_fields` projection, so this costs nothing; `./hamaca search` marks
       # archived rows from it.
       archived: not is_nil(card.archived_at),
       done: Cards.done?(card, stages),
@@ -117,10 +117,10 @@ defmodule HamacaWeb.Api.CardJSON do
     }
   end
 
-  # RE427 — a note's images, in position order; [] when none. `./relay card` prints them as
-  # `[image]` lines and `relay images --pull` downloads `download_path` (pinned under
+  # RE427 — a note's images, in position order; [] when none. `./hamaca card` prints them as
+  # `[image]` lines and `./hamaca images --pull` downloads `download_path` (pinned under
   # runner_contract.json's `note_images`). RE428 — `origin` is always present (nil for a plain
-  # note) so the runner can rely on the key; `./relay card` prints it after the author.
+  # note) so the runner can rely on the key; `./hamaca card` prints it after the author.
   defp entry(%Schemas.Comment{} = c) do
     %{
       kind: "comment",

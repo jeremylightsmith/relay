@@ -368,7 +368,7 @@ together with the session id on `:done` (and leaves it alone when the job's payl
 ## Node outcomes
 
 Every node declares exactly one outcome. This is the contract between a node and the engine:
-an agent node writes it to the file named by `$RELAY_NODE_OUTCOME`, a shell/gate node's exit
+an agent node writes it to the file named by `$HAMACA_NODE_OUTCOME`, a shell/gate node's exit
 status maps onto it. **A node that declares nothing is reported as `failed`** — a node that
 declared nothing cannot be distinguished from one that did nothing.
 

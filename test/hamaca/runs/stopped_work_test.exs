@@ -51,6 +51,53 @@ defmodule Hamaca.Runs.StoppedWorkTest do
     assert evidence.required_version == Runs.min_runner_version()
   end
 
+  describe "RE482: ./relay stragglers" do
+    test "names the one ./relay runner when it is the only refused runner", %{board: board, works: works} do
+      queued_job(works, 720)
+      runner = insert(:runner, board: board, name: "studio-mac", cli: "relay", version: 93)
+
+      assert %{reason: :runner_outdated, detail: detail, evidence: evidence} = Runs.stopped_work(board)
+      assert evidence.pre_rename_runners == [%{id: runner.id, name: "studio-mac"}]
+
+      assert detail ==
+               "No jobs claimed in 12m · Runner studio-mac is still installed as ./relay, which this board " <>
+                 "no longer accepts. Update it to ./hamaca and restart."
+    end
+
+    test "names several ./relay runners sorted by name", %{board: board, works: works} do
+      queued_job(works, 720)
+      b = insert(:runner, board: board, name: "b-box", cli: "relay", version: 93)
+      a = insert(:runner, board: board, name: "a-box", cli: "relay", version: 93)
+
+      assert %{reason: :runner_outdated, detail: detail, evidence: evidence} = Runs.stopped_work(board)
+      assert evidence.pre_rename_runners == [%{id: a.id, name: "a-box"}, %{id: b.id, name: "b-box"}]
+      assert String.starts_with?(detail, "No jobs claimed in 12m · Runners a-box, b-box are still installed as ./relay")
+      assert String.ends_with?(detail, "Update them to ./hamaca and restart.")
+    end
+
+    test "keeps the generic copy when a ./relay runner shares the roster with an old ./hamaca one", %{
+      board: board,
+      works: works
+    } do
+      queued_job(works, 720)
+      insert(:runner, board: board, name: "relay-box", cli: "relay", version: 93)
+      insert(:runner, board: board, name: "old-box", cli: "hamaca", version: Runs.min_runner_version() - 1)
+
+      assert %{reason: :runner_outdated, detail: detail, evidence: evidence} = Runs.stopped_work(board)
+      refute Map.has_key?(evidence, :pre_rename_runners)
+      assert String.starts_with?(detail, "No jobs claimed in 12m · every connected runner is running old code")
+    end
+
+    test "keeps the generic copy when no refused runner is a ./relay install", %{board: board, works: works} do
+      queued_job(works, 720)
+      insert(:runner, board: board, name: "old-box", cli: "hamaca", version: Runs.min_runner_version() - 1)
+
+      assert %{reason: :runner_outdated, detail: detail, evidence: evidence} = Runs.stopped_work(board)
+      refute Map.has_key?(evidence, :pre_rename_runners)
+      assert String.starts_with?(detail, "No jobs claimed in 12m · every connected runner is running old code")
+    end
+  end
+
   test ":no_runner on an empty roster", %{board: board, works: works} do
     queued_job(works, 600)
 

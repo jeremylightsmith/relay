@@ -3,7 +3,7 @@ defmodule HamacaWeb.PlanPaused do
   RE460, RE469 — the one owner of the `plan_paused` refusal: a board whose owner is held, or that
   is read-only on Free (`Hamaca.Billing.board_paused?/1`), answers **402** with this code and message on every board-key
   `/api/*` request (`HamacaWeb.Plugs.RequireActivePlan`) and on the `/api/all` writes
-  (`HamacaWeb.Api.FallbackController`). `./relay` mirrors the code as `PLAN_PAUSED_CODE`, pinned by
+  (`HamacaWeb.Api.FallbackController`). `./hamaca` mirrors the code as `PLAN_PAUSED_CODE`, pinned by
   `test/fixtures/runner_contract.json`'s `claim_refused.plan_paused`.
   """
 

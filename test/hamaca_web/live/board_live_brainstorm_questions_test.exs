@@ -5,7 +5,7 @@ defmodule HamacaWeb.BoardLiveBrainstormQuestionsTest do
   RLY-71 shipped the stepper but every one of its tests fed the LiveView a hand-made
   structured payload, so nothing caught that the sole producer (/brainstorm) still sent one
   big string and the drawer silently fell back to the wall of text. This test starts from
-  `test/fixtures/brainstorm_questions.json` — the same bytes bin/test_relay.py pins as the
+  `test/fixtures/brainstorm_questions.json` — the same bytes bin/test_hamaca.py pins as the
   POST body — posts it through the real API, and asserts the drawer steps it.
   """
   use HamacaWeb.ConnCase, async: true

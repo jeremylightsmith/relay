@@ -23,6 +23,16 @@ defmodule Hamaca.Flows.ReBoardFlowDocumentsTest do
     refute File.exists?(Path.join(@repo_root, ".relay"))
   end
 
+  # RE482 scenario 5: a `flow-push` of these documents must not reintroduce a `$RELAY_*` read.
+  test "the checked-in flow documents read no RELAY_ env name" do
+    paths = Path.wildcard(Path.join(@repo_root, ".hamaca/flows/*.json"))
+    assert @code_path in paths
+
+    for path <- paths do
+      refute File.read!(path) =~ "RELAY_", "#{Path.relative_to(path, @repo_root)} still reads a RELAY_ name"
+    end
+  end
+
   # A board shaped like RE after RE408: Code has its done sublane, and Deploy sits after Code
   # (the default board's Deploy, after Review, is replaced by one right after Code — a flow's
   # pickup and drop-off come from board order).

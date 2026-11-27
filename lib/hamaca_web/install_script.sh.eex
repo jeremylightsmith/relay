@@ -8,8 +8,8 @@
 # It checks first and writes nothing until the checks pass. Then it downloads only ./hamaca,
 # appends one pointer line to the LLM's pointer file and the .gitignore entries, and lets
 # `./hamaca update --starter-only` write the starter .hamaca/ files and `./hamaca update` lay down
-# hamaca.md, the Hamaca skills under the LLM's skill dir, the old-name shim and
-# .hamaca/scaffold.json (RE457, RE478). Nothing
+# hamaca.md, the Hamaca skills under the LLM's skill dir and .hamaca/scaffold.json — migrating
+# a pre-rename checkout and removing its old-name files on the way (RE457, RE478, RE482). Nothing
 # is committed. HAMACA_API_KEY is sent only as an Authorization header and is never written to a
 # file. Plain POSIX sh: only curl git python3 uname mktemp mkdir chmod mv rm cat grep printf.
 
@@ -199,7 +199,7 @@ done
 
 say "Writing:"
 printf '%s' "$resp" | py 'import json, sys
-for path in json.load(sys.stdin)["relay_files"]:
+for path in json.load(sys.stdin)["hamaca_files"]:
     print("  " + path)'
 [ -z "$pointer_note" ] || say "  $pointer_file$pointer_note"
 say "  .hamaca/runner.json"

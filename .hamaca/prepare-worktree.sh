@@ -1,26 +1,26 @@
 #!/usr/bin/env sh
-# Relay prepare hook (RLY-231): warm a freshly created per-card worktree so a Code run does not
+# Hamaca prepare hook (RLY-231): warm a freshly created per-card worktree so a Code run does not
 # pay a full deps.get + clean compile. Boring first cut — copy deps/_build/node_modules from a
 # warm base using APFS clonefile copy-on-write (near-free, each worktree gets its own writable
 # copy), falling back to a plain recursive copy on non-CoW filesystems. Reflink/tarball/container
 # restore and a shared read-only dep cache are deferred optimizations this hook can adopt later
-# with NO change to Relay core.
+# with NO change to Hamaca core.
 #
-# Invoked by ./relay right after `git worktree add`, cwd = the new worktree. Inputs arrive as
+# Invoked by ./hamaca right after `git worktree add`, cwd = the new worktree. Inputs arrive as
 # both argv and env. A nonzero exit FAILS the run (fail-fast) — a broken cache surfaces at once.
 #
-#   $1/$RELAY_WORKTREE   abs path of the new worktree (== cwd)
-#   $2/$RELAY_REF        card ref (e.g. RLY-231)
-#   $3/$RELAY_BRANCH     branch the run will attach
-#   $4/$RELAY_BASE       base ref (origin/main)
-#   $5/$RELAY_CACHE_DIR  configured cache dir (may be empty)
+#   $1/$HAMACA_WORKTREE   abs path of the new worktree (== cwd)
+#   $2/$HAMACA_REF        card ref (e.g. RLY-231)
+#   $3/$HAMACA_BRANCH     branch the run will attach
+#   $4/$HAMACA_BASE       base ref (origin/main)
+#   $5/$HAMACA_CACHE_DIR  configured cache dir (may be empty)
 set -eu
 
-WORKTREE="${RELAY_WORKTREE:-$1}"
-CACHE_DIR="${RELAY_CACHE_DIR:-}"
+WORKTREE="${HAMACA_WORKTREE:-$1}"
+CACHE_DIR="${HAMACA_CACHE_DIR:-}"
 
 # The warm source: the configured cache dir if it holds the dirs, else the main checkout's own
-# already-warm dirs (the repo you ran `relay start` from). git's common dir points at the main
+# already-warm dirs (the repo you ran `hamaca start` from). git's common dir points at the main
 # checkout's .git; its parent is that checkout's root.
 MAIN_ROOT="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | sed 's#/\.git/*$##')"
 

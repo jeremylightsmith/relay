@@ -6,7 +6,7 @@
     {
       "key": "branch",
       "type": "shell",
-      "run": "{relay} git-fetch && open=$(gh pr list --head {branch} --state open --json number -q length) && if [ \"$open\" -gt 0 ]; then base=origin/{branch}; else base=origin/main; fi && git checkout -B {branch} \"$base\" && {relay} card {ref} --json | jq -r '.plan // empty' > \"$RELAY_PLAN\" && test -s \"$RELAY_PLAN\" && {relay} branch {ref} {branch}",
+      "run": "{relay} git-fetch && open=$(gh pr list --head {branch} --state open --json number -q length) && if [ \"$open\" -gt 0 ]; then base=origin/{branch}; else base=origin/main; fi && git checkout -B {branch} \"$base\" && {relay} card {ref} --json | jq -r '.plan // empty' > \"$HAMACA_PLAN\" && test -s \"$HAMACA_PLAN\" && {relay} branch {ref} {branch}",
       "reads": ["plan"],
       "writes": ["branch"]
     },
@@ -20,7 +20,7 @@
       "foreach": "card.tasks",
       "agent": "plan-implementer",
       "reads": ["tasks"],
-      "run": "Implement task {task_id} (\"{task}\") with strict red/green TDD. Fetch its spec — the task's body — first, with the relay task show command: `{relay} task show {ref} {task_id}`. Read `$RELAY_PLAN` only for the card's header (Global Constraints, `## Verification`). This task only. If you believe the task is already fully implemented, say so explicitly and stop — do not report success having changed nothing."
+      "run": "Implement task {task_id} (\"{task}\") with strict red/green TDD. Fetch its spec — the task's body — first, with the hamaca task show command: `{relay} task show {ref} {task_id}`. Read `$HAMACA_PLAN` only for the card's header (Global Constraints, `## Verification`). This task only. If you believe the task is already fully implemented, say so explicitly and stop — do not report success having changed nothing."
     },
     {
       "key": "spec_review",
@@ -29,7 +29,7 @@
       "llm": "Claude Sonnet",
       "agent": "spec-reviewer",
       "reads": ["tasks"],
-      "run": "Review task {task_id} (\"{task}\"), just implemented, against its spec — the task's body, fetched with the relay task show command: `{relay} task show {ref} {task_id}`. Nothing missing, nothing extra."
+      "run": "Review task {task_id} (\"{task}\"), just implemented, against its spec — the task's body, fetched with the hamaca task show command: `{relay} task show {ref} {task_id}`. Nothing missing, nothing extra."
     },
     {
       "key": "quality_review",
@@ -38,7 +38,7 @@
       "llm": "Claude Opus",
       "agent": "quality-reviewer",
       "reads": ["tasks"],
-      "run": "Judge whether the change for task {task_id} (\"{task}\") is well-built: clean, conventional, meaningfully tested. Its spec is the task's body — fetch it with the relay task show command, `{relay} task show {ref} {task_id}`, when you need to know what the change was for."
+      "run": "Judge whether the change for task {task_id} (\"{task}\") is well-built: clean, conventional, meaningfully tested. Its spec is the task's body — fetch it with the hamaca task show command, `{relay} task show {ref} {task_id}`, when you need to know what the change was for."
     },
     {
       "key": "fix_findings",
@@ -48,7 +48,7 @@
       "agent": "final-fixer",
       "expects_commits": true,
       "reads": ["tasks"],
-      "run": "A reviewer rejected task {task_id} (\"{task}\"), which you just implemented; its findings are in the message. Addressing every one of them is your ONLY job. The code is already committed and the reviewer read that committed code — do NOT re-derive the task from its body (the relay task show command, `{relay} task show {ref} {task_id}`, is there only to look up what a finding refers to), and do NOT conclude it is already correct. Keep the change scoped to that task — do not start the next one. Fix the findings, commit, and keep the declared gate green. If a finding is genuinely wrong, say why and what you did instead — but still commit. Reporting success with no commit is always a failure."
+      "run": "A reviewer rejected task {task_id} (\"{task}\"), which you just implemented; its findings are in the message. Addressing every one of them is your ONLY job. The code is already committed and the reviewer read that committed code — do NOT re-derive the task from its body (the hamaca task show command, `{relay} task show {ref} {task_id}`, is there only to look up what a finding refers to), and do NOT conclude it is already correct. Keep the change scoped to that task — do not start the next one. Fix the findings, commit, and keep the declared gate green. If a finding is genuinely wrong, say why and what you did instead — but still commit. Reporting success with no commit is always a failure."
     },
     {
       "key": "sync",

@@ -35,8 +35,12 @@ defmodule HamacaWeb.Api.PreRenameRefusalTest do
       assert error["running"] == 62
 
       assert error["message"] ==
-               "this runner predates the executor→runner rename — install ./relay (relay update) " <>
-                 "and restart it with ./relay start"
+               "this runner predates the executor→runner rename — in this checkout run " <>
+                 Hamaca.Setup.install_command(HamacaWeb.Endpoint.url(), board.slug) <>
+                 ", then restart it with ./hamaca start"
+
+      refute error["message"] =~ "./relay start"
+      refute error["message"] =~ "relay update"
 
       assert Runs.list_runner_status(board) == []
     end

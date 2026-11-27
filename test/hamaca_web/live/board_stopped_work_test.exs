@@ -33,6 +33,16 @@ defmodule HamacaWeb.BoardStoppedWorkTest do
     assert render(view) =~ "requires v#{Hamaca.Runs.min_runner_version()}"
   end
 
+  test "RE482: names the ./relay runner and links its Runners-page panel", %{conn: conn, board: board, works: works} do
+    queued_job(works, 600)
+    insert(:runner, board: board, name: "studio-mac", cli: "relay", version: 93)
+
+    {:ok, view, _html} = live(conn, ~p"/board/#{board.slug}")
+
+    assert has_element?(view, "#stopped-work-banner", "is still installed as")
+    assert has_element?(view, "#stopped-work-banner a[href='/board/#{board.slug}/runners#runner-studio-mac']")
+  end
+
   test "stays quiet on a healthy board", %{conn: conn, board: board, works: works} do
     insert(:runner, board: board, name: "live", version: Hamaca.Runs.min_runner_version())
     insert(:card, stage: works, status: :working)

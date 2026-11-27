@@ -18,13 +18,14 @@ defmodule Schemas.Runner do
   `nil` when it has never reported one (RLY-182). All fields are set
   programmatically by `Hamaca.Runs`.
 
-  `version` is the `RUNNER_VERSION` the running `./relay` declares (RLY-184); `nil` means
+  `version` is the `RUNNER_VERSION` the running runner declares (RLY-184); `nil` means
   a runner predating that card, which `Hamaca.Runs.runner_outdated?/1` treats as behind.
 
   `cli` is the name the runner runs as — `"hamaca"` or `"relay"` (`cli_names/0`) — reported on
   every claim and heartbeat since RE478 and stored through `normalize_cli/1` (RE486): an unknown
-  value, or none, is nil. `Hamaca.Runs.pre_rename_runner?/1` reads it to tell a runner still
-  installed as `./relay` during the rename's compatibility window.
+  value, or none, is nil. `"relay"` stays valid after RE482 ended the compatibility window, because
+  it is how a straggler is recognised: `Hamaca.Runs.pre_rename_runner?/1` reads it to tell a runner
+  refused because it is still installed as `./relay`.
   """
   use Ecto.Schema
 
@@ -93,7 +94,7 @@ defmodule Schemas.Runner do
   end
 
   # RE311 — the closed set of per-card worktree states a runner can declare it HOLDS,
-  # defined exactly once on this side and mirrored in `./relay`'s HOLDING_STATES, which the
+  # defined exactly once on this side and mirrored in `./hamaca`'s HOLDING_STATES, which the
   # runner contract fixture (`vocabulary.holding_states`) pins to this function. Strings,
   # not atoms: this vocabulary only ever arrives off the wire and is only ever compared to
   # wire values, so atomizing it would buy nothing and add a conversion at every use site.
@@ -199,7 +200,7 @@ defmodule Schemas.Runner do
   def normalize_cli(_cli), do: nil
 
   # RE320 — the closed set of reasons a harness pauses on a usage limit, defined once here and
-  # mirrored in `./relay`'s USAGE_PAUSE_REASONS, which the runner contract fixture
+  # mirrored in `./hamaca`'s USAGE_PAUSE_REASONS, which the runner contract fixture
   # (`vocabulary.rate_limit_reasons`) pins to this function. Strings for the same reason as
   # `@holding_states`: wire-only values. (RE436 retired the Claude-only window vocabulary — a
   # harness's usage rule names its own windows.)

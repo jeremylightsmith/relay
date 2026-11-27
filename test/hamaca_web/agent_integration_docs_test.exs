@@ -17,12 +17,9 @@ defmodule Hamaca.AgentIntegrationDocsTest do
   end
 
   test "the guide carries the NODE_SCRATCH-contract anchor the scaffolded skills deep-link to" do
-    # The write-plan command links to hamaca.md#the-hamaca_node_scratch-contract (scaffolded
-    # repos still on the legacy names link to relay.md#the-relay_node_scratch-contract);
-    # GitHub derives that slug from this exact heading, so it must stay verbatim in the legacy
-    # relay.md the scaffold generates from hamaca.md (RE478).
+    # The write-plan command links to hamaca.md#the-hamaca_node_scratch-contract; GitHub
+    # derives that slug from this exact heading, so it must stay verbatim.
     assert File.read!(@doc_path) =~ "### The `HAMACA_NODE_SCRATCH` contract"
-    assert Hamaca.Scaffold.to_legacy_names(File.read!(@doc_path)) =~ "### The `RELAY_NODE_SCRATCH` contract"
   end
 
   test "AGENTS.md links to hamaca.md" do

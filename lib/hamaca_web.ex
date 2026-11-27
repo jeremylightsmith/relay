@@ -23,7 +23,7 @@ defmodule HamacaWeb do
 
   @doc """
   RE322 — where an uploaded attachment is served (`AttachmentController.show`). `CardJSON`
-  builds the `url` and `markdown` that `relay attach` hands back with it, and the drawer's
+  builds the `url` and `markdown` that `./hamaca attach` hands back with it, and the drawer's
   screenshots strip recognises those urls with `attachment_path?/1`. The one definition lives
   domain-side on `Schemas.Attachment.path/1` (RE370 — `Hamaca.Cards` validates mockup urls and
   may not call the web layer); `HamacaWeb.AttachmentPathTest` pins it to the router.

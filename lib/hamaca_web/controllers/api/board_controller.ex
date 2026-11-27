@@ -42,7 +42,7 @@ defmodule HamacaWeb.Api.BoardController do
     # live free count — Hamaca.Runs.Scheduler.Server debits in-flight :running runs from
     # it server-side before planning (see Hamaca.Runs.Capacity's moduledoc).
     #
-    # TRAP for the runner-side cutover: ./relay's RunnerPool.capacity() (used today
+    # TRAP for the runner-side cutover: ./hamaca's RunnerPool.capacity() (used today
     # only for /api/node-jobs/claim, not this route) returns CURRENTLY-FREE capacity,
     # already decremented as slots are taken. Whichever client first posts `capacity` on
     # this route must send the configured total (cfg["capacity"]) — posting the live-free

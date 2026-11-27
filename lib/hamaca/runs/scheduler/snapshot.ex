@@ -42,9 +42,10 @@ defmodule Hamaca.Runs.Scheduler.Snapshot do
       `:gone` runner's advertised capacity is dropped during assembly
       (`Server.build_snapshot/2`), so the planner never places work onto a
       machine the reaper has given up on (RLY-199).
-    * `runners` — `%{runner_id => %{name, version, outdated, freshness, rate_limit}}`: the durable
-      runner rows, `outdated` from `Hamaca.Runs.runner_outdated?/1` and `freshness` from
-      `Hamaca.Runs.runner_freshness/2` (not a second computation). `plan/1` ignores this
+    * `runners` — `%{runner_id => %{name, version, outdated, freshness, rate_limit, pre_rename}}`:
+      the durable runner rows, `outdated` from `Hamaca.Runs.runner_outdated?/1`, `freshness` from
+      `Hamaca.Runs.runner_freshness/2` and `pre_rename` from `Hamaca.Runs.pre_rename_runner?/1`
+      (RE482 — refused, and still installed as `./relay`; not a second computation). `plan/1` ignores this
       field; only `explain/2` / `capacity_diagnosis/1` read it, so the plan/explain agreement
       property is unaffected.
       `rate_limit` is `Hamaca.Runs.active_rate_limit/2` — set only while every installed harness
@@ -91,7 +92,8 @@ defmodule Hamaca.Runs.Scheduler.Snapshot do
           version: integer() | nil,
           outdated: boolean(),
           freshness: :fresh | :stale | :gone,
-          rate_limit: map() | nil
+          rate_limit: map() | nil,
+          pre_rename: boolean()
         }
 
   @type t :: %__MODULE__{

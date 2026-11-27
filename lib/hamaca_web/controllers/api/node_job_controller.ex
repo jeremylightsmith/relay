@@ -61,7 +61,7 @@ defmodule HamacaWeb.Api.NodeJobController do
 
   defp claim_for(conn, board, runner, params, inputs) do
     if Runs.runner_outdated?(runner) do
-      refuse_outdated(conn, runner)
+      refuse_outdated(conn, board, runner)
     else
       case claim_with(runner, inputs) do
         {:ok, nil} -> maybe_wait(conn, board, runner, params, inputs)
@@ -94,7 +94,7 @@ defmodule HamacaWeb.Api.NodeJobController do
 
     * **Capacity.** `Hamaca.Runs.Capacity` is what the scheduler reads to decide whether to
       dispatch at all, and it is deliberately lost on app restart. Before this route existed
-      it was fed only by `/api/board/heartbeat`, which `relay start` never calls — so
+      it was fed only by `/api/board/heartbeat`, which `./hamaca start` never calls — so
       starting a runner and enabling a flow dispatched nothing, and the cutover needed a
       hand-run `curl`. The `capacity` here is the runner's *configured* total, never a live
       free count: `Scheduler.Server.build_snapshot/1` debits in-flight `:running` runs itself,
@@ -120,7 +120,7 @@ defmodule HamacaWeb.Api.NodeJobController do
       process stays visible on the roster and how revokes still reach it. The reply carries
       `runner_outdated` / `required_version` so a runner idling with nothing to claim
       still learns why. The reply also carries `latest_runner_version` (RE185) — the
-      `RUNNER_VERSION` of the `./relay` this app itself serves at `/api/scaffold` (RE304) —
+      `RUNNER_VERSION` of the `./hamaca` this app itself serves at `/api/scaffold` (RE304) —
       which a runner with `auto_update` on uses to update itself.
 
     * **Liveness (RLY-226).** The same `running` list is a positive signal: each id maps to a
@@ -199,7 +199,7 @@ defmodule HamacaWeb.Api.NodeJobController do
         runner_outdated: Runs.runner_outdated?(runner),
         required_version: Runs.min_runner_version(),
         # RE185: the floor above says what is REFUSED; this says what can be FETCHED — the
-        # `RUNNER_VERSION` of the `./relay` this app serves at /api/scaffold (RE304), so it
+        # `RUNNER_VERSION` of the `./hamaca` this app serves at /api/scaffold (RE304), so it
         # cannot lie. `nil` when the scaffold has not been built, which the runner reads as
         # "never auto-update".
         latest_runner_version: Runs.latest_runner_version(),
@@ -238,7 +238,7 @@ defmodule HamacaWeb.Api.NodeJobController do
   end
 
   # The one code both refusals answer with — pinned by `test/fixtures/runner_contract.json`
-  # (`claim_refused.outdated`), because ./relay branches on it to tell a verdict from a job.
+  # (`claim_refused.outdated`), because ./hamaca branches on it to tell a verdict from a job.
   @outdated_code "runner_outdated"
 
   # RE319 — the ONE deliberate mention of the retired wire name. The rename was a hard cut, so a
@@ -254,23 +254,35 @@ defmodule HamacaWeb.Api.NodeJobController do
     refuse(
       conn,
       version,
-      "this runner predates the executor→runner rename — install ./relay (relay update) and restart it with ./relay start"
+      "this runner predates the executor→runner rename — in this checkout run " <>
+        "#{install_command(conn.assigns.current_board)}, then restart it with ./hamaca start"
     )
   end
 
   # RLY-184. Rendered here rather than through FallbackController because the two version
   # numbers are per-request data, not a static string — the runner logs both of them, and a
   # message that cannot name the required version cannot tell anyone what to do about it.
-  defp refuse_outdated(conn, runner) do
-    required = Runs.min_runner_version()
-
-    refuse(
-      conn,
-      runner.version,
-      "runner version #{runner.version || "none"} is below the required minimum #{required} — " <>
-        "restart it to pick up current code"
-    )
+  # RE482: a runner refused because it is still installed as `./relay` (`Runs.pre_rename_runner?/1`,
+  # never re-derived here) gets the board's install one-liner instead — restarting a `./relay`
+  # can never clear the floor. `code`, `required` and `running` are the same either way.
+  defp refuse_outdated(conn, board, runner) do
+    if Runs.pre_rename_runner?(runner) do
+      refuse(
+        conn,
+        runner.version,
+        "this board no longer accepts ./relay — in this checkout run #{install_command(board)}, then ./hamaca start"
+      )
+    else
+      refuse(
+        conn,
+        runner.version,
+        "runner version #{runner.version || "none"} is below the required minimum #{Runs.min_runner_version()} — " <>
+          "restart it to pick up current code"
+      )
+    end
   end
+
+  defp install_command(board), do: Setup.install_command(HamacaWeb.Endpoint.url(), board.slug)
 
   # 409 (not 403): the request is well-formed, it conflicts with the server's current state.
   defp refuse(conn, running, message) do
@@ -294,7 +306,7 @@ defmodule HamacaWeb.Api.NodeJobController do
   must still be held by a live claim (else 409 `conflict`). Replies with the
   run's post-outcome `run_state` (running|parked|done|failed|cancelled) so the
   runner knows whether to keep or free an exclusive worktree slot bound to
-  this run (RunnerPool.release, ./relay). `no_changes` (RE310) is the
+  this run (RunnerPool.release, ./hamaca). `no_changes` (RE310) is the
   node's assertion that its work was already committed; the engine honours it
   only when this node's own history proves it (see `Hamaca.Runs.RunServer`).
 

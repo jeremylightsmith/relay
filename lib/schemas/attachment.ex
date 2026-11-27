@@ -14,7 +14,7 @@ defmodule Schemas.Attachment do
   (`html_type/0`, `html?/1` — the controller's sandboxed serving branch asks here), the image
   types (`image_types/0`) and their display names (`image_type_names/0`, RE427), the size cap
   (`max_bytes/0`, RE427), the mockup types (`mockup_types/0`, RE390 — what `Hamaca.Cards`'
-  mockup validation accepts: HTML or an image; `./relay` mirrors it under
+  mockup validation accepts: HTML or an image; `./hamaca` mirrors it under
   `runner_contract.json`'s `mockups.content_types`), and where an attachment is served (`path/1`,
   `id_from_path/1`, `path?/1` — domain-side so `Hamaca.Cards` can parse a mockup url without
   calling the web layer; `HamacaWeb.attachment_path/1` delegates here) — plus where a board API
@@ -105,7 +105,7 @@ defmodule Schemas.Attachment do
   RE373 — the path a board API key downloads an attachment's raw bytes from
   (`HamacaWeb.Api.AttachmentController.show`). The router's bearer-authed
   `get "/attachments/:id"` inside `scope "/api"` is the only other spelling;
-  `HamacaWeb.AttachmentPathTest` pins the two together, and `./relay` mirrors the prefix under
+  `HamacaWeb.AttachmentPathTest` pins the two together, and `./hamaca` mirrors the prefix under
   `runner_contract.json`'s `mockups.download_path`.
   """
   def api_path(id), do: @api_path_prefix <> to_string(id)

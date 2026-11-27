@@ -3,7 +3,7 @@ defmodule HamacaWeb.Api.FlowMetricsController do
   Read-only per-flow node metrics for agents/scripts (RLY-209).
 
   An optional `?card=<ref>` scopes every figure to one card's executions (RE235). One response
-  shape serves both scopes — the extra keys are additive, so `./relay flow-stats`, which
+  shape serves both scopes — the extra keys are additive, so `./hamaca flow-stats`, which
   reads specific keys, is unaffected.
   """
   use HamacaWeb, :controller

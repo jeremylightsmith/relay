@@ -459,6 +459,7 @@ defmodule HamacaWeb.BoardLive do
               :if={@stopped_work}
               id="stopped-work-banner"
               verdict={@stopped_work}
+              runners_path={~p"/board/#{@board.slug}/runners"}
               class="mx-4 mb-2 mt-2 sm:mx-5"
             />
             <%!-- RE432 — one amber banner per flow paused by a broken board shape. --%>

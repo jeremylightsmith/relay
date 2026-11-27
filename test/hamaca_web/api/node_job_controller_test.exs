@@ -105,8 +105,9 @@ defmodule HamacaWeb.Api.NodeJobControllerTest do
           "name" => "fake",
           "host" => "fake",
           "interval" => 30,
-          # A fully current runner (RE366): able to take `shared_clean` talk turns too.
-          "version" => Runs.shared_talk_min_version()
+          # A fully current runner: at the base floor, which RE482 raised past the shared-talk floor
+          # (RE366), so it takes `shared_clean` talk turns too.
+          "version" => Runs.min_runner_version()
         },
         "capacity" => capacity,
         "running" => running
@@ -451,6 +452,65 @@ defmodule HamacaWeb.Api.NodeJobControllerTest do
 
       assert body["ref"] == ref
       assert body["isolation"] == "exclusive"
+    end
+  end
+
+  describe "a runner still installed as ./relay (RE482)" do
+    # RE482 ends the relay → hamaca window: the floor is the first runner no ./relay can be, so
+    # every ./relay install is refused at claim — with a message naming the board's install
+    # one-liner — while its heartbeat still answers 200 so it stays on the roster.
+    setup %{conn: conn} do
+      board = insert(:board, slug: "s1")
+      {:ok, %{token: token}} = Hamaca.ApiKeys.create_key(board, board.owner)
+      %{conn: put_req_header(conn, "authorization", "Bearer " <> token), board: board}
+    end
+
+    defp claim_as(conn, runner) do
+      post(
+        conn,
+        ~p"/api/node-jobs/claim?wait=0",
+        Jason.encode!(%{"runner" => runner, "capacity" => %{"shared_clean" => 1}})
+      )
+    end
+
+    test "a ./relay claim is refused 409 with the board's install one-liner", %{conn: conn} do
+      error = conn |> claim_as(%{name: "box", version: 93, cli: "relay"}) |> json_response(409) |> Map.fetch!("error")
+
+      assert error["code"] == "runner_outdated"
+      assert error["required"] == Runs.min_runner_version()
+      assert error["running"] == 93
+
+      assert error["message"] ==
+               "this board no longer accepts ./relay — in this checkout run " <>
+                 Hamaca.Setup.install_command(HamacaWeb.Endpoint.url(), "s1") <> ", then ./hamaca start"
+    end
+
+    test "an outdated ./hamaca claim keeps the generic restart message", %{conn: conn} do
+      n = Runs.min_runner_version()
+      error = conn |> claim_as(%{name: "box", version: n - 1, cli: "hamaca"}) |> json_response(409) |> Map.fetch!("error")
+
+      assert error["code"] == "runner_outdated"
+
+      assert error["message"] ==
+               "runner version #{n - 1} is below the required minimum #{n} — restart it to pick up current code"
+    end
+
+    test "a ./relay heartbeat is answered 200, flagged outdated, and keeps it on the roster",
+         %{conn: conn, board: board} do
+      body =
+        conn
+        |> post(
+          ~p"/api/node-jobs/heartbeat",
+          Jason.encode!(%{
+            "runner" => %{name: "box", version: 93, cli: "relay"},
+            "capacity" => %{"shared_clean" => 1},
+            "running" => []
+          })
+        )
+        |> json_response(200)
+
+      assert body["runner_outdated"] == true
+      assert [%{name: "box", pre_rename: true, outdated: true}] = Runs.list_runner_status(board)
     end
   end
 

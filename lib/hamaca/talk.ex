@@ -31,7 +31,7 @@ defmodule Hamaca.Talk do
   does not hold it). `stop_turn/1` revokes unconditionally, so a person can always end it.
 
   **Not here in step 1**: receipts and `:field_changed` ([AC16]), `awaiting` turns ([AC17]), the
-  write lease and `./relay say` ([AC18]), card-level runner pinning ([AC12]). A talk turn
+  write lease and `./hamaca say` ([AC18]), card-level runner pinning ([AC12]). A talk turn
   does **not** move the card's baton (ADR 0014 §6).
 
   PubSub: `card:<card_id>:talk`, carrying `{:talk_event, event}` and `{:talk_turn_changed, turn}`.

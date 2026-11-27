@@ -3,11 +3,11 @@ defmodule HamacaWeb.Api.SetupJSON do
   Renders a board's setup checklist (`Hamaca.Setup.checklist/1`) for `GET /api/setup` and
   `POST /api/setup/steps/:step` (RE445). `current` is `Hamaca.Setup.reportable_id/1` — the one step
   a report may move; the interview catalog, the 5.4 change decisions and the 5.4 missing-file
-  resolutions ride along so `./relay setup` and the skill never re-type them.
+  resolutions ride along so `./hamaca setup` and the skill never re-type them.
 
   `referenced_files` (RE447) is `Hamaca.Flows.referenced_files/1` over the board's flows — every
   `.claude/` agent or skill file they name, with its repo `paths` and the `{flow, node}` pairs
-  using it (`[]` when the flows name none, as on every template board). `/relay-onboard` checks
+  using it (`[]` when the flows name none, as on every template board). `/hamaca-onboard` checks
   them at 5.1 and resolves the missing ones at 5.4.
 
   Statuses, actors and file kinds are strings, datetimes ISO 8601 or null. The step-3 key's raw
